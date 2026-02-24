@@ -19,7 +19,6 @@ Sources/simplebanking/Secrets.swift
 
 # Sparkle
 /.sparkle-tools/
-sparkle-public-key.txt
 
 # Backups und temporäre Worktrees
 /backups/
