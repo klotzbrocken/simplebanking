@@ -12,14 +12,6 @@
         </item>
         <item>
             <title>1.0</title>
-            <pubDate>Tue, 24 Feb 2026 02:10:08 +0100</pubDate>
-            <sparkle:version>2026-02-24_02:09:49_3</sparkle:version>
-            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-020959.dmg" length="97035099" type="application/octet-stream" sparkle:edSignature="lUC77cg16DbfDRCYqa6yo8UjkLr2dX7E/7aCvcctE+ESu9S/hiWc+dD73uWilDPjI42lAfxFM+cUwZ3cTYDCDg=="/>
-        </item>
-        <item>
-            <title>1.0</title>
             <pubDate>Tue, 24 Feb 2026 05:04:55 +0100</pubDate>
             <sparkle:version>2026-02-24_05:04:40_6</sparkle:version>
             <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
@@ -33,6 +25,14 @@
             <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
             <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-062053.dmg" length="97037442" type="application/octet-stream" sparkle:edSignature="2neJIlAt7DZQy+lO+w/7MqMNUi2nyKkbbmUr0mTDB0Xb3Rz2g7ytPQWWSCrlsM/6Yb/Wmniw5+l5fMhqm6kmCA=="/>
+        </item>
+        <item>
+            <title>1.0</title>
+            <pubDate>Tue, 24 Feb 2026 07:00:23 +0100</pubDate>
+            <sparkle:version>2026-02-24_07:00:23_10</sparkle:version>
+            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-070021.dmg" length="93403276" type="application/octet-stream" sparkle:edSignature="/2wMl+6t628o2PAQtFY0r/S3anf27DcPY2Nbm5JsDGyeBpfGFyr05s2gMWllWied9xMg8FVgJ5yLz5K0RAnQCQ=="/>
         </item>
     </channel>
 </rss>
