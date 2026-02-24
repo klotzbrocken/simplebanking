@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>simplebanking</title>
+        <item>
+            <title>1.0</title>
+            <pubDate>Tue, 24 Feb 2026 01:59:01 +0100</pubDate>
+            <sparkle:version>2026-02-24_01:53:39_2</sparkle:version>
+            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.0/simplebanking-20260224-015854.dmg" length="97039222" type="application/octet-stream" sparkle:edSignature="pt3qKO3NnkJ9oGXvfwTPY+KVH7VOWGy5LiTlcwvnwYADLLP+RCXP1ZdGinXH1IDIVrL8PzjCghHhzJReuq+bDw=="/>
+        </item>
+    </channel>
+</rss>

@@ -68,6 +68,12 @@ if [[ -d "$SPARKLE_FW" ]]; then
             --sign "$SIGN_IDENTITY" "$nested_app"
     done < <(find "$SPARKLE_FW" -name "*.app" | sort -r)
 
+    echo "  Signing Sparkle bare executables (Autoupdate etc.)..."
+    while IFS= read -r bin; do
+        codesign --force --timestamp --options runtime \
+            --sign "$SIGN_IDENTITY" "$bin"
+    done < <(find "$SPARKLE_FW/Versions/B" -maxdepth 1 -type f -perm +0111 ! -name "*.plist")
+
     echo "  Signing Sparkle.framework..."
     codesign --force --timestamp --options runtime \
         --sign "$SIGN_IDENTITY" "$SPARKLE_FW"
