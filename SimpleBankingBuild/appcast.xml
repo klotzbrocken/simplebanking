@@ -28,11 +28,11 @@
         </item>
         <item>
             <title>1.0</title>
-            <pubDate>Tue, 24 Feb 2026 05:49:28 +0100</pubDate>
-            <sparkle:version>2026-02-24_05:49:28_8</sparkle:version>
+            <pubDate>Tue, 24 Feb 2026 06:20:54 +0100</pubDate>
+            <sparkle:version>2026-02-24_06:20:54_9</sparkle:version>
             <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-054926.dmg" length="97033477" type="application/octet-stream" sparkle:edSignature="LHXW3v5Iz7x34XGWaCzBVfnDuUFvy2wOA8dVCNsT82uu9R4iYaMbXkw8vE6dXnJE+3BkXKcXZmkisAPS/GaADA=="/>
+            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-062053.dmg" length="97037442" type="application/octet-stream" sparkle:edSignature="2neJIlAt7DZQy+lO+w/7MqMNUi2nyKkbbmUr0mTDB0Xb3Rz2g7ytPQWWSCrlsM/6Yb/Wmniw5+l5fMhqm6kmCA=="/>
         </item>
     </channel>
 </rss>
