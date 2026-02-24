@@ -10,5 +10,13 @@
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.0/simplebanking-20260224-015854.dmg" length="97039222" type="application/octet-stream" sparkle:edSignature="pt3qKO3NnkJ9oGXvfwTPY+KVH7VOWGy5LiTlcwvnwYADLLP+RCXP1ZdGinXH1IDIVrL8PzjCghHhzJReuq+bDw=="/>
         </item>
+        <item>
+            <title>1.0</title>
+            <pubDate>Tue, 24 Feb 2026 02:10:08 +0100</pubDate>
+            <sparkle:version>2026-02-24_02:09:49_3</sparkle:version>
+            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.0.1/simplebanking-20260224-020959.dmg" length="97035099" type="application/octet-stream" sparkle:edSignature="lUC77cg16DbfDRCYqa6yo8UjkLr2dX7E/7aCvcctE+ESu9S/hiWc+dD73uWilDPjI42lAfxFM+cUwZ3cTYDCDg=="/>
+        </item>
     </channel>
 </rss>
