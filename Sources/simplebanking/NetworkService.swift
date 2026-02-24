@@ -407,7 +407,8 @@ enum NetworkService {
             normalized.contains("session expired") ||
             normalized.contains("session abgelaufen") ||
             normalized.contains("ungültige session") ||
-            normalized.contains("invalid session") {
+            normalized.contains("invalid session") ||
+            normalized.hasPrefix("unexpected service error") {
             return .sessionOnly
         }
 
