@@ -234,8 +234,9 @@ async function handleSCAFlow(json, service, client, ticket, depth = 0) {
       return s.includes('push') || s.includes('app') || s.includes('decoupled')
     }) ?? options[0]
 
-    if (!preferred) return { error: 'SCA/TAN required (interactive)' }
-    console.log(`[SCA] Selection: ${options.length} option(s), auto-picking: ${JSON.stringify(preferred)}`)
+    if (!preferred) return { error: 'SCA/TAN required (interactive) [Selection: no options]' }
+    const matchedKeyword = ['push', 'app', 'decoupled'].find(kw => JSON.stringify(preferred ?? '').toLowerCase().includes(kw)) ?? 'fallback'
+    console.log(`[SCA] Selection: ${options.length} option(s) available: ${JSON.stringify(options)} — picking (${matchedKeyword}): ${JSON.stringify(preferred)}`)
 
     const next = service === 'balances'
       ? await client.respondBalances({ ticket, context: u8FromB64(ctxB64), response: preferred })
@@ -249,7 +250,7 @@ async function handleSCAFlow(json, service, client, ticket, depth = 0) {
     let delay = json.Dialog.input.Confirmation.pollingDelaySecs || 2
 
     for (let i = 0; i < 60; i++) {
-      await new Promise(r => setTimeout(r, Math.min(delay, 5) * 1000))
+      await new Promise(r => setTimeout(r, Math.max(delay, 1) * 1000))
       const next = service === 'balances'
         ? await client.confirmBalances({ ticket, context: u8FromB64(ctxB64) })
         : await client.confirmTransactions({ ticket, context: u8FromB64(ctxB64) })
@@ -318,7 +319,9 @@ async function handleSCAFlow(json, service, client, ticket, depth = 0) {
 
   // Field or unknown dialog interrupt
   if (json?.Dialog) {
-    return { error: 'SCA/TAN required (interactive)' }
+    const inputType = Object.keys(json.Dialog?.input || {})[0] || 'Unknown'
+    console.log(`[SCA] Unhandled dialog input type: ${inputType}`)
+    return { error: `SCA/TAN required (interactive) [${inputType}]` }
   }
 
   return { error: 'Unknown response shape' }
@@ -573,7 +576,7 @@ app.post('/balances', async (req, res) => {
     const userMsg = (typeof e?.userMessage === 'string' && e.userMessage.length > 0) ? e.userMessage : null
     // Unauthorized = stale connectionData (invalid recurring consent). Clear it so the next
     // attempt (Swift retries automatically) goes through fresh auth without stale consent.
-    if (e?.name === 'UnauthorizedException' || e?.name === 'UnexpectedErrorException') {
+    if (e?.name === 'UnauthorizedException' || e?.name === 'ConsentExpiredException' || e?.name === 'UnexpectedErrorException') {
       console.log(`[Balances] ${e.name} — clearing stale connectionData + session from state`)
       s.connectionDataBase64 = null
       inMemorySessionBase64 = null
@@ -722,7 +725,7 @@ app.post('/transactions', async (req, res) => {
   } catch (e) {
     const msg = String(e?.message || e)
     const userMsg = (typeof e?.userMessage === 'string' && e.userMessage.length > 0) ? e.userMessage : null
-    if (e?.name === 'UnauthorizedException' || e?.name === 'UnexpectedErrorException') {
+    if (e?.name === 'UnauthorizedException' || e?.name === 'ConsentExpiredException' || e?.name === 'UnexpectedErrorException') {
       console.log(`[Transactions] ${e.name} — clearing stale connectionData + session from state`)
       s.connectionDataBase64 = null
       inMemorySessionBase64 = null

@@ -394,9 +394,11 @@ enum NetworkService {
         let normalized = (errorText ?? "").lowercased()
         guard !normalized.isEmpty else { return .none }
 
-        // YAXI Unauthorized = "Invalid consent." Only happens when stale connectionData is
-        // passed with recurringConsents. Fix: clear all (incl. connectionData) and retry.
-        if normalized.hasPrefix("unauthorized") {
+        // YAXI Unauthorized / ConsentExpired = stale connectionData with recurringConsents.
+        // Fix: clear all (incl. connectionData) and retry.
+        if normalized.hasPrefix("unauthorized") ||
+           normalized.hasPrefix("consentexpired") ||
+           normalized.contains("consent expired") {
             return .full
         }
 
