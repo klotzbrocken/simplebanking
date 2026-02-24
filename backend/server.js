@@ -573,9 +573,11 @@ app.post('/balances', async (req, res) => {
     const userMsg = (typeof e?.userMessage === 'string' && e.userMessage.length > 0) ? e.userMessage : null
     // Unauthorized = stale connectionData (invalid recurring consent). Clear it so the next
     // attempt (Swift retries automatically) goes through fresh auth without stale consent.
-    if (e?.name === 'UnauthorizedException') {
-      console.log('[Balances] Unauthorized — clearing stale connectionData from state')
+    if (e?.name === 'UnauthorizedException' || e?.name === 'UnexpectedErrorException') {
+      console.log(`[Balances] ${e.name} — clearing stale connectionData + session from state`)
       s.connectionDataBase64 = null
+      inMemorySessionBase64 = null
+      s.sessionBase64 = null
       saveState(s)
     }
     // Reset invalid session tokens.
@@ -720,9 +722,11 @@ app.post('/transactions', async (req, res) => {
   } catch (e) {
     const msg = String(e?.message || e)
     const userMsg = (typeof e?.userMessage === 'string' && e.userMessage.length > 0) ? e.userMessage : null
-    if (e?.name === 'UnauthorizedException') {
-      console.log('[Transactions] Unauthorized — clearing stale connectionData from state')
+    if (e?.name === 'UnauthorizedException' || e?.name === 'UnexpectedErrorException') {
+      console.log(`[Transactions] ${e.name} — clearing stale connectionData + session from state`)
       s.connectionDataBase64 = null
+      inMemorySessionBase64 = null
+      s.sessionBase64 = null
       saveState(s)
     }
     if (isObsoleteSessionError(msg)) {

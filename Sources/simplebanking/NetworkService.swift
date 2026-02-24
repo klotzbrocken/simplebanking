@@ -407,9 +407,14 @@ enum NetworkService {
             normalized.contains("session expired") ||
             normalized.contains("session abgelaufen") ||
             normalized.contains("ungültige session") ||
-            normalized.contains("invalid session") ||
-            normalized.hasPrefix("unexpected service error") {
+            normalized.contains("invalid session") {
             return .sessionOnly
+        }
+
+        // YAXI UnexpectedError mit leerem userMessage = häufig veraltete connectionData.
+        // Backend löscht connectionData bereits in state.json; Swift löscht lokal via .full.
+        if normalized.hasPrefix("unexpected service error") {
+            return .full
         }
 
         // Verbindungsdaten ungültig oder Session-Format unbekannt → vollständiger Reset nötig
