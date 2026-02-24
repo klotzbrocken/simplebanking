@@ -1,0 +1,26 @@
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+
+# Generierte Secrets-Datei – NIEMALS committen
+Sources/simplebanking/Secrets.swift
+
+# Build-Output — nicht im Repo
+/SimpleBankingBuild/
+/BalanceBarBuild/
+
+# Backend
+/backend/node_modules/
+
+# Sparkle
+/.sparkle-tools/
+sparkle-public-key.txt
+
+# Backups und temporäre Worktrees
+/backups/
+/.claude/worktrees/

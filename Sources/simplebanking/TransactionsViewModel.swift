@@ -1,0 +1,277 @@
+import Foundation
+import SwiftUI
+
+// MARK: - Transactions Panel (paged, SwiftUI)
+
+@MainActor
+final class TransactionsViewModel: ObservableObject {
+    @Published var isLoading: Bool = false
+    @Published var error: String? = nil
+    @Published var transactions: [TransactionsResponse.Transaction] = [] {
+        didSet {
+            rebuildSearchIndex()
+            applyCurrentFilter(resetPage: true)
+        }
+    }
+    @Published var page: Int = 0
+    @Published var query: String = "" {
+        didSet {
+            scheduleFilterUpdate()
+        }
+    }
+    @Published var fromDate: String?
+    @Published var toDate: String?
+    @Published var currentBalance: String?
+    @Published var connectedBankDisplayName: String = ""
+    @Published var connectedBankLogoID: String? = nil
+    @Published var connectedBankIBAN: String? = nil
+    @Published var anthropicApiKey: String? = nil
+    @Published var confettiTrigger: Int = 0
+    @Published var enrichmentData: [String: (note: String?, attachmentCount: Int)] = [:]
+    @Published private(set) var filteredTransactions: [TransactionsResponse.Transaction] = []
+
+    let pageSize: Int = 10
+    private let searchDebounceNanoseconds: UInt64 = 150_000_000
+    private let minimumSearchCharacters: Int = 2
+
+    private var queryTask: Task<Void, Never>?
+    private var searchIndex: [String] = []
+    private var uniqueDateCache: [String] = []
+
+    deinit {
+        queryTask?.cancel()
+    }
+
+    private func clean(_ s: String?) -> String {
+        (s ?? "")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var normalizedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    var isSearchActive: Bool {
+        normalizedQuery.count >= minimumSearchCharacters
+    }
+
+    private func queryVariants() -> (raw: String, dot: String, compact: String) {
+        let raw = normalizedQuery
+        let dot = raw.replacingOccurrences(of: ",", with: ".")
+        let compact = dot.replacingOccurrences(of: ".", with: "")
+        return (raw, dot, compact)
+    }
+
+    private func searchableText(for transaction: TransactionsResponse.Transaction) -> String {
+        let remittance = (transaction.remittanceInformation ?? []).map(clean).joined(separator: " ")
+        let resolvedMerchant = MerchantResolver.resolve(transaction: transaction).effectiveMerchant
+        let resolvedCategory = TransactionCategorizer.category(for: transaction).displayName
+        let fields: [String] = [
+            clean(transaction.bookingDate),
+            clean(transaction.valueDate),
+            clean(transaction.endToEndId),
+            clean(transaction.amount?.amount),
+            clean(transaction.amount?.currency),
+            clean(resolvedMerchant),
+            clean(transaction.creditor?.name),
+            clean(transaction.creditor?.iban),
+            clean(transaction.creditor?.bic),
+            clean(transaction.debtor?.name),
+            clean(transaction.debtor?.iban),
+            clean(transaction.debtor?.bic),
+            clean(transaction.additionalInformation),
+            clean(transaction.purposeCode),
+            clean(transaction.category),
+            clean(resolvedCategory),
+            remittance,
+        ]
+        return fields.joined(separator: " ").lowercased()
+    }
+
+    private func buildSearchIndexText(for transaction: TransactionsResponse.Transaction) -> String {
+        let base = searchableText(for: transaction)
+        let amountRaw = clean(transaction.amount?.amount).lowercased()
+        let amountDot = amountRaw.replacingOccurrences(of: ",", with: ".")
+        let amountCompact = amountDot.replacingOccurrences(of: ".", with: "")
+        return [base, amountRaw, amountDot, amountCompact]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private func rebuildSearchIndex() {
+        searchIndex = transactions.map(buildSearchIndexText)
+    }
+
+    private func rebuildUniqueDateCache() {
+        guard !isSearchActive else {
+            uniqueDateCache = []
+            return
+        }
+
+        let dates = filteredTransactions.compactMap { $0.bookingDate ?? $0.valueDate }
+        uniqueDateCache = Array(Set(dates)).sorted(by: >)
+    }
+
+    private func applyCurrentFilter(resetPage: Bool) {
+        let variants = queryVariants()
+        if !isSearchActive {
+            filteredTransactions = transactions
+        } else {
+            var results: [TransactionsResponse.Transaction] = []
+            results.reserveCapacity(transactions.count)
+
+            for (index, transaction) in transactions.enumerated() {
+                let haystack = index < searchIndex.count ? searchIndex[index] : buildSearchIndexText(for: transaction)
+                if haystack.contains(variants.raw) || haystack.contains(variants.dot) {
+                    results.append(transaction)
+                    continue
+                }
+                if !variants.compact.isEmpty, haystack.contains(variants.compact) {
+                    results.append(transaction)
+                }
+            }
+
+            filteredTransactions = results
+        }
+
+        rebuildUniqueDateCache()
+
+        if resetPage {
+            page = 0
+        } else {
+            page = min(page, max(0, totalPages - 1))
+        }
+    }
+
+    private func scheduleFilterUpdate() {
+        queryTask?.cancel()
+
+        if !isSearchActive {
+            applyCurrentFilter(resetPage: true)
+            return
+        }
+
+        let debounce = searchDebounceNanoseconds
+
+        queryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: debounce)
+            guard !Task.isCancelled else { return }
+            guard let self else { return }
+            self.applyCurrentFilter(resetPage: true)
+        }
+    }
+
+    var filtered: [TransactionsResponse.Transaction] {
+        filteredTransactions
+    }
+
+    var totalPages: Int {
+        if !isSearchActive {
+            return uniqueDateCache.count
+        }
+        return max(1, Int(ceil(Double(filteredTransactions.count) / Double(pageSize))))
+    }
+
+    var currentDateLabel: String {
+        guard page < uniqueDateCache.count else { return "" }
+        return uniqueDateCache[page]
+    }
+
+    var currentPageItems: [TransactionsResponse.Transaction] {
+        let list = filteredTransactions
+
+        if !isSearchActive {
+            guard !uniqueDateCache.isEmpty, page < uniqueDateCache.count else { return [] }
+            let targetDate = uniqueDateCache[page]
+            return list.filter { ($0.bookingDate ?? $0.valueDate) == targetDate }
+        }
+
+        let start = page * pageSize
+        guard start < list.count else { return [] }
+        let end = min(list.count, start + pageSize)
+        return Array(list[start..<end])
+    }
+
+    func resetPaging() {
+        if page != 0 {
+            page = 0
+        }
+    }
+
+    func nextPage() {
+        page = min(page + 1, totalPages - 1)
+    }
+
+    func prevPage() {
+        page = max(page - 1, 0)
+    }
+
+    func loadEnrichmentData(bankId: String) {
+        Task { [weak self] in
+            let data = (try? TransactionsDatabase.loadEnrichmentData(bankId: bankId)) ?? [:]
+            await MainActor.run {
+                self?.enrichmentData = data
+            }
+        }
+    }
+
+    func searchMatchBadges(for transaction: TransactionsResponse.Transaction) -> [String] {
+        guard isSearchActive else { return [] }
+
+        let variants = queryVariants()
+        var badges: [String] = []
+
+        let containsTextQuery: (String) -> Bool = { text in
+            let normalized = text.lowercased()
+            return normalized.contains(variants.raw) || normalized.contains(variants.dot)
+        }
+
+        let ibanRaw = [clean(transaction.creditor?.iban), clean(transaction.debtor?.iban)]
+            .compactMap { $0 }
+            .joined(separator: " ")
+        let ibanCompact = ibanRaw
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+        let queryCompact = variants.raw.replacingOccurrences(of: " ", with: "")
+        if !queryCompact.isEmpty, ibanCompact.contains(queryCompact) {
+            badges.append("IBAN")
+        }
+
+        let merchantName = MerchantResolver.resolve(transaction: transaction).effectiveMerchant
+        let counterpartyRaw = [
+            clean(transaction.creditor?.name),
+            clean(transaction.debtor?.name),
+            clean(merchantName),
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+        if !counterpartyRaw.isEmpty, containsTextQuery(counterpartyRaw) {
+            badges.append("Empfänger")
+        }
+
+        let purposeRaw = [
+            clean((transaction.remittanceInformation ?? []).joined(separator: " ")),
+            clean(transaction.additionalInformation),
+            clean(transaction.purposeCode),
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+        if !purposeRaw.isEmpty, containsTextQuery(purposeRaw) {
+            badges.append("Verwendungszweck")
+        }
+
+        let amountRaw = clean(transaction.amount?.amount).lowercased()
+        let amountDot = amountRaw.replacingOccurrences(of: ",", with: ".")
+        let amountCompact = amountDot.replacingOccurrences(of: ".", with: "")
+        let amountMatches = amountRaw.contains(variants.raw) ||
+            amountDot.contains(variants.dot) ||
+            (!variants.compact.isEmpty && amountCompact.contains(variants.compact))
+        if amountMatches {
+            badges.append("Betrag")
+        }
+
+        return badges
+    }
+
+}

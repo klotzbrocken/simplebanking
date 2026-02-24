@@ -1,0 +1,21 @@
+{
+  "name": "simplebanking",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["banking", "yaxi", "transactions"],
+  "author": "",
+  "license": "ISC",
+  "description": "Simple Banking Interface with German formatting",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "routex-client": "^0.4.7",
+    "uuid": "^13.0.0"
+  }
+}
