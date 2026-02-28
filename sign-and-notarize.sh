@@ -84,22 +84,7 @@ codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" \
     "$APP/Contents/MacOS/simplebanking"
 
-# yaxi-backend-node is a Node.js/V8 binary and requires JIT + unsigned-executable-memory.
-# Without allow-jit, V8 cannot compile JavaScript and the backend will not function.
-codesign --force --timestamp --options runtime \
-    --entitlements "$ROOT/entitlements-backend-node.plist" \
-    --sign "$SIGN_IDENTITY" \
-    "$APP/Contents/Resources/yaxi-backend-node"
-
-# yaxi-backend is a shell script — sign as a resource (no runtime options for scripts)
-if [[ -f "$APP/Contents/Resources/yaxi-backend" ]]; then
-    codesign --force --sign "$SIGN_IDENTITY" \
-        "$APP/Contents/Resources/yaxi-backend"
-fi
-
-echo "[4/8] Sign app bundle (no --deep: nested binaries already signed with their own entitlements)"
-# Do NOT use --deep here — it would re-sign nested binaries and overwrite
-# the JIT entitlements set for yaxi-backend-node above.
+echo "[4/8] Sign app bundle"
 codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$APP"
 
 echo "[5/8] Verify app signature"

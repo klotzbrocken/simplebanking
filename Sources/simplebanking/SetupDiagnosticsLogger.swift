@@ -2,9 +2,9 @@ import Foundation
 
 final class SetupDiagnosticsLogger: @unchecked Sendable {
     static let logDirectoryURL: URL = {
-        let fm = FileManager.default
-        let desktop = fm.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
-        return desktop.appendingPathComponent("simplebanking-setup-logs", isDirectory: true)
+        let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        return lib.appendingPathComponent("Logs/simplebanking/setup", isDirectory: true)
     }()
 
     private static let maxRetainedLogs = 10

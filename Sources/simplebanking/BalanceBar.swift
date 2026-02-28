@@ -25,7 +25,6 @@ final class CredentialsPanel {
     private var result: Result? = nil
     private var discoveredBankName: String? = nil
     
-    private let baseURL = URL(string: "http://127.0.0.1:8787")!
 
     init() {
         saveButton = NSButton(title: "Verbinden", target: nil, action: nil)
@@ -255,8 +254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var apiKeyObserver: Any?
     private var languageObserver: Any?
     private var balanceDisplayModeObserver: Any?
-    private var backendPreparedIBAN: String? = nil
     private var didTriggerAutoSetupThisLaunch: Bool = false
+    // After a missed SCA redirect, pause auto-refresh to avoid burning through the bank's
+    // daily SCA authorization limit (e.g. Sparkasse allows ~4 redirects per day).
+    private var scaBackoffUntil: Date? = nil
 
     private func decoratedTitle(_ title: String) -> String {
         // New booking indicator: dot if unseen newer transactions exist.
@@ -445,8 +446,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.log("Application did finish launching")
+        YaxiService.migrateCredentialsModelIfNeeded()
         installEditMenu()
-        BackendManager.shared.start()
         do {
             try TransactionsDatabase.migrate()
         } catch {
@@ -544,8 +545,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupItem.tag = 100
         menu.addItem(setupItem)
 
-        let forgetItem = NSMenuItem(title: t("Zugangsdaten vergessen", "Forget Credentials"), action: #selector(forget), keyEquivalent: "")
+        let forgetItem = NSMenuItem(title: "⚠ \(t("Zurücksetzen", "Reset"))", action: #selector(resetApp), keyEquivalent: "")
         forgetItem.tag = 101
+        if let img = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil) {
+            img.isTemplate = true
+            forgetItem.image = img
+        }
         menu.addItem(forgetItem)
         menu.addItem(NSMenuItem.separator())
 
@@ -639,7 +644,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         AppLogger.log("Application will terminate")
-        BackendManager.shared.stop()
         if let observer = refreshIntervalObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -666,6 +670,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func refresh() {
+        // Manual refresh always clears the SCA backoff — user explicitly wants to retry.
+        scaBackoffUntil = nil
         Task { await refreshAsync() }
     }
 
@@ -866,7 +872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.title = locked ? t("Entsperren…", "Unlock…") : t("Sperren", "Lock")
         }
         menu.item(withTag: 100)?.title = t("Einrichtungsassistent…", "Setup Wizard…")
-        menu.item(withTag: 101)?.title = t("Zugangsdaten vergessen", "Forget Credentials")
+        menu.item(withTag: 101)?.title = "⚠ \(t("Zurücksetzen", "Reset"))"
         menu.item(withTag: 202)?.title = t("Nach Updates suchen…", "Check for Updates…")
         menu.item(withTag: 200)?.title = t("Einstellungen…", "Settings…")
         menu.item(withTag: 1000)?.title = t("Beenden", "Quit")
@@ -1059,8 +1065,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do { try TransactionsDatabase.deleteDatabaseFileIfExists() } catch { }
         BiometricStore.clear()
         biometricOfferDismissed = false
-        Task { await NetworkService.clearSessionState() }
-        
+        Task { await YaxiService.clearSessionState() }
+
         // Reset UserDefaults
         if let bundleID = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: bundleID)
@@ -1072,8 +1078,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         llmAPIKeyPresent = false
         confettiLastIncomeTxSig = ""
         confettiInitialShown = false
-        backendPreparedIBAN = nil
         clearConnectedBankState()
+        lastBalance = nil
+        lastShownTitle = "— €"
         locked = false
         isHiddenBalance = false
         isHoverRevealingBalance = false
@@ -1221,43 +1228,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { await openTransactionsPanel() }
     }
 
-    private func shouldBootstrapBackendConnection(for errorText: String?) -> Bool {
-        let normalized = (errorText ?? "").lowercased()
-        return normalized.contains("no connectionid") ||
-            normalized.contains("missing iban") ||
-            normalized.contains("post /discover")
-    }
-
-    private func ensureBackendConnection(iban: String) async -> Bool {
-        let normalizedIBAN = iban
-            .replacingOccurrences(of: " ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-
-        guard !normalizedIBAN.isEmpty else { return false }
-
-        if backendPreparedIBAN == normalizedIBAN {
-            return true
-        }
-
-        guard await NetworkService.waitUntilBackendUp(maxWaitSeconds: 12) else {
-            return false
-        }
-
-        guard await NetworkService.configureBackend(iban: normalizedIBAN) else {
-            return false
-        }
-
-        guard let bank = await NetworkService.discoverBank() else {
-            return false
-        }
-
-        backendPreparedIBAN = normalizedIBAN
-        updateConnectedBankState(bank, iban: normalizedIBAN)
-        statusItem.button?.toolTip = "Verbunden mit \(bank.displayName)"
-        return true
-    }
-
     private func refreshAsync() async {
         // Demo-Modus: Keine echten API-Calls
         if demoMode {
@@ -1272,11 +1242,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         
-        // Live-Modus
-        if !(await NetworkService.waitUntilBackendUp(maxWaitSeconds: 12)) {
-            statusItem.button?.title = "Nicht verbunden"
-            statusItem.button?.toolTip = "Backend nicht erreichbar"
-            AppLogger.log("Backend not reachable during refresh", category: "Backend", level: "WARN")
+        // SCA backoff: after a missed redirect approval, pause auto-refresh for 1 hour
+        // to avoid exhausting the bank's daily SCA authorization limit (~4/day at Sparkasse).
+        if let backoff = scaBackoffUntil, backoff > Date() {
+            let remaining = Int(backoff.timeIntervalSinceNow / 60)
+            statusItem.button?.toolTip = t(
+                "SCA-Freigabe erforderlich — bitte manuell aktualisieren (Limit erreicht, noch ~\(remaining) Min.)",
+                "SCA approval required — please refresh manually (limit reached, ~\(remaining) min remaining)"
+            )
             return
         }
 
@@ -1307,13 +1280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         llmAPIKeyPresent = txVM.anthropicApiKey != nil
 
         do {
-            var resp = try await NetworkService.fetchBalances(userId: userId, password: password)
-
-            if !resp.ok && shouldBootstrapBackendConnection(for: resp.error) {
-                if await ensureBackendConnection(iban: creds.iban) {
-                    resp = try await NetworkService.fetchBalances(userId: userId, password: password)
-                }
-            }
+            let resp = try await YaxiService.fetchBalances(userId: userId, password: password)
 
             if resp.ok, let booked = resp.booked {
                 lastShownTitle = formatEURNoDecimals(booked.amount)
@@ -1328,6 +1295,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if loadTransactionsOnStart {
                     Task { await checkNewBookings(userId: userId, password: password) }
                 }
+            } else if resp.scaRequired == true {
+                // SCA redirect timed out or was missed. State has been cleared (server + Swift).
+                // Pause auto-refresh for 1 hour so we don't burn through the bank's daily
+                // SCA authorization limit before the user can approve.
+                scaBackoffUntil = Date().addingTimeInterval(3600)
+                statusItem.button?.title = "— €"
+                statusItem.button?.toolTip = t(
+                    "Banking-Freigabe erforderlich — klicke \"Aktualisieren\" wenn du bereit bist, die SCA-Anfrage in deiner Banking-App zu bestätigen",
+                    "Banking approval required — click \"Refresh\" when ready to approve the SCA request in your banking app"
+                )
+                AppLogger.log("SCA required — auto-refresh paused for 1h to preserve daily SCA limit", category: "Network", level: "WARN")
             } else {
                 statusItem.button?.title = "— €"
                 statusItem.button?.toolTip = resp.error ?? "Keine Daten"
@@ -1432,23 +1410,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             print("[DB] Load cached transactions failed: \(error.localizedDescription)")
         }
 
-        if !(await NetworkService.waitUntilBackendUp(maxWaitSeconds: 12)) {
-            txVM.error = cachedTransactions.isEmpty ? "Backend off" : "Offline, zeige gespeicherte Umsätze"
-            txVM.isLoading = false
-            if !didTriggerInitialConfetti {
-                maybeTriggerTransactionsConfetti(transactions: confettiTransactions, currentBalance: self.lastBalance)
-            }
-            return
-        }
-
         do {
-            var resp = try await NetworkService.fetchTransactions(userId: userId, password: password, from: from)
-
-            if !(resp.ok ?? false) && shouldBootstrapBackendConnection(for: resp.error) {
-                if await ensureBackendConnection(iban: creds.iban) {
-                    resp = try await NetworkService.fetchTransactions(userId: userId, password: password, from: from)
-                }
-            }
+            let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
 
             if (resp.ok ?? false), let tx = resp.transactions {
                 let sortedNetwork = sortTransactionsNewestFirst(tx)
@@ -1571,7 +1534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Avoid noisy UI if locked/hidden; still compute indicator.
         let from = isoDateDaysAgo(7)
         do {
-            let resp = try await NetworkService.fetchTransactions(userId: userId, password: password, from: from)
+            let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
             guard (resp.ok ?? false), let tx = resp.transactions, !tx.isEmpty else { return }
             let sorted = tx.sorted { ($0.bookingDate ?? $0.valueDate ?? "") > ($1.bookingDate ?? $1.valueDate ?? "") }
             let sig = computeTxSignature(sorted[0])
@@ -1766,7 +1729,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     .replacingOccurrences(of: " ", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .uppercased()
-                backendPreparedIBAN = normalizedIBAN.isEmpty ? nil : normalizedIBAN
                 updateConnectedBankState(bank, iban: normalizedIBAN)
             } else {
                 updateConnectedBankState(bank)
@@ -1784,8 +1746,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     
     private enum SetupFlowError: LocalizedError {
         case cancelled
-        case backendUnavailable(details: String?)
-        case backendConfigFailed
         case bankNotFound
         case connectTimeout(step: String)
         case authenticationFailed(String)
@@ -1795,14 +1755,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch self {
             case .cancelled:
                 return "Einrichtung abgebrochen."
-            case let .backendUnavailable(details):
-                let detailText = details?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                if detailText.isEmpty {
-                    return "Backend ist nicht erreichbar. Bitte erneut versuchen."
-                }
-                return "Backend ist nicht erreichbar. Bitte erneut versuchen. Ursache: \(detailText)"
-            case .backendConfigFailed:
-                return "Backend konnte nicht konfiguriert werden. Bitte Eingaben prüfen und erneut versuchen."
             case .bankNotFound:
                 return "Bankverbindung konnte nicht erkannt werden. Bitte IBAN prüfen."
             case .connectTimeout:
@@ -1844,53 +1796,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             text.contains("credentials") ||
             text.contains("wrong") ||
             text.contains("unauthorized")
-    }
-
-    nonisolated private static func ensureBackendReadyForSetup(
-        logger: SetupDiagnosticsLogger?
-    ) async throws {
-        if await NetworkService.waitUntilBackendUp(maxWaitSeconds: 6) {
-            logger?.log(step: "backend_health", event: "already_ready")
-            return
-        }
-
-        let startIssue = await MainActor.run { () -> String? in
-            BackendManager.shared.startIfNeeded()
-            let issue = BackendManager.shared.lastStartupIssue?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return issue?.isEmpty == true ? nil : issue
-        }
-        if let startIssue {
-            logger?.log(step: "backend_health", event: "start_if_needed_issue", details: ["issue": startIssue])
-        } else {
-            logger?.log(step: "backend_health", event: "start_if_needed")
-        }
-
-        if await NetworkService.waitUntilBackendUp(maxWaitSeconds: 20) {
-            logger?.log(step: "backend_health", event: "ready_after_start")
-            return
-        }
-
-        let restartIssue = await MainActor.run { () -> String? in
-            BackendManager.shared.restartForRecovery()
-            let issue = BackendManager.shared.lastStartupIssue?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return issue?.isEmpty == true ? nil : issue
-        }
-        if let restartIssue {
-            logger?.log(step: "backend_health", event: "restart_issue", details: ["issue": restartIssue])
-        } else {
-            logger?.log(step: "backend_health", event: "restart_triggered")
-        }
-
-        if await NetworkService.waitUntilBackendUp(maxWaitSeconds: 30) {
-            logger?.log(step: "backend_health", event: "ready_after_restart")
-            return
-        }
-
-        let finalIssue = await MainActor.run { () -> String? in
-            let issue = BackendManager.shared.lastStartupIssue?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return issue?.isEmpty == true ? nil : issue
-        }
-        throw SetupFlowError.backendUnavailable(details: finalIssue)
     }
 
     nonisolated private static func runSetupStepWithTimeout<T: Sendable>(
@@ -1942,9 +1847,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let raw = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = raw.lowercased()
 
-        // "Unauthorized: " (empty userMessage) — bank rejected connection.
-        // Most common cause: blocked SCA device or expired consent.
-        if lower.hasPrefix("unauthorized") {
+        // "Unauthorized" — bank rejected connection.
+        // Most common cause: wrong credentials, blocked SCA device, or expired consent.
+        if lower.contains("unauthorized") {
             return .authenticationFailed("Zugang nicht autorisiert. Bitte prüfe deine Zugangsdaten und ob dein Online-Banking-Zugang aktiv ist.")
         }
 
@@ -1981,30 +1886,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
 
         do {
-            options.onProgress?(.startingBackend)
-            AppLogger.log("Setup step backend_health", category: "Setup")
-            try await runSetupStepWithTimeout(step: "backend_health", logger: diagnosticsLogger) {
-                try await ensureBackendReadyForSetup(logger: diagnosticsLogger)
-            }
-
             let normalizedIBAN = result.iban
                 .replacingOccurrences(of: " ", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .uppercased()
 
-            options.onProgress?(.configuringBank)
-            AppLogger.log("Setup step backend_config", category: "Setup")
-            let configured = try await runSetupStepWithTimeout(step: "backend_config", logger: diagnosticsLogger) {
-                await NetworkService.configureBackend(iban: normalizedIBAN)
-            }
-            guard configured else {
-                throw SetupFlowError.backendConfigFailed
-            }
-
             options.onProgress?(.discoveringBank)
             AppLogger.log("Setup step discover_bank", category: "Setup")
+            _ = try await runSetupStepWithTimeout(step: "configure_bank", logger: diagnosticsLogger) {
+                await YaxiService.configureBackend(iban: normalizedIBAN)
+            }
             let discoveredBank = try await runSetupStepWithTimeout(step: "discover_bank", logger: diagnosticsLogger) {
-                guard let discoveredBank = await NetworkService.discoverBank() else {
+                guard let discoveredBank = await YaxiService.discoverBank() else {
                     throw SetupFlowError.bankNotFound
                 }
                 return discoveredBank
@@ -2024,7 +1917,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 : discoveredBank
 
             try await runSetupStepWithTimeout(step: "clear_session_initial", logger: diagnosticsLogger) {
-                await NetworkService.clearSessionState()
+                await YaxiService.clearSessionState()
             }
 
             let fetchDaysSetting = UserDefaults.standard.integer(forKey: "fetchDays")
@@ -2034,9 +1927,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             options.onProgress?(.requestingApproval)
             AppLogger.log("Setup step warmup_balances", category: "Setup")
             // Redirect-Flows (z.B. Sparkasse): Nutzer muss sich auf Bank-Website einloggen
-            // und SCA bestätigen. Server pollt bis zu 300 s — Swift-Timeout muss größer sein.
-            let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 360, logger: diagnosticsLogger) {
-                try await NetworkService.fetchBalances(
+            // und SCA bestätigen. Server pollt bis zu 600 s — Swift-Timeout muss größer sein.
+            let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 720, logger: diagnosticsLogger) {
+                try await YaxiService.fetchBalances(
                     userId: result.userId,
                     password: result.password
                 )
@@ -2047,10 +1940,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             // Nur Fortschritt zeigen wenn Kontostand erfolgreich war (sonst SCA noch ausstehend)
-            if warmupBalances.ok { options.onProgress?(.fetchingTransactions) }
+            if warmupBalances.ok { options.onProgress?(.requestingTransactionApproval) }
             AppLogger.log("Setup step warmup_transactions", category: "Setup")
-            var warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions", timeout: 150, logger: diagnosticsLogger) {
-                try await NetworkService.fetchTransactions(
+            var warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions", timeout: 720, logger: diagnosticsLogger) {
+                try await YaxiService.fetchTransactions(
                     userId: result.userId,
                     password: result.password,
                     from: warmupFrom
@@ -2062,13 +1955,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     // Nur Sessions löschen, connectionData behalten:
                     // Ohne connectionData kennt die Bank das Gerät nicht und schickt
                     // keinen Push-TAN – sie fällt auf interaktive TAN zurück.
-                    await NetworkService.clearSessionsKeepingConnectionData()
+                    await YaxiService.clearSessionsKeepingConnectionData()
                 }
-                _ = try await runSetupStepWithTimeout(step: "warmup_balances_retry", timeout: 360, logger: diagnosticsLogger) {
-                    try await NetworkService.fetchBalances(userId: result.userId, password: result.password)
+                _ = try await runSetupStepWithTimeout(step: "warmup_balances_retry", timeout: 720, logger: diagnosticsLogger) {
+                    try await YaxiService.fetchBalances(userId: result.userId, password: result.password)
                 }
-                warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions_retry", timeout: 150, logger: diagnosticsLogger) {
-                    try await NetworkService.fetchTransactions(
+                warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions_retry", timeout: 720, logger: diagnosticsLogger) {
+                    try await YaxiService.fetchTransactions(
                         userId: result.userId,
                         password: result.password,
                         from: warmupFrom
@@ -2122,20 +2015,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func forget() {
-        do { try CredentialsStore.delete() } catch { }
-        do { try TransactionsDatabase.deleteDatabaseFileIfExists() } catch { }
-        Task { await NetworkService.clearSessionState() }
-        masterPassword = nil
-        txVM.anthropicApiKey = nil
-        llmAPIKeyPresent = false
-        confettiLastIncomeTxSig = ""
-        confettiInitialShown = false
-        backendPreparedIBAN = nil
-        clearConnectedBankState()
-        locked = false
-        statusItem.button?.title = "Einrichten…"
-        statusItem.button?.toolTip = "Credentials removed"
+    @objc private func resetApp() {
+        let alert = NSAlert()
+        alert.messageText = t("simplebanking zurücksetzen?", "Reset simplebanking?")
+        alert.informativeText = t(
+            "Willst Du wirklich simplebanking zurücksetzen? Alle Zugangsdaten und Einstellungen werden gelöscht.",
+            "Do you really want to reset simplebanking? All credentials and settings will be deleted."
+        )
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: t("Zurücksetzen", "Reset"))
+        alert.addButton(withTitle: t("Abbrechen", "Cancel"))
+        if alert.runModal() == .alertFirstButtonReturn {
+            performSecurityReset()
+        }
     }
     
     @objc private func showSettings() {

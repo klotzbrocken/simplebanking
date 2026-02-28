@@ -24,15 +24,17 @@ enum RefreshInterval: Int, CaseIterable {
     case minutes60 = 60
     case minutes120 = 120
     case minutes180 = 180
+    case minutes240 = 240
     case minutes360 = 360
-    
+
     var label: String {
         switch self {
         case .manual: return L10n.t("Manuell", "Manual")
-        case .minutes60: return L10n.t("60 Minuten", "60 minutes")
-        case .minutes120: return L10n.t("120 Minuten", "120 minutes")
-        case .minutes180: return L10n.t("180 Minuten", "180 minutes")
-        case .minutes360: return L10n.t("360 Minuten", "360 minutes")
+        case .minutes60: return L10n.t("1 Stunde", "1 hour")
+        case .minutes120: return L10n.t("2 Stunden", "2 hours")
+        case .minutes180: return L10n.t("3 Stunden", "3 hours")
+        case .minutes240: return L10n.t("4 Stunden", "4 hours")
+        case .minutes360: return L10n.t("6 Stunden", "6 hours")
         }
     }
 }
@@ -84,7 +86,7 @@ struct SettingsView: View {
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
-    @AppStorage("refreshInterval") private var refreshInterval: Int = 60
+    @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("resetAttempts") private var resetAttempts: Int = 0
     @AppStorage("swapClickBehavior") private var swapClickBehavior: Bool = false
     @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
@@ -119,6 +121,7 @@ struct SettingsView: View {
     @State private var aiStatusMessage: String = ""
     @State private var availableThemes: [AppTheme] = []
     @State private var logStatusMessage: String = ""
+    @State private var logoTapCount: Int = 0
     @State private var merchantResolutionStatusMessage: String = ""
     @State private var didInitialMerchantRefresh: Bool = false
     
@@ -307,6 +310,13 @@ struct SettingsView: View {
 
     private var appBuildTimestamp: String {
         Bundle.main.object(forInfoDictionaryKey: "SBBuildTimestamp") as? String ?? "-"
+    }
+
+    private var appBuildDateFormatted: String {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "SBBuildDate") as? String ?? ""
+        let parts = raw.split(separator: "-")
+        guard parts.count == 3 else { return raw }
+        return "\(parts[2]).\(parts[1]).\(parts[0])"
     }
 
     private func openLogFile() {
@@ -506,9 +516,6 @@ struct SettingsView: View {
 
             Divider()
 
-            aiAssistantSettings
-            Divider()
-            
             // Refresh Interval
             VStack(alignment: .leading, spacing: 8) {
                 Text(t("Abfrage-Intervall", "Refresh interval"))
@@ -516,7 +523,7 @@ struct SettingsView: View {
                 Text(t("Wie oft soll der Kontostand automatisch abgefragt werden?", "How often should the balance be refreshed automatically?"))
                     .font(ThemeFonts.body(size: 12))
                     .foregroundColor(.secondary)
-                
+
                 Picker("", selection: $refreshInterval) {
                     ForEach(RefreshInterval.allCases, id: \.rawValue) { interval in
                         Text(interval.label).tag(interval.rawValue)
@@ -525,12 +532,16 @@ struct SettingsView: View {
                 .pickerStyle(MenuPickerStyle())
                 .frame(maxWidth: 200)
             }
+
+            Divider()
+
+            aiAssistantSettings
         }
     }
 
     private var aiAssistantSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(t("AI-Assistent", "AI assistant"))
+            Text(t("AI-Assistent (experimentell)", "AI assistant (experimental)"))
                 .font(ThemeFonts.heading(size: 13))
 
             Text(t("Anthropic API-Key für Umsatz-Fragen. Der Key wird verschlüsselt gespeichert.", "Anthropic API key for transaction questions. The key is stored encrypted."))
@@ -591,7 +602,7 @@ struct SettingsView: View {
                         Text(t("365 Tage", "365 days")).tag(365)
                     }
                     .pickerStyle(MenuPickerStyle())
-                    .frame(width: 120)
+                    .frame(minWidth: 140)
                 }
             }
 
@@ -685,8 +696,8 @@ struct SettingsView: View {
                         }
                     }
                     .pickerStyle(MenuPickerStyle())
-                    .frame(width: 80)
-                    
+                    .frame(minWidth: 100)
+
                     Text(t("des Monats", "of the month"))
                         .font(ThemeFonts.body(size: 13))
                         .foregroundColor(.secondary)
@@ -1119,26 +1130,37 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             // App Icon and Name
             HStack(spacing: 16) {
-                if let nsImage = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 64, height: 64)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
-                } else {
-                    Image(systemName: "building.columns.fill")
-                        .font(.system(size: 48))
-                        .foregroundColor(.accentColor)
+                Group {
+                    if let nsImage = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage {
+                        Image(nsImage: nsImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                    } else {
+                        Image(systemName: "building.columns.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(.accentColor)
+                    }
                 }
-                
+                .onTapGesture {
+                    logoTapCount += 1
+                }
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text("simplebanking")
                         .font(ThemeFonts.heading(size: 20, weight: .bold))
-                    Text("\(t("Version", "Version")) \(appVersionString) (\(t("Build", "Build")) \(appBuildString))")
-                        .font(ThemeFonts.body(size: 12))
-                        .foregroundColor(.secondary)
-                    Text("\(t("Erstellt", "Built")): \(appBuildTimestamp)")
+                    if logoTapCount >= 5 {
+                        Text("\(t("Version", "Version")) \(appVersionString) (\(t("Build", "Build")) \(appBuildString))")
+                            .font(ThemeFonts.body(size: 12))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("\(t("Version", "Version")) \(appVersionString)")
+                            .font(ThemeFonts.body(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    Text("\(t("Erstellt", "Built")): \(appBuildDateFormatted)")
                         .font(ThemeFonts.body(size: 11))
                         .foregroundColor(.secondary)
                 }

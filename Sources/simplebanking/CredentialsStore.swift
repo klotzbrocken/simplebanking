@@ -77,6 +77,7 @@ enum CredentialsStore {
 
         let data = try JSONEncoder().encode(env)
         try data.write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     static func load(masterPassword: String) throws -> StoredCredentials {

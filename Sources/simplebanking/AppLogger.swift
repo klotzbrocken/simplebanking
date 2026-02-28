@@ -10,13 +10,15 @@ enum AppLogger {
         UserDefaults.standard.bool(forKey: enabledKey)
     }
 
-    static var logFileURL: URL {
-        let fm = FileManager.default
-        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+    /// Shared log directory for all log files: ~/Library/Logs/simplebanking/
+    static var logDirectoryURL: URL {
+        let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return base
-            .appendingPathComponent("com.maik.simplebanking", isDirectory: true)
-            .appendingPathComponent(fileName, isDirectory: false)
+        return lib.appendingPathComponent("Logs/simplebanking", isDirectory: true)
+    }
+
+    static var logFileURL: URL {
+        logDirectoryURL.appendingPathComponent(fileName, isDirectory: false)
     }
 
     static func setEnabled(_ enabled: Bool) {
@@ -79,8 +81,7 @@ enum AppLogger {
     }
 
     private static func ensureParentDirectory() throws {
-        let dir = logFileURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: logDirectoryURL, withIntermediateDirectories: true)
     }
 
     private static func ensureLogFileExists() throws {

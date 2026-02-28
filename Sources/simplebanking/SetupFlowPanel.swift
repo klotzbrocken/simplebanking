@@ -2,19 +2,17 @@ import AppKit
 import Foundation
 
 enum SetupProgress: Sendable {
-    case startingBackend
-    case configuringBank
     case discoveringBank
     case requestingApproval
+    case requestingTransactionApproval
     case fetchingTransactions
     case savingCredentials
 
     var displayText: String {
         switch self {
-        case .startingBackend: return "Backend wird gestartet…"
-        case .configuringBank: return "Bank wird konfiguriert…"
         case .discoveringBank: return "Bank wird gesucht…"
         case .requestingApproval: return "Freigabe angefordert"
+        case .requestingTransactionApproval: return "Transaktionen freigeben"
         case .fetchingTransactions: return "Umsätze werden geladen…"
         case .savingCredentials: return "Daten werden gespeichert…"
         }
@@ -23,7 +21,9 @@ enum SetupProgress: Sendable {
     var subtitle: String {
         switch self {
         case .requestingApproval:
-            return "Bitte bestätige die Verbindung in deiner Banking-App."
+            return "Push-TAN bestätigen (1/2)"
+        case .requestingTransactionApproval:
+            return "Push-TAN bestätigen (2/2)"
         default:
             return "Bitte warten…"
         }
@@ -32,6 +32,7 @@ enum SetupProgress: Sendable {
     var iconName: String {
         switch self {
         case .requestingApproval: return "bell.circle.fill"
+        case .requestingTransactionApproval: return "arrow.triangle.2.circlepath"
         default: return "arrow.triangle.2.circlepath.circle.fill"
         }
     }
@@ -58,7 +59,7 @@ enum SetupWizardOutcome {
 }
 
 @MainActor
-final class SetupWizardPanel: NSObject, NSWindowDelegate {
+final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     typealias ConnectAction = @Sendable (CredentialsPanel.Result, String?, SetupConnectOptions, String) async throws -> DiscoveredBank
 
     private enum Step {
@@ -122,11 +123,13 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
     private let successSubtitleLabel = NSTextField(labelWithString: "")
     private let diagnosticsToggle = NSButton(checkboxWithTitle: "Neu versuchen mit Diagnoselogging", target: nil, action: nil)
     private let diagnosticsPrivacyLabel = NSTextField(wrappingLabelWithString: "Es werden keine persönlichen Daten gespeichert.")
-    private let diagnosticsDeliveryLabel = NSTextField(wrappingLabelWithString: "Log-Datei wird als TXT auf dem Desktop abgelegt und muss manuell versendet werden.")
+    private let diagnosticsDeliveryLabel = NSTextField(wrappingLabelWithString: "Log-Datei wird im Log-Ordner abgelegt und muss manuell versendet werden.")
     private let diagnosticsLogPathLabel = NSTextField(labelWithString: "")
     private let diagnosticsOpenFolderButton = NSButton(title: "Log-Ordner öffnen", target: nil, action: nil)
     private weak var searchContinueButton: NSButton?
     private let discoverSpinner = NSProgressIndicator()
+    private var autocompletePanel: NSPanel?
+    private var autocompleteTable: NSTableView?
 
     init(connectAction: @escaping ConnectAction) {
         self.connectAction = connectAction
@@ -229,6 +232,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
         )
 
         // Bank search fields
+        bankSearchField.delegate = self
         bankSearchField.placeholderString = "Bank suchen…"
         bankSearchField.sendsSearchStringImmediately = true
         bankSearchField.font = .systemFont(ofSize: 14)
@@ -251,8 +255,6 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
             object: ibanField
         )
 
-        bankPopup.target = self
-        bankPopup.action = #selector(onBankPopupChanged)
         bankPopup.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([bankPopup.widthAnchor.constraint(equalToConstant: fieldWidth)])
 
@@ -330,9 +332,11 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
 
         credentialsStatusLabel.font = .systemFont(ofSize: 12)
         credentialsStatusLabel.textColor = .secondaryLabelColor
-        credentialsStatusLabel.alignment = .center
+        credentialsStatusLabel.alignment = .left
         credentialsStatusLabel.lineBreakMode = .byWordWrapping
         credentialsStatusLabel.maximumNumberOfLines = 0
+        credentialsStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        credentialsStatusLabel.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
         credentialsStatusLabel.isHidden = true
 
         approvalSpinner.style = .spinning
@@ -395,6 +399,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
     }
 
     private func render(step: Step) {
+        hideAutocompletePanel()
         self.step = step
         clearRootContent()
 
@@ -542,7 +547,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
         updateBankChip()
 
         let bankSectionLabel = sectionLabel("Bank auswählen")
-        let bankGroup = NSStackView(views: [bankSectionLabel, bankSearchField, bankPopup, selectedBankChipView])
+        let bankGroup = NSStackView(views: [bankSectionLabel, bankSearchField, selectedBankChipView])
         bankGroup.orientation = .vertical
         bankGroup.spacing = 6
         bankGroup.alignment = .leading
@@ -581,8 +586,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
         rootStack.setCustomSpacing(18, after: bankGroup)
         rootStack.setCustomSpacing(6, after: ibanGroup)
 
-        bankSearchField.nextKeyView = bankPopup
-        bankPopup.nextKeyView = ibanField
+        bankSearchField.nextKeyView = ibanField
         ibanField.nextKeyView = buttonRow.primary
         buttonRow.primary.nextKeyView = buttonRow.back
         buttonRow.back.nextKeyView = bankSearchField
@@ -697,7 +701,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
     private func renderConnectingStep() {
         rootStack.alignment = .centerX
 
-        let initial: SetupProgress = .startingBackend
+        let initial: SetupProgress = .discoveringBank
         approvalIconView.image = NSImage(systemSymbolName: initial.iconName, accessibilityDescription: "Setup")
         approvalTitleLabel.stringValue = initial.displayText
         approvalSubtitleLabel.stringValue = initial.subtitle
@@ -1029,14 +1033,17 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
         updateSearchResults()
     }
 
-    @objc private func onBankPopupChanged() {
-        guard bankPopup.indexOfSelectedItem >= 0, bankPopup.indexOfSelectedItem < filteredBanks.count else {
-            selectedBank = nil
-            updateBankChip()
-            return
-        }
-        selectedBank = filteredBanks[bankPopup.indexOfSelectedItem]
+    private func autocompleteSelectionChanged() {
+        guard let table = autocompleteTable else { return }
+        let idx = table.selectedRow
+        guard idx >= 0, idx < filteredBanks.count else { return }
+        selectedBank = filteredBanks[idx]
         updateBankChip()
+        hideAutocompletePanel()
+    }
+
+    @objc private func autocompleteTableDoubleClick() {
+        autocompleteSelectionChanged()
     }
 
     private func updateSearchResults() {
@@ -1061,26 +1068,155 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
         }
 
         filteredBanks = matches
-        bankPopup.removeAllItems()
+
+        guard case .bankSearch = step else { return }
 
         guard !matches.isEmpty else {
-            bankPopup.addItem(withTitle: "Keine Treffer")
-            bankPopup.isEnabled = false
-            selectedBank = nil
-            updateBankChip()
+            if selectedBank != nil {
+                // Bank already selected, just hide panel
+            } else {
+                selectedBank = nil
+                updateBankChip()
+            }
+            hideAutocompletePanel()
             return
         }
 
-        bankPopup.isEnabled = true
-        bankPopup.addItems(withTitles: matches.map(\.displayName))
-
         if let selectedBank, let idx = matches.firstIndex(where: { $0.id == selectedBank.id }) {
-            bankPopup.selectItem(at: idx)
+            autocompleteTable?.reloadData()
+            autocompleteTable?.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
+        } else if !query.isEmpty {
+            // New query — pre-select first match but don't commit until user picks
+            autocompleteTable?.reloadData()
+            autocompleteTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
         } else {
-            bankPopup.selectItem(at: 0)
-            selectedBank = matches.first
+            autocompleteTable?.reloadData()
         }
-        updateBankChip()
+
+        if query.isEmpty && selectedBank != nil {
+            hideAutocompletePanel()
+        } else {
+            showAutocompletePanel()
+        }
+    }
+
+    private func showAutocompletePanel() {
+        // Build panel on first use
+        if autocompletePanel == nil {
+            let tableView = NSTableView()
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("bank"))
+            column.isEditable = false
+            tableView.addTableColumn(column)
+            tableView.headerView = nil
+            tableView.rowHeight = 28
+            tableView.dataSource = self
+            tableView.delegate = self
+            tableView.doubleAction = #selector(autocompleteTableDoubleClick)
+            tableView.target = self
+            tableView.focusRingType = .none
+            tableView.translatesAutoresizingMaskIntoConstraints = false
+            autocompleteTable = tableView
+
+            let scrollView = NSScrollView()
+            scrollView.documentView = tableView
+            scrollView.hasVerticalScroller = true
+            scrollView.autohidesScrollers = true
+            scrollView.borderType = .noBorder
+
+            let acPanel = NSPanel(
+                contentRect: .zero,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: true
+            )
+            acPanel.level = .popUpMenu
+            acPanel.isOpaque = false
+            acPanel.hasShadow = true
+            acPanel.contentView = scrollView
+            acPanel.backgroundColor = .controlBackgroundColor
+            autocompletePanel = acPanel
+        }
+
+        autocompleteTable?.reloadData()
+
+        // Position below bankSearchField in screen coordinates
+        guard let fieldWindow = bankSearchField.window,
+              let screenFrame = bankSearchField.window?.convertToScreen(
+                bankSearchField.convert(bankSearchField.bounds, to: nil)
+              ) else { return }
+
+        let rowCount = min(filteredBanks.count, 7)
+        let panelHeight = CGFloat(rowCount) * 28 + 4
+        let panelFrame = NSRect(
+            x: screenFrame.minX,
+            y: screenFrame.minY - panelHeight - 2,
+            width: screenFrame.width,
+            height: panelHeight
+        )
+
+        autocompletePanel?.setFrame(panelFrame, display: false)
+
+        if autocompletePanel?.parent == nil {
+            fieldWindow.addChildWindow(autocompletePanel!, ordered: .above)
+        }
+        autocompletePanel?.orderFront(nil)
+    }
+
+    private func hideAutocompletePanel() {
+        guard let acPanel = autocompletePanel, acPanel.isVisible else { return }
+        acPanel.parent?.removeChildWindow(acPanel)
+        acPanel.orderOut(nil)
+    }
+
+    // MARK: - NSTableViewDataSource
+
+    nonisolated func numberOfRows(in tableView: NSTableView) -> Int {
+        MainActor.assumeIsolated { filteredBanks.count }
+    }
+
+    // MARK: - NSTableViewDelegate
+
+    nonisolated func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        MainActor.assumeIsolated {
+            let name = filteredBanks[row].displayName
+            let cell = NSTextField(labelWithString: name)
+            cell.font = .systemFont(ofSize: 13)
+            cell.lineBreakMode = .byTruncatingTail
+            return cell
+        }
+    }
+
+    nonisolated func tableViewSelectionDidChange(_ notification: Notification) {
+        // Selection handled by double-click and keyboard Return
+    }
+
+    // MARK: - NSTextFieldDelegate (keyboard navigation)
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === bankSearchField,
+              let table = autocompleteTable,
+              let acPanel = autocompletePanel, acPanel.isVisible else { return false }
+
+        switch commandSelector {
+        case #selector(NSResponder.moveDown(_:)):
+            let next = min(table.selectedRow + 1, filteredBanks.count - 1)
+            table.selectRowIndexes(IndexSet(integer: max(next, 0)), byExtendingSelection: false)
+            table.scrollRowToVisible(max(next, 0))
+            return true
+        case #selector(NSResponder.moveUp(_:)):
+            let prev = max(table.selectedRow - 1, 0)
+            table.selectRowIndexes(IndexSet(integer: prev), byExtendingSelection: false)
+            table.scrollRowToVisible(prev)
+            return true
+        case #selector(NSResponder.insertNewline(_:)):
+            autocompleteSelectionChanged()
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            hideAutocompletePanel()
+            return true
+        default:
+            return false
+        }
     }
 
     @objc private func onSearchBack() {
@@ -1108,41 +1244,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
         discoverTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
 
-            if !(await NetworkService.isBackendUp()) {
-                await MainActor.run { BackendManager.shared.startIfNeeded() }
-                let ready = await NetworkService.waitUntilBackendUp(maxWaitSeconds: 20)
-                guard !Task.isCancelled else { return }
-                guard ready else {
-                    Self.enqueueOnMainRunLoop { [weak self] in
-                        guard let self else { return }
-                        MainActor.assumeIsolated {
-                            self.discoverSpinner.stopAnimation(nil)
-                            self.searchHelperLabel.stringValue = "Backend nicht erreichbar. Bitte App neu starten."
-                            self.searchHelperLabel.textColor = .systemRed
-                            self.searchContinueButton?.isEnabled = true
-                        }
-                    }
-                    return
-                }
-            }
-
-            let configured = await NetworkService.configureBackend(iban: rawIBAN)
+            await YaxiService.configureBackend(iban: rawIBAN)
             guard !Task.isCancelled else { return }
 
-            guard configured else {
-                Self.enqueueOnMainRunLoop { [weak self] in
-                    guard let self else { return }
-                    MainActor.assumeIsolated {
-                        self.discoverSpinner.stopAnimation(nil)
-                        self.searchHelperLabel.stringValue = "Verbindung zum Backend fehlgeschlagen."
-                        self.searchHelperLabel.textColor = .systemRed
-                        self.searchContinueButton?.isEnabled = true
-                    }
-                }
-                return
-            }
-
-            let discovered = await NetworkService.discoverBank()
+            let discovered = await YaxiService.discoverBank()
             guard !Task.isCancelled else { return }
 
             Self.enqueueOnMainRunLoop { [weak self] in
@@ -1347,7 +1452,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
             diagnosticsLogPathLabel.isHidden = true
         }
 
-        diagnosticsOpenFolderButton.isEnabled = FileManager.default.fileExists(atPath: SetupDiagnosticsLogger.logDirectoryURL.path)
+        diagnosticsOpenFolderButton.isEnabled = FileManager.default.fileExists(atPath: AppLogger.logDirectoryURL.path)
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -1370,13 +1475,17 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate {
     }
 
     @objc private func onOpenDiagnosticsFolder() {
-        let folderURL = SetupDiagnosticsLogger.logDirectoryURL
-        guard FileManager.default.fileExists(atPath: folderURL.path) else { return }
+        let rootDir = AppLogger.logDirectoryURL
+        // Try to select the latest log file directly; fall back to opening the root folder.
         if let latestDiagnosticsLogURL,
            FileManager.default.fileExists(atPath: latestDiagnosticsLogURL.path) {
             NSWorkspace.shared.activateFileViewerSelecting([latestDiagnosticsLogURL])
+        } else if FileManager.default.fileExists(atPath: rootDir.path) {
+            NSWorkspace.shared.open(rootDir)
         } else {
-            NSWorkspace.shared.open(folderURL)
+            // Create directory so it can be opened.
+            try? FileManager.default.createDirectory(at: rootDir, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(rootDir)
         }
     }
 }

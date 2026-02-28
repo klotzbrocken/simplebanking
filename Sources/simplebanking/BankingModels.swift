@@ -31,6 +31,7 @@ struct BalancesResponse: Codable, Sendable {
     let connectionData: String?
     let error: String?
     let userMessage: String?
+    let scaRequired: Bool?
 }
 
 struct TransactionsResponse: Codable, Sendable {
@@ -65,6 +66,7 @@ struct TransactionsResponse: Codable, Sendable {
     let connectionData: String?
     let error: String?
     let userMessage: String?
+    let scaRequired: Bool?
 }
 
 extension String {

@@ -15,34 +15,19 @@ if [[ ! -f "$SECRETS_FILE" ]]; then
     exit 1
 fi
 
-# Prefer universal binary for distribution (Apple Silicon + Intel).
-if ! swift build -c release --arch arm64 --arch x86_64; then
-    echo "Warning: Universal build failed, falling back to host architecture build"
-    swift build -c release
-fi
+# arm64-only: routex-client-swift XCFramework setzt macOS 14.0 voraus,
+# was ausschließlich auf Apple-Silicon-Macs läuft. Intel-Support entfällt.
+swift build -c release --arch arm64
 
-BIN=""
-for CANDIDATE in \
-    "$ROOT/.build/apple/Products/Release/simplebanking" \
-    "$ROOT/.build/arm64-apple-macosx/release/simplebanking" \
-    "$ROOT/.build/x86_64-apple-macosx/release/simplebanking"
-do
-    if [[ -x "$CANDIDATE" ]]; then
-        BIN="$CANDIDATE"
-        break
-    fi
-done
-
-if [[ -z "$BIN" ]]; then
-    echo "Error: built binary not found"
+BIN="$ROOT/.build/arm64-apple-macosx/release/simplebanking"
+if [[ ! -x "$BIN" ]]; then
+    echo "Error: built binary not found at $BIN"
     exit 1
 fi
 OUTDIR="$ROOT/SimpleBankingBuild"
 APP="$OUTDIR/simplebanking.app"
 ICON_SRC="${ICON_SRC:-$ROOT/Resources/icon_full_black.png}"
-BACKEND_SRC="${BACKEND_SRC:-$ROOT/backend}"
-NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
-VERSION_BASE="${VERSION_BASE:-1.0}"
+VERSION_BASE="${VERSION_BASE:-1.1.0}"
 
 mkdir -p "$OUTDIR"
 rm -rf "$APP"
@@ -87,70 +72,6 @@ fi
 if [[ -f "$CLIPPY_ANIMATIONS_SRC" ]]; then
     cp "$CLIPPY_ANIMATIONS_SRC" "$APP/Contents/Resources/animations.json"
 fi
-
-# Bundle backend runtime (Node + YAXI backend sources)
-if [[ ! -d "$BACKEND_SRC" ]]; then
-    echo "Error: Backend source directory not found: $BACKEND_SRC"
-    echo "Set BACKEND_SRC=/path/to/backend and rerun."
-    exit 1
-fi
-
-if [[ -z "$NODE_BIN" || ! -x "$NODE_BIN" ]]; then
-    echo "Error: Node.js binary not found. Install Node or set NODE_BIN=/path/to/node."
-    exit 1
-fi
-
-for req in server.js yaxi.js package.json; do
-    if [[ ! -f "$BACKEND_SRC/$req" ]]; then
-        echo "Error: Missing backend file: $BACKEND_SRC/$req"
-        exit 1
-    fi
-done
-
-if [[ ! -d "$BACKEND_SRC/node_modules" ]]; then
-    echo "Error: Missing backend dependencies in $BACKEND_SRC/node_modules"
-    echo "Run npm install in $BACKEND_SRC and retry."
-    exit 1
-fi
-
-BACKEND_RES_DIR="$APP/Contents/Resources/yaxi-backend-src"
-BACKEND_NODE_BIN="$APP/Contents/Resources/yaxi-backend-node"
-BACKEND_WRAPPER="$APP/Contents/Resources/yaxi-backend"
-
-rm -rf "$BACKEND_RES_DIR"
-mkdir -p "$BACKEND_RES_DIR"
-cp "$BACKEND_SRC/server.js" "$BACKEND_RES_DIR/server.js"
-cp "$BACKEND_SRC/yaxi.js" "$BACKEND_RES_DIR/yaxi.js"
-cp "$BACKEND_SRC/package.json" "$BACKEND_RES_DIR/package.json"
-if [[ -f "$BACKEND_SRC/package-lock.json" ]]; then
-    cp "$BACKEND_SRC/package-lock.json" "$BACKEND_RES_DIR/package-lock.json"
-fi
-cp -R "$BACKEND_SRC/node_modules" "$BACKEND_RES_DIR/node_modules"
-
-cp "$NODE_BIN" "$BACKEND_NODE_BIN"
-chmod +x "$BACKEND_NODE_BIN"
-
-cat > "$BACKEND_WRAPPER" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUNDLED_NODE="$SELF_DIR/yaxi-backend-node"
-BACKEND_JS="$SELF_DIR/yaxi-backend-src/server.js"
-
-if command -v node >/dev/null 2>&1; then
-    exec node "$BACKEND_JS"
-fi
-
-if [[ -x "$BUNDLED_NODE" ]]; then
-    exec "$BUNDLED_NODE" "$BACKEND_JS"
-fi
-
-echo "Node runtime not found to start yaxi-backend." >&2
-exit 1
-SH
-chmod +x "$BACKEND_WRAPPER"
-echo "Bundled backend from $BACKEND_SRC using Node at $NODE_BIN"
 
 # Generate .icns from source PNG if available
 if [[ -f "$ICON_SRC" ]]; then
