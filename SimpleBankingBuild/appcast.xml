@@ -3,12 +3,17 @@
     <channel>
         <title>simplebanking</title>
         <item>
-            <title>1.1.1</title>
-            <pubDate>Sun, 01 Mar 2026 05:20:05 +0100</pubDate>
-            <sparkle:version>2026-03-01_05:19:59_24</sparkle:version>
-            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+            <title>1.1.2</title>
+            <pubDate>Sun, 01 Mar 2026 06:20:02 +0100</pubDate>
+            <sparkle:version>20260301_061946_27</sparkle:version>
+            <sparkle:shortVersionString>1.1.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-20260301-051919.dmg" length="8757674" type="application/octet-stream" sparkle:edSignature="jovj8qDzlaExln4JIkM/hu7g6V8d6LMxn4DuV0hXL/Qzm7qpmYuD5aUSws7h2ElKhkK/m2vrIQmaVxDL1w15BA=="/>
+            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-20260301-061958.dmg" length="8757616" type="application/octet-stream" sparkle:edSignature="1vZi0NAlSRgdKLE1E0992oMHJcOjCZAK+kqnP7FFOWXzle8eE/aLz+0e3psBK3j9TJGC3DoUigkiz9g8aQ3GCg=="/>
+            <sparkle:deltas>
+                <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking20260301_061946_27-2026-03-01_06%3A00%3A21_26.delta" sparkle:deltaFrom="2026-03-01_06:00:21_26" length="11406" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="VNxsCF5BfnHlDJxuSKP8kvLbEJq8pwKKG64MpHUJXWwbmUdCsThTqGACyHP2TMvImyfjlKWCsSIeM00yjfOqAQ=="/>
+                <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking20260301_061946_27-2026-02-28_04%3A46%3A23_23.delta" sparkle:deltaFrom="2026-02-28_04:46:23_23" length="251754" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="vCN9VNLYAfEjE2OCc3JHXHa/2ssZXvYUOa3s5naIrXuF2KZ5JJ2F5Z6Mo2e4c32dG14iuWg8++xF7bT8if1QDg=="/>
+                <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking20260301_061946_27-2026-03-01_05%3A19%3A59_24.delta" sparkle:deltaFrom="2026-03-01_05:19:59_24" length="188838" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="Bi532Zcguzv74ALfRWtzOb3l0Hbki8KbiECX+Uza7G3E9gWm0i++bt8Snp31iw1VrfXrN/b3YxpnPc7grwvLDA=="/>
+            </sparkle:deltas>
         </item>
         <item>
             <title>1.1.0</title>

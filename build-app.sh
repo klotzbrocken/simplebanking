@@ -46,7 +46,11 @@ printf "%s\n" "$BUILD_SEQ" > "$BUILD_NUMBER_FILE"
 BUILD_DATE="$(date '+%Y-%m-%d')"
 BUILD_TIME="$(date '+%H:%M:%S')"
 BUILD_TIMESTAMP="$BUILD_DATE $BUILD_TIME"
-BUILD_NUMBER="${BUILD_DATE}_${BUILD_TIME}_${BUILD_SEQ}"
+# Sparkle's version comparator breaks at '-' (treats it as pre-release dash).
+# Use dash-free format: YYYYMMDD_HHMMSS_SEQ → Sparkle compares as single number 20260301 > 2026
+BUILD_DATE_NODASH="$(date '+%Y%m%d')"
+BUILD_TIME_NOCOLON="$(date '+%H%M%S')"
+BUILD_NUMBER="${BUILD_DATE_NODASH}_${BUILD_TIME_NOCOLON}_${BUILD_SEQ}"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
