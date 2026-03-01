@@ -112,7 +112,8 @@ SPARKLE_TOOLS="${SPARKLE_TOOLS:-$ROOT/.sparkle-tools}"
 GENERATE_APPCAST="$SPARKLE_TOOLS/bin/generate_appcast"
 if [[ -x "$GENERATE_APPCAST" ]]; then
     APPCAST_OUT="$OUTDIR/appcast.xml"
-    "$GENERATE_APPCAST" "$OUTDIR" -o "$APPCAST_OUT"
+    DOWNLOAD_URL_PREFIX="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/"
+    "$GENERATE_APPCAST" "$OUTDIR" -o "$APPCAST_OUT" --download-url-prefix "$DOWNLOAD_URL_PREFIX"
     echo "Appcast: $APPCAST_OUT"
     echo "Upload $APPCAST_OUT and the .dmg to your server."
 else

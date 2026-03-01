@@ -2035,6 +2035,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
         updateChecker?.checkForUpdates()
     }
 

@@ -3,12 +3,12 @@
     <channel>
         <title>simplebanking</title>
         <item>
-            <title>1.1.1</title>
-            <pubDate>Sun, 01 Mar 2026 05:20:05 +0100</pubDate>
-            <sparkle:version>2026-03-01_05:19:59_24</sparkle:version>
-            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+            <title>1.1.2</title>
+            <pubDate>Sun, 01 Mar 2026 06:01:50 +0100</pubDate>
+            <sparkle:version>2026-03-01_06:00:21_26</sparkle:version>
+            <sparkle:shortVersionString>1.1.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-20260301-051919.dmg" length="8757674" type="application/octet-stream" sparkle:edSignature="jovj8qDzlaExln4JIkM/hu7g6V8d6LMxn4DuV0hXL/Qzm7qpmYuD5aUSws7h2ElKhkK/m2vrIQmaVxDL1w15BA=="/>
+            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-20260301-060146.dmg" length="8757628" type="application/octet-stream" sparkle:edSignature="cFn85PeFz4SdRFrvjPAU8+l49TPM1jrJseEDIytz/DfVT4aq9bb9CCbpuyBZcRY6C+T2ObzoMn1WPCBZndlaCg=="/>
         </item>
     </channel>
 </rss>
