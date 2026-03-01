@@ -133,7 +133,7 @@ enum YaxiService {
             d.set(pick.id, forKey: connectionIdKey)
             d.set(pick.credentials.full, forKey: credModelFullKey)
             d.set(pick.credentials.userId, forKey: credModelUserIdKey)
-            d.set(false, forKey: credModelNoneKey)
+            d.set(pick.credentials.none, forKey: credModelNoneKey)
 
             AppLogger.log("discoverBank: found \(pick.displayName)", category: "YaxiService")
             return DiscoveredBank(
@@ -357,12 +357,23 @@ enum YaxiService {
 
     // MARK: - Credential building (mirrors buildCredentialsForConnection in server.js)
 
-    /// One-time migration: clear legacy `none: true` so all banks use direct credential flow.
+    /// Corrects previously mis-saved credModel for redirect-banks (e.g. Sparkasse).
+    /// Earlier code hardcoded `none = false`; re-discover to get the correct value.
     static func migrateCredentialsModelIfNeeded() {
         let d = UserDefaults.standard
-        if d.bool(forKey: credModelNoneKey) {
-            d.set(false, forKey: credModelNoneKey)
-            AppLogger.log("Migrated credModel: none reset to false", category: "YaxiService")
+        // If connectionId is present but credModel was saved with none=false and full=false,
+        // it may be a redirect-bank (e.g. Sparkasse) that was wrongly migrated.
+        // Clear sessions to force a fresh SCA that then saves correct credModel via discoverBank.
+        let hasConnection = d.string(forKey: connectionIdKey) != nil
+        let noneIsStored = d.object(forKey: credModelNoneKey) != nil
+        let none = d.bool(forKey: credModelNoneKey)
+        let full = d.bool(forKey: credModelFullKey)
+        let userId = d.bool(forKey: credModelUserIdKey)
+        if hasConnection && noneIsStored && !none && !full && !userId {
+            // Likely a redirect-bank with wrong credModel — clear sessions so next fetch
+            // re-establishes the connection and saves the correct model.
+            Task { await sessionStore.clearSessionsOnly() }
+            AppLogger.log("migrateCredentialsModel: detected likely redirect-bank with wrong model, cleared sessions", category: "YaxiService")
         }
     }
 
