@@ -3,36 +3,12 @@
     <channel>
         <title>simplebanking</title>
         <item>
-            <title>1.0</title>
-            <pubDate>Tue, 24 Feb 2026 01:59:01 +0100</pubDate>
-            <sparkle:version>2026-02-24_01:53:39_2</sparkle:version>
-            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
+            <title>1.1.1</title>
+            <pubDate>Sun, 01 Mar 2026 05:20:05 +0100</pubDate>
+            <sparkle:version>2026-03-01_05:19:59_24</sparkle:version>
+            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-015854.dmg" length="97039222" type="application/octet-stream" sparkle:edSignature="pt3qKO3NnkJ9oGXvfwTPY+KVH7VOWGy5LiTlcwvnwYADLLP+RCXP1ZdGinXH1IDIVrL8PzjCghHhzJReuq+bDw=="/>
-        </item>
-        <item>
-            <title>1.0</title>
-            <pubDate>Tue, 24 Feb 2026 05:04:55 +0100</pubDate>
-            <sparkle:version>2026-02-24_05:04:40_6</sparkle:version>
-            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-050326.dmg" length="97039366" type="application/octet-stream" sparkle:edSignature="JXp26Q95ADtsYB48bnNrTpWSZ2IAXrCVFx2c3JVhNpC8OCgO9ygCX+Asro5alkG757ARoyLuD56Wq24o9Kq6Dw=="/>
-        </item>
-        <item>
-            <title>1.0</title>
-            <pubDate>Tue, 24 Feb 2026 06:20:54 +0100</pubDate>
-            <sparkle:version>2026-02-24_06:20:54_9</sparkle:version>
-            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-062053.dmg" length="97037442" type="application/octet-stream" sparkle:edSignature="2neJIlAt7DZQy+lO+w/7MqMNUi2nyKkbbmUr0mTDB0Xb3Rz2g7ytPQWWSCrlsM/6Yb/Wmniw5+l5fMhqm6kmCA=="/>
-        </item>
-        <item>
-            <title>1.0</title>
-            <pubDate>Tue, 24 Feb 2026 07:00:23 +0100</pubDate>
-            <sparkle:version>2026-02-24_07:00:23_10</sparkle:version>
-            <sparkle:shortVersionString>1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/simplebanking-20260224-070021.dmg" length="93403276" type="application/octet-stream" sparkle:edSignature="/2wMl+6t628o2PAQtFY0r/S3anf27DcPY2Nbm5JsDGyeBpfGFyr05s2gMWllWied9xMg8FVgJ5yLz5K0RAnQCQ=="/>
+            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-20260301-051919.dmg" length="8757674" type="application/octet-stream" sparkle:edSignature="jovj8qDzlaExln4JIkM/hu7g6V8d6LMxn4DuV0hXL/Qzm7qpmYuD5aUSws7h2ElKhkK/m2vrIQmaVxDL1w15BA=="/>
         </item>
     </channel>
 </rss>
