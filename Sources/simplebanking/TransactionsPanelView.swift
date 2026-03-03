@@ -23,6 +23,8 @@ private struct TransactionsPanelView: View {
     @State private var showScoreSheet = false
     @State private var showFixedCosts = false
     @State private var showSubscriptions = false
+    @State private var showCalendar = false
+    @State private var panelIsWide: Bool = false
     @State private var chatDraft = ""
     @State private var chatMessages: [ChatMessage] = []
     @State private var chatState: ChatState = .idle
@@ -561,7 +563,8 @@ private struct TransactionsPanelView: View {
                                     userNote: enrichment?.note,
                                     attachmentCount: enrichment?.attachmentCount ?? 0,
                                     bankId: "primary",
-                                    onEnrichmentChanged: { vm.loadEnrichmentData(bankId: "primary") }
+                                    onEnrichmentChanged: { vm.loadEnrichmentData(bankId: "primary") },
+                                    isWide: panelIsWide
                                 )
                                 .onAppear {
                                     loadMoreTransactionsIfNeeded(current: t)
@@ -659,6 +662,15 @@ private struct TransactionsPanelView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .help("Abos der letzten 60 Tage")
+
+                    // Kalender-Heatmap Button
+                    Button(action: { showCalendar.toggle() }) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 15))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .help("Ausgaben-Kalender")
                 }
                 
                 Spacer()
@@ -689,6 +701,9 @@ private struct TransactionsPanelView: View {
         .background(Color.panelBackground) // Light grey background
         .tint(Color.themeAccent)
         .preferredColorScheme(colorScheme)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { newWidth in
+            panelIsWide = newWidth >= 700
+        }
         .onChange(of: llmAPIKeyPresent) { enabled in
             if !enabled {
                 chatDraft = ""
@@ -737,6 +752,9 @@ private struct TransactionsPanelView: View {
         }
         .sheet(isPresented: $showSubscriptions) {
             SubscriptionsView(transactions: vm.transactions)
+        }
+        .sheet(isPresented: $showCalendar) {
+            CalendarHeatmapView()
         }
         .sheet(isPresented: $showChatSheet) {
             ChatOverlaySheet(
@@ -897,6 +915,7 @@ private struct TransactionRowNew: View {
     let attachmentCount: Int
     let bankId: String
     let onEnrichmentChanged: () -> Void
+    var isWide: Bool = false
 
     @ObservedObject private var logoService = MerchantLogoService.shared
     @State private var showDetail: Bool = false
@@ -924,7 +943,17 @@ private struct TransactionRowNew: View {
                         .lineLimit(1)
                         .foregroundColor(.primary)
                 }
-                Spacer()
+                if isWide {
+                    let remittance = transaction.remittanceInformation?.first ?? ""
+                    Text(remittance)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(1)
+                        .padding(.leading, 8)
+                } else {
+                    Spacer()
+                }
                 // Enrichment indicators (monochrome)
                 HStack(spacing: 4) {
                     if attachmentCount > 0 {

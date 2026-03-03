@@ -545,7 +545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupItem.tag = 100
         menu.addItem(setupItem)
 
-        let forgetItem = NSMenuItem(title: "⚠ \(t("Zurücksetzen", "Reset"))", action: #selector(resetApp), keyEquivalent: "")
+        let forgetItem = NSMenuItem(title: t("Zurücksetzen", "Reset"), action: #selector(resetApp), keyEquivalent: "")
         forgetItem.tag = 101
         if let img = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil) {
             img.isTemplate = true
@@ -872,7 +872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.title = locked ? t("Entsperren…", "Unlock…") : t("Sperren", "Lock")
         }
         menu.item(withTag: 100)?.title = t("Einrichtungsassistent…", "Setup Wizard…")
-        menu.item(withTag: 101)?.title = "⚠ \(t("Zurücksetzen", "Reset"))"
+        menu.item(withTag: 101)?.title = t("Zurücksetzen", "Reset")
         menu.item(withTag: 202)?.title = t("Nach Updates suchen…", "Check for Updates…")
         menu.item(withTag: 200)?.title = t("Einstellungen…", "Settings…")
         menu.item(withTag: 1000)?.title = t("Beenden", "Quit")
@@ -1210,13 +1210,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             low: balanceSignalLowUpperBound,
             medium: balanceSignalMediumUpperBound
         )
-        let rootView = StatusBalanceFlyoutCardView(
+        var rootView = StatusBalanceFlyoutCardView(
             balanceText: balanceText,
             balanceValue: lastBalance,
             thresholds: thresholds,
             isDefaultTheme: themeId == ThemeManager.defaultThemeID,
             forcedColorScheme: configuredColorScheme()
         )
+        rootView.onDoubleTap = { [weak self] in
+            self?.balancePopover?.performClose(nil)
+            Task { await self?.openTransactionsPanel() }
+        }
         let host = NSHostingController(rootView: rootView)
         popover.contentSize = NSSize(width: 348, height: 170)
         popover.contentViewController = host
@@ -1285,6 +1289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if resp.ok, let booked = resp.booked {
                 lastShownTitle = formatEURNoDecimals(booked.amount)
                 self.lastBalance = AmountParser.parse(booked.amount)
+                self.txVM.currentBalance = self.formatEURWithCents(self.lastBalance ?? 0)
                 applyBalanceDisplayModeConstraints()
                 updateStatusBalanceTitle()
                 statusItem.button?.toolTip = "Kontostand (Auto-Refresh: \(refreshInterval) Min.)"
@@ -2061,6 +2066,7 @@ private struct StatusBalanceFlyoutCardView: View {
     let thresholds: BalanceSignalThresholds
     let isDefaultTheme: Bool
     let forcedColorScheme: ColorScheme?
+    var onDoubleTap: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var environmentColorScheme
 
@@ -2082,6 +2088,7 @@ private struct StatusBalanceFlyoutCardView: View {
         .frame(width: 348, height: 170)
         .background(Color.panelBackground)
         .preferredColorScheme(forcedColorScheme)
+        .onTapGesture(count: 2) { onDoubleTap?() }
     }
 
     private var defaultThemeCard: some View {
