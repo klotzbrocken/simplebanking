@@ -2,45 +2,69 @@ import LocalAuthentication
 import Security
 import Foundation
 
-/// Speichert das Master-Passwort im Keychain, geschützt durch Touch ID beim Lesen.
-/// Auf macOS erfordert kSecAttrAccessControl + .userPresence eine Systemauthentifizierung
-/// bereits beim Speichern (SecItemAdd), was in signierten Apps regelmäßig fehlschlägt.
-/// Stattdessen: Eintrag ohne Access Control speichern; biometrische Schranke wird
-/// ausschließlich beim Lesen über LAContext.evaluatePolicy durchgesetzt.
+/// Speichert das Master-Passwort im Keychain, gesichert durch Touch ID beim Lesen.
+///
+/// Idealer Schutz wäre kSecAttrAccessControl + .userPresence beim Speichern,
+/// damit der Keychain selbst die Authentifizierung erzwingt. Das scheitert jedoch
+/// bei ad-hoc signierten Apps (SecItemAdd liefert errSecMissingEntitlement /
+/// errSecAuthFailed), da macOS für access-controlled Items ein gültiges
+/// Team-Identifier im Code Signing voraussetzt.
+///
+/// Daher: Item ohne Access Control speichern; der biometrische Schutz wird
+/// ausschließlich über LAContext.evaluatePolicy vor dem Lesen durchgesetzt
+/// (Soft Gate). Für echten Keychain-Level-Schutz wäre Developer ID Signing nötig.
 enum BiometricStore {
     private static let service = "tech.yaxi.simplebanking"
     private static let account = "master-password"
 
-    /// Touch ID ist auf diesem Gerät verfügbar und eingerichtet.
+    // MARK: - Availability
+
+    /// Touch ID ist auf diesem Gerät verfügbar.
     static var isAvailable: Bool {
         let ctx = LAContext()
         var err: NSError?
-        return ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &err)
+        if ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &err) {
+            return true
+        }
+        // Fallback für bestimmte Signing-Konfigurationen: biometryType auslesen
+        let ctx2 = LAContext()
+        var err2: NSError?
+        ctx2.canEvaluatePolicy(.deviceOwnerAuthentication, error: &err2)
+        return ctx2.biometryType == .touchID
     }
 
-    /// Ein Passwort ist im Keychain hinterlegt.
+    // MARK: - Existence check
+
+    /// Prüft ob ein Passwort gespeichert ist, ohne einen Auth-Dialog zu zeigen.
     static var hasSavedPassword: Bool {
+        let ctx = LAContext()
+        ctx.interactionNotAllowed = true
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account,
-            kSecReturnData: false
+            kSecReturnData: false,
+            kSecUseAuthenticationContext: ctx
         ]
-        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        // errSecSuccess:               Item existiert, keine Auth nötig
+        // errSecInteractionNotAllowed: Item existiert, Auth erforderlich (access-controlled)
+        return status == errSecSuccess || status == errSecInteractionNotAllowed
     }
 
+    // MARK: - Save
+
     /// Speichert das Passwort im Keychain (nur auf diesem Gerät, nur wenn entsperrt).
-    /// Die biometrische Schranke wird beim Lesen über LAContext.evaluatePolicy erzwungen.
+    /// Ohne kSecAttrAccessControl — Soft Gate via evaluatePolicy beim Lesen.
     static func save(password: String) throws {
         guard let data = password.data(using: .utf8) else { return }
 
         // Vorhandenen Eintrag erst löschen
-        let deleteQuery: [CFString: Any] = [
+        SecItemDelete([
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
+        ] as CFDictionary)
 
         let addQuery: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
@@ -55,46 +79,48 @@ enum BiometricStore {
         }
     }
 
-    /// Zeigt Touch ID-Prompt und gibt das gespeicherte Passwort zurück.
+    // MARK: - Load
+
+    /// Zeigt Touch ID / Passwort-Dialog und gibt das gespeicherte Passwort zurück.
+    /// Verwendet .deviceOwnerAuthentication (Touch ID mit Passwort-Fallback).
     static func loadPassword(reason: String) async throws -> String {
         let ctx = LAContext()
-        // Nutzer authentifizieren → Touch ID-Dialog
-        try await ctx.evaluatePolicy(
-            .deviceOwnerAuthenticationWithBiometrics,
-            localizedReason: reason
-        )
+        try await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
 
-        // Passwort nach erfolgreicher Authentifizierung aus Keychain lesen
         return try await withCheckedThrowingContinuation { continuation in
-            var result: CFTypeRef?
-            let query: [CFString: Any] = [
-                kSecClass: kSecClassGenericPassword,
-                kSecAttrService: service,
-                kSecAttrAccount: account,
-                kSecReturnData: true
-            ]
-            let status = SecItemCopyMatching(query as CFDictionary, &result)
-            if status == errSecSuccess,
-               let data = result as? Data,
-               let password = String(data: data, encoding: .utf8) {
-                continuation.resume(returning: password)
-            } else {
-                continuation.resume(throwing: NSError(
-                    domain: NSOSStatusErrorDomain,
-                    code: Int(status),
-                    userInfo: [NSLocalizedDescriptionKey: "Passwort konnte nicht aus Keychain gelesen werden."]
-                ))
+            DispatchQueue.global(qos: .userInitiated).async {
+                var result: CFTypeRef?
+                let query: [CFString: Any] = [
+                    kSecClass: kSecClassGenericPassword,
+                    kSecAttrService: service,
+                    kSecAttrAccount: account,
+                    kSecReturnData: true,
+                    kSecUseAuthenticationContext: ctx
+                ]
+                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                if status == errSecSuccess,
+                   let data = result as? Data,
+                   let password = String(data: data, encoding: .utf8) {
+                    continuation.resume(returning: password)
+                } else {
+                    continuation.resume(throwing: NSError(
+                        domain: NSOSStatusErrorDomain,
+                        code: Int(status),
+                        userInfo: [NSLocalizedDescriptionKey: "Passwort konnte nicht aus Keychain gelesen werden (status: \(status))."]
+                    ))
+                }
             }
         }
     }
 
+    // MARK: - Clear
+
     /// Löscht das gespeicherte Passwort (z.B. bei Security-Reset).
     static func clear() {
-        let query: [CFString: Any] = [
+        SecItemDelete([
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account
-        ]
-        SecItemDelete(query as CFDictionary)
+        ] as CFDictionary)
     }
 }

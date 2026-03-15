@@ -377,6 +377,9 @@ struct SettingsView: View {
                 TabButton(title: t("Über", "About"), icon: "info.circle", isSelected: selectedTab == 4) {
                     selectedTab = 4
                 }
+                TabButton(title: "Labs", icon: "flask", isSelected: selectedTab == 5) {
+                    selectedTab = 5
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -398,6 +401,8 @@ struct SettingsView: View {
                         securitySettings
                     case 4:
                         aboutSection
+                    case 5:
+                        labsSettings
                     default:
                         EmptyView()
                     }
@@ -466,6 +471,12 @@ struct SettingsView: View {
         .onChange(of: balanceSignalMediumUpperBound) { _ in
             normalizeBalanceSignalThresholds()
         }
+        .onChange(of: selectedTab) { tab in
+            if tab == 3 {
+                touchIDAvailable = BiometricStore.isAvailable
+                touchIDEnabled = BiometricStore.hasSavedPassword
+            }
+        }
         .alert(t("simplebanking zurücksetzen?", "Reset simplebanking?"), isPresented: $showResetConfirmation) {
             Button(t("Abbrechen", "Cancel"), role: .cancel) { }
             Button(t("Zurücksetzen", "Reset"), role: .destructive) {
@@ -517,25 +528,23 @@ struct SettingsView: View {
             Divider()
 
             // Refresh Interval
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Abfrage-Intervall", "Refresh interval"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Wie oft soll der Kontostand automatisch abgefragt werden?", "How often should the balance be refreshed automatically?"))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Abfrage-Intervall", "Refresh interval"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Wie oft soll der Kontostand automatisch abgefragt werden?", "How often should the balance be refreshed automatically?"))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
                 Picker("", selection: $refreshInterval) {
                     ForEach(RefreshInterval.allCases, id: \.rawValue) { interval in
                         Text(interval.label).tag(interval.rawValue)
                     }
                 }
                 .pickerStyle(MenuPickerStyle())
-                .frame(maxWidth: 200)
+                .frame(width: 150)
             }
-
-            Divider()
-
-            aiAssistantSettings
         }
     }
 
@@ -586,24 +595,24 @@ struct SettingsView: View {
     private var financeSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Abruf-Zeitraum
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Abruf-Zeitraum", "Fetch range"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Wie viele Tage an Transaktionen sollen abgerufen werden?", "How many days of transactions should be fetched?"))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 8) {
-                    Picker("Tage", selection: $fetchDays) {
-                        Text(t("30 Tage", "30 days")).tag(30)
-                        Text(t("60 Tage", "60 days")).tag(60)
-                        Text(t("90 Tage", "90 days")).tag(90)
-                        Text(t("180 Tage", "180 days")).tag(180)
-                        Text(t("365 Tage", "365 days")).tag(365)
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                    .frame(minWidth: 140)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Abruf-Zeitraum", "Fetch range"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Wie viele Tage an Transaktionen sollen abgerufen werden?", "How many days of transactions should be fetched?"))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
                 }
+                Spacer()
+                Picker("", selection: $fetchDays) {
+                    Text(t("30 Tage", "30 days")).tag(30)
+                    Text(t("60 Tage", "60 days")).tag(60)
+                    Text(t("90 Tage", "90 days")).tag(90)
+                    Text(t("180 Tage", "180 days")).tag(180)
+                    Text(t("365 Tage", "365 days")).tag(365)
+                }
+                .pickerStyle(MenuPickerStyle())
+                .frame(width: 130)
             }
 
             Divider()
@@ -682,24 +691,25 @@ struct SettingsView: View {
             Divider()
             
             // Gehaltsdatum
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Gehaltseingang", "Salary incoming day"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Tag des Monats, an dem dein Gehalt eingeht. Die Finanzanalyse wird entsprechend berechnet.", "Day of month when salary arrives. Financial analysis uses this setting."))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 12) {
-                    Picker("Tag", selection: $salaryDay) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Gehaltseingang", "Salary incoming day"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Tag des Monats, an dem dein Gehalt eingeht. Die Finanzanalyse wird entsprechend berechnet.", "Day of month when salary arrives. Financial analysis uses this setting."))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                HStack(spacing: 6) {
+                    Picker("", selection: $salaryDay) {
                         ForEach(1...31, id: \.self) { day in
                             Text("\(day).").tag(day)
                         }
                     }
                     .pickerStyle(MenuPickerStyle())
-                    .frame(minWidth: 100)
-
-                    Text(t("des Monats", "of the month"))
-                        .font(ThemeFonts.body(size: 13))
+                    .frame(minWidth: 80)
+                    Text(t("des Monats", "of month"))
+                        .font(ThemeFonts.body(size: 12))
                         .foregroundColor(.secondary)
                 }
             }
@@ -920,40 +930,43 @@ struct SettingsView: View {
             Divider()
 
             // Language
-            VStack(alignment: .leading, spacing: 8) {
+            HStack {
                 Text(t("Sprache", "Language"))
-                    .font(ThemeFonts.heading(size: 13))
-
+                    .font(ThemeFonts.body(size: 13, weight: .medium))
+                Spacer()
                 Picker("", selection: $appLanguage) {
                     ForEach(AppLanguage.allCases, id: \.rawValue) { language in
                         Text(language.pickerLabel).tag(language.rawValue)
                     }
                 }
                 .pickerStyle(SegmentedPickerStyle())
-                .frame(maxWidth: 320)
+                .frame(width: 180)
             }
 
             Divider()
 
             // Theme (colors + typography from cfg files)
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Theme", "Theme"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t(
-                    "Wähle ein Theme aus .cfg-Dateien (Farben + Typografie).",
-                    "Choose a theme from .cfg files (colors + typography)."
-                ))
-                .font(ThemeFonts.body(size: 12))
-                .foregroundColor(.secondary)
-
-                Picker("", selection: $themeId) {
-                    ForEach(availableThemes, id: \.id) { theme in
-                        Text(theme.name).tag(theme.id)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t("Theme", "Theme"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(t(
+                            "Wähle ein Theme aus .cfg-Dateien (Farben + Typografie).",
+                            "Choose a theme from .cfg files (colors + typography)."
+                        ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
                     }
+                    Spacer()
+                    Picker("", selection: $themeId) {
+                        ForEach(availableThemes, id: \.id) { theme in
+                            Text(theme.name).tag(theme.id)
+                        }
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                    .frame(width: 180)
                 }
-                .pickerStyle(MenuPickerStyle())
-                .frame(maxWidth: 260)
-
                 Text("\(t("Theme-Ordner", "Theme folder")): \(ThemeManager.shared.themesDirectoryPath)")
                     .font(ThemeFonts.body(size: 10))
                     .foregroundColor(.secondary)
@@ -963,17 +976,17 @@ struct SettingsView: View {
             Divider()
 
             // Appearance
-            VStack(alignment: .leading, spacing: 8) {
+            HStack {
                 Text(t("Darstellung", "Appearance"))
-                    .font(ThemeFonts.heading(size: 13))
-
+                    .font(ThemeFonts.body(size: 13, weight: .medium))
+                Spacer()
                 Picker("", selection: $appearanceMode) {
                     ForEach(AppearanceMode.allCases, id: \.rawValue) { mode in
                         Text(mode.label).tag(mode.rawValue)
                     }
                 }
                 .pickerStyle(SegmentedPickerStyle())
-                .frame(maxWidth: 300)
+                .frame(width: 200)
             }
 
             Divider()
@@ -991,19 +1004,19 @@ struct SettingsView: View {
                     isOn: $confettiEnabled
                 )
 
-                VStack(alignment: .leading, spacing: 6) {
+                HStack {
                     Text(t("Konfetti-Effekt", "Confetti effect"))
-                        .font(ThemeFonts.body(size: 12, weight: .medium))
-
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Spacer()
                     Picker("", selection: $confettiEffect) {
                         ForEach(ConfettiEffect.allCases, id: \.rawValue) { effect in
                             Text(effect.label).tag(effect.rawValue)
                         }
                     }
                     .pickerStyle(MenuPickerStyle())
-                    .frame(maxWidth: 220)
-                    .disabled(!confettiEnabled)
+                    .frame(width: 160)
                 }
+                .disabled(!confettiEnabled)
 
                 SettingsToggleRow(
                     title: t("Bei Kontostand über Schwellwert", "When balance exceeds threshold"),
@@ -1300,6 +1313,42 @@ struct SettingsView: View {
         }
     }
     
+    // MARK: - Labs Settings
+
+    private var labsSettings: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // AI Assistant
+            aiAssistantSettings
+
+            Divider()
+
+            // Easter-Egg-Assistent
+            VStack(alignment: .leading, spacing: 8) {
+                Text(t("Easter-Egg-Assistent", "Easter egg assistant"))
+                    .font(ThemeFonts.heading(size: 13))
+                Text(t("Wähle den animierten Assistenten (experimentell).", "Choose the animated assistant (experimental)."))
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.secondary)
+
+                HStack {
+                    Text(t("Assistent", "Assistant"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { ClippyAgentType(rawValue: UserDefaults.standard.string(forKey: MediumClippy.agentKey) ?? "") ?? .clippy },
+                        set: { UserDefaults.standard.set($0.rawValue, forKey: MediumClippy.agentKey) }
+                    )) {
+                        ForEach(ClippyAgentType.allCases, id: \.self) { agent in
+                            Text(agent.displayName).tag(agent)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 120)
+                }
+            }
+        }
+    }
+
     private func resetApp() {
         // Delete credentials
         try? CredentialsStore.delete()

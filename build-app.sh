@@ -27,7 +27,7 @@ fi
 OUTDIR="$ROOT/SimpleBankingBuild"
 APP="$OUTDIR/simplebanking.app"
 ICON_SRC="${ICON_SRC:-$ROOT/Resources/icon_full_black.png}"
-VERSION_BASE="${VERSION_BASE:-1.2.0}"
+VERSION_BASE="${VERSION_BASE:-1.2.1}"
 
 mkdir -p "$OUTDIR"
 rm -rf "$APP"
@@ -66,6 +66,8 @@ fi
 
 CATEGORIES_JSON_SRC="$ROOT/Sources/simplebanking/Resources/categories_de.json"
 CLIPPY_PNG_SRC="$ROOT/Sources/simplebanking/Resources/Clippy.png"
+GENIUS_PNG_SRC="$ROOT/Sources/simplebanking/Resources/Genius.png"
+LINKS_PNG_SRC="$ROOT/Sources/simplebanking/Resources/Links.png"
 CLIPPY_ANIMATIONS_SRC="$ROOT/Sources/simplebanking/Resources/animations.json"
 if [[ -f "$CATEGORIES_JSON_SRC" ]]; then
     cp "$CATEGORIES_JSON_SRC" "$APP/Contents/Resources/categories_de.json"
@@ -73,6 +75,8 @@ fi
 if [[ -f "$CLIPPY_PNG_SRC" ]]; then
     cp "$CLIPPY_PNG_SRC" "$APP/Contents/Resources/Clippy.png"
 fi
+[[ -f "$GENIUS_PNG_SRC" ]] && cp "$GENIUS_PNG_SRC" "$APP/Contents/Resources/Genius.png"
+[[ -f "$LINKS_PNG_SRC"  ]] && cp "$LINKS_PNG_SRC"  "$APP/Contents/Resources/Links.png"
 if [[ -f "$CLIPPY_ANIMATIONS_SRC" ]]; then
     cp "$CLIPPY_ANIMATIONS_SRC" "$APP/Contents/Resources/animations.json"
 fi

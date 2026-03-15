@@ -1,8 +1,24 @@
 import AppKit
 import Foundation
 
+enum ClippyAgentType: String, CaseIterable {
+    case clippy = "clippy"
+    case genius = "genius"
+    case links  = "links"
+
+    var displayName: String {
+        switch self {
+        case .clippy: return "Clippy"
+        case .genius: return "Genius"
+        case .links:  return "Links"
+        }
+    }
+}
+
 @MainActor
 final class MediumClippy: NSObject {
+    static let agentKey = "clippy.agent"
+    private(set) var agentType: ClippyAgentType = .clippy
     private struct Frame {
         let x: Int
         let y: Int
@@ -298,8 +314,14 @@ final class MediumClippy: NSObject {
     }
 
     private func show(on host: NSView?) {
+        // Re-read agent type on each show so settings changes take effect
+        let newType = ClippyAgentType(rawValue: UserDefaults.standard.string(forKey: Self.agentKey) ?? "") ?? .clippy
+        if newType != agentType {
+            agentType = newType
+            loadSpriteSheet()
+        }
         guard spriteSheet != nil else {
-            AppLogger.log("Clippy sprite sheet missing (Clippy.png)", category: "Clippy", level: "WARN")
+            AppLogger.log("Sprite sheet missing for agent \(agentType.rawValue)", category: "Clippy", level: "WARN")
             return
         }
 
@@ -483,17 +505,25 @@ final class MediumClippy: NSObject {
 
     private func playRandomIdleVariation() {
         guard isVisible, !isClosing else { return }
-        let variations = [
-            frames(named: "Idle1_1", fallback: idleFingerTapFrames),
-            frames(named: "IdleAtom", fallback: idleHeadScratchFrames),
-            frames(named: "IdleEyeBrowRaise", fallback: idleEyeBrowRaiseFrames),
-            frames(named: "IdleFingerTap", fallback: idleFingerTapFrames),
-            frames(named: "IdleHeadScratch", fallback: idleHeadScratchFrames),
-            frames(named: "IdleRopePile", fallback: idleSideToSideFrames),
-            frames(named: "IdleSideToSide", fallback: idleSideToSideFrames),
-            frames(named: "IdleSnooze", fallback: idleEyeBrowRaiseFrames),
-        ]
-        let selected = variations.randomElement() ?? frames(named: "IdleEyeBrowRaise", fallback: idleEyeBrowRaiseFrames)
+        let selected: [Frame]
+        switch agentType {
+        case .clippy:
+            let variations = [
+                frames(named: "Idle1_1",         fallback: idleFingerTapFrames),
+                frames(named: "IdleAtom",         fallback: idleHeadScratchFrames),
+                frames(named: "IdleEyeBrowRaise", fallback: idleEyeBrowRaiseFrames),
+                frames(named: "IdleFingerTap",    fallback: idleFingerTapFrames),
+                frames(named: "IdleHeadScratch",  fallback: idleHeadScratchFrames),
+                frames(named: "IdleRopePile",     fallback: idleSideToSideFrames),
+                frames(named: "IdleSideToSide",   fallback: idleSideToSideFrames),
+                frames(named: "IdleSnooze",       fallback: idleEyeBrowRaiseFrames),
+            ]
+            selected = variations.randomElement() ?? frames(named: "IdleEyeBrowRaise", fallback: idleEyeBrowRaiseFrames)
+        case .genius:
+            selected = geniusIdleVariation()
+        case .links:
+            selected = linksIdleVariation()
+        }
         playFrameSequence(selected, loop: false) { [weak self] in
             self?.startIdleLoop()
         }
@@ -578,13 +608,22 @@ final class MediumClippy: NSObject {
     }
 
     private func loadSpriteSheet() {
-        if let path = Bundle.main.path(forResource: "Clippy", ofType: "png"),
+        let name = agentType == .clippy ? "Clippy"
+                 : agentType == .genius ? "Genius"
+                 : "Links"
+        if let path = Bundle.main.path(forResource: name, ofType: "png"),
            let image = NSImage(contentsOfFile: path) {
             spriteSheet = image
             return
         }
-
-        spriteSheet = nil
+        // Fallback to Clippy
+        if agentType != .clippy,
+           let path = Bundle.main.path(forResource: "Clippy", ofType: "png"),
+           let image = NSImage(contentsOfFile: path) {
+            spriteSheet = image
+        } else {
+            spriteSheet = nil
+        }
     }
 
     private func loadAnimationCatalog() {
@@ -628,10 +667,449 @@ final class MediumClippy: NSObject {
     }
 
     private func frames(named name: String, fallback: [Frame]) -> [Frame] {
-        if let frames = animationCatalog[name], !frames.isEmpty {
-            return frames
+        switch agentType {
+        case .clippy:
+            if let f = animationCatalog[name], !f.isEmpty { return f }
+            return fallback
+        case .genius:
+            return geniusFrames(named: name)
+        case .links:
+            return linksFrames(named: name)
         }
-        return fallback
+    }
+
+    // MARK: - Genius frame data (Genius.png, 124×93 frames)
+
+    private func geniusFrames(named name: String) -> [Frame] {
+        switch name {
+        case "Show":
+            return [
+                Frame(x: 992, y: 186, duration: 0.06),
+                Frame(x: 868, y: 186, duration: 0.06),
+                Frame(x: 744, y: 186, duration: 0.06),
+                Frame(x: 0,   y: 0,   duration: 0.10),
+            ]
+        case "GoodBye", "Goodbye":
+            return [
+                Frame(x:   0, y:   0, duration: 0.10),
+                Frame(x: 744, y: 186, duration: 0.12),
+                Frame(x: 868, y: 186, duration: 0.12),
+                Frame(x: 992, y: 186, duration: 0.14),
+                Frame(x: 868, y: 186, duration: 0.10),
+                Frame(x: 992, y: 186, duration: 0.18),
+            ]
+        case "Wave":
+            return [
+                Frame(x: 744,  y: 1581, duration: 0.13),
+                Frame(x: 868,  y: 1581, duration: 0.08),
+                Frame(x: 992,  y: 1581, duration: 0.13),
+                Frame(x: 1116, y: 1581, duration: 0.08),
+                Frame(x: 1240, y: 1581, duration: 0.08),
+                Frame(x: 1364, y: 1581, duration: 0.08),
+                Frame(x: 1488, y: 1581, duration: 0.08),
+                Frame(x: 1364, y: 1581, duration: 0.10),
+                Frame(x: 1240, y: 1581, duration: 0.10),
+                Frame(x: 1116, y: 1581, duration: 0.10),
+                Frame(x: 992,  y: 1581, duration: 0.10),
+                Frame(x: 868,  y: 1581, duration: 0.10),
+                Frame(x: 744,  y: 1581, duration: 0.10),
+                Frame(x:   0,  y:    0, duration: 0.20),
+            ]
+        case "Thinking":
+            return [
+                Frame(x: 1116, y: 372, duration: 0.13),
+                Frame(x: 1364, y: 372, duration: 0.35),
+                Frame(x: 1488, y: 372, duration: 0.45),
+                Frame(x: 1612, y: 372, duration: 0.45),
+                Frame(x: 1488, y: 372, duration: 0.35),
+                Frame(x: 1364, y: 372, duration: 0.25),
+                Frame(x: 1116, y: 372, duration: 0.15),
+                Frame(x:    0, y:   0, duration: 0.20),
+            ]
+        case "Alert":
+            return [
+                Frame(x: 1860, y: 372,  duration: 0.13),
+                Frame(x: 1240, y: 1302, duration: 0.13),
+                Frame(x: 1364, y: 1302, duration: 0.70),
+                Frame(x: 1240, y: 1302, duration: 0.13),
+                Frame(x: 1736, y: 372,  duration: 0.25),
+                Frame(x: 1860, y: 372,  duration: 0.15),
+                Frame(x:    0, y:    0, duration: 0.20),
+            ]
+        case "GetTechy":
+            return [
+                Frame(x: 1488, y: 930,  duration: 0.10),
+                Frame(x: 1612, y: 930,  duration: 0.10),
+                Frame(x: 1736, y: 930,  duration: 0.10),
+                Frame(x: 1860, y: 930,  duration: 0.10),
+                Frame(x: 1984, y: 930,  duration: 0.10),
+                Frame(x: 2108, y: 930,  duration: 0.10),
+                Frame(x: 2232, y: 930,  duration: 0.10),
+                Frame(x: 2356, y: 930,  duration: 0.10),
+                Frame(x: 2480, y: 930,  duration: 0.10),
+                Frame(x: 2604, y: 930,  duration: 0.10),
+                Frame(x: 2728, y: 930,  duration: 0.10),
+                Frame(x: 0,    y: 1023, duration: 0.10),
+                Frame(x: 124,  y: 1023, duration: 0.10),
+                Frame(x: 248,  y: 1023, duration: 0.10),
+                Frame(x: 372,  y: 1023, duration: 0.22),
+                Frame(x: 248,  y: 1023, duration: 0.10),
+                Frame(x: 124,  y: 1023, duration: 0.10),
+                Frame(x: 0,    y: 1023, duration: 0.10),
+                Frame(x:   0,  y:    0, duration: 0.20),
+            ]
+        case "Processing":
+            return [
+                Frame(x: 124,  y: 0, duration: 0.13),
+                Frame(x: 248,  y: 0, duration: 0.20),
+                Frame(x: 372,  y: 0, duration: 0.16),
+                Frame(x: 496,  y: 0, duration: 0.13),
+                Frame(x: 620,  y: 0, duration: 0.26),
+                Frame(x: 744,  y: 0, duration: 0.26),
+                Frame(x: 620,  y: 0, duration: 0.26),
+                Frame(x: 496,  y: 0, duration: 0.26),
+                Frame(x: 744,  y: 0, duration: 0.26),
+                Frame(x: 868,  y: 0, duration: 0.13),
+                Frame(x: 992,  y: 0, duration: 0.13),
+                Frame(x: 1116, y: 0, duration: 0.13),
+                Frame(x: 1240, y: 0, duration: 0.13),
+                Frame(x: 1364, y: 0, duration: 0.13),
+                Frame(x: 1488, y: 0, duration: 0.13),
+                Frame(x: 1612, y: 0, duration: 0.13),
+                Frame(x: 1736, y: 0, duration: 0.13),
+                Frame(x: 1860, y: 0, duration: 0.22),
+                Frame(x:    0, y:   0, duration: 0.20),
+            ]
+        case "RestPose":
+            return [Frame(x: 0, y: 0, duration: 0.30)]
+        default:
+            return [Frame(x: 0, y: 0, duration: 0.30)]
+        }
+    }
+
+    private func geniusIdleVariation() -> [Frame] {
+        let variants: [[Frame]] = [
+            // Idle0: subtle glance
+            [
+                Frame(x: 1736, y: 372, duration: 0.33),
+                Frame(x: 1860, y: 372, duration: 0.20),
+                Frame(x: 1736, y: 372, duration: 0.15),
+                Frame(x:    0, y:   0, duration: 0.15),
+            ],
+            // Idle1: book / scroll reading
+            [
+                Frame(x: 124,  y: 1302, duration: 0.10),
+                Frame(x: 248,  y: 1302, duration: 0.08),
+                Frame(x: 372,  y: 1302, duration: 0.13),
+                Frame(x: 496,  y: 1302, duration: 0.25),
+                Frame(x: 620,  y: 1302, duration: 0.08),
+                Frame(x: 744,  y: 1302, duration: 0.08),
+                Frame(x: 868,  y: 1302, duration: 0.13),
+                Frame(x: 744,  y: 1302, duration: 0.08),
+                Frame(x: 620,  y: 1302, duration: 0.08),
+                Frame(x: 496,  y: 1302, duration: 0.25),
+                Frame(x: 372,  y: 1302, duration: 0.13),
+                Frame(x:   0,  y:    0, duration: 0.15),
+            ],
+            // Idle2: floating magic
+            [
+                Frame(x: 1488, y: 1395, duration: 0.13),
+                Frame(x: 1612, y: 1395, duration: 0.13),
+                Frame(x: 1736, y: 1395, duration: 0.13),
+                Frame(x: 1860, y: 1395, duration: 0.13),
+                Frame(x: 1984, y: 1395, duration: 0.33),
+                Frame(x: 1860, y: 1395, duration: 0.13),
+                Frame(x: 1736, y: 1395, duration: 0.13),
+                Frame(x: 1612, y: 1395, duration: 0.13),
+                Frame(x: 1488, y: 1395, duration: 0.13),
+                Frame(x:    0, y:    0, duration: 0.15),
+            ],
+            // Idle3: looking around
+            [
+                Frame(x: 2108, y: 1209, duration: 0.13),
+                Frame(x: 2232, y: 1209, duration: 0.13),
+                Frame(x: 2356, y: 1209, duration: 0.13),
+                Frame(x: 2480, y: 1209, duration: 0.20),
+                Frame(x: 2604, y: 1209, duration: 0.20),
+                Frame(x: 2728, y: 1209, duration: 0.13),
+                Frame(x: 2604, y: 1209, duration: 0.13),
+                Frame(x: 2480, y: 1209, duration: 0.13),
+                Frame(x: 2356, y: 1209, duration: 0.13),
+                Frame(x: 2232, y: 1209, duration: 0.13),
+                Frame(x: 2108, y: 1209, duration: 0.13),
+                Frame(x:    0, y:    0, duration: 0.15),
+            ],
+            // Idle4: stretching
+            [
+                Frame(x: 2108, y: 1116, duration: 0.13),
+                Frame(x: 2232, y: 1116, duration: 0.16),
+                Frame(x: 2356, y: 1116, duration: 0.13),
+                Frame(x: 2480, y: 1116, duration: 0.25),
+                Frame(x: 2604, y: 1116, duration: 0.25),
+                Frame(x: 2728, y: 1116, duration: 0.13),
+                Frame(x: 2604, y: 1116, duration: 0.13),
+                Frame(x: 2480, y: 1116, duration: 0.13),
+                Frame(x: 2356, y: 1116, duration: 0.13),
+                Frame(x: 2232, y: 1116, duration: 0.13),
+                Frame(x: 2108, y: 1116, duration: 0.13),
+                Frame(x:    0, y:    0, duration: 0.15),
+            ],
+            // Idle5: quick pondering (short Thinking variant)
+            [
+                Frame(x: 1116, y: 372, duration: 0.15),
+                Frame(x: 1364, y: 372, duration: 0.45),
+                Frame(x: 1116, y: 372, duration: 0.15),
+                Frame(x:    0, y:   0, duration: 0.15),
+            ],
+            // Idle6: brief book glance
+            [
+                Frame(x: 496,  y: 1302, duration: 0.12),
+                Frame(x: 620,  y: 1302, duration: 0.30),
+                Frame(x: 744,  y: 1302, duration: 0.30),
+                Frame(x: 620,  y: 1302, duration: 0.12),
+                Frame(x: 496,  y: 1302, duration: 0.12),
+                Frame(x:   0,  y:    0, duration: 0.15),
+            ],
+            // Idle7: nod (Processing row short variant)
+            [
+                Frame(x: 124,  y: 0, duration: 0.10),
+                Frame(x: 248,  y: 0, duration: 0.12),
+                Frame(x: 372,  y: 0, duration: 0.12),
+                Frame(x: 248,  y: 0, duration: 0.10),
+                Frame(x: 124,  y: 0, duration: 0.10),
+                Frame(x:   0,  y: 0, duration: 0.15),
+            ],
+        ]
+        return variants.randomElement() ?? [Frame(x: 0, y: 0, duration: 0.30)]
+    }
+
+    // MARK: - Links frame data (Links.png, 124×93 frames)
+
+    private func linksFrames(named name: String) -> [Frame] {
+        switch name {
+        case "Show":
+            return [
+                Frame(x: 1364, y: 186, duration: 0.06),
+                Frame(x: 1240, y: 186, duration: 0.06),
+                Frame(x: 0,    y: 0,   duration: 0.10),
+            ]
+        case "GoodBye", "Goodbye":
+            return [
+                Frame(x: 1612, y: 2697, duration: 0.10),
+                Frame(x: 1736, y: 2697, duration: 0.10),
+                Frame(x: 1860, y: 2697, duration: 0.10),
+                Frame(x: 1984, y: 2697, duration: 0.10),
+                Frame(x: 2108, y: 2697, duration: 0.10),
+                Frame(x: 2232, y: 2697, duration: 0.10),
+                Frame(x: 2356, y: 2697, duration: 0.10),
+                Frame(x: 2480, y: 2697, duration: 0.10),
+                Frame(x: 2604, y: 2697, duration: 0.10),
+                Frame(x: 2728, y: 2697, duration: 0.10),
+                Frame(x: 2852, y: 2697, duration: 0.10),
+                Frame(x: 0,    y: 2790, duration: 0.10),
+                Frame(x: 124,  y: 2790, duration: 0.10),
+                Frame(x: 248,  y: 2790, duration: 0.10),
+                Frame(x: 372,  y: 2790, duration: 0.10),
+            ]
+        case "Wave":
+            return [
+                Frame(x: 992,  y: 1488, duration: 0.10),
+                Frame(x: 1116, y: 1488, duration: 0.10),
+                Frame(x: 1240, y: 1488, duration: 0.10),
+                Frame(x: 1364, y: 1488, duration: 0.10),
+                Frame(x: 1488, y: 1488, duration: 0.10),
+                Frame(x: 1612, y: 1488, duration: 0.10),
+                Frame(x: 1736, y: 1488, duration: 0.10),
+                Frame(x: 1860, y: 1488, duration: 0.10),
+                Frame(x: 1984, y: 1488, duration: 0.10),
+                Frame(x: 2108, y: 1488, duration: 0.10),
+                Frame(x: 2232, y: 1488, duration: 0.10),
+                Frame(x: 2356, y: 1488, duration: 0.10),
+                Frame(x: 2480, y: 1488, duration: 0.10),
+                Frame(x: 2604, y: 1488, duration: 0.10),
+                Frame(x: 2728, y: 1488, duration: 0.10),
+                Frame(x: 2852, y: 1488, duration: 0.10),
+                Frame(x: 0,    y: 1581, duration: 0.10),
+                Frame(x: 124,  y: 1581, duration: 0.10),
+            ]
+        case "Thinking":
+            return [
+                Frame(x: 1116, y: 372, duration: 0.12),
+                Frame(x: 1240, y: 372, duration: 0.28),
+                Frame(x: 1116, y: 372, duration: 0.10),
+                Frame(x: 1240, y: 372, duration: 0.38),
+                Frame(x: 1116, y: 372, duration: 0.10),
+                Frame(x: 1240, y: 372, duration: 0.28),
+                Frame(x: 1116, y: 372, duration: 0.12),
+                Frame(x:    0, y:   0, duration: 0.20),
+            ]
+        case "Alert":
+            return [
+                Frame(x: 2480, y: 1302, duration: 0.10),
+                Frame(x: 2604, y: 1302, duration: 0.10),
+                Frame(x: 2728, y: 1302, duration: 0.35),
+                Frame(x: 2604, y: 1302, duration: 0.10),
+                Frame(x: 2480, y: 1302, duration: 0.10),
+                Frame(x: 2728, y: 1302, duration: 0.25),
+                Frame(x: 2604, y: 1302, duration: 0.10),
+                Frame(x: 2480, y: 1302, duration: 0.10),
+                Frame(x:    0, y:    0, duration: 0.20),
+            ]
+        case "GetTechy":
+            return [
+                Frame(x: 2356, y: 837, duration: 0.10),
+                Frame(x: 2480, y: 837, duration: 0.10),
+                Frame(x: 2604, y: 837, duration: 0.10),
+                Frame(x: 2728, y: 837, duration: 0.10),
+                Frame(x: 2852, y: 837, duration: 0.10),
+                Frame(x: 0,    y: 930, duration: 0.10),
+                Frame(x: 124,  y: 930, duration: 0.10),
+                Frame(x: 248,  y: 930, duration: 0.25),
+                Frame(x: 124,  y: 930, duration: 0.10),
+                Frame(x: 0,    y: 930, duration: 0.10),
+                Frame(x:   0,  y:   0, duration: 0.20),
+            ]
+        case "Processing":
+            return [
+                Frame(x: 744,  y: 1209, duration: 0.10),
+                Frame(x: 868,  y: 1209, duration: 0.10),
+                Frame(x: 992,  y: 1209, duration: 0.10),
+                Frame(x: 1116, y: 1209, duration: 0.10),
+                Frame(x: 1240, y: 1209, duration: 0.10),
+                Frame(x: 1364, y: 1209, duration: 0.10),
+                Frame(x: 1488, y: 1209, duration: 0.10),
+                Frame(x: 1612, y: 1209, duration: 0.10),
+                Frame(x: 1736, y: 1209, duration: 0.10),
+                Frame(x: 1860, y: 1209, duration: 0.10),
+                Frame(x: 1984, y: 1209, duration: 0.10),
+                Frame(x: 2108, y: 1209, duration: 0.10),
+                Frame(x: 2232, y: 1209, duration: 0.10),
+                Frame(x: 2356, y: 1209, duration: 0.10),
+                Frame(x: 2480, y: 1209, duration: 0.10),
+                Frame(x: 2604, y: 1209, duration: 0.10),
+                Frame(x: 2728, y: 1209, duration: 0.22),
+                Frame(x: 2852, y: 1209, duration: 0.15),
+                Frame(x:    0, y:    0, duration: 0.20),
+            ]
+        case "RestPose":
+            return [Frame(x: 0, y: 0, duration: 0.30)]
+        default:
+            return [Frame(x: 0, y: 0, duration: 0.30)]
+        }
+    }
+
+    private func linksIdleVariation() -> [Frame] {
+        let variants: [[Frame]] = [
+            // IdleBlink: quick blink
+            [
+                Frame(x:   0, y: 0, duration: 0.15),
+                Frame(x: 124, y: 0, duration: 0.10),
+                Frame(x:   0, y: 0, duration: 0.20),
+                Frame(x: 124, y: 0, duration: 0.10),
+                Frame(x:   0, y: 0, duration: 0.15),
+            ],
+            // IdleTailWagA: tail wagging forward
+            [
+                Frame(x: 248,  y: 0, duration: 0.10),
+                Frame(x: 372,  y: 0, duration: 0.10),
+                Frame(x: 496,  y: 0, duration: 0.10),
+                Frame(x: 620,  y: 0, duration: 0.10),
+                Frame(x: 744,  y: 0, duration: 0.10),
+                Frame(x: 868,  y: 0, duration: 0.10),
+                Frame(x: 992,  y: 0, duration: 0.10),
+                Frame(x: 1116, y: 0, duration: 0.10),
+                Frame(x: 1240, y: 0, duration: 0.10),
+                Frame(x: 1364, y: 0, duration: 0.10),
+                Frame(x: 1240, y: 0, duration: 0.10),
+                Frame(x: 1116, y: 0, duration: 0.10),
+                Frame(x: 992,  y: 0, duration: 0.10),
+                Frame(x:   0,  y: 0, duration: 0.15),
+            ],
+            // IdleTailWagB: tail wag with stretch
+            [
+                Frame(x: 0,    y: 558, duration: 0.10),
+                Frame(x: 124,  y: 558, duration: 0.10),
+                Frame(x: 248,  y: 558, duration: 0.10),
+                Frame(x: 372,  y: 558, duration: 0.10),
+                Frame(x: 496,  y: 558, duration: 0.10),
+                Frame(x: 620,  y: 558, duration: 0.10),
+                Frame(x: 744,  y: 558, duration: 0.10),
+                Frame(x: 868,  y: 558, duration: 0.10),
+                Frame(x: 992,  y: 558, duration: 0.10),
+                Frame(x: 1116, y: 558, duration: 0.10),
+                Frame(x: 1240, y: 558, duration: 0.10),
+                Frame(x: 1364, y: 558, duration: 0.10),
+                Frame(x: 1488, y: 558, duration: 0.12),
+                Frame(x:    0, y:   0, duration: 0.15),
+            ],
+            // Stretch / yawn
+            [
+                Frame(x: 868,  y: 930, duration: 0.10),
+                Frame(x: 992,  y: 930, duration: 0.10),
+                Frame(x: 1116, y: 930, duration: 0.10),
+                Frame(x: 1240, y: 930, duration: 0.10),
+                Frame(x: 1364, y: 930, duration: 0.15),
+                Frame(x: 1488, y: 930, duration: 0.38),
+                Frame(x: 1612, y: 930, duration: 0.15),
+                Frame(x: 1364, y: 930, duration: 0.10),
+                Frame(x: 1240, y: 930, duration: 0.10),
+                Frame(x: 1116, y: 930, duration: 0.10),
+                Frame(x: 992,  y: 930, duration: 0.10),
+                Frame(x: 868,  y: 930, duration: 0.10),
+                Frame(x:    0, y:   0, duration: 0.15),
+            ],
+            // Sniff / look around
+            [
+                Frame(x: 248,  y: 186, duration: 0.10),
+                Frame(x: 372,  y: 186, duration: 0.10),
+                Frame(x: 496,  y: 186, duration: 0.10),
+                Frame(x: 620,  y: 186, duration: 0.10),
+                Frame(x: 744,  y: 186, duration: 0.10),
+                Frame(x: 868,  y: 186, duration: 0.10),
+                Frame(x: 992,  y: 186, duration: 0.10),
+                Frame(x: 1116, y: 186, duration: 0.10),
+                Frame(x: 992,  y: 186, duration: 0.10),
+                Frame(x: 868,  y: 186, duration: 0.10),
+                Frame(x: 744,  y: 186, duration: 0.10),
+                Frame(x: 620,  y: 186, duration: 0.10),
+                Frame(x: 496,  y: 186, duration: 0.10),
+                Frame(x:   0,  y:   0, duration: 0.15),
+            ],
+            // Quick wag (short tail burst)
+            [
+                Frame(x: 248,  y: 0, duration: 0.08),
+                Frame(x: 372,  y: 0, duration: 0.08),
+                Frame(x: 496,  y: 0, duration: 0.08),
+                Frame(x: 372,  y: 0, duration: 0.08),
+                Frame(x: 248,  y: 0, duration: 0.08),
+                Frame(x: 372,  y: 0, duration: 0.08),
+                Frame(x: 496,  y: 0, duration: 0.08),
+                Frame(x:   0,  y: 0, duration: 0.15),
+            ],
+            // Double blink + sniff
+            [
+                Frame(x: 124,  y: 0,   duration: 0.10),
+                Frame(x: 0,    y: 0,   duration: 0.15),
+                Frame(x: 124,  y: 0,   duration: 0.10),
+                Frame(x: 0,    y: 0,   duration: 0.10),
+                Frame(x: 248,  y: 186, duration: 0.10),
+                Frame(x: 372,  y: 186, duration: 0.12),
+                Frame(x: 248,  y: 186, duration: 0.10),
+                Frame(x: 0,    y: 0,   duration: 0.15),
+            ],
+            // Tail wag then settle
+            [
+                Frame(x: 1116, y: 0, duration: 0.10),
+                Frame(x: 1240, y: 0, duration: 0.10),
+                Frame(x: 1364, y: 0, duration: 0.10),
+                Frame(x: 1240, y: 0, duration: 0.10),
+                Frame(x: 1116, y: 0, duration: 0.10),
+                Frame(x: 992,  y: 0, duration: 0.10),
+                Frame(x: 868,  y: 0, duration: 0.10),
+                Frame(x:   0,  y: 0, duration: 0.15),
+            ],
+        ]
+        return variants.randomElement() ?? [Frame(x: 0, y: 0, duration: 0.30)]
     }
 
     private func displayFrame(x: Int, y: Int) {

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Routex
+import Security
 
 // MARK: - YaxiService
 // Replaces NetworkService + BackendManager. Calls the YAXI API directly via
@@ -21,24 +22,56 @@ enum YaxiService {
     static let sessionStore = SessionStore()
 
     actor SessionStore {
-        private let defaults = UserDefaults.standard
-        private let legacyKey = "simplebanking.yaxi.session"
-        private let balancesKey = "simplebanking.yaxi.session.balances"
-        private let transactionsKey = "simplebanking.yaxi.session.transactions"
-        private let connectionDataKey = "simplebanking.yaxi.connectionData"
+        // Keychain accounts — service matches app bundle id
+        private static let kcService = "tech.yaxi.simplebanking"
+        private static let kcBalances       = "session.balances"
+        private static let kcTransactions   = "session.transactions"
+        private static let kcConnectionData = "session.connectionData"
+
+        // Legacy UserDefaults keys (read-once migration)
+        private let legacyUDKey            = "simplebanking.yaxi.session"
+        private let legacyBalancesUDKey    = "simplebanking.yaxi.session.balances"
+        private let legacyTxUDKey          = "simplebanking.yaxi.session.transactions"
+        private let legacyConnDataUDKey    = "simplebanking.yaxi.connectionData"
 
         private var balancesSession: Data?
         private var transactionsSession: Data?
         private var storedConnectionData: Data?
 
         init() {
-            let legB64 = defaults.string(forKey: legacyKey)
-            balancesSession = (defaults.string(forKey: balancesKey) ?? legB64)
-                .flatMap { Data(base64Encoded: $0) }
-            transactionsSession = (defaults.string(forKey: transactionsKey) ?? legB64)
-                .flatMap { Data(base64Encoded: $0) }
-            storedConnectionData = defaults.string(forKey: connectionDataKey)
-                .flatMap { Data(base64Encoded: $0) }
+            // 1. Try Keychain first
+            balancesSession    = SessionStore.kcRead(account: SessionStore.kcBalances)
+            transactionsSession = SessionStore.kcRead(account: SessionStore.kcTransactions)
+            storedConnectionData = SessionStore.kcRead(account: SessionStore.kcConnectionData)
+
+            // 2. Migrate from UserDefaults if Keychain is empty
+            let ud = UserDefaults.standard
+            let legB64 = ud.string(forKey: legacyUDKey)
+
+            if balancesSession == nil,
+               let data = (ud.string(forKey: legacyBalancesUDKey) ?? legB64)
+                   .flatMap({ Data(base64Encoded: $0) }) {
+                balancesSession = data
+                SessionStore.kcWrite(account: SessionStore.kcBalances, data: data)
+            }
+            if transactionsSession == nil,
+               let data = (ud.string(forKey: legacyTxUDKey) ?? legB64)
+                   .flatMap({ Data(base64Encoded: $0) }) {
+                transactionsSession = data
+                SessionStore.kcWrite(account: SessionStore.kcTransactions, data: data)
+            }
+            if storedConnectionData == nil,
+               let data = ud.string(forKey: legacyConnDataUDKey)
+                   .flatMap({ Data(base64Encoded: $0) }) {
+                storedConnectionData = data
+                SessionStore.kcWrite(account: SessionStore.kcConnectionData, data: data)
+            }
+
+            // 3. Remove legacy UserDefaults entries
+            ud.removeObject(forKey: legacyUDKey)
+            ud.removeObject(forKey: legacyBalancesUDKey)
+            ud.removeObject(forKey: legacyTxUDKey)
+            ud.removeObject(forKey: legacyConnDataUDKey)
         }
 
         func session(for scope: Scope) -> Data? {
@@ -55,34 +88,75 @@ enum YaxiService {
                 switch scope {
                 case .balances:
                     balancesSession = s
-                    defaults.set(s.base64EncodedString(), forKey: balancesKey)
+                    SessionStore.kcWrite(account: SessionStore.kcBalances, data: s)
                 case .transactions:
                     transactionsSession = s
-                    defaults.set(s.base64EncodedString(), forKey: transactionsKey)
+                    SessionStore.kcWrite(account: SessionStore.kcTransactions, data: s)
                 }
             }
             if let cd = connectionData {
                 storedConnectionData = cd
-                defaults.set(cd.base64EncodedString(), forKey: connectionDataKey)
+                SessionStore.kcWrite(account: SessionStore.kcConnectionData, data: cd)
             }
         }
 
         func clearAll() {
             balancesSession = nil; transactionsSession = nil; storedConnectionData = nil
-            defaults.removeObject(forKey: legacyKey)
-            defaults.removeObject(forKey: balancesKey)
-            defaults.removeObject(forKey: transactionsKey)
-            defaults.removeObject(forKey: connectionDataKey)
+            SessionStore.kcDelete(account: SessionStore.kcBalances)
+            SessionStore.kcDelete(account: SessionStore.kcTransactions)
+            SessionStore.kcDelete(account: SessionStore.kcConnectionData)
         }
 
         func clearSessionsOnly() {
             balancesSession = nil; transactionsSession = nil
-            defaults.removeObject(forKey: legacyKey)
-            defaults.removeObject(forKey: balancesKey)
-            defaults.removeObject(forKey: transactionsKey)
+            SessionStore.kcDelete(account: SessionStore.kcBalances)
+            SessionStore.kcDelete(account: SessionStore.kcTransactions)
         }
 
         enum Scope { case balances, transactions }
+
+        // MARK: - Keychain helpers (nonisolated static, safe to call from init)
+
+        private static func kcRead(account: String) -> Data? {
+            let query: [CFString: Any] = [
+                kSecClass:           kSecClassGenericPassword,
+                kSecAttrService:     kcService,
+                kSecAttrAccount:     account,
+                kSecReturnData:      true,
+                kSecMatchLimit:      kSecMatchLimitOne
+            ]
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+            return result as? Data
+        }
+
+        private static func kcWrite(account: String, data: Data) {
+            // Try update first; if not found, add
+            let query: [CFString: Any] = [
+                kSecClass:       kSecClassGenericPassword,
+                kSecAttrService: kcService,
+                kSecAttrAccount: account
+            ]
+            let attrs: [CFString: Any] = [
+                kSecValueData:      data,
+                kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            ]
+            let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
+            if status == errSecItemNotFound {
+                var addQuery = query
+                addQuery[kSecValueData]      = data
+                addQuery[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+                SecItemAdd(addQuery as CFDictionary, nil)
+            }
+        }
+
+        private static func kcDelete(account: String) {
+            SecItemDelete([
+                kSecClass:       kSecClassGenericPassword,
+                kSecAttrService: kcService,
+                kSecAttrAccount: account
+            ] as CFDictionary)
+        }
     }
 
     // Throttle re-opening the bank redirect URL (< 290 s cooldown).

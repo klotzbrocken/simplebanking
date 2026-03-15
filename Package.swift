@@ -26,6 +26,8 @@ let package = Package(
             resources: [
                 .copy("Resources/categories_de.json"),
                 .copy("Resources/Clippy.png"),
+                .copy("Resources/Genius.png"),
+                .copy("Resources/Links.png"),
                 .copy("Resources/animations.json"),
             ],
             linkerSettings: [
