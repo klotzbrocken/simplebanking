@@ -8,7 +8,7 @@
             <sparkle:version>20260315_210133_77</sparkle:version>
             <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-20260315-210132.dmg" length="10845078" type="application/octet-stream" sparkle:edSignature="VH0h7tOas11WgbllBzIWWbFrvwc+Aj7BETnE5Td4nx07vVnis5d2uw4x0he+bHhMEZcyQnDh2zBg6g6NQ7gADQ=="/>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.1/simplebanking-1.2.1.dmg" length="10845078" type="application/octet-stream" sparkle:edSignature="VH0h7tOas11WgbllBzIWWbFrvwc+Aj7BETnE5Td4nx07vVnis5d2uw4x0he+bHhMEZcyQnDh2zBg6g6NQ7gADQ=="/>
         </item>
         <item>
             <title>1.2.0</title>
