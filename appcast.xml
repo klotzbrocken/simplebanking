@@ -4,11 +4,11 @@
         <title>simplebanking</title>
         <item>
             <title>1.2.2</title>
-            <pubDate>Wed, 18 Mar 2026 09:23:30 +0100</pubDate>
-            <sparkle:version>20260318_092125_86</sparkle:version>
+            <pubDate>Wed, 18 Mar 2026 15:36:02 +0100</pubDate>
+            <sparkle:version>20260318_153556_88</sparkle:version>
             <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.2/simplebanking-20260318-092325.dmg" length="10853941" type="application/octet-stream" sparkle:edSignature="O8ORxUmqngunXiulGvxfYEk2AmSUU/VvoEOSKSWF7sY2V/0yWi1aXhBxEQV9/zwJTtZ/cQZS4yW1n8N1GlhhDQ=="/>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.2/simplebanking-20260318-153511.dmg" length="10859851" type="application/octet-stream" sparkle:edSignature="G9TeL6XfM+HX9tWJZuVHOIIB3l4CJYL2X1MwapsXIGAU+2VsmhzkCTr0em80no10+80KkhJMqWk9NCCHW951Cg=="/>
         </item>
         <item>
             <title>1.2.1</title>
@@ -16,20 +16,7 @@
             <sparkle:version>20260315_210133_77</sparkle:version>
             <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-20260315-210132.dmg" length="10845078" type="application/octet-stream" sparkle:edSignature="VH0h7tOas11WgbllBzIWWbFrvwc+Aj7BETnE5Td4nx07vVnis5d2uw4x0he+bHhMEZcyQnDh2zBg6g6NQ7gADQ=="/>
-        </item>
-        <item>
-            <title>1.2.0</title>
-            <pubDate>Tue, 03 Mar 2026 15:16:56 +0100</pubDate>
-            <sparkle:version>20260303_151636_42</sparkle:version>
-            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking-1.2.0.dmg" length="8769990" type="application/octet-stream" sparkle:edSignature="6rdZIFNIH/blUL0T445OTB6ARhD9GXRavqjFCEeZOGAX6Yp+c0PLjWy7Ejll0hywjTIm4J1QXHOutnAaBLtgCg=="/>
-            <sparkle:deltas>
-                <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking20260303_151636_42-20260301_061946_27.delta" sparkle:deltaFrom="20260301_061946_27" length="534818" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="b5xKSv0zmrUSmTUHx/Tg/s4zDvzYCFPSgNRDJtCHhp9qWxRMARvuiAP0PNhRhQYDcsdO0E38BKcUG1UiY9VlCw=="/>
-                <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking20260303_151636_42-2026-03-01_05%3A19%3A59_24.delta" sparkle:deltaFrom="2026-03-01_05:19:59_24" length="527342" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="yT/Z6sp4LvHCg0OI0ZfSUjzoquoNMot7A1aaYvpjTzVoP+yROr7Foohkh6Lh6L+h3CfOyOnEFf5rkMu7MAe1Dw=="/>
-                <enclosure url="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/simplebanking20260303_151636_42-2026-02-28_04%3A46%3A23_23.delta" sparkle:deltaFrom="2026-02-28_04:46:23_23" length="534930" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="vvY0sEs3pBYspulCDzpalKv1MfHUax3hby8Csob0jrBbCj5AfK1oIScy5kmoy0y/K0wt9cp6zbjQoIuKxap/Aw=="/>
-            </sparkle:deltas>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.1/simplebanking-1.2.1.dmg" length="10845078" type="application/octet-stream" sparkle:edSignature="VH0h7tOas11WgbllBzIWWbFrvwc+Aj7BETnE5Td4nx07vVnis5d2uw4x0he+bHhMEZcyQnDh2zBg6g6NQ7gADQ=="/>
         </item>
     </channel>
 </rss>
