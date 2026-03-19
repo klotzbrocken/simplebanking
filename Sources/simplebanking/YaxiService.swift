@@ -9,69 +9,78 @@ import Security
 
 enum YaxiService {
 
-    // MARK: - UserDefaults keys
+    // MARK: - Active slot ID (set by BalanceBar when switching accounts)
 
-    static let ibanKey = "simplebanking.iban"
-    private static let connectionIdKey = "simplebanking.yaxi.connectionId"
-    private static let credModelFullKey = "simplebanking.yaxi.credModel.full"
-    private static let credModelUserIdKey = "simplebanking.yaxi.credModel.userId"
-    private static let credModelNoneKey = "simplebanking.yaxi.credModel.none"
+    nonisolated(unsafe) static var activeSlotId: String = "legacy"
+
+    // MARK: - UserDefaults keys (per-slot)
+
+    static var ibanKey: String { "simplebanking.iban.\(activeSlotId)" }
+    private static var connectionIdKey: String { "simplebanking.yaxi.connectionId.\(activeSlotId)" }
+    private static var credModelFullKey: String { "simplebanking.yaxi.credModel.full.\(activeSlotId)" }
+    private static var credModelUserIdKey: String { "simplebanking.yaxi.credModel.userId.\(activeSlotId)" }
+    private static var credModelNoneKey: String { "simplebanking.yaxi.credModel.none.\(activeSlotId)" }
 
     // MARK: - Session Store (same UserDefaults keys as the old NetworkService)
 
     static let sessionStore = SessionStore()
 
     actor SessionStore {
-        // Keychain accounts — service matches app bundle id
-        private static let kcService = "tech.yaxi.simplebanking"
-        private static let kcBalances       = "session.balances"
-        private static let kcTransactions   = "session.transactions"
-        private static let kcConnectionData = "session.connectionData"
+        private let defaults = UserDefaults.standard
+        private let legacyKey = "simplebanking.yaxi.session"
 
-        // Legacy UserDefaults keys (read-once migration)
-        private let legacyUDKey            = "simplebanking.yaxi.session"
-        private let legacyBalancesUDKey    = "simplebanking.yaxi.session.balances"
-        private let legacyTxUDKey          = "simplebanking.yaxi.session.transactions"
-        private let legacyConnDataUDKey    = "simplebanking.yaxi.connectionData"
+        // Keys computed dynamically from the active slot ID at access time
+        private var balancesKey: String { "simplebanking.yaxi.session.balances.\(YaxiService.activeSlotId)" }
+        private var transactionsKey: String { "simplebanking.yaxi.session.transactions.\(YaxiService.activeSlotId)" }
+        private var connectionDataKey: String { "simplebanking.yaxi.connectionData.\(YaxiService.activeSlotId)" }
 
         private var balancesSession: Data?
         private var transactionsSession: Data?
         private var storedConnectionData: Data?
 
         init() {
-            // 1. Try Keychain first
-            balancesSession    = SessionStore.kcRead(account: SessionStore.kcBalances)
-            transactionsSession = SessionStore.kcRead(account: SessionStore.kcTransactions)
-            storedConnectionData = SessionStore.kcRead(account: SessionStore.kcConnectionData)
+            let legB64 = defaults.string(forKey: legacyKey)
+            // Use hardcoded legacy keys for initial migration read (runs once for legacy slot)
+            let legacyBalancesKey = "simplebanking.yaxi.session.balances"
+            let legacyTransactionsKey = "simplebanking.yaxi.session.transactions"
+            let legacyConnectionDataKey = "simplebanking.yaxi.connectionData"
+            balancesSession = (defaults.string(forKey: legacyBalancesKey) ?? legB64)
+                .flatMap { Data(base64Encoded: $0) }
+            transactionsSession = (defaults.string(forKey: legacyTransactionsKey) ?? legB64)
+                .flatMap { Data(base64Encoded: $0) }
+            storedConnectionData = defaults.string(forKey: legacyConnectionDataKey)
+                .flatMap { Data(base64Encoded: $0) }
 
-            // 2. Migrate from UserDefaults if Keychain is empty
-            let ud = UserDefaults.standard
-            let legB64 = ud.string(forKey: legacyUDKey)
-
+            // Fallback: v1.2.0 migrated data to Keychain and deleted UserDefaults.
+            // Recover it back to UserDefaults so the primary store works again.
+            if storedConnectionData == nil,
+               let data = SessionStore.kcRead(service: "tech.yaxi.simplebanking", account: "session.connectionData") {
+                storedConnectionData = data
+                defaults.set(data.base64EncodedString(), forKey: legacyConnectionDataKey)
+            }
             if balancesSession == nil,
-               let data = (ud.string(forKey: legacyBalancesUDKey) ?? legB64)
-                   .flatMap({ Data(base64Encoded: $0) }) {
+               let data = SessionStore.kcRead(service: "tech.yaxi.simplebanking", account: "session.balances") {
                 balancesSession = data
-                SessionStore.kcWrite(account: SessionStore.kcBalances, data: data)
+                defaults.set(data.base64EncodedString(), forKey: legacyBalancesKey)
             }
             if transactionsSession == nil,
-               let data = (ud.string(forKey: legacyTxUDKey) ?? legB64)
-                   .flatMap({ Data(base64Encoded: $0) }) {
+               let data = SessionStore.kcRead(service: "tech.yaxi.simplebanking", account: "session.transactions") {
                 transactionsSession = data
-                SessionStore.kcWrite(account: SessionStore.kcTransactions, data: data)
+                defaults.set(data.base64EncodedString(), forKey: legacyTransactionsKey)
             }
-            if storedConnectionData == nil,
-               let data = ud.string(forKey: legacyConnDataUDKey)
-                   .flatMap({ Data(base64Encoded: $0) }) {
-                storedConnectionData = data
-                SessionStore.kcWrite(account: SessionStore.kcConnectionData, data: data)
-            }
+        }
 
-            // 3. Remove legacy UserDefaults entries
-            ud.removeObject(forKey: legacyUDKey)
-            ud.removeObject(forKey: legacyBalancesUDKey)
-            ud.removeObject(forKey: legacyTxUDKey)
-            ud.removeObject(forKey: legacyConnDataUDKey)
+        private static func kcRead(service: String, account: String) -> Data? {
+            let query: [CFString: Any] = [
+                kSecClass: kSecClassGenericPassword,
+                kSecAttrService: service,
+                kSecAttrAccount: account,
+                kSecReturnData: true,
+                kSecMatchLimit: kSecMatchLimitOne
+            ]
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+            return result as? Data
         }
 
         func session(for scope: Scope) -> Data? {
@@ -88,75 +97,41 @@ enum YaxiService {
                 switch scope {
                 case .balances:
                     balancesSession = s
-                    SessionStore.kcWrite(account: SessionStore.kcBalances, data: s)
+                    defaults.set(s.base64EncodedString(), forKey: balancesKey)
                 case .transactions:
                     transactionsSession = s
-                    SessionStore.kcWrite(account: SessionStore.kcTransactions, data: s)
+                    defaults.set(s.base64EncodedString(), forKey: transactionsKey)
                 }
             }
             if let cd = connectionData {
                 storedConnectionData = cd
-                SessionStore.kcWrite(account: SessionStore.kcConnectionData, data: cd)
+                defaults.set(cd.base64EncodedString(), forKey: connectionDataKey)
             }
         }
 
         func clearAll() {
             balancesSession = nil; transactionsSession = nil; storedConnectionData = nil
-            SessionStore.kcDelete(account: SessionStore.kcBalances)
-            SessionStore.kcDelete(account: SessionStore.kcTransactions)
-            SessionStore.kcDelete(account: SessionStore.kcConnectionData)
+            defaults.removeObject(forKey: legacyKey)
+            defaults.removeObject(forKey: balancesKey)
+            defaults.removeObject(forKey: transactionsKey)
+            defaults.removeObject(forKey: connectionDataKey)
         }
 
         func clearSessionsOnly() {
             balancesSession = nil; transactionsSession = nil
-            SessionStore.kcDelete(account: SessionStore.kcBalances)
-            SessionStore.kcDelete(account: SessionStore.kcTransactions)
+            defaults.removeObject(forKey: legacyKey)
+            defaults.removeObject(forKey: balancesKey)
+            defaults.removeObject(forKey: transactionsKey)
+        }
+
+        /// Call this after switching slots to reload persisted session data for the new slot.
+        func reloadForActiveSlot() {
+            balancesSession = defaults.string(forKey: balancesKey).flatMap { Data(base64Encoded: $0) }
+            transactionsSession = defaults.string(forKey: transactionsKey).flatMap { Data(base64Encoded: $0) }
+            storedConnectionData = defaults.string(forKey: connectionDataKey).flatMap { Data(base64Encoded: $0) }
         }
 
         enum Scope { case balances, transactions }
-
-        // MARK: - Keychain helpers (nonisolated static, safe to call from init)
-
-        private static func kcRead(account: String) -> Data? {
-            let query: [CFString: Any] = [
-                kSecClass:           kSecClassGenericPassword,
-                kSecAttrService:     kcService,
-                kSecAttrAccount:     account,
-                kSecReturnData:      true,
-                kSecMatchLimit:      kSecMatchLimitOne
-            ]
-            var result: CFTypeRef?
-            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-            return result as? Data
-        }
-
-        private static func kcWrite(account: String, data: Data) {
-            // Try update first; if not found, add
-            let query: [CFString: Any] = [
-                kSecClass:       kSecClassGenericPassword,
-                kSecAttrService: kcService,
-                kSecAttrAccount: account
-            ]
-            let attrs: [CFString: Any] = [
-                kSecValueData:      data,
-                kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            ]
-            let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
-            if status == errSecItemNotFound {
-                var addQuery = query
-                addQuery[kSecValueData]      = data
-                addQuery[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-                SecItemAdd(addQuery as CFDictionary, nil)
-            }
-        }
-
-        private static func kcDelete(account: String) {
-            SecItemDelete([
-                kSecClass:       kSecClassGenericPassword,
-                kSecAttrService: kcService,
-                kSecAttrAccount: account
-            ] as CFDictionary)
-        }
     }
 
     // Throttle re-opening the bank redirect URL (< 290 s cooldown).
@@ -300,6 +275,7 @@ enum YaxiService {
                                        userMessage: nil, scaRequired: true)
             }
 
+            AppLogger.log("fetchBalances: outcome.connectionData=\(outcome.connectionData == nil ? "nil" : "\(outcome.connectionData!.count)b")", category: "YaxiService")
             await sessionStore.update(scope: .balances,
                                       session: outcome.session,
                                       connectionData: outcome.connectionData)
@@ -341,6 +317,7 @@ enum YaxiService {
 
         let model = loadCredentialsModel()
         let storedCD = await sessionStore.connectionData()
+        AppLogger.log("fetchTransactions: storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
         let storedSession = await sessionStore.session(for: .transactions)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
@@ -419,6 +396,54 @@ enum YaxiService {
         }
     }
 
+    /// Lightweight bank search for as-you-type IBAN preview. No side-effects.
+    static func previewBank(iban: String) async -> DiscoveredBank? {
+        let normalized = iban
+            .replacingOccurrences(of: " ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard normalized.count >= 15 else { return nil }
+
+        // Extract BLZ for DE IBANs (chars 4–11) as fallback search term
+        let blz: String? = normalized.hasPrefix("DE") && normalized.count >= 12
+            ? String(normalized.dropFirst(4).prefix(8))
+            : nil
+
+        let client = RoutexClient()
+
+        func searchWith(term: String, ibanDetection: Bool) async -> DiscoveredBank? {
+            let ticket = YaxiTicketMaker.issueTicket(service: "Accounts")
+            guard let results = try? await client.search(
+                ticket: ticket,
+                filters: [.term(term: term)],
+                ibanDetection: ibanDetection,
+                limit: 3
+            ), let pick = results.first else { return nil }
+            return DiscoveredBank(
+                id: pick.id,
+                displayName: pick.displayName,
+                logoId: pick.logoId,
+                credentials: DiscoveredBankCredentials(
+                    full: pick.credentials.full,
+                    userId: pick.credentials.userId,
+                    none: pick.credentials.none
+                ),
+                userIdLabel: pick.userId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                advice: pick.advice?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            )
+        }
+
+        // 1. Try full IBAN with IBAN detection
+        if let bank = await searchWith(term: normalized, ibanDetection: true) {
+            return bank
+        }
+        // 2. Fallback: search by BLZ only (plain text search, no ibanDetection)
+        if let blz, let bank = await searchWith(term: blz, ibanDetection: false) {
+            return bank
+        }
+        return nil
+    }
+
     static func clearSessionState() async {
         await sessionStore.clearAll()
         AppLogger.log("Cleared YAXI session state", category: "YaxiService")
@@ -472,26 +497,12 @@ enum YaxiService {
     ) -> Credentials {
         let u = userId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         let p = password?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        let hasConnectionData = connectionData != nil
 
         var creds = Credentials(connectionId: connectionId, connectionData: connectionData)
-
-        if let u, let p, (!model.none || hasConnectionData) {
-            // Direct credential flow: send userId + password to YAXI.
-            // For redirect-banks (none:true): only use direct credentials once we have connectionData
-            // from a previous successful redirect — on first setup they must authenticate via browser.
-            creds.userId = u
-            creds.password = p
-        } else if model.none {
-            // Redirect bank, no connectionData yet — bank handles auth in browser, no credentials sent.
-        } else if model.userId {
-            creds.userId = u
-            // Some banks (N26, DKB) report userId-only but still need the password for SCA.
-            creds.password = p
-        } else {
-            creds.userId = u
-            creds.password = p
-        }
+        // Always send credentials when available — the SDK decides the SCA method.
+        // v1.1.0 behaviour: never suppress credentials based on model.none.
+        creds.userId = u
+        creds.password = p
 
         return creds
     }
@@ -690,6 +701,7 @@ enum YaxiService {
         switch initial {
 
         case .result(let payload, let session, let connectionData):
+            AppLogger.log("SCA result: connectionData=\(connectionData == nil ? "nil" : "\(connectionData!.count)b")", category: "YaxiService")
             return SCAOutcome(payload: payload, session: session, connectionData: connectionData)
 
         case .dialog(let input):
@@ -773,7 +785,7 @@ enum YaxiService {
     ) async -> SCAOutcome? {
         var ctx = context
         var currentDelay = delay
-        for i in 0..<60 {
+        for i in 0..<180 {
             try? await Task.sleep(nanoseconds: UInt64(max(currentDelay, 1.0) * 1_000_000_000))
             do {
                 let next = try await confirm(ctx)
@@ -798,7 +810,7 @@ enum YaxiService {
                 return nil
             }
         }
-        AppLogger.log("SCA Confirmation: timeout (60 attempts)", category: "YaxiService", level: "WARN")
+        AppLogger.log("SCA Confirmation: timeout (180 attempts)", category: "YaxiService", level: "WARN")
         return nil
     }
 
@@ -832,10 +844,12 @@ enum YaxiService {
                 }
             } catch {
                 AppLogger.log("SCA Redirect poll failed: \(error.localizedDescription)", category: "YaxiService", level: "WARN")
+                await writeTrace(client: client, label: "pollRedirect", ticket: ticket, error: error)
                 return nil
             }
         }
         AppLogger.log("SCA Redirect: timeout (120 × 5 s)", category: "YaxiService", level: "WARN")
+        await writeTrace(client: client, label: "pollRedirect-timeout", ticket: ticket)
         return nil
     }
 
