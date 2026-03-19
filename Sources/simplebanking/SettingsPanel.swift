@@ -113,6 +113,9 @@ struct SettingsView: View {
     
     @State private var selectedTab: Int = 0
     @State private var showResetConfirmation: Bool = false
+    @State private var slotToDelete: BankSlot? = nil
+    @State private var showSlotDeleteConfirmation: Bool = false
+    @ObservedObject private var multibankingStore = MultibankingStore.shared
     @State private var notificationStatus: String = ""
     @State private var touchIDAvailable: Bool = false
     @State private var touchIDEnabled: Bool = false
@@ -179,6 +182,46 @@ struct SettingsView: View {
         }
     }
     
+    // MARK: - Slot Deletion
+
+    private func deleteSlot(id slotId: String) {
+        let wasActive = MultibankingStore.shared.activeSlot?.id == slotId
+
+        // 1. Delete credentials file
+        let fm = FileManager.default
+        if let appDir = try? CredentialsStore.appSupportURL() {
+            let credFile = appDir.appendingPathComponent("credentials-\(slotId).json")
+            try? fm.removeItem(at: credFile)
+        }
+
+        // 2. Delete transactions from DB for this slot
+        try? TransactionsDatabase.deleteTransactions(forSlotId: slotId)
+
+        // 3. Clear UserDefaults keys for this slot
+        let defaults = UserDefaults.standard
+        let keysToRemove = [
+            "simplebanking.iban.\(slotId)",
+            "simplebanking.yaxi.connectionId.\(slotId)",
+            "simplebanking.yaxi.credModel.full.\(slotId)",
+            "simplebanking.yaxi.credModel.userId.\(slotId)",
+            "simplebanking.yaxi.credModel.none.\(slotId)",
+            "simplebanking.yaxi.session.balances.\(slotId)",
+            "simplebanking.yaxi.session.transactions.\(slotId)",
+            "simplebanking.yaxi.connectionData.\(slotId)",
+        ]
+        for key in keysToRemove { defaults.removeObject(forKey: key) }
+
+        // 4. Remove from store
+        MultibankingStore.shared.removeSlot(id: slotId)
+
+        // 5. Notify BalanceBar so it can react
+        NotificationCenter.default.post(
+            name: Notification.Name("simplebanking.slotDeleted"),
+            object: nil,
+            userInfo: ["slotId": slotId, "wasActive": wasActive]
+        )
+    }
+
     // MARK: - Launch at Login
     
     private func updateLaunchAtLogin(_ enabled: Bool) {
@@ -1113,6 +1156,56 @@ struct SettingsView: View {
 
             Divider()
 
+            // MARK: Connected Accounts
+
+            if multibankingStore.slots.count > 0 {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(t("Verbundene Konten", "Connected Accounts"))
+                        .font(ThemeFonts.heading(size: 13))
+
+                    ForEach(multibankingStore.slots) { slot in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(slot.displayName.isEmpty ? t("Konto", "Account") : slot.displayName)
+                                    .font(ThemeFonts.body(size: 13))
+                                if !slot.iban.isEmpty {
+                                    Text(slot.iban.prefix(4) + " ···· " + slot.iban.suffix(4))
+                                        .font(ThemeFonts.body(size: 11))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Button(action: {
+                                slotToDelete = slot
+                                showSlotDeleteConfirmation = true
+                            }) {
+                                Text(t("Entfernen", "Remove"))
+                                    .foregroundColor(.red)
+                                    .font(ThemeFonts.body(size: 12))
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .disabled(multibankingStore.slots.count == 1)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .alert(t("Konto entfernen?", "Remove account?"), isPresented: $showSlotDeleteConfirmation, presenting: slotToDelete) { slot in
+                    Button(t("Entfernen", "Remove"), role: .destructive) {
+                        deleteSlot(id: slot.id)
+                    }
+                    Button(t("Abbrechen", "Cancel"), role: .cancel) {}
+                } message: { slot in
+                    Text(t(
+                        "Das Konto \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" und alle zugehörigen Daten werden unwiderruflich gelöscht.",
+                        "The account \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" and all its data will be permanently deleted."
+                    ))
+                }
+            }
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 8) {
                 Text(t("simplebanking zurücksetzen", "Reset simplebanking"))
                     .font(ThemeFonts.heading(size: 13))
@@ -1121,7 +1214,9 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
 
                 Button(action: { showResetConfirmation = true }) {
-                    Text(t("Zurücksetzen…", "Reset…"))
+                    Text(multibankingStore.slots.count > 1
+                         ? t("Alle Konten zurücksetzen…", "Reset all accounts…")
+                         : t("Zurücksetzen…", "Reset…"))
                         .foregroundColor(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)

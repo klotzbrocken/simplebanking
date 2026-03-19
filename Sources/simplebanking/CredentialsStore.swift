@@ -23,6 +23,10 @@ enum CredentialsStoreError: Error, LocalizedError {
 /// Password-based encrypted file store (AES.GCM).
 /// Note: this is a convenience feature; security depends on the master password.
 enum CredentialsStore {
+
+    // MARK: - Active slot ID (set by BalanceBar when switching accounts)
+
+    nonisolated(unsafe) static var activeSlotId: String = "legacy"
     struct Envelope: Codable {
         var v: Int
         var saltB64: String
@@ -36,12 +40,26 @@ enum CredentialsStore {
     private static let currentVersion = 2
     private static let pbkdf2Iterations = 210_000
 
-    static func defaultURL() throws -> URL {
+    static func appSupportURL() throws -> URL {
         let fm = FileManager.default
         let dir = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let appDir = dir.appendingPathComponent("simplebanking", isDirectory: true)
         try fm.createDirectory(at: appDir, withIntermediateDirectories: true)
-        return appDir.appendingPathComponent("credentials.json")
+        return appDir
+    }
+
+    static func defaultURL() throws -> URL {
+        let appDir = try appSupportURL()
+        let slotFile = appDir.appendingPathComponent("credentials-\(activeSlotId).json")
+        // Legacy fallback: if the slot-specific file doesn't exist but credentials.json does,
+        // return the legacy path so existing installs continue to work on first launch.
+        if !FileManager.default.fileExists(atPath: slotFile.path) {
+            let legacyFile = appDir.appendingPathComponent("credentials.json")
+            if FileManager.default.fileExists(atPath: legacyFile.path) {
+                return legacyFile
+            }
+        }
+        return slotFile
     }
 
     static func exists() -> Bool {
@@ -56,7 +74,9 @@ enum CredentialsStore {
     }
 
     static func save(_ creds: StoredCredentials, masterPassword: String) throws {
-        let url = try defaultURL()
+        // Always save to the slot-specific file (never the legacy path)
+        let appDir = try appSupportURL()
+        let url = appDir.appendingPathComponent("credentials-\(activeSlotId).json")
         let plaintext = try JSONEncoder().encode(creds)
 
         let salt = try randomBytes(count: 16)
