@@ -5,6 +5,7 @@ import SwiftUI
 private struct TransactionsPanelView: View {
     @ObservedObject var vm: TransactionsViewModel
     let onRefresh: () async -> Void
+    @ObservedObject var accountNav: AccountNavModel
     @AppStorage("salaryDay") private var salaryDay: Int = 1
     @AppStorage("dispoLimit") private var dispoLimit: Int = 0
     @AppStorage("targetBuffer") private var targetBuffer: Int = 500
@@ -20,6 +21,7 @@ private struct TransactionsPanelView: View {
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
     @Environment(\.colorScheme) private var environmentColorScheme
     
+    @State private var showAccountNav = false
     @State private var showScoreSheet = false
     @State private var showFixedCosts = false
     @State private var showSubscriptions = false
@@ -421,6 +423,39 @@ private struct TransactionsPanelView: View {
                     legacyBalanceCard
                 }
             }
+            .overlay(alignment: .trailing) {
+                HStack(spacing: 4) {
+                    if let prev = accountNav.onPrevAccount {
+                        Button(action: prev) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 13, weight: .semibold))
+                                .padding(6)
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(showAccountNav ? 1 : 0)
+                    }
+                    if let next = accountNav.onNextAccount {
+                        Button(action: next) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .padding(6)
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(showAccountNav ? 1 : 0)
+                    } else if let add = accountNav.onAddAccount {
+                        Button(action: add) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 13, weight: .semibold))
+                                .padding(6)
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(showAccountNav ? 1 : 0)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.15), value: showAccountNav)
+                .padding(.trailing, 20)
+            }
+            .onHover { hovering in showAccountNav = hovering }
             .padding(.horizontal, 16)
             .padding(.top, 16)
             .padding(.bottom, 12)
@@ -1320,10 +1355,17 @@ private struct ChatOverlaySheet: View {
 
 // MARK: - Transactions Panel Host
 
-@MainActor
-final class TransactionsPanel: NSObject, NSWindowDelegate {
+/// Hält die Multibanking-Navigations-Callbacks reaktiv für SwiftUI.
+final class AccountNavModel: ObservableObject {
+    @Published var onPrevAccount: (() -> Void)? = nil
+    @Published var onNextAccount: (() -> Void)? = nil
+    @Published var onAddAccount:  (() -> Void)? = nil
+}
+
+@MainActor final class TransactionsPanel: NSObject, NSWindowDelegate {
     private let panel: NSPanel
     private let vm: TransactionsViewModel
+    let accountNav: AccountNavModel
 
     nonisolated static let narrowWidth: CGFloat = 420
     nonisolated static let wideWidth:   CGFloat = 840
@@ -1347,6 +1389,7 @@ final class TransactionsPanel: NSObject, NSWindowDelegate {
     init(vm: TransactionsViewModel, onRefresh: @escaping () async -> Void = {}, onSettings: (() -> Void)? = nil) {
         self.vm = vm
         self.onSettings = onSettings
+        self.accountNav = AccountNavModel()
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -1387,7 +1430,9 @@ final class TransactionsPanel: NSObject, NSWindowDelegate {
             }
         }
 
-        let host = NSHostingView(rootView: TransactionsPanelView(vm: vm, onRefresh: onRefresh))
+        let host = NSHostingView(rootView: TransactionsPanelView(
+            vm: vm, onRefresh: onRefresh, accountNav: accountNav
+        ))
         host.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView()
