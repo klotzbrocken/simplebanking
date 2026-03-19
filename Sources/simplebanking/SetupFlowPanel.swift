@@ -10,22 +10,22 @@ enum SetupProgress: Sendable {
 
     var displayText: String {
         switch self {
-        case .discoveringBank: return "Bank wird gesucht…"
-        case .requestingApproval: return "Freigabe angefordert"
-        case .requestingTransactionApproval: return "Transaktionen freigeben"
-        case .fetchingTransactions: return "Umsätze werden geladen…"
-        case .savingCredentials: return "Daten werden gespeichert…"
+        case .discoveringBank: return L10n.t("Bank wird gesucht…", "Searching for bank…")
+        case .requestingApproval: return L10n.t("Freigabe angefordert", "Approval requested")
+        case .requestingTransactionApproval: return L10n.t("Transaktionen freigeben", "Approve transactions")
+        case .fetchingTransactions: return L10n.t("Umsätze werden geladen…", "Loading transactions…")
+        case .savingCredentials: return L10n.t("Daten werden gespeichert…", "Saving data…")
         }
     }
 
     var subtitle: String {
         switch self {
         case .requestingApproval:
-            return "Push-TAN bestätigen (1/2)"
+            return L10n.t("Push-TAN bestätigen (1/2)", "Confirm Push-TAN (1/2)")
         case .requestingTransactionApproval:
-            return "Push-TAN bestätigen (2/2)"
+            return L10n.t("Push-TAN bestätigen (2/2)", "Confirm Push-TAN (2/2)")
         default:
-            return "Bitte warten…"
+            return L10n.t("Bitte warten…", "Please wait…")
         }
     }
 
@@ -82,7 +82,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let connectAction: ConnectAction
     private let panelWidth: CGFloat = 460
     private let panelHeight: CGFloat = 520
-    private let fieldWidth: CGFloat = 400
+    private let fieldWidth: CGFloat = 380
 
     private var step: Step = .welcome
     private var selectedBank: BankLogoAssets.BankBrand?
@@ -103,6 +103,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let masterPassField = NSSecureTextField(string: "")
     private let masterConfirmField = NSSecureTextField(string: "")
     private let masterMatchLabel = NSTextField(labelWithString: "")
+    private weak var masterNextBtn: NSButton?
+    private var strengthBars: [NSView] = []
 
     // Reused controls for state persistence across step transitions.
     private let bankSearchField = NSSearchField(string: "")
@@ -115,21 +117,35 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let ibanField = NSTextField(string: "")
     private let userField = NSTextField(string: "")
     private let passField = NSSecureTextField(string: "")
-    private let rememberToggle = NSButton(checkboxWithTitle: "Login-Daten merken", target: nil, action: nil)
+    private let rememberToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let approvalSpinner = NSProgressIndicator()
     private let approvalTitleLabel = NSTextField(labelWithString: "")
     private let approvalSubtitleLabel = NSTextField(labelWithString: "")
     private let approvalIconView = NSImageView()
     private let successSubtitleLabel = NSTextField(labelWithString: "")
-    private let diagnosticsToggle = NSButton(checkboxWithTitle: "Neu versuchen mit Diagnoselogging", target: nil, action: nil)
-    private let diagnosticsPrivacyLabel = NSTextField(wrappingLabelWithString: "Es werden keine persönlichen Daten gespeichert.")
-    private let diagnosticsDeliveryLabel = NSTextField(wrappingLabelWithString: "Log-Datei wird im Log-Ordner abgelegt und muss manuell versendet werden.")
+    private let diagnosticsToggle = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let diagnosticsPrivacyLabel = NSTextField(wrappingLabelWithString: "")
+    private let diagnosticsDeliveryLabel = NSTextField(wrappingLabelWithString: "")
     private let diagnosticsLogPathLabel = NSTextField(labelWithString: "")
-    private let diagnosticsOpenFolderButton = NSButton(title: "Log-Ordner öffnen", target: nil, action: nil)
+    private let diagnosticsOpenFolderButton = NSButton(title: "", target: nil, action: nil)
     private weak var searchContinueButton: NSButton?
     private let discoverSpinner = NSProgressIndicator()
     private var autocompletePanel: NSPanel?
     private var autocompleteTable: NSTableView?
+
+    // IBAN live-detection UI
+    private let ibanDetectedRow = NSStackView()
+    private let ibanDetectedIcon = NSImageView()
+    private let ibanDetectedLabel = NSTextField(labelWithString: "")
+    private var ibanPreviewBank: DiscoveredBank? = nil
+    private var isFormattingIBAN = false
+
+    // Progress bar
+    private let progressBarFill = NSView()
+    private var progressBarFillWidthConstraint: NSLayoutConstraint?
+
+    // IBAN not-found mail button
+    private let ibanNotFoundMailButton = NSButton(title: "", target: nil, action: nil)
 
     init(connectAction: @escaping ConnectAction) {
         self.connectAction = connectAction
@@ -182,9 +198,9 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         panel.contentView = content
 
         rootStack.orientation = .vertical
-        rootStack.spacing = 14
+        rootStack.spacing = 12
         rootStack.alignment = .leading
-        rootStack.edgeInsets = NSEdgeInsets(top: 28, left: 30, bottom: 24, right: 30)
+        rootStack.edgeInsets = NSEdgeInsets(top: 32, left: 40, bottom: 32, right: 40)
         rootStack.translatesAutoresizingMaskIntoConstraints = false
 
         content.addSubview(rootStack)
@@ -192,14 +208,38 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         NSLayoutConstraint.activate([
             rootStack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             rootStack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            rootStack.topAnchor.constraint(equalTo: content.topAnchor),
+            rootStack.topAnchor.constraint(equalTo: content.topAnchor, constant: 3),
             rootStack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
+
+        // Thin progress bar at very top of content
+        let progressTrack = NSView()
+        progressTrack.wantsLayer = true
+        progressTrack.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        progressTrack.translatesAutoresizingMaskIntoConstraints = false
+
+        progressBarFill.wantsLayer = true
+        progressBarFill.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        progressBarFill.translatesAutoresizingMaskIntoConstraints = false
+        progressTrack.addSubview(progressBarFill)
+        content.addSubview(progressTrack)
+
+        NSLayoutConstraint.activate([
+            progressTrack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            progressTrack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            progressTrack.topAnchor.constraint(equalTo: content.topAnchor),
+            progressTrack.heightAnchor.constraint(equalToConstant: 3),
+            progressBarFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
+            progressBarFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
+            progressBarFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
+        ])
+        progressBarFillWidthConstraint = progressBarFill.widthAnchor.constraint(equalToConstant: 0)
+        progressBarFillWidthConstraint?.isActive = true
     }
 
     private func setupControlDefaults() {
         // Master password fields
-        masterPassField.placeholderString = "Passwort eingeben…"
+        masterPassField.placeholderString = L10n.t("Mindestens 6 Zeichen", "At least 6 characters")
         masterPassField.font = .systemFont(ofSize: 14)
         masterPassField.bezelStyle = .roundedBezel
         masterPassField.isEditable = true
@@ -207,7 +247,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         masterPassField.isEnabled = true
         masterPassField.translatesAutoresizingMaskIntoConstraints = false
 
-        masterConfirmField.placeholderString = "Passwort wiederholen…"
+        masterConfirmField.placeholderString = L10n.t("Passwort erneut eingeben", "Repeat password")
         masterConfirmField.font = .systemFont(ofSize: 14)
         masterConfirmField.bezelStyle = .roundedBezel
         masterConfirmField.isEditable = true
@@ -215,7 +255,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         masterConfirmField.isEnabled = true
         masterConfirmField.translatesAutoresizingMaskIntoConstraints = false
 
-        masterMatchLabel.font = .systemFont(ofSize: 12)
+        masterMatchLabel.font = .systemFont(ofSize: 11)
         masterMatchLabel.isHidden = true
 
         NotificationCenter.default.addObserver(
@@ -233,7 +273,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         // Bank search fields
         bankSearchField.delegate = self
-        bankSearchField.placeholderString = "Bank suchen…"
+        bankSearchField.placeholderString = L10n.t("Bank suchen…", "Search bank…")
         bankSearchField.sendsSearchStringImmediately = true
         bankSearchField.font = .systemFont(ofSize: 14)
         bankSearchField.isEditable = true
@@ -313,8 +353,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         selectedBankLabel.maximumNumberOfLines = 1
 
         ibanField.placeholderString = "IBAN"
-        userField.placeholderString = "Anmeldename / Leg.-ID (falls nötig)"
-        passField.placeholderString = "PIN / Passwort (falls nötig)"
+        userField.placeholderString = L10n.t("Dein Banking-Benutzername", "Your banking username")
+        passField.placeholderString = L10n.t("Deine Online-Banking PIN", "Your online banking PIN")
         [ibanField, userField, passField].forEach {
             $0.font = .systemFont(ofSize: 14)
             $0.bezelStyle = .roundedBezel
@@ -359,15 +399,18 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         successSubtitleLabel.maximumNumberOfLines = 2
         successSubtitleLabel.lineBreakMode = .byWordWrapping
 
+        diagnosticsToggle.title = L10n.t("Neu versuchen mit Diagnoselogging", "Retry with diagnostic logging")
         diagnosticsToggle.state = diagnosticsLoggingEnabled ? .on : .off
         diagnosticsToggle.target = self
         diagnosticsToggle.action = #selector(onDiagnosticsToggleChanged)
 
+        diagnosticsPrivacyLabel.stringValue = L10n.t("Es werden keine persönlichen Daten gespeichert.", "No personal data is stored.")
         diagnosticsPrivacyLabel.font = .systemFont(ofSize: 12)
         diagnosticsPrivacyLabel.textColor = .secondaryLabelColor
         diagnosticsPrivacyLabel.maximumNumberOfLines = 2
         diagnosticsPrivacyLabel.lineBreakMode = .byWordWrapping
 
+        diagnosticsDeliveryLabel.stringValue = L10n.t("Log-Datei wird im Log-Ordner abgelegt und muss manuell versendet werden.", "Log file is saved in the log folder and must be sent manually.")
         diagnosticsDeliveryLabel.font = .systemFont(ofSize: 12)
         diagnosticsDeliveryLabel.textColor = .secondaryLabelColor
         diagnosticsDeliveryLabel.maximumNumberOfLines = 3
@@ -378,6 +421,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         diagnosticsLogPathLabel.lineBreakMode = .byTruncatingMiddle
         diagnosticsLogPathLabel.maximumNumberOfLines = 1
 
+        diagnosticsOpenFolderButton.title = L10n.t("Log-Ordner öffnen", "Open log folder")
         diagnosticsOpenFolderButton.bezelStyle = .rounded
         diagnosticsOpenFolderButton.target = self
         diagnosticsOpenFolderButton.action = #selector(onOpenDiagnosticsFolder)
@@ -388,6 +432,34 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         discoverSpinner.translatesAutoresizingMaskIntoConstraints = false
         discoverSpinner.widthAnchor.constraint(equalToConstant: 14).isActive = true
         discoverSpinner.heightAnchor.constraint(equalToConstant: 14).isActive = true
+
+        ibanDetectedIcon.image = NSImage(systemSymbolName: "building.columns.circle.fill", accessibilityDescription: nil)
+        ibanDetectedIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        ibanDetectedIcon.contentTintColor = .controlAccentColor
+        ibanDetectedIcon.translatesAutoresizingMaskIntoConstraints = false
+        ibanDetectedIcon.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        ibanDetectedIcon.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        ibanDetectedIcon.setContentHuggingPriority(.required, for: .horizontal)
+
+        ibanDetectedLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        ibanDetectedLabel.textColor = .controlAccentColor
+        ibanDetectedLabel.lineBreakMode = .byTruncatingTail
+
+        ibanDetectedRow.orientation = .horizontal
+        ibanDetectedRow.spacing = 6
+        ibanDetectedRow.alignment = .centerY
+        ibanDetectedRow.addArrangedSubview(ibanDetectedIcon)
+        ibanDetectedRow.addArrangedSubview(ibanDetectedLabel)
+        ibanDetectedRow.isHidden = true
+
+        ibanNotFoundMailButton.title = L10n.t("Bank fehlt? Melden →", "Bank missing? Report →")
+        ibanNotFoundMailButton.isBordered = false
+        ibanNotFoundMailButton.bezelStyle = .inline
+        ibanNotFoundMailButton.font = .systemFont(ofSize: 12)
+        ibanNotFoundMailButton.contentTintColor = .controlAccentColor
+        ibanNotFoundMailButton.target = self
+        ibanNotFoundMailButton.action = #selector(openSupportMail)
+        ibanNotFoundMailButton.isHidden = true
     }
 
     private func clearRootContent() {
@@ -398,9 +470,33 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         }
     }
 
+    private func updateProgressBar(step: Step) {
+        let fraction: CGFloat
+        switch step {
+        case .welcome: fraction = 0
+        case .masterPassword: fraction = 0.14
+        case .bankSearch: fraction = 0.28
+        case .credentials: fraction = 0.42
+        case .connecting: fraction = 0.57
+        case .onboarding(let page):
+            switch page {
+            case 0: fraction = 0.71
+            case 1: fraction = 0.85
+            case 2: fraction = 1.0
+            default: fraction = 0
+            }
+        }
+        progressBarFillWidthConstraint?.constant = panelWidth * fraction
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.3
+            progressBarFill.animator().layoutSubtreeIfNeeded()
+        }
+    }
+
     private func render(step: Step) {
         hideAutocompletePanel()
         self.step = step
+        updateProgressBar(step: step)
         clearRootContent()
 
         switch step {
@@ -424,52 +520,51 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         case .onboarding(let page):
             renderOnboardingPage(page)
         }
+
     }
 
     // MARK: - Welcome
 
     private func renderWelcomeStep() {
         rootStack.alignment = .centerX
+        rootStack.spacing = 12
 
-        let icon = NSImageView()
-        if let appIcon = NSImage(named: "AppIcon") ?? NSImage(named: NSImage.applicationIconName) {
-            icon.image = appIcon
-        }
-        icon.imageScaling = .scaleProportionallyUpOrDown
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.widthAnchor.constraint(equalToConstant: 56).isActive = true
-        icon.heightAnchor.constraint(equalToConstant: 56).isActive = true
+        let iconBox = iconContainer(size: 64, cornerRadius: 16, bg: NSColor(white: 0.5, alpha: 0.12), icon: "eurosign", iconSize: 28, tint: .labelColor)
 
         let title = NSTextField(labelWithString: "simplebanking")
-        title.font = .systemFont(ofSize: 34, weight: .bold)
+        title.font = .systemFont(ofSize: 22, weight: .semibold)
         title.alignment = .center
 
-        let tagline = NSTextField(labelWithString: "simple banking without the fluff")
-        tagline.font = .systemFont(ofSize: 13)
-        tagline.textColor = .secondaryLabelColor
+        let tagline = NSTextField(labelWithString: t("Dein Kontostand. Immer sichtbar.", "Your balance. Always visible."))
+        tagline.font = .systemFont(ofSize: 14, weight: .medium)
+        tagline.textColor = NSColor.labelColor.withAlphaComponent(0.8)
         tagline.alignment = .center
 
-        let spacerTop = NSView()
-        let spacerMid = NSView()
-        let spacerBottom = NSView()
-        spacerTop.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        spacerMid.heightAnchor.constraint(greaterThanOrEqualToConstant: 20).isActive = true
-        spacerBottom.heightAnchor.constraint(equalToConstant: 12).isActive = true
+        let body = NSTextField(wrappingLabelWithString: t("Keine App öffnen, kein Login – einfach hingucken. Dein Kontostand lebt in der Menüleiste.", "No app to open, no login – just look. Your balance lives in the menu bar."))
+        body.font = .systemFont(ofSize: 13)
+        body.textColor = .secondaryLabelColor
+        body.alignment = .center
+        body.translatesAutoresizingMaskIntoConstraints = false
+        body.widthAnchor.constraint(lessThanOrEqualToConstant: 320).isActive = true
 
-        let connectButton = primaryButton(title: "Jetzt verbinden", action: #selector(onWelcomeConnect))
-        connectButton.translatesAutoresizingMaskIntoConstraints = false
+        let connectButton = primaryButton(title: t("Jetzt verbinden", "Connect now"), action: #selector(onWelcomeConnect))
         connectButton.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
-        let demoButton = NSButton(title: "Demo-Modus starten", target: self, action: #selector(onWelcomeDemo))
-        demoButton.bezelStyle = .rounded
-        demoButton.translatesAutoresizingMaskIntoConstraints = false
+        let demoButton = outlineButton(title: t("Demo-Modus starten", "Start demo mode"), action: #selector(onWelcomeDemo))
         demoButton.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
-        [spacerTop, icon, title, tagline, spacerMid, connectButton, demoButton, spacerBottom].forEach {
-            rootStack.addArrangedSubview($0)
-        }
-        rootStack.setCustomSpacing(8, after: icon)
+        rootStack.addArrangedSubview(iconBox)
+        rootStack.addArrangedSubview(title)
+        rootStack.addArrangedSubview(tagline)
+        rootStack.addArrangedSubview(body)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(connectButton)
+        rootStack.addArrangedSubview(demoButton)
+
+        rootStack.setCustomSpacing(16, after: iconBox)
         rootStack.setCustomSpacing(4, after: title)
+        rootStack.setCustomSpacing(6, after: tagline)
+        rootStack.setCustomSpacing(24, after: body)
         rootStack.setCustomSpacing(8, after: connectButton)
     }
 
@@ -477,44 +572,73 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     private func renderMasterPasswordStep() {
         rootStack.alignment = .leading
+        rootStack.spacing = 12
 
-        let title = NSTextField(labelWithString: "Sicherheit einrichten")
-        title.font = .systemFont(ofSize: 20, weight: .bold)
+        let iconBox = iconContainer(size: 40, cornerRadius: 12, bg: NSColor(white: 0.5, alpha: 0.12), icon: "lock.fill", iconSize: 18, tint: .labelColor)
 
-        let info = NSTextField(wrappingLabelWithString: "Das Master-Passwort schützt deine Daten lokal. Es wird nicht gespeichert — merke es dir gut!")
-        info.font = .systemFont(ofSize: 13)
-        info.textColor = .secondaryLabelColor
-        info.translatesAutoresizingMaskIntoConstraints = false
-        info.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        let title = NSTextField(labelWithString: t("Schütze deine Daten.", "Protect your data."))
+        title.font = .systemFont(ofSize: 19, weight: .semibold)
 
-        let passGroup = NSStackView(views: [sectionLabel("Master-Passwort"), iconField("lock", masterPassField)])
-        passGroup.orientation = .vertical
-        passGroup.spacing = 6
-        passGroup.alignment = .leading
+        let subtitle = NSTextField(wrappingLabelWithString: t("Dein Master-Passwort verschlüsselt alles auf deinem Mac.", "Your master password encrypts everything on your Mac."))
+        subtitle.font = .systemFont(ofSize: 13)
+        subtitle.textColor = .secondaryLabelColor
 
-        let confirmGroup = NSStackView(views: [sectionLabel("Passwort bestätigen"), iconField("lock.rotation", masterConfirmField)])
-        confirmGroup.orientation = .vertical
-        confirmGroup.spacing = 6
-        confirmGroup.alignment = .leading
+        masterPassField.placeholderString = t("Mindestens 6 Zeichen", "At least 6 characters")
+        masterConfirmField.placeholderString = t("Passwort erneut eingeben", "Repeat password")
+        masterPassField.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        masterConfirmField.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+
+        // Strength bar
+        let barWidth = (fieldWidth - 18) / 4
+        strengthBars = (0..<4).map { _ in
+            let bar = NSView()
+            bar.wantsLayer = true
+            bar.layer?.cornerRadius = 1.5
+            bar.layer?.backgroundColor = NSColor.separatorColor.cgColor
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.widthAnchor.constraint(equalToConstant: barWidth).isActive = true
+            bar.heightAnchor.constraint(equalToConstant: 3).isActive = true
+            return bar
+        }
+        let strengthStack = NSStackView(views: strengthBars)
+        strengthStack.orientation = .horizontal
+        strengthStack.spacing = 6
+        strengthStack.alignment = .centerY
+        updateStrengthUI()
 
         masterMatchLabel.isHidden = masterConfirmField.stringValue.isEmpty
 
+        let info = infoBox(icon: "info.circle", t("Wir speichern dein Passwort nicht – also gut merken. Bei Verlust müssen die Daten neu eingerichtet werden.", "We don't store your password – remember it well. If lost, you'll need to set up everything again."))
+
         let buttonRow = horizontalButtons(
-            backTitle: "Zurück",
+            backTitle: t("Zurück", "Back"),
             backAction: #selector(onMasterPasswordBack),
-            primaryTitle: "Weiter",
+            primaryTitle: t("Weiter", "Continue"),
             primaryAction: #selector(onMasterPasswordContinue),
-            primaryEnabled: true
+            primaryEnabled: false
         )
+        masterNextBtn = buttonRow.primary
         buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
-        [title, info, passGroup, confirmGroup, masterMatchLabel, NSView(), buttonRow.stack].forEach {
-            rootStack.addArrangedSubview($0)
-        }
+        rootStack.addArrangedSubview(iconBox)
+        rootStack.addArrangedSubview(title)
+        rootStack.addArrangedSubview(subtitle)
+        rootStack.addArrangedSubview(masterPassField)
+        rootStack.addArrangedSubview(strengthStack)
+        rootStack.addArrangedSubview(masterConfirmField)
+        rootStack.addArrangedSubview(masterMatchLabel)
+        rootStack.addArrangedSubview(info)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(buttonRow.stack)
+
+        rootStack.setCustomSpacing(14, after: iconBox)
         rootStack.setCustomSpacing(4, after: title)
-        rootStack.setCustomSpacing(20, after: info)
-        rootStack.setCustomSpacing(14, after: passGroup)
-        rootStack.setCustomSpacing(8, after: confirmGroup)
+        rootStack.setCustomSpacing(16, after: subtitle)
+        rootStack.setCustomSpacing(6, after: masterPassField)
+        rootStack.setCustomSpacing(8, after: strengthStack)
+        rootStack.setCustomSpacing(6, after: masterConfirmField)
+        rootStack.setCustomSpacing(12, after: masterMatchLabel)
+        rootStack.setCustomSpacing(16, after: info)
 
         // Tab chain
         masterPassField.nextKeyView = masterConfirmField
@@ -527,72 +651,94 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         }
     }
 
+    private func updateStrengthUI() {
+        let count = masterPassField.stringValue.count
+        let colors: [NSColor]
+        switch count {
+        case 0:
+            colors = Array(repeating: NSColor.separatorColor, count: 4)
+        case 1...3:
+            colors = [.systemRed, .separatorColor, .separatorColor, .separatorColor]
+        case 4...5:
+            colors = [.systemOrange, .systemOrange, .separatorColor, .separatorColor]
+        case 6...7:
+            colors = [.systemYellow, .systemYellow, .systemYellow, .separatorColor]
+        default:
+            colors = Array(repeating: NSColor.systemGreen, count: 4)
+        }
+        for (i, bar) in strengthBars.enumerated() {
+            bar.layer?.backgroundColor = colors[i].cgColor
+        }
+
+        let pass = masterPassField.stringValue
+        let confirm = masterConfirmField.stringValue
+        let ready = pass.count >= 6 && !confirm.isEmpty && pass == confirm
+        masterNextBtn?.isEnabled = ready
+    }
+
     // MARK: - Bank Search
 
     private func renderSearchStep() {
         rootStack.alignment = .leading
+        rootStack.spacing = 12
 
         discoverSpinner.stopAnimation(nil)
+        ibanDetectedRow.isHidden = ibanPreviewBank == nil
 
-        let title = NSTextField(labelWithString: "Deine Bank verbinden")
-        title.font = .systemFont(ofSize: 20, weight: .bold)
+        let iconBox = iconContainer(size: 40, cornerRadius: 12, bg: NSColor(white: 0.5, alpha: 0.12), icon: "building.2.fill", iconSize: 18, tint: .labelColor)
 
-        let subtitle = NSTextField(labelWithString: "Suche Deine Bank und gib Deine IBAN ein, um fortzufahren.")
+        let title = NSTextField(labelWithString: t("Welche Bank nutzt du?", "Which bank do you use?"))
+        title.font = .systemFont(ofSize: 19, weight: .semibold)
+
+        let subtitle = NSTextField(wrappingLabelWithString: t("Gib deine IBAN ein – wir finden deine Bank automatisch.", "Enter your IBAN – we'll find your bank automatically."))
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
-        subtitle.translatesAutoresizingMaskIntoConstraints = false
-        subtitle.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
-        updateSearchResults()
-        updateBankChip()
-
-        let bankSectionLabel = sectionLabel("Bank auswählen")
-        let bankGroup = NSStackView(views: [bankSectionLabel, bankSearchField, selectedBankChipView])
-        bankGroup.orientation = .vertical
-        bankGroup.spacing = 6
-        bankGroup.alignment = .leading
-
-        let ibanSectionLabel = sectionLabel("Deine IBAN")
-        let ibanRow = iconField("creditcard", ibanField)
-        let ibanGroup = NSStackView(views: [ibanSectionLabel, ibanRow])
-        ibanGroup.orientation = .vertical
-        ibanGroup.spacing = 6
-        ibanGroup.alignment = .leading
+        ibanField.placeholderString = "DE00 0000 0000 0000 0000 00"
+        ibanField.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
 
         let statusRow = NSStackView(views: [discoverSpinner, searchHelperLabel])
         statusRow.orientation = .horizontal
         statusRow.spacing = 6
         statusRow.alignment = .centerY
 
-        let normalizedIBAN = ibanField.stringValue
-            .replacingOccurrences(of: " ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let yaxiInfo = infoBox(icon: "info.circle", t("EU Open Banking nach PSD2. simplebanking nutzt YAXI mit echter 1:1-Verbindung ohne Dritte.\n\nNur Lesezugriff. Keine Überweisungen.", "EU Open Banking via PSD2. simplebanking uses YAXI with a direct 1:1 connection, no third parties.\n\nRead-only access. No transfers."))
 
+        let hasBank = ibanPreviewBank != nil
         let buttonRow = horizontalButtons(
-            backTitle: "Zurück",
+            backTitle: t("Zurück", "Back"),
             backAction: #selector(onSearchBack),
-            primaryTitle: "Weiter",
+            primaryTitle: t("Weiter", "Continue"),
             primaryAction: #selector(onSearchContinue),
-            primaryEnabled: !normalizedIBAN.isEmpty
+            primaryEnabled: hasBank
         )
         searchContinueButton = buttonRow.primary
         buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
-        [title, subtitle, bankGroup, ibanGroup, statusRow, NSView(), buttonRow.stack].forEach {
-            rootStack.addArrangedSubview($0)
-        }
-        rootStack.setCustomSpacing(4, after: title)
-        rootStack.setCustomSpacing(20, after: subtitle)
-        rootStack.setCustomSpacing(18, after: bankGroup)
-        rootStack.setCustomSpacing(6, after: ibanGroup)
+        rootStack.addArrangedSubview(iconBox)
+        rootStack.addArrangedSubview(title)
+        rootStack.addArrangedSubview(subtitle)
+        rootStack.addArrangedSubview(ibanField)
+        rootStack.addArrangedSubview(ibanDetectedRow)
+        rootStack.addArrangedSubview(ibanNotFoundMailButton)
+        rootStack.addArrangedSubview(yaxiInfo)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(buttonRow.stack)
 
-        bankSearchField.nextKeyView = ibanField
+        rootStack.setCustomSpacing(14, after: iconBox)
+        rootStack.setCustomSpacing(4, after: title)
+        rootStack.setCustomSpacing(16, after: subtitle)
+        rootStack.setCustomSpacing(8, after: ibanField)
+        rootStack.setCustomSpacing(8, after: ibanDetectedRow)
+        rootStack.setCustomSpacing(12, after: ibanNotFoundMailButton)
+        rootStack.setCustomSpacing(16, after: yaxiInfo)
+
         ibanField.nextKeyView = buttonRow.primary
         buttonRow.primary.nextKeyView = buttonRow.back
-        buttonRow.back.nextKeyView = bankSearchField
-        panel.initialFirstResponder = bankSearchField
+        buttonRow.back.nextKeyView = ibanField
+        panel.initialFirstResponder = ibanField
         DispatchQueue.main.async { [weak self] in
-            self?.panel.makeFirstResponder(self?.bankSearchField)
+            self?.panel.makeFirstResponder(self?.ibanField)
         }
     }
 
@@ -600,34 +746,23 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     private func renderCredentialsStep() {
         rootStack.alignment = .leading
-        let bankName = discoverResult?.displayName ?? selectedBank?.displayName ?? "Bank"
+        rootStack.spacing = 12
 
-        let pageTitle = NSTextField(labelWithString: "Zugangsdaten eingeben")
-        pageTitle.font = .systemFont(ofSize: 20, weight: .bold)
+        let pageTitle = NSTextField(labelWithString: t("Fast geschafft.", "Almost there."))
+        pageTitle.font = .systemFont(ofSize: 19, weight: .semibold)
 
-        let logo = NSImageView()
-        logo.image = NSImage(systemSymbolName: "building.columns.circle.fill", accessibilityDescription: "Bank")
-        logo.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-        logo.contentTintColor = .labelColor
-        logo.translatesAutoresizingMaskIntoConstraints = false
-        logo.widthAnchor.constraint(equalToConstant: 22).isActive = true
-        logo.heightAnchor.constraint(equalToConstant: 22).isActive = true
-
-        let bankNameLabel = NSTextField(labelWithString: bankName)
-        bankNameLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-
-        let headerStack = NSStackView(views: [logo, bankNameLabel])
-        headerStack.orientation = .horizontal
-        headerStack.spacing = 8
-        headerStack.alignment = .centerY
+        let subtitle = NSTextField(labelWithString: t("Deine Online-Banking Zugangsdaten", "Your online banking credentials"))
+        subtitle.font = .systemFont(ofSize: 13)
+        subtitle.textColor = .secondaryLabelColor
 
         let creds = discoverResult?.credentials
         let needsUserId = creds == nil || creds!.full || creds!.userId
         let needsPassword = creds == nil || creds!.full
 
         let userLabel = discoverResult?.userIdLabel ?? "Anmeldename / Leg.-ID"
-        userField.placeholderString = needsUserId ? userLabel : ""
+        userField.placeholderString = needsUserId ? t("Dein Banking-Benutzername", "Your banking username") : ""
         userField.isHidden = !needsUserId
+        passField.placeholderString = needsPassword ? t("Deine Online-Banking PIN", "Your online banking PIN") : ""
         passField.isHidden = !needsPassword
 
         var fieldViews: [NSView] = []
@@ -639,7 +774,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             fieldViews.append(userGroup)
         }
         if needsPassword {
-            let passGroup = NSStackView(views: [sectionLabel("PIN / Passwort"), iconField("lock", passField)])
+            let passGroup = NSStackView(views: [sectionLabel(t("PIN / Passwort", "PIN / Password")), iconField("lock", passField)])
             passGroup.orientation = .vertical
             passGroup.spacing = 6
             passGroup.alignment = .leading
@@ -655,7 +790,19 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             fieldViews.append(adviceLabel)
         }
 
-        fieldViews.append(contentsOf: [rememberToggle, credentialsStatusLabel])
+        rememberToggle.title = t("Zugangsdaten speichern", "Save credentials")
+        rememberToggle.font = .systemFont(ofSize: 13, weight: .medium)
+
+        let rememberSublabel = NSTextField(labelWithString: t("Sicher im macOS Keychain verschlüsselt", "Securely encrypted in macOS Keychain"))
+        rememberSublabel.font = .systemFont(ofSize: 11)
+        rememberSublabel.textColor = .secondaryLabelColor
+
+        let rememberStack = NSStackView(views: [rememberToggle, rememberSublabel])
+        rememberStack.orientation = .vertical
+        rememberStack.spacing = 2
+        rememberStack.alignment = .leading
+
+        fieldViews.append(contentsOf: [rememberStack, credentialsStatusLabel])
         credentialsStatusLabel.isHidden = credentialsStatusLabel.stringValue.isEmpty
 
         let fields = NSStackView(views: fieldViews)
@@ -663,25 +810,30 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         fields.spacing = 14
         fields.alignment = .leading
 
+        let securityInfo = infoBox(icon: "checkmark.shield.fill", t("Verschlüsselte Verbindung via PSD2 – deine Daten werden nie auf unseren Servern gespeichert.", "Encrypted connection via PSD2 – your data is never stored on our servers."), tint: .systemGreen)
+
         let buttonRow = horizontalButtons(
-            backTitle: "Zurück",
+            backTitle: t("Zurück", "Back"),
             backAction: #selector(onCredentialsBack),
-            primaryTitle: "Verbinden",
+            primaryTitle: t("Verbinden", "Connect"),
             primaryAction: #selector(onCredentialsConnect),
             primaryEnabled: true
         )
         buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
         rootStack.addArrangedSubview(pageTitle)
-        rootStack.addArrangedSubview(headerStack)
+        rootStack.addArrangedSubview(subtitle)
         rootStack.addArrangedSubview(fields)
+        rootStack.addArrangedSubview(securityInfo)
         if hasFailedOnce {
             rootStack.addArrangedSubview(makeDiagnosticsSection())
         }
-        rootStack.addArrangedSubview(NSView())
+        rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(buttonRow.stack)
-        rootStack.setCustomSpacing(6, after: pageTitle)
-        rootStack.setCustomSpacing(20, after: headerStack)
+        rootStack.setCustomSpacing(4, after: pageTitle)
+        rootStack.setCustomSpacing(16, after: subtitle)
+        rootStack.setCustomSpacing(12, after: fields)
+        rootStack.setCustomSpacing(16, after: securityInfo)
 
         let firstField: NSTextField? = needsUserId ? userField : (needsPassword ? passField : nil)
         if needsUserId { userField.nextKeyView = needsPassword ? passField : buttonRow.primary }
@@ -711,7 +863,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         approvalSpinner.startAnimation(nil)
 
-        let cancelButton = NSButton(title: "Verbindung abbrechen", target: self, action: #selector(onCancelConnection))
+        let cancelButton = NSButton(title: t("Verbindung abbrechen", "Cancel connection"), target: self, action: #selector(onCancelConnection))
         cancelButton.bezelStyle = .inline
         cancelButton.font = .systemFont(ofSize: 12)
 
@@ -733,170 +885,212 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     // MARK: - Onboarding
 
     private func renderOnboardingPage(_ page: Int) {
-        rootStack.alignment = .centerX
-
         approvalSpinner.stopAnimation(nil)
 
-        struct OnboardingContent {
-            let systemImage: String
-            let imageColor: NSColor
-            let title: String
-            let body: String
-            let features: [(icon: String, text: String)]
+        let totalPages = 3
+        guard page >= 0 && page < totalPages else { return }
+
+        switch page {
+        case 0:
+            renderOnboardingPage0()
+        case 1:
+            renderOnboardingPage1()
+        case 2:
+            renderOnboardingPage2()
+        default:
+            break
         }
+    }
 
-        let pages: [OnboardingContent] = [
-            OnboardingContent(
-                systemImage: "checkmark.seal.fill",
-                imageColor: .systemGreen,
-                title: "Einrichtung abgeschlossen!",
-                body: "simplebanking läuft jetzt in deiner Menüleiste.",
-                features: []
-            ),
-            OnboardingContent(
-                systemImage: "macwindow.on.rectangle",
-                imageColor: .controlAccentColor,
-                title: "So funktioniert's",
-                body: "",
-                features: [
-                    ("cursorarrow.click", "Klick auf den Kontostand öffnet die Umsatzliste"),
-                    ("arrow.clockwise", "Kontostand wird automatisch aktualisiert"),
-                    ("magnifyingglass", "Umsätze durchsuchen, filtern und analysieren"),
-                    ("cursorarrow.click.2", "Rechtsklick → Sperren, Einstellungen, Demo-Modus"),
-                ]
-            ),
-            OnboardingContent(
-                systemImage: "lock.shield.fill",
-                imageColor: .systemIndigo,
-                title: "Deine Daten sind sicher",
-                body: "",
-                features: [
-                    ("key.fill", "Master-Passwort verschlüsselt alle Daten lokal"),
-                    ("touchid", "Touch ID für schnelles Entsperren aktivierbar"),
-                    ("iphone.and.arrow.forward", "Keine Daten in der Cloud – alles bleibt auf deinem Mac"),
-                ]
-            ),
-        ]
+    private func renderOnboardingPage0() {
+        rootStack.alignment = .centerX
+        rootStack.spacing = 12
 
-        guard page >= 0 && page < pages.count else { return }
-        let content = pages[page]
+        let iconBox = iconContainer(size: 56, cornerRadius: 28, bg: NSColor.systemGreen.withAlphaComponent(0.1), icon: "checkmark.circle.fill", iconSize: 24, tint: .systemGreen)
 
-        let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: content.systemImage, accessibilityDescription: nil)
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 56, weight: .semibold)
-        icon.contentTintColor = content.imageColor
-        icon.translatesAutoresizingMaskIntoConstraints = false
-
-        let titleLabel = NSTextField(labelWithString: content.title)
-        titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
+        let titleLabel = NSTextField(labelWithString: t("Geschafft.", "Done."))
+        titleLabel.font = .systemFont(ofSize: 19, weight: .semibold)
         titleLabel.alignment = .center
 
-        let contentStack = NSStackView()
-        contentStack.orientation = .vertical
-        contentStack.spacing = 10
-        contentStack.alignment = .leading
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        let bankName = completedBank?.displayName ?? "Bank"
+        let bankConnected = NSTextField(labelWithString: "\(bankName) \(t("verbunden", "connected"))")
+        bankConnected.font = .systemFont(ofSize: 13, weight: .medium)
+        bankConnected.textColor = NSColor.labelColor.withAlphaComponent(0.8)
+        bankConnected.alignment = .center
 
-        if content.features.isEmpty {
-            if let bank = completedBank {
-                let bankLabel = NSTextField(labelWithString: "Verbunden mit \(bank.displayName)")
-                bankLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-                bankLabel.textColor = .controlAccentColor
-                bankLabel.alignment = .center
-                contentStack.addArrangedSubview(bankLabel)
-            }
-            let bodyLabel = NSTextField(wrappingLabelWithString: content.body)
-            bodyLabel.font = .systemFont(ofSize: 14)
-            bodyLabel.textColor = .secondaryLabelColor
-            bodyLabel.alignment = .center
-            bodyLabel.translatesAutoresizingMaskIntoConstraints = false
-            bodyLabel.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
-            contentStack.addArrangedSubview(bodyLabel)
-        } else {
-            for feature in content.features {
-                let featureIcon = NSImageView()
-                featureIcon.image = NSImage(systemSymbolName: feature.icon, accessibilityDescription: nil)
-                featureIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-                featureIcon.contentTintColor = .controlAccentColor
-                featureIcon.translatesAutoresizingMaskIntoConstraints = false
-                featureIcon.widthAnchor.constraint(equalToConstant: 20).isActive = true
-                featureIcon.heightAnchor.constraint(equalToConstant: 20).isActive = true
-                featureIcon.setContentHuggingPriority(.required, for: .horizontal)
+        let body = NSTextField(wrappingLabelWithString: t("Ab jetzt siehst du deinen Kontostand direkt in der Menüleiste.", "From now on, your balance is visible directly in the menu bar."))
+        body.font = .systemFont(ofSize: 13)
+        body.textColor = .secondaryLabelColor
+        body.alignment = .center
 
-                let featureLabel = NSTextField(labelWithString: feature.text)
-                featureLabel.font = .systemFont(ofSize: 13)
-                featureLabel.textColor = .labelColor
-                featureLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let tipBox = infoBox(icon: "lightbulb.fill", t("Tipp: Klick auf den Kontostand in der Menüleiste, um deine Umsätze zu durchsuchen.", "Tip: Click on your balance in the menu bar to browse your transactions."))
 
-                let row = NSStackView(views: [featureIcon, featureLabel])
-                row.orientation = .horizontal
-                row.spacing = 10
-                row.alignment = .centerY
-                contentStack.addArrangedSubview(row)
-            }
-        }
+        let nextBtn = primaryButton(title: t("Weiter", "Continue"), action: #selector(onOnboardingNext(_:)))
+        nextBtn.tag = 0
+        nextBtn.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
-        // Dot indicator
-        let dotRow = NSStackView()
-        dotRow.orientation = .horizontal
-        dotRow.spacing = 6
-        dotRow.alignment = .centerY
-        for i in 0..<pages.count {
-            let dot = NSView()
-            dot.wantsLayer = true
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            dot.widthAnchor.constraint(equalToConstant: 7).isActive = true
-            dot.heightAnchor.constraint(equalToConstant: 7).isActive = true
-            dot.layer?.cornerRadius = 3.5
-            if i == page {
-                dot.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-            } else {
-                dot.layer?.backgroundColor = NSColor.tertiaryLabelColor.cgColor
-            }
-            dotRow.addArrangedSubview(dot)
-        }
+        rootStack.addArrangedSubview(iconBox)
+        rootStack.addArrangedSubview(titleLabel)
+        rootStack.addArrangedSubview(bankConnected)
+        rootStack.addArrangedSubview(body)
+        rootStack.addArrangedSubview(tipBox)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(nextBtn)
 
-        // Button row
-        let isFirst = page == 0
-        let isLast = page == pages.count - 1
+        rootStack.setCustomSpacing(16, after: iconBox)
+        rootStack.setCustomSpacing(4, after: titleLabel)
+        rootStack.setCustomSpacing(6, after: bankConnected)
+        rootStack.setCustomSpacing(20, after: body)
+        rootStack.setCustomSpacing(20, after: tipBox)
+    }
 
-        let backBtn = NSButton(title: "← Zurück", target: self, action: #selector(onOnboardingBack))
-        backBtn.bezelStyle = .inline
-        backBtn.font = .systemFont(ofSize: 13)
-        backBtn.isHidden = isFirst
+    private func renderOnboardingPage1() {
+        rootStack.alignment = .leading
+        rootStack.spacing = 12
 
-        let primaryTitle = isLast ? "Los geht's!" : "Weiter →"
-        let primaryBtn = primaryButton(title: primaryTitle, action: #selector(onOnboardingNext))
-        primaryBtn.tag = page
+        let titleLabel = NSTextField(labelWithString: t("Alles im Überblick.", "Everything at a glance."))
+        titleLabel.font = .systemFont(ofSize: 19, weight: .semibold)
 
-        let spacerBetween = NSView()
-        spacerBetween.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let subtitle = NSTextField(wrappingLabelWithString: t("So holst du das Beste aus simplebanking heraus.", "Get the most out of simplebanking."))
+        subtitle.font = .systemFont(ofSize: 13)
+        subtitle.textColor = .secondaryLabelColor
 
-        let bottomButtonStack = NSStackView(views: [backBtn, spacerBetween, primaryBtn])
-        bottomButtonStack.orientation = .horizontal
-        bottomButtonStack.alignment = .centerY
-        bottomButtonStack.spacing = 8
-        bottomButtonStack.translatesAutoresizingMaskIntoConstraints = false
-        bottomButtonStack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        let f1 = featureRow(icon: "cursorarrow.rays", title: t("Ein Klick auf deinen Kontostand", "One click on your balance"), body: t("Alle Umsätze sofort durchsuchbar und filterbar.", "All transactions instantly searchable and filterable."))
+        let f2 = featureRow(icon: "arrow.clockwise", title: t("Automatische Updates", "Automatic updates"), body: t("Immer aktuell, ohne dass du etwas tun musst.", "Always up to date, without any effort."))
+        let f3 = featureRow(icon: "ellipsis", title: t("Rechtsklick für mehr", "Right-click for more"), body: t("Einstellungen, Sperre, Demo-Modus – alles erreichbar.", "Settings, lock, demo mode – all accessible."))
 
-        let spacerContent = NSView()
+        let features = NSStackView(views: [f1, f2, f3])
+        features.orientation = .vertical
+        features.spacing = 14
+        features.alignment = .leading
 
-        [icon, titleLabel, contentStack, spacerContent, dotRow, bottomButtonStack].forEach {
-            rootStack.addArrangedSubview($0)
-        }
-        rootStack.setCustomSpacing(12, after: icon)
-        rootStack.setCustomSpacing(14, after: titleLabel)
-        rootStack.setCustomSpacing(8, after: dotRow)
+        let buttonRow = horizontalButtons(
+            backTitle: t("Zurück", "Back"),
+            backAction: #selector(onOnboardingBack),
+            primaryTitle: t("Weiter", "Continue"),
+            primaryAction: #selector(onOnboardingNext(_:)),
+            primaryEnabled: true
+        )
+        buttonRow.primary.tag = 1
+        buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+
+        rootStack.addArrangedSubview(titleLabel)
+        rootStack.addArrangedSubview(subtitle)
+        rootStack.addArrangedSubview(features)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(buttonRow.stack)
+
+        rootStack.setCustomSpacing(4, after: titleLabel)
+        rootStack.setCustomSpacing(20, after: subtitle)
+        rootStack.setCustomSpacing(20, after: features)
+    }
+
+    private func renderOnboardingPage2() {
+        rootStack.alignment = .leading
+        rootStack.spacing = 12
+
+        let titleLabel = NSTextField(labelWithString: t("100 % sicher. 100 % lokal.", "100% secure. 100% local."))
+        titleLabel.font = .systemFont(ofSize: 19, weight: .semibold)
+
+        let subtitle = NSTextField(wrappingLabelWithString: t("Deine Finanzdaten gehören nur dir.", "Your financial data belongs only to you."))
+        subtitle.font = .systemFont(ofSize: 13)
+        subtitle.textColor = .secondaryLabelColor
+
+        let f1 = featureRow(icon: "checkmark.shield.fill", title: t("Alles verschlüsselt", "Everything encrypted"), body: t("Deine Daten liegen nur auf deinem Mac – vollständig verschlüsselt.", "Your data stays only on your Mac – fully encrypted."))
+        let f2 = featureRow(icon: "touchid", title: t("Touch ID verfügbar", "Touch ID available"), body: t("Einmal einrichten, dann ohne Passwort entsperren.", "Set up once, then unlock without a password."))
+        let f3 = featureRow(icon: "wifi.slash", title: t("Keine Cloud", "No cloud"), body: t("Wir schicken nichts ins Internet. Alles bleibt hier.", "We send nothing to the internet. Everything stays here."))
+
+        let features = NSStackView(views: [f1, f2, f3])
+        features.orientation = .vertical
+        features.spacing = 14
+        features.alignment = .leading
+
+        let pills = pillsRow([t("PSD2-konform", "PSD2 compliant"), "Open Source", "macOS native"])
+
+        let buttonRow = horizontalButtons(
+            backTitle: t("Zurück", "Back"),
+            backAction: #selector(onOnboardingBack),
+            primaryTitle: t("Los geht's!", "Let's go!"),
+            primaryAction: #selector(onOnboardingNext(_:)),
+            primaryEnabled: true
+        )
+        buttonRow.primary.tag = 2
+        buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+
+        rootStack.addArrangedSubview(titleLabel)
+        rootStack.addArrangedSubview(subtitle)
+        rootStack.addArrangedSubview(features)
+        rootStack.addArrangedSubview(pills)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(buttonRow.stack)
+
+        rootStack.setCustomSpacing(4, after: titleLabel)
+        rootStack.setCustomSpacing(20, after: subtitle)
+        rootStack.setCustomSpacing(14, after: features)
+        rootStack.setCustomSpacing(20, after: pills)
     }
 
     // MARK: - Helpers
 
+    private func t(_ de: String, _ en: String) -> String {
+        L10n.t(de, en)
+    }
+
+    private func flexSpacer() -> NSView {
+        let v = NSView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        v.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        return v
+    }
+
+    private func iconContainer(size: CGFloat, cornerRadius: CGFloat, bg: NSColor, icon: String, iconSize: CGFloat, tint: NSColor) -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = bg.cgColor
+        container.layer?.cornerRadius = cornerRadius
+        container.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: size),
+            container.heightAnchor.constraint(equalToConstant: size)
+        ])
+        let img = NSImageView()
+        let config = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .medium)
+        img.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        img.contentTintColor = tint
+        img.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(img)
+        NSLayoutConstraint.activate([
+            img.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            img.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+        return container
+    }
+
     private func primaryButton(title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded
-        button.keyEquivalent = "\r"
-        return button
+        let btn = NSButton(title: title, target: self, action: action)
+        btn.bezelStyle = .regularSquare
+        btn.isBordered = true
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 8
+        btn.keyEquivalent = "\r"
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        return btn
+    }
+
+    private func outlineButton(title: String, action: Selector) -> NSButton {
+        let btn = NSButton(title: title, target: self, action: action)
+        btn.bezelStyle = .regularSquare
+        btn.isBordered = true
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 8
+        btn.layer?.borderWidth = 1
+        btn.layer?.borderColor = NSColor.separatorColor.cgColor
+        btn.layer?.backgroundColor = NSColor.clear.cgColor
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        return btn
     }
 
     private func horizontalButtons(
@@ -906,21 +1100,19 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         primaryAction: Selector,
         primaryEnabled: Bool
     ) -> ButtonRow {
-        let back = NSButton(title: backTitle, target: self, action: backAction)
-        back.bezelStyle = .rounded
+        let half = (fieldWidth - 8) / 2
 
-        let primary = NSButton(title: primaryTitle, target: self, action: primaryAction)
-        primary.bezelStyle = .rounded
-        primary.keyEquivalent = "\r"
+        let back = outlineButton(title: backTitle, action: backAction)
+        back.widthAnchor.constraint(equalToConstant: half).isActive = true
+
+        let primary = primaryButton(title: primaryTitle, action: primaryAction)
+        primary.widthAnchor.constraint(equalToConstant: half).isActive = true
         primary.isEnabled = primaryEnabled
 
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let stack = NSStackView(views: [back, spacer, primary])
+        let stack = NSStackView(views: [back, primary])
         stack.orientation = .horizontal
-        stack.alignment = .centerY
         stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
         return ButtonRow(stack: stack, back: back, primary: primary)
     }
 
@@ -954,6 +1146,91 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         return label
     }
 
+    private func infoBox(icon: String = "info.circle", _ text: String, tint: NSColor = .secondaryLabelColor) -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor(white: 0.5, alpha: 0.08).cgColor
+        container.layer?.cornerRadius = 8
+        container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
+        container.layer?.borderWidth = 0.5
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let img = NSImageView()
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        img.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        img.contentTintColor = tint
+        img.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([img.widthAnchor.constraint(equalToConstant: 16), img.heightAnchor.constraint(equalToConstant: 16)])
+
+        let lbl = NSTextField(wrappingLabelWithString: text)
+        lbl.font = .systemFont(ofSize: 11)
+        lbl.textColor = .secondaryLabelColor
+
+        let inner = NSStackView(views: [img, lbl])
+        inner.orientation = .horizontal
+        inner.spacing = 8
+        inner.alignment = .top
+        inner.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(inner)
+        NSLayoutConstraint.activate([
+            inner.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            inner.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            inner.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            inner.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+        ])
+        container.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        return container
+    }
+
+    private func featureRow(icon: String, title: String, body: String) -> NSView {
+        let iconBox = iconContainer(size: 40, cornerRadius: 12, bg: NSColor(white: 0.5, alpha: 0.12), icon: icon, iconSize: 18, tint: .labelColor)
+
+        let titleLbl = NSTextField(labelWithString: title)
+        titleLbl.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let bodyLbl = NSTextField(wrappingLabelWithString: body)
+        bodyLbl.font = .systemFont(ofSize: 12)
+        bodyLbl.textColor = .secondaryLabelColor
+
+        let textStack = NSStackView(views: [titleLbl, bodyLbl])
+        textStack.orientation = .vertical
+        textStack.spacing = 2
+        textStack.alignment = .leading
+
+        let row = NSStackView(views: [iconBox, textStack])
+        row.orientation = .horizontal
+        row.spacing = 12
+        row.alignment = .centerY
+        return row
+    }
+
+    private func pillsRow(_ labels: [String]) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 6
+        for label in labels {
+            let pill = NSView()
+            pill.wantsLayer = true
+            pill.layer?.cornerRadius = 12
+            pill.layer?.borderColor = NSColor.separatorColor.cgColor
+            pill.layer?.borderWidth = 0.5
+            pill.translatesAutoresizingMaskIntoConstraints = false
+
+            let lbl = NSTextField(labelWithString: label)
+            lbl.font = .systemFont(ofSize: 11, weight: .medium)
+            lbl.translatesAutoresizingMaskIntoConstraints = false
+            pill.addSubview(lbl)
+            NSLayoutConstraint.activate([
+                lbl.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: 10),
+                lbl.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -10),
+                lbl.topAnchor.constraint(equalTo: pill.topAnchor, constant: 4),
+                lbl.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -4),
+            ])
+            stack.addArrangedSubview(pill)
+        }
+        return stack
+    }
+
     private func updateBankChip() {
         if let bank = selectedBank {
             selectedBankChipLabel.stringValue = bank.displayName
@@ -979,10 +1256,12 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     @objc private func onMasterPassChanged(_ notification: Notification) {
         updateMasterMatchLabel()
+        updateStrengthUI()
     }
 
     @objc private func onMasterConfirmChanged(_ notification: Notification) {
         updateMasterMatchLabel()
+        updateStrengthUI()
     }
 
     private func updateMasterMatchLabel() {
@@ -994,10 +1273,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         }
         masterMatchLabel.isHidden = false
         if pass == confirm {
-            masterMatchLabel.stringValue = "✓ Passwörter stimmen überein"
+            masterMatchLabel.stringValue = "✓ \(t("Passwörter stimmen überein", "Passwords match"))"
             masterMatchLabel.textColor = .systemGreen
         } else {
-            masterMatchLabel.stringValue = "✗ Passwörter stimmen nicht überein"
+            masterMatchLabel.stringValue = "✗ \(t("Passwörter stimmen nicht überein", "Passwords do not match"))"
             masterMatchLabel.textColor = .systemRed
         }
     }
@@ -1010,14 +1289,14 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let pass = masterPassField.stringValue
         let confirm = masterConfirmField.stringValue
         guard pass.count >= 4 else {
-            masterMatchLabel.stringValue = "✗ Mindestens 4 Zeichen erforderlich"
+            masterMatchLabel.stringValue = "✗ \(t("Mindestens 6 Zeichen", "At least 6 characters"))"
             masterMatchLabel.textColor = .systemRed
             masterMatchLabel.isHidden = false
             NSSound.beep()
             return
         }
         guard pass == confirm else {
-            masterMatchLabel.stringValue = "✗ Passwörter stimmen nicht überein"
+            masterMatchLabel.stringValue = "✗ \(t("Passwörter stimmen nicht überein", "Passwords do not match"))"
             masterMatchLabel.textColor = .systemRed
             masterMatchLabel.isHidden = false
             NSSound.beep()
@@ -1146,12 +1425,12 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
               ) else { return }
 
         let rowCount = min(filteredBanks.count, 7)
-        let panelHeight = CGFloat(rowCount) * 28 + 4
+        let acPanelHeight = CGFloat(rowCount) * 28 + 4
         let panelFrame = NSRect(
             x: screenFrame.minX,
-            y: screenFrame.minY - panelHeight - 2,
+            y: screenFrame.minY - acPanelHeight - 2,
             width: screenFrame.width,
-            height: panelHeight
+            height: acPanelHeight
         )
 
         autocompletePanel?.setFrame(panelFrame, display: false)
@@ -1229,16 +1508,11 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .uppercased()
 
-        guard !rawIBAN.isEmpty else {
-            searchHelperLabel.stringValue = "Bitte IBAN eingeben."
-            searchHelperLabel.textColor = .systemOrange
-            return
-        }
+        guard !rawIBAN.isEmpty, ibanPreviewBank != nil else { return }
 
-        searchHelperLabel.stringValue = "Bank wird erkannt…"
-        searchHelperLabel.textColor = .secondaryLabelColor
         searchContinueButton?.isEnabled = false
         discoverSpinner.startAnimation(nil)
+        searchHelperLabel.stringValue = ""
 
         discoverTask?.cancel()
         discoverTask = Task.detached(priority: .userInitiated) { [weak self] in
@@ -1258,7 +1532,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
                         self.discoverResult = discovered
                         self.render(step: .credentials)
                     } else {
-                        self.searchHelperLabel.stringValue = "Bank nicht gefunden. IBAN prüfen."
+                        self.searchHelperLabel.stringValue = L10n.t("Ungültige IBAN – bitte prüfen", "Invalid IBAN – please check")
                         self.searchHelperLabel.textColor = .systemRed
                         self.searchContinueButton?.isEnabled = true
                     }
@@ -1268,10 +1542,85 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     }
 
     @objc private func onIBANFieldChanged(_ notification: Notification) {
+        guard !isFormattingIBAN else { return }
+
         let raw = ibanField.stringValue
             .replacingOccurrences(of: " ", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        searchContinueButton?.isEnabled = !raw.isEmpty
+            .uppercased()
+
+        // Format IBAN as groups of 4 (DE89 3704 0044 ...)
+        var formatted = ""
+        for (i, ch) in raw.enumerated() {
+            if i > 0 && i % 4 == 0 { formatted += " " }
+            formatted += String(ch)
+        }
+        isFormattingIBAN = true
+        ibanField.stringValue = formatted
+        isFormattingIBAN = false
+
+        // Reset detection if IBAN changed
+        if raw.count < 15 {
+            ibanPreviewBank = nil
+            ibanDetectedRow.isHidden = true
+            ibanNotFoundMailButton.isHidden = true
+            discoverTask?.cancel()
+            searchHelperLabel.stringValue = ""
+            searchContinueButton?.isEnabled = false
+        } else {
+            ibanNotFoundMailButton.isHidden = true
+            triggerLiveIBANPreview(iban: raw)
+        }
+    }
+
+    private func triggerLiveIBANPreview(iban: String) {
+        discoverTask?.cancel()
+        ibanDetectedRow.isHidden = true
+        ibanPreviewBank = nil
+        ibanNotFoundMailButton.isHidden = true
+        searchContinueButton?.isEnabled = false
+        discoverSpinner.startAnimation(nil)
+        searchHelperLabel.stringValue = L10n.t("Bank wird erkannt…", "Detecting bank…")
+        searchHelperLabel.textColor = .secondaryLabelColor
+
+        discoverTask = Task.detached(priority: .userInitiated) { [weak self] in
+            // Debounce: wait for typing to settle
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled, let self else { return }
+
+            let bank = await YaxiService.previewBank(iban: iban)
+            guard !Task.isCancelled else { return }
+
+            Self.enqueueOnMainRunLoop { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    self.discoverSpinner.stopAnimation(nil)
+                    if let bank {
+                        self.ibanPreviewBank = bank
+                        self.ibanDetectedLabel.stringValue = "\(bank.displayName) \(L10n.t("erkannt", "detected"))"
+                        self.ibanDetectedRow.isHidden = false
+                        self.searchHelperLabel.stringValue = ""
+                        self.ibanNotFoundMailButton.isHidden = true
+                        self.searchContinueButton?.isEnabled = true
+                    } else {
+                        self.ibanPreviewBank = nil
+                        self.ibanDetectedRow.isHidden = true
+                        self.searchHelperLabel.stringValue = L10n.t("Ungültige IBAN – bitte prüfen", "Invalid IBAN – please check")
+                        self.searchHelperLabel.textColor = .secondaryLabelColor
+                        self.ibanNotFoundMailButton.isHidden = false
+                        self.searchContinueButton?.isEnabled = false
+                    }
+                }
+            }
+        }
+    }
+
+    @objc private func openYaxiWebsite() {
+        NSWorkspace.shared.open(URL(string: "https://yaxi.tech")!)
+    }
+
+    @objc private func openSupportMail() {
+        NSWorkspace.shared.open(URL(string: "mailto:support@simplebanking.de?subject=IBAN")!)
     }
 
     // MARK: - Actions: Credentials
@@ -1427,7 +1776,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         approvalSpinner.stopAnimation(nil)
         var displayMessage = message
         if diagnosticsLogURL != nil {
-            displayMessage += "\nDiagnoseprotokoll wurde erstellt."
+            displayMessage += "\n\(t("Diagnoseprotokoll wurde erstellt.", "Diagnostic log has been created."))"
         }
         credentialsStatusLabel.stringValue = displayMessage
         credentialsStatusLabel.textColor = .systemRed
@@ -1440,12 +1789,12 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private func makeDiagnosticsSection() -> NSView {
         diagnosticsToggle.state = diagnosticsLoggingEnabled ? .on : .off
 
-        let title = NSTextField(labelWithString: "Fehlerdiagnose")
+        let title = NSTextField(labelWithString: t("Fehlerdiagnose", "Error diagnostics"))
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.textColor = .labelColor
 
         if let latestDiagnosticsLogURL {
-            diagnosticsLogPathLabel.stringValue = "Letztes Protokoll: \(latestDiagnosticsLogURL.lastPathComponent)"
+            diagnosticsLogPathLabel.stringValue = "\(t("Letztes Protokoll", "Latest log")): \(latestDiagnosticsLogURL.lastPathComponent)"
             diagnosticsLogPathLabel.isHidden = false
         } else {
             diagnosticsLogPathLabel.stringValue = ""

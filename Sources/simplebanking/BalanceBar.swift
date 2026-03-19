@@ -586,6 +586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }, onSettings: { [weak self] in
             self?.showSettings()
         })
+        updateTxPanelAccountNav()
         settingsPanel = SettingsPanel()
 
         setupRefreshTimer()
@@ -1257,7 +1258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Task 2: Navigation callbacks
         rootView.onPrevAccount = idx > 0 ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
         rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
-        rootView.onAddAccount  = idx == count - 1 ? { [weak self] in self?.runSetupWizardForAddingAccount() } : nil
+        // "+" immer anzeigen wenn man beim letzten Slot ist (also auch wenn nur 1 Konto)
+        rootView.onAddAccount  = { [weak self] in self?.runSetupWizardForAddingAccount() }
         let host = NSHostingController(rootView: rootView)
         popover.contentSize = NSSize(width: 348, height: 170)
         popover.contentViewController = host
@@ -1767,6 +1769,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Reload balance + transactions
         await refreshAsync()
+        updateTxPanelAccountNav()
+    }
+
+    /// Aktualisiert die < / > / + Callbacks im Transaktions-Panel nach jedem Slot-Wechsel.
+    @MainActor private func updateTxPanelAccountNav() {
+        guard let nav = txPanel?.accountNav else { return }
+        let store = MultibankingStore.shared
+        let idx   = store.activeIndex
+        let count = store.slots.count
+        nav.onPrevAccount = idx > 0
+            ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
+        nav.onNextAccount = idx < count - 1
+            ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
+        nav.onAddAccount  = { [weak self] in self?.runSetupWizardForAddingAccount() }
     }
 
     // MARK: - Task 3: Add account wizard
