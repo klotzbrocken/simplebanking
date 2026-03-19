@@ -14,6 +14,10 @@ struct AttachmentInfo: Identifiable {
 }
 
 enum TransactionsDatabase {
+
+    // MARK: - Active slot ID (set by BalanceBar when switching accounts)
+
+    nonisolated(unsafe) static var activeSlotId: String = "legacy"
     private static let isoDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -84,6 +88,10 @@ enum TransactionsDatabase {
                 """)
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_attachments_tx_id ON transaction_attachments(tx_id)")
         }
+        migrator.registerMigration("v6_slot_id") { db in
+            try addColumnIfMissing(db, table: "transactions", column: "slot_id", definition: "TEXT NOT NULL DEFAULT 'legacy'")
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_transactions_slot_id ON transactions(slot_id)")
+        }
         return migrator
     }
 
@@ -99,6 +107,7 @@ enum TransactionsDatabase {
         let queue = try makeQueue(bankId: bankId)
         let now = currentTimestamp()
 
+        let slotId = activeSlotId
         try queue.write { db in
             for transaction in transactions {
                 let record = try TransactionRecord(transaction: transaction, updatedAt: now)
@@ -108,8 +117,9 @@ enum TransactionsDatabase {
                             tx_id, end_to_end_id, datum, buchungsdatum, betrag, waehrung,
                             empfaenger, absender, iban, verwendungszweck, kategorie,
                             additional_information, effective_merchant, normalized_merchant,
-                            merchant_source, merchant_confidence, search_text, raw_json, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            merchant_source, merchant_confidence, search_text, raw_json, updated_at,
+                            slot_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(tx_id) DO UPDATE SET
                             end_to_end_id = excluded.end_to_end_id,
                             datum = excluded.datum,
@@ -129,6 +139,7 @@ enum TransactionsDatabase {
                             search_text = excluded.search_text,
                             raw_json = excluded.raw_json,
                             updated_at = excluded.updated_at,
+                            slot_id = excluded.slot_id,
                             user_note = user_note,
                             attachment_count = attachment_count
                         """,
@@ -152,6 +163,7 @@ enum TransactionsDatabase {
                         record.searchText,
                         record.rawJSON,
                         record.updatedAt,
+                        slotId,
                     ]
                 )
             }
@@ -165,16 +177,17 @@ enum TransactionsDatabase {
         let normalizedDays = max(1, days)
         let cutoffDate = Calendar(identifier: .gregorian).date(byAdding: .day, value: -(normalizedDays - 1), to: Date()) ?? Date()
         let cutoff = isoDateFormatter.string(from: cutoffDate)
+        let slotId = activeSlotId
 
         return try queue.read { db in
             let records = try TransactionRecord.fetchAll(
                 db,
                 sql: """
                     SELECT * FROM transactions
-                    WHERE datum >= ? OR buchungsdatum >= ?
+                    WHERE slot_id = ? AND (datum >= ? OR buchungsdatum >= ?)
                     ORDER BY buchungsdatum DESC, datum DESC, updated_at DESC
                     """,
-                arguments: [cutoff, cutoff]
+                arguments: [slotId, cutoff, cutoff]
             )
             return records.compactMap { $0.toTransaction() }
         }
@@ -183,6 +196,7 @@ enum TransactionsDatabase {
     static func loadAllTransactions(limit: Int? = nil, bankId: String = "primary") throws -> [TransactionRecord] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        let slotId = activeSlotId
 
         return try queue.read { db in
             if let limit, limit > 0 {
@@ -190,10 +204,11 @@ enum TransactionsDatabase {
                     db,
                     sql: """
                         SELECT * FROM transactions
+                        WHERE slot_id = ?
                         ORDER BY buchungsdatum DESC, datum DESC, updated_at DESC
                         LIMIT ?
                         """,
-                    arguments: [limit]
+                    arguments: [slotId, limit]
                 )
             }
 
@@ -201,8 +216,10 @@ enum TransactionsDatabase {
                 db,
                 sql: """
                     SELECT * FROM transactions
+                    WHERE slot_id = ?
                     ORDER BY buchungsdatum DESC, datum DESC, updated_at DESC
-                    """
+                    """,
+                arguments: [slotId]
             )
         }
     }
@@ -257,8 +274,9 @@ enum TransactionsDatabase {
     static func loadEnrichmentData(bankId: String = "primary") throws -> [String: (note: String?, attachmentCount: Int)] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        let slotId = activeSlotId
         return try queue.read { db in
-            let rows = try Row.fetchAll(db, sql: "SELECT tx_id, user_note, attachment_count FROM transactions")
+            let rows = try Row.fetchAll(db, sql: "SELECT tx_id, user_note, attachment_count FROM transactions WHERE slot_id = ?", arguments: [slotId])
             var result: [String: (note: String?, attachmentCount: Int)] = [:]
             for row in rows {
                 let txID: String = row["tx_id"]
@@ -397,6 +415,14 @@ enum TransactionsDatabase {
         case "gif": return "image/gif"
         case "webp": return "image/webp"
         default: return "application/octet-stream"
+        }
+    }
+
+    static func deleteTransactions(forSlotId slotId: String, bankId: String = "primary") throws {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        try queue.write { db in
+            try db.execute(sql: "DELETE FROM transactions WHERE slot_id = ?", arguments: [slotId])
         }
     }
 

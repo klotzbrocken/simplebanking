@@ -280,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func hiddenBalanceMaskTitle() -> String {
-        "••.••• €"
+        "•••.•• €"
     }
 
     private func configuredColorScheme() -> ColorScheme? {
@@ -447,6 +447,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.log("Application did finish launching")
         YaxiService.migrateCredentialsModelIfNeeded()
+
+        // Task 4: Set active slot IDs in all data layers at startup
+        if let slot = MultibankingStore.shared.activeSlot {
+            YaxiService.activeSlotId = slot.id
+            CredentialsStore.activeSlotId = slot.id
+            TransactionsDatabase.activeSlotId = slot.id
+        }
+
         installEditMenu()
         do {
             try TransactionsDatabase.migrate()
@@ -632,7 +640,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.applyBalanceDisplayModeConstraints()
             }
         }
-        
+
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.slotDeleted"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            let wasActive = (note.userInfo?["wasActive"] as? Bool) == true
+            Task { @MainActor in
+                if wasActive {
+                    let store = MultibankingStore.shared
+                    if store.slots.isEmpty {
+                        self.autoStartSetupWizardIfNeeded()
+                    } else {
+                        await self.switchToSlot(index: store.activeIndex)
+                    }
+                }
+            }
+        }
+
         refresh()
 
         // Preload subscription logos once so the Abos sheet can render icons immediately.
@@ -702,8 +729,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 promptUnlockIfNeeded()
             } else {
                 // Keine Credentials → Zeige Verbindungs-Hinweis
-                statusItem.button?.title = "Verbinden…"
-                statusItem.button?.toolTip = "Rechtsklick → Einrichtungsassistent"
+                statusItem.button?.title = t("Verbinden…", "Connect…")
+                statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
             }
         }
     }
@@ -978,7 +1005,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 offerBiometricEnrollmentIfNeeded(password: pw)
 
                 // Show loading state while refreshing
-                statusItem.button?.title = "Lädt…"
+                statusItem.button?.title = t("Lädt…", "Loading…")
                 Task {
                     try? await Task.sleep(for: .milliseconds(100))
                     await refreshAsync()
@@ -1080,6 +1107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         confettiInitialShown = false
         clearConnectedBankState()
         lastBalance = nil
+        txVM.transactions = []
+        txVM.resetPaging()
         lastShownTitle = "— €"
         locked = false
         isHiddenBalance = false
@@ -1087,8 +1116,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         failedAttempts = 0
         balancePopover?.performClose(nil)
         hideLockIcon()
-        statusItem.button?.title = "Verbinden…"
-        statusItem.button?.toolTip = "Rechtsklick → Einrichtungsassistent"
+        statusItem.button?.title = t("Verbinden…", "Connect…")
+        statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
         
         // Show notification
         let alert = NSAlert()
@@ -1210,6 +1239,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             low: balanceSignalLowUpperBound,
             medium: balanceSignalMediumUpperBound
         )
+        let store = MultibankingStore.shared
+        let idx = store.activeIndex
+        let count = store.slots.count
+
         var rootView = StatusBalanceFlyoutCardView(
             balanceText: balanceText,
             balanceValue: lastBalance,
@@ -1221,6 +1254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
         }
+        // Task 2: Navigation callbacks
+        rootView.onPrevAccount = idx > 0 ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
+        rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
+        rootView.onAddAccount  = idx == count - 1 ? { [weak self] in self?.runSetupWizardForAddingAccount() } : nil
         let host = NSHostingController(rootView: rootView)
         popover.contentSize = NSSize(width: 348, height: 170)
         popover.contentViewController = host
@@ -1259,8 +1296,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if locked { promptUnlockIfNeeded() }
         guard !locked, let pw = masterPassword else {
-            statusItem.button?.title = "Gesperrt"
-            statusItem.button?.toolTip = "Entsperren erforderlich"
+            statusItem.button?.title = t("Gesperrt", "Locked")
+            statusItem.button?.toolTip = t("Entsperren erforderlich", "Unlock required")
             return
         }
 
@@ -1268,8 +1305,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             creds = try CredentialsStore.load(masterPassword: pw)
         } catch {
-            statusItem.button?.title = "Gesperrt"
-            statusItem.button?.toolTip = "Entsperren fehlgeschlagen"
+            statusItem.button?.title = t("Gesperrt", "Locked")
+            statusItem.button?.toolTip = t("Entsperren fehlgeschlagen", "Unlock failed")
             locked = true
             AppLogger.log("Unlock failed during refresh: \(error.localizedDescription)", category: "Auth", level: "WARN")
             return
@@ -1707,7 +1744,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    // MARK: - Task 1: Slot switching
+
+    private func switchToSlot(index: Int) async {
+        let store = MultibankingStore.shared
+        guard store.slots.indices.contains(index) else { return }
+        let slot = store.slots[index]
+
+        // Switch active slot in all data layers
+        YaxiService.activeSlotId = slot.id
+        CredentialsStore.activeSlotId = slot.id
+        TransactionsDatabase.activeSlotId = slot.id
+        await YaxiService.sessionStore.reloadForActiveSlot()
+        store.setActive(index: index)
+
+        // Clear displayed data immediately
+        txVM.transactions = []
+        txVM.resetPaging()
+        txVM.currentBalance = nil
+        lastBalance = nil
+        statusItem.button?.title = "…"
+
+        // Reload balance + transactions
+        await refreshAsync()
+    }
+
+    // MARK: - Task 3: Add account wizard
+
+    private func runSetupWizardForAddingAccount() {
+        DispatchQueue.main.async { [weak self] in
+            self?._runSetupWizardForAddingAccount()
+        }
+    }
+
+    private func _runSetupWizardForAddingAccount() {
+        let wizard = SetupWizardPanel(connectAction: { payload, selectedBankName, options, masterPassword in
+            AppLogger.log(
+                "AddAccount connectAction entered ibanPrefix=\(String(payload.iban.prefix(6))) selectedBank=\(selectedBankName ?? "-")",
+                category: "Setup"
+            )
+            let setupResult = try await Self.performSetupConnection(
+                result: payload,
+                selectedBankName: selectedBankName,
+                masterPassword: masterPassword,
+                options: options
+            )
+            return setupResult.bank
+        })
+
+        switch wizard.runModal() {
+        case .realBanking(let pw, let bank):
+            // Build new slot from connected bank info
+            let creds = try? CredentialsStore.load(masterPassword: pw)
+            let normalizedIBAN = (creds?.iban ?? "")
+                .replacingOccurrences(of: " ", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            let newSlot = BankSlot.makeNew(
+                iban: normalizedIBAN,
+                displayName: bank.displayName,
+                logoId: bank.logoId
+            )
+            // Switch data layers to new slot before saving credentials
+            YaxiService.activeSlotId = newSlot.id
+            CredentialsStore.activeSlotId = newSlot.id
+            TransactionsDatabase.activeSlotId = newSlot.id
+            // Save credentials under new slot key
+            if let creds = creds, let masterPw = masterPassword as String? {
+                try? CredentialsStore.save(creds, masterPassword: masterPw)
+            }
+            MultibankingStore.shared.addSlot(newSlot)
+            updateConnectedBankState(bank, iban: normalizedIBAN)
+            statusItem.button?.toolTip = "Verbunden mit \(bank.displayName)"
+            Task { await self.refreshAsync() }
+        case .demoMode:
+            break // ignore demo mode in add-account flow
+        case .cancelled:
+            // Restore previous active slot's data layers
+            if let slot = MultibankingStore.shared.activeSlot {
+                YaxiService.activeSlotId = slot.id
+                CredentialsStore.activeSlotId = slot.id
+                TransactionsDatabase.activeSlotId = slot.id
+            }
+        }
+    }
+
     private func runSetupWizardIfNeeded() {
+        // Clear old state immediately — opening the wizard means starting fresh
+        lastBalance = nil
+        txVM.transactions = []
+        txVM.resetPaging()
+        statusItem.button?.title = t("Verbinden…", "Connect…")
+
         let wizard = SetupWizardPanel(connectAction: { payload, selectedBankName, options, masterPassword in
             AppLogger.log(
                 "Setup connectAction entered ibanPrefix=\(String(payload.iban.prefix(6))) selectedBank=\(selectedBankName ?? "-") diagnostics=\(options.diagnosticsEnabled)",
@@ -1826,6 +1954,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     throw SetupFlowError.authenticationFailed("Einrichtung wurde unterbrochen.")
                 }
                 group.cancelAll()
+                // Drain remaining cancelled tasks to prevent CancellationError propagation
+                while let _ = try? await group.next() {}
                 return result
             }
             let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -1884,6 +2014,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return nil
             }
         }()
+        // Diagnostics-Modus aktiviert AppLogger temporär, damit writeTrace (YAXI-Trace)
+        // auch bei SCA-Fehlern (pollRedirect) geschrieben wird.
+        let appLoggerWasEnabled = AppLogger.isEnabled
+        if options.diagnosticsEnabled && !appLoggerWasEnabled {
+            AppLogger.setEnabled(true)
+        }
+        defer {
+            if options.diagnosticsEnabled && !appLoggerWasEnabled {
+                AppLogger.setEnabled(false)
+            }
+        }
         diagnosticsLogger?.log(
             step: "setup",
             event: "attempt_start",
@@ -1939,9 +2080,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     password: result.password
                 )
             }
-            if !warmupBalances.ok, let techMsg = warmupBalances.error, isLikelyCredentialError(techMsg) {
-                let displayMsg = warmupBalances.userMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? techMsg
-                throw SetupFlowError.authenticationFailed(displayMsg)
+            if !warmupBalances.ok {
+                let techMsg = warmupBalances.error?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let techMsg, isLikelyCredentialError(techMsg) {
+                    let displayMsg = warmupBalances.userMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? techMsg
+                    throw SetupFlowError.authenticationFailed(displayMsg)
+                }
+                let fallback = warmupBalances.scaRequired == true
+                    ? "Freigabe nicht bestätigt. Bitte erneut versuchen und die Anfrage in der Banking-App bestätigen."
+                    : "Kontostandabfrage fehlgeschlagen. Bitte erneut versuchen."
+                throw SetupFlowError.authenticationFailed(
+                    warmupBalances.userMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                    ?? techMsg?.nilIfEmpty
+                    ?? fallback
+                )
             }
 
             // Nur Fortschritt zeigen wenn Kontostand erfolgreich war (sonst SCA noch ausstehend)
@@ -2067,8 +2219,13 @@ private struct StatusBalanceFlyoutCardView: View {
     let isDefaultTheme: Bool
     let forcedColorScheme: ColorScheme?
     var onDoubleTap: (() -> Void)? = nil
+    // Task 2: Navigation callbacks
+    var onPrevAccount: (() -> Void)? = nil
+    var onNextAccount: (() -> Void)? = nil
+    var onAddAccount:  (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var environmentColorScheme
+    @State private var showNav: Bool = false
 
     private var activeColorScheme: ColorScheme {
         forcedColorScheme ?? environmentColorScheme
@@ -2089,6 +2246,42 @@ private struct StatusBalanceFlyoutCardView: View {
         .background(Color.panelBackground)
         .preferredColorScheme(forcedColorScheme)
         .onTapGesture(count: 2) { onDoubleTap?() }
+        .overlay(alignment: .top) {
+            if showNav || onPrevAccount != nil || onNextAccount != nil || onAddAccount != nil {
+                HStack {
+                    // Left: previous account
+                    if let prev = onPrevAccount {
+                        Button(action: prev) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(showNav ? 1 : 0)
+                    }
+                    Spacer()
+                    // Right: next account or add account
+                    if let next = onNextAccount {
+                        Button(action: next) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(showNav ? 1 : 0)
+                    } else if let add = onAddAccount {
+                        Button(action: add) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(showNav ? 1 : 0)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .animation(.easeInOut(duration: 0.15), value: showNav)
+            }
+        }
+        .onHover { hovering in showNav = hovering }
     }
 
     private var defaultThemeCard: some View {
