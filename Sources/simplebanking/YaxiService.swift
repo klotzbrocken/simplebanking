@@ -14,12 +14,14 @@ enum YaxiService {
     nonisolated(unsafe) static var activeSlotId: String = "legacy"
 
     // MARK: - UserDefaults keys (per-slot)
+    // "legacy" slot uses the original key names for backward compatibility.
 
-    static var ibanKey: String { "simplebanking.iban.\(activeSlotId)" }
-    private static var connectionIdKey: String { "simplebanking.yaxi.connectionId.\(activeSlotId)" }
-    private static var credModelFullKey: String { "simplebanking.yaxi.credModel.full.\(activeSlotId)" }
-    private static var credModelUserIdKey: String { "simplebanking.yaxi.credModel.userId.\(activeSlotId)" }
-    private static var credModelNoneKey: String { "simplebanking.yaxi.credModel.none.\(activeSlotId)" }
+    private static func slotSuffix() -> String { activeSlotId == "legacy" ? "" : ".\(activeSlotId)" }
+    static var ibanKey: String { "simplebanking.iban\(slotSuffix())" }
+    private static var connectionIdKey: String { "simplebanking.yaxi.connectionId\(slotSuffix())" }
+    private static var credModelFullKey: String { "simplebanking.yaxi.credModel.full\(slotSuffix())" }
+    private static var credModelUserIdKey: String { "simplebanking.yaxi.credModel.userId\(slotSuffix())" }
+    private static var credModelNoneKey: String { "simplebanking.yaxi.credModel.none\(slotSuffix())" }
 
     // MARK: - Session Store (same UserDefaults keys as the old NetworkService)
 
@@ -29,10 +31,12 @@ enum YaxiService {
         private let defaults = UserDefaults.standard
         private let legacyKey = "simplebanking.yaxi.session"
 
-        // Keys computed dynamically from the active slot ID at access time
-        private var balancesKey: String { "simplebanking.yaxi.session.balances.\(YaxiService.activeSlotId)" }
-        private var transactionsKey: String { "simplebanking.yaxi.session.transactions.\(YaxiService.activeSlotId)" }
-        private var connectionDataKey: String { "simplebanking.yaxi.connectionData.\(YaxiService.activeSlotId)" }
+        // Keys computed dynamically from the active slot ID at access time.
+        // "legacy" slot uses the original key names for backward compatibility.
+        private static func suffix() -> String { YaxiService.activeSlotId == "legacy" ? "" : ".\(YaxiService.activeSlotId)" }
+        private var balancesKey: String { "simplebanking.yaxi.session.balances\(Self.suffix())" }
+        private var transactionsKey: String { "simplebanking.yaxi.session.transactions\(Self.suffix())" }
+        private var connectionDataKey: String { "simplebanking.yaxi.connectionData\(Self.suffix())" }
 
         private var balancesSession: Data?
         private var transactionsSession: Data?
