@@ -20,10 +20,9 @@ Powered by [YAXI Open Banking](https://yaxi.de) · PSD2 · Pure Swift · No Node
 
 ## Screenshot
 
-> _Add a screenshot of the menu bar icon and the transaction panel here._
-> _Drag & drop a PNG into this area on GitHub to embed it:_
->
-> `![simplebanking menu bar](Resources/screenshot-menubar.png)`
+<div align="center">
+  <img src="Resources/screenshot-menubar.png" alt="simplebanking — menu bar and transaction panel" width="800">
+</div>
 
 ---
 
