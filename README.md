@@ -1,60 +1,127 @@
 # simplebanking
 
-macOS menu bar app that shows your current account balance — no decimals, auto-refreshed.
+<div align="center">
 
-## What it does
+![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey?logo=apple)
+![Swift](https://img.shields.io/badge/Swift-5.9%2B-orange?logo=swift)
+![License](https://img.shields.io/github/license/klotzbrocken/simplebanking)
+![Latest Release](https://img.shields.io/github/v/release/klotzbrocken/simplebanking?label=latest)
+![Stars](https://img.shields.io/github/stars/klotzbrocken/simplebanking?style=social)
 
-- Displays booked balance in the menu bar (e.g. `1.234 €`)
-- Shows recent transactions with categories, merchant logos, and a financial health score
-- Auto-refreshes on a configurable interval (default: every 4 hours); manual refresh via menu
-- Supports any German bank reachable via YAXI Open Banking (PSD2)
-- Setup wizard: enter IBAN + optional credentials, bank is discovered automatically
-- SCA handled automatically where possible (push-TAN via banking app, OAuth redirect)
-- Credentials stored AES-256 encrypted with a master password; master password in Keychain
-- Optional Touch ID / Face ID unlock
-- Auto-updates via Sparkle
+**macOS menu bar app that shows your current account balance — no decimals, auto-refreshed.**
 
-## Architecture
+Powered by [YAXI Open Banking](https://yaxi.de) · PSD2 · Pure Swift · No Node.js
 
-```
-Menu bar → Swift app → routex-client-swift (Swift Package) → YAXI API → Bank (PSD2)
-```
+[Download](#installation) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Report a Bug](https://github.com/klotzbrocken/simplebanking/issues)
 
-Pure Swift — no Node.js, no embedded runtime. The `routex-client-swift` Swift Package handles
-all YAXI Open Banking API calls directly. Session tokens and connection data are persisted in
-UserDefaults; credentials encrypted in a local file (`Application Support/simplebanking/credentials.json`).
+</div>
 
-## Building
+---
 
-Requires: macOS 13+, Xcode CLI tools, Swift 5.9+
+## Screenshot
+
+> _Add a screenshot of the menu bar icon and the transaction panel here._
+> _Drag & drop a PNG into this area on GitHub to embed it:_
+>
+> `![simplebanking menu bar](Resources/screenshot-menubar.png)`
+
+---
+
+## Features
+
+| Feature | Details |
+|---|---|
+| **Live Balance** | Booked balance directly in the menu bar (e.g. `1.234 €`) |
+| **Transaction Panel** | Recent transactions with categories, merchant logos & financial health score |
+| **Calendar Heatmap** | Monthly spending/income heatmap, drill-down to daily transactions |
+| **Auto-Refresh** | Configurable interval (default: every 4 h); manual refresh via menu |
+| **Any German Bank** | Works with all banks reachable via YAXI Open Banking (PSD2) |
+| **Setup Wizard** | Enter IBAN — bank is discovered automatically |
+| **SCA Support** | Push-TAN & OAuth redirect handled automatically |
+| **Security** | AES-256-GCM + PBKDF2 · master password in Keychain · Touch ID / Face ID |
+| **Auto-Update** | Ships with [Sparkle](https://sparkle-project.org/) for silent over-the-air updates |
+
+---
+
+## Installation
+
+### Option A — Download DMG (recommended)
+
+1. Go to [**Releases**](https://github.com/klotzbrocken/simplebanking/releases/latest).
+2. Download `simplebanking-<version>.dmg`.
+3. Open the DMG, drag **simplebanking.app** to `/Applications`.
+4. Launch the app — a setup wizard guides you through connecting your bank.
+
+> **Note:** The app is notarized by Apple. If macOS still blocks it, right-click → Open.
+
+### Option B — Build from source
+
+**Requirements:** macOS 13+, Xcode CLI tools, Swift 5.9+
 
 ```bash
-# Generate secrets (once)
+# 1. Clone the repo
+git clone https://github.com/klotzbrocken/simplebanking.git
+cd simplebanking
+
+# 2. Generate secrets (one-time setup — requires YAXI API credentials)
 ./make-secrets.sh "YOUR_YAXI_KEY_ID" "YOUR_YAXI_SECRET_BASE64"
 
-# Build ad-hoc signed app bundle
+# 3. Build an ad-hoc signed app bundle
 ./build-app.sh
-# → SimpleBankingBuild/simplebanking.app
+# → output: SimpleBankingBuild/simplebanking.app
 
-# Build + sign + notarize + create DMG + update appcast
-SIGN_IDENTITY="Developer ID Application: …" \
+# 4. (Optional) Build + sign + notarize + DMG + appcast update
+SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 NOTARY_PROFILE="simplebanking-notary" \
 ./sign-and-notarize.sh
 ```
 
-No Node.js, no `npm install` needed.
+No `npm install`, no Node.js runtime needed.
+
+---
+
+## Architecture
+
+```
+Menu bar
+  └─ Swift app (SwiftUI)
+       └─ routex-client-swift (Swift Package)
+            └─ YAXI Open Banking API
+                 └─ Bank (PSD2)
+```
+
+Pure Swift — no embedded runtime, no JIT entitlement.
+Session tokens are stored in `UserDefaults`; credentials are AES-GCM encrypted at `~/Library/Application Support/simplebanking/credentials.json`.
+
+---
 
 ## Security
 
-- Credentials encrypted with AES-GCM + PBKDF2-SHA256 (210,000 iterations)
+- Credentials encrypted with **AES-GCM + PBKDF2-SHA256** (210,000 iterations)
 - Master password stored in macOS Keychain (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`)
 - Credentials file permissions: `600` (owner read/write only)
 - No credentials or IBAN written to log files
-- SQL injection protection via parameterized queries + read-only query guard
+- SQL injection protection via parameterised queries + read-only query guard
 - HTTPS for all API calls
+
+---
 
 ## Dependencies
 
-- [routex-client-swift](https://github.com/yaxi/routex-client-swift) — YAXI Open Banking Swift SDK
-- [GRDB.swift](https://github.com/groue/GRDB.swift) — local transaction database (SQLite)
-- [Sparkle](https://sparkle-project.org) — auto-update framework
+| Package | Purpose |
+|---|---|
+| [routex-client-swift](https://github.com/yaxi/routex-client-swift) | YAXI Open Banking Swift SDK |
+| [GRDB.swift](https://github.com/groue/GRDB.swift) | Local transaction database (SQLite) |
+| [Sparkle](https://sparkle-project.org/) | Auto-update framework |
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
