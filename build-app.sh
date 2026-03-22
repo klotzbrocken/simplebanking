@@ -160,8 +160,13 @@ else
     echo "Run 'swift package resolve' to download Sparkle, then rebuild."
 fi
 
-# ad-hoc sign
-codesign --force --deep --sign - "$APP"
+# ad-hoc sign — use dev entitlements (no sandbox; sandbox requires Developer ID)
+DEV_ENTITLEMENTS="$ROOT/Sources/simplebanking/simplebanking-dev.entitlements"
+if [[ -f "$DEV_ENTITLEMENTS" ]]; then
+    codesign --force --deep --sign - --entitlements "$DEV_ENTITLEMENTS" "$APP"
+else
+    codesign --force --deep --sign - "$APP"
+fi
 
 echo "Built app: $APP"
 echo "Version: ${VERSION_BASE} (Build ${BUILD_NUMBER})"

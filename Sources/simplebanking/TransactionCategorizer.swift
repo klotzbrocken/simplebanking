@@ -290,12 +290,6 @@ enum TransactionCategorizer {
             return resourceURL
         }
 
-        let devURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("Sources/simplebanking/Resources/categories_de.json")
-        if FileManager.default.fileExists(atPath: devURL.path) {
-            return devURL
-        }
-
         return nil
     }
 

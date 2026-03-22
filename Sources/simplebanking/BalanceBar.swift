@@ -1000,27 +1000,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withFullDate]
             let dateStr = formatter.string(from: Date())
-            let zipName = "simplebanking-diagnostic-\(dateStr).zip"
-            let zipURL = FileManager.default.temporaryDirectory.appendingPathComponent(zipName)
-            try? FileManager.default.removeItem(at: zipURL)
 
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-            process.arguments = ["-r", zipURL.path, "."]
-            process.currentDirectoryURL = logsDir
-            try? process.run()
-            process.waitUntilExit()
+            // Collect log files — sandbox-safe, no shell/Process spawn needed.
+            let fm = FileManager.default
+            var attachments: [URL] = []
+            if let enumerator = fm.enumerator(at: logsDir, includingPropertiesForKeys: [.isRegularFileKey]) {
+                for case let fileURL as URL in enumerator {
+                    if (try? fileURL.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+                        attachments.append(fileURL)
+                    }
+                }
+            }
 
             DispatchQueue.main.async {
-                guard process.terminationStatus == 0,
-                      FileManager.default.fileExists(atPath: zipURL.path) else {
+                guard !attachments.isEmpty else {
                     NSWorkspace.shared.open(logsDir)
                     return
                 }
                 if let service = NSSharingService(named: .composeEmail) {
                     service.recipients = ["support@simplebanking.de"]
                     service.subject = "simplebanking Diagnosebericht \(dateStr)"
-                    service.perform(withItems: [zipURL])
+                    service.perform(withItems: attachments.sorted { $0.lastPathComponent < $1.lastPathComponent })
                 }
             }
         }

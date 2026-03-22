@@ -79,13 +79,19 @@ if [[ -d "$SPARKLE_FW" ]]; then
         --sign "$SIGN_IDENTITY" "$SPARKLE_FW"
 fi
 
-# Main Swift binary — no special entitlements needed (not sandboxed)
+ENTITLEMENTS="$ROOT/Sources/simplebanking/simplebanking.entitlements"
+
+# Main Swift binary — with sandbox entitlements
 codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" \
+    --entitlements "$ENTITLEMENTS" \
     "$APP/Contents/MacOS/simplebanking"
 
 echo "[4/8] Sign app bundle"
-codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$APP"
+codesign --force --timestamp --options runtime \
+    --sign "$SIGN_IDENTITY" \
+    --entitlements "$ENTITLEMENTS" \
+    "$APP"
 
 echo "[5/8] Verify app signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
