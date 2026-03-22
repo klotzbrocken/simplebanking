@@ -15,63 +15,63 @@ enum BankLogoAssets {
         BankBrand(
             id: "sparkasse",
             displayName: "Sparkasse",
-            logoURL: wiki("Sparkasse.svg"),
+            logoURL: bundled("sparkasse"),
             accentColor: "FF0000",
             keywords: ["sparkasse", "spk", "stadtsparkasse", "kreissparkasse", "landessparkasse", "nasspa", "haspa", "ospa"]
         ),
         BankBrand(
             id: "volksbank",
             displayName: "Volksbank / Raiffeisenbank",
-            logoURL: wiki("Volksbank_Logo.svg"),
+            logoURL: bundled("volk"),
             accentColor: "003399",
             keywords: ["volksbank", "raiffeisenbank", "vr bank", "vr-bank", "raiffeisen", "voba", "genobank", "sparda"]
         ),
         BankBrand(
             id: "deutsche-bank",
             displayName: "Deutsche Bank",
-            logoURL: wiki("Deutsche_Bank_logo.svg"),
+            logoURL: bundled("deutsche"),
             accentColor: "0018A8",
             keywords: ["deutsche bank"]
         ),
         BankBrand(
             id: "commerzbank",
             displayName: "Commerzbank",
-            logoURL: wiki("Commerzbank_(2009).svg"),
+            logoURL: bundled("commerz"),
             accentColor: "FFCC00",
             keywords: ["commerzbank"]
         ),
         BankBrand(
             id: "postbank",
             displayName: "Postbank",
-            logoURL: wiki("Postbank_Logo.svg"),
+            logoURL: bundled("post"),
             accentColor: "FFCC00",
             keywords: ["postbank"]
         ),
         BankBrand(
             id: "unicredit",
             displayName: "HypoVereinsbank",
-            logoURL: wiki("HypoVereinsbank_logo.svg"),
+            logoURL: bundled("unicredit"),
             accentColor: "D71920",
             keywords: ["hypovereinsbank", "hvb", "unicredit"]
         ),
         BankBrand(
             id: "ing",
             displayName: "ING",
-            logoURL: wiki("ING_Group_N.V._Logo.svg"),
+            logoURL: bundled("ing"),
             accentColor: "FF6200",
             keywords: ["ing", "ing-diba", "ing diba", "ing deutschland"]
         ),
         BankBrand(
             id: "dkb",
             displayName: "DKB",
-            logoURL: wiki("Deutsche_Kreditbank_AG_Logo_2016.svg"),
+            logoURL: bundled("dkb"),
             accentColor: "005E7D",
             keywords: ["dkb", "deutsche kreditbank"]
         ),
         BankBrand(
             id: "comdirect",
             displayName: "comdirect",
-            logoURL: wiki("Comdirect_Bank_AG_Logo.svg"),
+            logoURL: bundled("comdirect"),
             accentColor: "FFD700",
             keywords: ["comdirect"]
         ),
@@ -85,56 +85,56 @@ enum BankLogoAssets {
         BankBrand(
             id: "consorsbank",
             displayName: "Consorsbank",
-            logoURL: wiki("Consorsbank_201x_logo.svg"),
+            logoURL: bundled("consors"),
             accentColor: "003B7E",
             keywords: ["consorsbank", "consors", "bnp paribas"]
         ),
         BankBrand(
             id: "1822direkt",
             displayName: "1822direkt",
-            logoURL: wiki("1822direkt_logo.svg"),
+            logoURL: bundled("1822direkt"),
             accentColor: "E30613",
             keywords: ["1822direkt", "1822"]
         ),
         BankBrand(
             id: "n26",
             displayName: "N26",
-            logoURL: wiki("N26_(Direktbank)_2018_logo.svg"),
+            logoURL: bundled("n26"),
             accentColor: "36A18B",
             keywords: ["n26", "number26"]
         ),
         BankBrand(
             id: "c24",
             displayName: "C24 Bank",
-            logoURL: wiki("C24_Bank_logo.svg"),
+            logoURL: bundled("c24"),
             accentColor: "003C64",
             keywords: ["c24"]
         ),
         BankBrand(
             id: "vivid",
             displayName: "Vivid Money",
-            logoURL: wiki("Vivid_Money_logo.svg"),
+            logoURL: bundled("vivid"),
             accentColor: "6C3AFF",
             keywords: ["vivid"]
         ),
         BankBrand(
             id: "tomorrow",
             displayName: "Tomorrow Bank",
-            logoURL: wiki("Tomorrow_(Unternehmen)_logo.svg"),
+            logoURL: bundled("tomorrow"),
             accentColor: "1A1A1A",
             keywords: ["tomorrow"]
         ),
         BankBrand(
             id: "targobank",
             displayName: "Targobank",
-            logoURL: wiki("Targobank-logo.svg"),
+            logoURL: bundled("targo"),
             accentColor: "003A65",
             keywords: ["targobank", "targo"]
         ),
         BankBrand(
             id: "santander",
             displayName: "Santander",
-            logoURL: wiki("Banco_Santander_Logotipo.svg"),
+            logoURL: bundled("santander"),
             accentColor: "EC0000",
             keywords: ["santander"]
         ),
@@ -148,42 +148,42 @@ enum BankLogoAssets {
         BankBrand(
             id: "psd",
             displayName: "PSD Bank",
-            logoURL: wiki("PSD_Bank_logo.svg"),
+            logoURL: bundled("psd"),
             accentColor: "009EE3",
             keywords: ["psd bank"]
         ),
         BankBrand(
             id: "oldenburgische",
             displayName: "Oldenburgische Landesbank",
-            logoURL: wiki("OLB_2021_Logo.svg"),
+            logoURL: bundled("olb"),
             accentColor: "003366",
             keywords: ["oldenburgische landesbank", "olb"]
         ),
         BankBrand(
             id: "apobank",
             displayName: "apoBank",
-            logoURL: wiki("Apobank_logo.svg"),
+            logoURL: bundled("apo"),
             accentColor: "003B7E",
             keywords: ["apobank", "apo bank", "apotheker"]
         ),
         BankBrand(
             id: "gls",
             displayName: "GLS Bank",
-            logoURL: wiki("GLS_Gemeinschaftsbank_logo.svg"),
+            logoURL: bundled("gls"),
             accentColor: "006633",
             keywords: ["gls bank", "gls gemeinschaftsbank"]
         ),
         BankBrand(
             id: "triodos",
             displayName: "Triodos Bank",
-            logoURL: wiki("Triodos_Bank_logo.svg"),
+            logoURL: bundled("triodos"),
             accentColor: "004B3A",
             keywords: ["triodos"]
         ),
         BankBrand(
             id: "ethikbank",
             displayName: "EthikBank",
-            logoURL: wiki("EthikBank_Logo.svg"),
+            logoURL: bundled("ethik"),
             accentColor: "009640",
             keywords: ["ethikbank"]
         ),
@@ -197,9 +197,16 @@ enum BankLogoAssets {
         BankBrand(
             id: "bundesbank",
             displayName: "Deutsche Bundesbank",
-            logoURL: wiki("Deutsche_Bundesbank_Logo.svg"),
+            logoURL: bundled("bundes"),
             accentColor: "003399",
             keywords: ["bundesbank"]
+        ),
+        BankBrand(
+            id: "revolut",
+            displayName: "Revolut",
+            logoURL: bundled("revolut"),
+            accentColor: "191C1F",
+            keywords: ["revolut"]
         ),
     ]
 
@@ -224,6 +231,7 @@ enum BankLogoAssets {
         "c24": "c24",
         "targobank": "targobank",
         "santander": "santander",
+        "revolut": "revolut",
     ]
 
     private static let blzMapping: [String: String] = [
@@ -242,26 +250,42 @@ enum BankLogoAssets {
         "20041111": "comdirect",
         "20041133": "comdirect",
         "10077777": "norisbank",
+        "10010010": "revolut",
     ]
 
     private static let blzPrefixMapping: [String: String] = [
         "120": "dkb",
-        "500": "commerzbank",
+        // "500" removed: too broad — catches Sparkasse Frankfurt and others.
+        // "100" removed: too broad — catches Revolut (10010010), N26 (10011001), etc.
+        // Deutsche Bank and comdirect are covered by exact BLZ entries.
         "200": "comdirect",
-        "100": "deutsche-bank",
     ]
 
     static func resolve(displayName: String?, logoID: String?, iban: String?) -> BankBrand? {
         if let logoID, let byLogo = find(byLogoID: logoID) {
-            return byLogo
+            return withGeneratedColor(byLogo)
         }
         if let displayName, let byName = find(byName: displayName) {
-            return byName
+            return withGeneratedColor(byName)
         }
         if let iban, let byIBAN = find(byIBAN: iban) {
-            return byIBAN
+            return withGeneratedColor(byIBAN)
         }
         return nil
+    }
+
+    /// Overrides accentColor with the value from GeneratedBankColors if available.
+    private static func withGeneratedColor(_ brand: BankBrand) -> BankBrand {
+        guard let color = GeneratedBankColors.primaryColor(forLogoId: brand.id) else {
+            return brand
+        }
+        return BankBrand(
+            id: brand.id,
+            displayName: brand.displayName,
+            logoURL: brand.logoURL,
+            accentColor: color,
+            keywords: brand.keywords
+        )
     }
 
     static func find(byLogoID logoID: String) -> BankBrand? {
@@ -323,6 +347,15 @@ enum BankLogoAssets {
             .replacingOccurrences(of: "[^a-z0-9]+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+    }
+
+    /// Returns a file URL to a bundled SVG in Resources/bank-logos/, or falls back to a placeholder.
+    private static func bundled(_ name: String) -> URL {
+        if let url = Bundle.main.url(forResource: name, withExtension: "svg", subdirectory: "bank-logos") {
+            return url
+        }
+        // Fallback: should never happen for correctly bundled assets
+        return URL(fileURLWithPath: "/")
     }
 
     private static func wiki(_ filename: String, width: Int = 72) -> URL {
