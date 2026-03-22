@@ -15,6 +15,9 @@ if [[ ! -f "$SECRETS_FILE" ]]; then
     exit 1
 fi
 
+# Generiere GeneratedBankColors.swift aus SVG-Metadaten
+bash "$ROOT/scripts/generate-bank-colors.sh"
+
 # arm64-only: routex-client-swift XCFramework setzt macOS 14.0 voraus,
 # was ausschließlich auf Apple-Silicon-Macs läuft. Intel-Support entfällt.
 swift build -c release --arch arm64
@@ -27,7 +30,7 @@ fi
 OUTDIR="$ROOT/SimpleBankingBuild"
 APP="$OUTDIR/simplebanking.app"
 ICON_SRC="${ICON_SRC:-$ROOT/Resources/icon_full_black.png}"
-VERSION_BASE="${VERSION_BASE:-1.2.3}"
+VERSION_BASE="${VERSION_BASE:-1.2.4}"
 
 mkdir -p "$OUTDIR"
 rm -rf "$APP"
@@ -79,6 +82,10 @@ fi
 [[ -f "$LINKS_PNG_SRC"  ]] && cp "$LINKS_PNG_SRC"  "$APP/Contents/Resources/Links.png"
 if [[ -f "$CLIPPY_ANIMATIONS_SRC" ]]; then
     cp "$CLIPPY_ANIMATIONS_SRC" "$APP/Contents/Resources/animations.json"
+fi
+BANK_LOGOS_SRC="$ROOT/Sources/simplebanking/Resources/bank-logos"
+if [[ -d "$BANK_LOGOS_SRC" ]]; then
+    cp -R "$BANK_LOGOS_SRC" "$APP/Contents/Resources/bank-logos"
 fi
 
 # Generate .icns from source PNG if available

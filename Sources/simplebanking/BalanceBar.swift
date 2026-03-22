@@ -1,8 +1,10 @@
 import AppKit
 import Foundation
+import Routex
 import SwiftUI
 import UserNotifications
 import ServiceManagement
+
 
 // MARK: - Credentials Panel (custom, because NSAlert sizing is limited)
 
@@ -213,7 +215,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @AppStorage("demoMode") private var demoMode: Bool = false
     @AppStorage("demoSeed") private var demoSeed: Int = 123456
 
-    @AppStorage("hideIndex") private var hideIndex: Int = 0 // 0=off, 1=immediate, 2=10s, 3=30s, 4=60s
+    @AppStorage("hideIndex") private var hideIndex: Int = 2 // 0=off, 1=immediate, 2=5s, 3=10s
+    @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
+    @AppStorage("menubarStyle") private var menubarStyle: Int = 1  // 0=lang (fixed), 1=kurz (dynamic)
     @AppStorage("refreshInterval") private var refreshInterval: Int = 60
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
@@ -225,10 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
-    @AppStorage("confettiEnabled") private var confettiEnabled: Bool = true
-    @AppStorage("confettiOnBalanceThreshold") private var confettiOnBalanceThreshold: Bool = true
-    @AppStorage("confettiBalanceThreshold") private var confettiBalanceThreshold: Int = 3000
-    @AppStorage("confettiOnNewIncome") private var confettiOnNewIncome: Bool = true
+    @AppStorage("confettiIncomeThreshold") private var confettiIncomeThreshold: Int = 50
     @AppStorage("confettiInitialShown") private var confettiInitialShown: Bool = false
     @AppStorage("connectedBankDisplayName") private var connectedBankDisplayName: String = ""
     @AppStorage("connectedBankLogoID") private var connectedBankLogoID: String = ""
@@ -243,10 +244,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var masterPassword: String? = nil
     private var locked: Bool = false
 
+    /// Incremented on every slot switch. Async tasks capture this at start and bail if it changed.
+    private var slotEpoch: Int = 0
+    private var isHBCICallInFlight: Bool = false    // guard against concurrent HBCI calls (balance + transactions)
+    private var isTanPending: Bool = false
+
     private var isHiddenBalance: Bool = false
     private var hideTimer: Timer?
     private var pendingLeftClick: DispatchWorkItem?
-    private var lastShownTitle: String = "— €"
+    private var lastShownTitle: String = "—"
     
     private var settingsPanel: SettingsPanel?
     private var updateChecker: UpdateChecker?
@@ -295,14 +301,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateStatusBalanceTitle() {
+        updateMenuBarButton()
+    }
+
+    // Returns the bank logo (16×16, template) for the menu bar, or nil if none available.
+    // When nil, "€" is used as text fallback instead.
+    private func menuBarLogoImage() -> NSImage? {
+        if demoMode {
+            let img = NSImage(systemSymbolName: "wallet.pass", accessibilityDescription: "Demo")
+            img?.isTemplate = true
+            return img
+        }
+        let logoID = connectedBankLogoID.isEmpty ? nil : connectedBankLogoID
+        guard let logoID else { return nil }
+        let brand = BankLogoAssets.resolve(displayName: connectedBankDisplayName, logoID: logoID, iban: nil)
+        BankLogoStore.shared.preload(brand: brand)
+        guard let img = BankLogoStore.shared.image(for: brand) else { return nil }
+        let sized = img.resized(to: NSSize(width: 16, height: 16))
+        sized.isTemplate = true
+        return sized
+    }
+
+    private func updateMenuBarButton() {
         guard let button = statusItem?.button else { return }
         guard !locked else { return }
 
-        if isHiddenBalance {
-            button.title = isHoverRevealingBalance ? decoratedTitle(lastShownTitle) : hiddenBalanceMaskTitle()
-        } else {
-            button.title = decoratedTitle(lastShownTitle)
+        let isShort = menubarStyle == 1
+        let logo = menuBarLogoImage()
+
+        // Logo on the LEFT, text on the right.
+        // If no logo: "€" is prepended to the title text instead.
+        button.image = logo
+        button.imagePosition = logo != nil ? .imageLeft : .noImage
+
+        let p = logo != nil ? " " : "€ "  // prefix: space after logo, or "€ " when no logo
+
+        // TAN / 2FA pending
+        if isTanPending {
+            setButtonTitle(button, "\(p)TAN")
+            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
+            return
         }
+
+        // Hidden balance
+        if isHiddenBalance && !isHoverRevealingBalance {
+            if isShort {
+                // Short: logo only (or "€" if no logo)
+                setButtonTitle(button, logo != nil ? "" : "€")
+            } else {
+                // Long: logo + mask
+                setButtonTitle(button, "\(p)•••.•• ")
+            }
+            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
+            return
+        }
+
+        // Normal balance
+        setButtonTitle(button, "\(p)\(decoratedTitle(lastShownTitle))")
+        statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
+    }
+
+    private func menubarFixedWidth() -> CGFloat {
+        let refString = " \(lastShownTitle.isEmpty ? "1.234" : lastShownTitle) "
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        ]
+        let textWidth = (refString as NSString).size(withAttributes: attrs).width
+        return textWidth + 22  // 22px for the logo image + gap
+    }
+
+    private func setButtonTitle(_ button: NSStatusBarButton, _ text: String) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        ]
+        button.attributedTitle = NSAttributedString(string: text, attributes: attrs)
     }
 
     private func updateHiddenBalanceTooltip() {
@@ -373,30 +445,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return value
     }
 
-    private func syncConnectedBankIntoViewModel(iban: String? = nil) {
-        var displayName = connectedBankDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if displayName.isEmpty, let cachedDisplayName = cachedBackendConnectionDisplayName() {
-            displayName = cachedDisplayName
-            connectedBankDisplayName = cachedDisplayName
-        }
-        txVM.connectedBankDisplayName = displayName
+    /// Single source of truth: applies a BankSlot's identity to both AppStorage globals and txVM.
+    /// Call this at startup and on every slot switch — NOT during data refresh.
+    private func applySlotToViewModel(_ slot: BankSlot) {
+        let store = MultibankingStore.shared
+        var resolvedName = slot.displayName
+        var resolvedLogo = slot.logoId ?? ""
 
-        let logoID = connectedBankLogoID.trimmingCharacters(in: .whitespacesAndNewlines)
-        txVM.connectedBankLogoID = logoID.isEmpty ? nil : logoID
-
-        if let iban {
-            let normalizedIBAN = iban
-                .replacingOccurrences(of: " ", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .uppercased()
-            txVM.connectedBankIBAN = normalizedIBAN.isEmpty ? nil : normalizedIBAN
+        // Brand resolution: name takes priority over YAXI's logoId (which can be wrong, e.g. "commerzbank" for C24).
+        // Priority: 1) user-visible name → 2) stored logoId → 3) IBAN lookup
+        if !resolvedName.isEmpty, let brand = BankLogoAssets.find(byName: resolvedName) {
+            resolvedLogo = brand.id
+        } else if !resolvedLogo.isEmpty, BankLogoAssets.find(byLogoID: resolvedLogo) != nil {
+            // logo is already valid — keep it
+        } else if !slot.iban.isEmpty, let brand = BankLogoAssets.find(byIBAN: slot.iban) {
+            if resolvedName.isEmpty { resolvedName = brand.displayName }
+            resolvedLogo = brand.id
         }
+
+        // Persist resolved logo/name back to the slot so it's correct on next launch.
+        // This auto-heals existing accounts that were set up before the icon fix.
+        if resolvedLogo != (slot.logoId ?? "") || resolvedName != slot.displayName {
+            var updated = slot
+            updated.displayName = resolvedName
+            updated.logoId = resolvedLogo.isEmpty ? nil : resolvedLogo
+            store.updateSlot(updated)
+        }
+
+        let normalizedIBAN = slot.iban
+            .replacingOccurrences(of: " ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        connectedBankDisplayName = resolvedName
+        connectedBankLogoID = resolvedLogo
+        txVM.connectedBankDisplayName = resolvedName
+        txVM.connectedBankLogoID = resolvedLogo.isEmpty ? nil : resolvedLogo
+        txVM.connectedBankIBAN = normalizedIBAN.isEmpty ? nil : normalizedIBAN
     }
 
     private func updateConnectedBankState(_ bank: DiscoveredBank, iban: String? = nil) {
         connectedBankDisplayName = bank.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         connectedBankLogoID = bank.logoId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        syncConnectedBankIntoViewModel(iban: iban)
+        txVM.connectedBankDisplayName = connectedBankDisplayName
+        txVM.connectedBankLogoID = connectedBankLogoID.isEmpty ? nil : connectedBankLogoID
+        if let iban {
+            let n = iban.replacingOccurrences(of: " ", with: "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            txVM.connectedBankIBAN = n.isEmpty ? nil : n
+        }
     }
 
     private func clearConnectedBankState() {
@@ -448,11 +543,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AppLogger.log("Application did finish launching")
         YaxiService.migrateCredentialsModelIfNeeded()
 
+        // TAN/SCA state callback → update menu bar and transactions panel
+        YaxiService.onTanStateChanged = { [weak self] isPending in
+            self?.isTanPending = isPending
+            self?.txVM.isTanPending = isPending
+            self?.updateMenuBarButton()
+        }
+
         // Task 4: Set active slot IDs in all data layers at startup
-        if let slot = MultibankingStore.shared.activeSlot {
+        let store = MultibankingStore.shared
+        if let slot = store.activeSlot {
             YaxiService.activeSlotId = slot.id
             CredentialsStore.activeSlotId = slot.id
             TransactionsDatabase.activeSlotId = slot.id
+            applySlotToViewModel(slot)
+            // SessionStore.init() always loads the legacy (no-suffix) keys regardless of which
+            // slot was last active. For non-legacy slots this means the wrong session is in memory.
+            // Reload immediately so the first refreshAsync uses the correct slot's session.
+            Task { await YaxiService.sessionStore.reloadForActiveSlot() }
+        }
+
+        // One-time migration: clear ALL corrupted legacy slot state.
+        // During early multibanking builds, C24 setup wrote its connectionId, connectionData
+        // and session to the legacy (Sparkasse) keys, causing Sparkasse to show C24's balance.
+        // We clear everything and re-discover the Sparkasse bank so it can re-auth via redirect.
+        if store.slots.count > 1 {
+            let migrationKey = "simplebanking.migration.legacySlotFullReset.v1"
+            if !UserDefaults.standard.bool(forKey: migrationKey) {
+                UserDefaults.standard.set(true, forKey: migrationKey)
+                Task {
+                    // 1. Clear session/connectionData (actor-isolated)
+                    await YaxiService.sessionStore.clearLegacySessionData()
+                    // 2. Clear connectionId and credModel (non-actor UserDefaults keys)
+                    let d = UserDefaults.standard
+                    d.removeObject(forKey: "simplebanking.yaxi.connectionId")
+                    d.removeObject(forKey: "simplebanking.yaxi.credModel.full")
+                    d.removeObject(forKey: "simplebanking.yaxi.credModel.userId")
+                    d.removeObject(forKey: "simplebanking.yaxi.credModel.none")
+                    AppLogger.log("Migration: legacy slot state cleared (multi-slot corruption fix)", category: "App")
+                    // 3. Re-discover legacy bank so next refresh can trigger SCA/redirect
+                    let prev = YaxiService.activeSlotId
+                    YaxiService.activeSlotId = "legacy"
+                    if await YaxiService.discoverBank() != nil {
+                        AppLogger.log("Migration: legacy bank re-discovered successfully", category: "App")
+                    } else {
+                        AppLogger.log("Migration: legacy bank re-discovery failed — user may need to re-run setup", category: "App", level: "WARN")
+                    }
+                    YaxiService.activeSlotId = prev
+                }
+            }
         }
 
         installEditMenu()
@@ -501,57 +640,136 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         ThemeManager.shared.ensureThemeFiles()
         ThemeManager.shared.reloadThemes()
-        syncConnectedBankIntoViewModel()
 
         // Build a menu, but don't assign it to statusItem.menu, otherwise left click always opens the menu.
         let menu = NSMenu()
 
+        // ── Aktualisieren ────────────────────────────────────────────────
         let refreshItem = NSMenuItem(title: t("Aktualisieren", "Refresh"), action: #selector(refresh), keyEquivalent: "r")
         refreshItem.tag = 300
+        if let img = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil) {
+            img.isTemplate = true; refreshItem.image = img
+        }
         menu.addItem(refreshItem)
         menu.addItem(NSMenuItem.separator())
 
-        let demoItem = NSMenuItem(title: "", action: #selector(toggleDemoMode), keyEquivalent: "d")
-        demoItem.tag = 301
-        demoItem.state = demoMode ? .on : .off
-        menu.addItem(demoItem)
-        menu.addItem(NSMenuItem.separator())
-
+        // ── Automatisch verstecken (submenu) ─────────────────────────────
         let hideSub = NSMenu()
+
+        let immediateItem = NSMenuItem(title: t("Sofort", "Immediately"), action: #selector(setHideImmediate), keyEquivalent: "")
+        immediateItem.tag = 411
+        immediateItem.state = (hideIndex == 1) ? .on : .off
+        hideSub.addItem(immediateItem)
+
+        let fiveSecItem = NSMenuItem(title: t("Nach 5 Sekunden", "After 5 seconds"), action: #selector(setHide10), keyEquivalent: "")
+        fiveSecItem.tag = 412
+        fiveSecItem.state = (hideIndex == 2) ? .on : .off
+        hideSub.addItem(fiveSecItem)
+
+        let tenSecItem = NSMenuItem(title: t("Nach 10 Sekunden", "After 10 seconds"), action: #selector(setHide30), keyEquivalent: "")
+        tenSecItem.tag = 413
+        tenSecItem.state = (hideIndex == 3) ? .on : .off
+        hideSub.addItem(tenSecItem)
 
         let offItem = NSMenuItem(title: t("Aus", "Off"), action: #selector(setHideOff), keyEquivalent: "")
         offItem.tag = 410
         offItem.state = (hideIndex == 0) ? .on : .off
         hideSub.addItem(offItem)
 
-        let tenSecItem = NSMenuItem(title: t("10 Sekunden", "10 seconds"), action: #selector(setHide10), keyEquivalent: "")
-        tenSecItem.tag = 412
-        tenSecItem.state = (hideIndex == 2) ? .on : .off
-        hideSub.addItem(tenSecItem)
-
-        let thirtySecItem = NSMenuItem(title: t("30 Sekunden", "30 seconds"), action: #selector(setHide30), keyEquivalent: "")
-        thirtySecItem.tag = 413
-        thirtySecItem.state = (hideIndex == 3) ? .on : .off
-        hideSub.addItem(thirtySecItem)
-
-        let sixtySecItem = NSMenuItem(title: t("60 Sekunden", "60 seconds"), action: #selector(setHide60), keyEquivalent: "")
-        sixtySecItem.tag = 414
-        sixtySecItem.state = (hideIndex == 4) ? .on : .off
-        hideSub.addItem(sixtySecItem)
-
         let hideItem = NSMenuItem(title: t("Automatisch verstecken", "Auto-hide"), action: nil, keyEquivalent: "")
         hideItem.tag = 401
         hideItem.submenu = hideSub
+        if let img = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil) {
+            img.isTemplate = true; hideItem.image = img
+        }
         menu.addItem(hideItem)
-        menu.addItem(NSMenuItem.separator())
 
+        // ── Sperren ───────────────────────────────────────────────────────
         let lockItem = NSMenuItem(title: "", action: #selector(toggleLock), keyEquivalent: "l")
         lockItem.tag = 999
+        if let img = NSImage(systemSymbolName: "lock", accessibilityDescription: nil) {
+            img.isTemplate = true; lockItem.image = img
+        }
         menu.addItem(lockItem)
+        menu.addItem(NSMenuItem.separator())
 
-        let setupItem = NSMenuItem(title: t("Einrichtungsassistent…", "Setup Wizard…"), action: #selector(connect), keyEquivalent: "c")
-        setupItem.tag = 100
-        menu.addItem(setupItem)
+        // ── Einstellungen (submenu) ───────────────────────────────────────
+        let settingsSub = NSMenu()
+
+        let addBankItem = NSMenuItem(title: t("Bankkonto hinzufügen…", "Add Bank Account…"), action: #selector(connect), keyEquivalent: "b")
+        addBankItem.tag = 100
+        settingsSub.addItem(addBankItem)
+
+        let openSettingsItem = NSMenuItem(title: t("Einstellungen öffnen…", "Open Settings…"), action: #selector(showSettings), keyEquivalent: ",")
+        openSettingsItem.tag = 200
+        settingsSub.addItem(openSettingsItem)
+
+        settingsSub.addItem(NSMenuItem.separator())
+
+        // Demo-Modus submenu
+        let demoSub = NSMenu()
+
+        let demoOnItem = NSMenuItem(title: t("An", "On"), action: #selector(setDemoOn), keyEquivalent: "")
+        demoOnItem.tag = 3011
+        demoOnItem.state = demoMode ? .on : .off
+        demoSub.addItem(demoOnItem)
+
+        let demoOffItem = NSMenuItem(title: t("Aus", "Off"), action: #selector(setDemoOff), keyEquivalent: "")
+        demoOffItem.tag = 3010
+        demoOffItem.state = demoMode ? .off : .on
+        demoSub.addItem(demoOffItem)
+
+        demoSub.addItem(NSMenuItem.separator())
+
+        let generateTxItem = NSMenuItem(title: t("Umsätze generieren", "Generate Transactions"), action: #selector(randomizeDemo), keyEquivalent: "")
+        generateTxItem.tag = 3012
+        demoSub.addItem(generateTxItem)
+
+        let demoItem = NSMenuItem(title: t("Demo-Modus", "Demo Mode"), action: nil, keyEquivalent: "")
+        demoItem.tag = 301
+        demoItem.submenu = demoSub
+        settingsSub.addItem(demoItem)
+
+        let einstellungenItem = NSMenuItem(title: t("Einstellungen", "Settings"), action: nil, keyEquivalent: "")
+        einstellungenItem.tag = 400
+        einstellungenItem.submenu = settingsSub
+        if let img = NSImage(systemSymbolName: "gear", accessibilityDescription: nil) {
+            img.isTemplate = true; einstellungenItem.image = img
+        }
+        menu.addItem(einstellungenItem)
+        menu.addItem(NSMenuItem.separator())
+
+        // ── Nach Updates suchen ───────────────────────────────────────────
+        let updateItem = NSMenuItem(title: t("Nach Updates suchen…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "u")
+        updateItem.tag = 202
+        if let img = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil) {
+            img.isTemplate = true; updateItem.image = img
+        }
+        menu.addItem(updateItem)
+
+        // ── Support (submenu) ─────────────────────────────────────────────
+        let supportSub = NSMenu()
+
+        let diagEnableItem = NSMenuItem(title: t("Diagnose aktivieren", "Enable Diagnostics"), action: #selector(toggleSupportDiagnostics), keyEquivalent: "")
+        diagEnableItem.tag = 501
+        diagEnableItem.state = appLoggingEnabled ? .on : .off
+        supportSub.addItem(diagEnableItem)
+
+        let diagReportItem = NSMenuItem(title: t("Diagnosebericht versenden…", "Send Diagnostic Report…"), action: #selector(sendDiagnosticReport), keyEquivalent: "")
+        diagReportItem.tag = 502
+        supportSub.addItem(diagReportItem)
+
+        supportSub.addItem(NSMenuItem.separator())
+
+        let openLogsItem = NSMenuItem(title: t("Logs öffnen", "Open Logs"), action: #selector(openLogs), keyEquivalent: "")
+        openLogsItem.tag = 503
+        supportSub.addItem(openLogsItem)
+
+        let docItem = NSMenuItem(title: t("Dokumentation", "Documentation"), action: #selector(openDocumentation), keyEquivalent: "")
+        docItem.tag = 504
+        supportSub.addItem(docItem)
+
+        supportSub.addItem(NSMenuItem.separator())
 
         let forgetItem = NSMenuItem(title: t("Zurücksetzen", "Reset"), action: #selector(resetApp), keyEquivalent: "")
         forgetItem.tag = 101
@@ -559,20 +777,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             img.isTemplate = true
             forgetItem.image = img
         }
-        menu.addItem(forgetItem)
+        supportSub.addItem(forgetItem)
+
+        let supportItem = NSMenuItem(title: t("Support", "Support"), action: nil, keyEquivalent: "")
+        supportItem.tag = 500
+        supportItem.submenu = supportSub
+        if let img = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil) {
+            img.isTemplate = true; supportItem.image = img
+        }
+        menu.addItem(supportItem)
         menu.addItem(NSMenuItem.separator())
 
-        let updateItem = NSMenuItem(title: t("Nach Updates suchen…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "u")
-        updateItem.tag = 202
-        menu.addItem(updateItem)
-
-        let settingsItem = NSMenuItem(title: t("Einstellungen…", "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
-        settingsItem.tag = 200
-        menu.addItem(settingsItem)
-        menu.addItem(NSMenuItem.separator())
-
+        // ── Beenden ───────────────────────────────────────────────────────
         let quitItem = NSMenuItem(title: t("Beenden", "Quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.tag = 1000
+        if let img = NSImage(systemSymbolName: "power", accessibilityDescription: nil) {
+            img.isTemplate = true; quitItem.image = img
+        }
         menu.addItem(quitItem)
 
         menu.autoenablesItems = false
@@ -639,6 +860,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             Task { @MainActor in
                 self.applyBalanceDisplayModeConstraints()
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.slotRenamed"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            Task { @MainActor in
+                let store = MultibankingStore.shared
+                if let slot = store.activeSlot {
+                    self.applySlotToViewModel(slot)
+                    self.updateTxPanelAccountNav()
+                }
             }
         }
 
@@ -733,11 +969,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 statusItem.button?.title = t("Verbinden…", "Connect…")
                 statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
             }
+            // Kontoname/-logo sofort aus aktivem Slot wiederherstellen
+            if let slot = MultibankingStore.shared.activeSlot {
+                applySlotToViewModel(slot)
+            }
+            updateTxPanelAccountNav()
         }
     }
 
     @objc private func randomizeDemo() {
         demoSeed = Int.random(in: 1...Int.max)
+    }
+
+    @objc private func setDemoOn() {
+        if !demoMode { toggleDemoMode() }
+    }
+
+    @objc private func setDemoOff() {
+        if demoMode { toggleDemoMode() }
+    }
+
+    @objc private func toggleSupportDiagnostics() {
+        AppLogger.setEnabled(!appLoggingEnabled)
+        applyLocalizedMenuTitles()
+    }
+
+    @objc private func sendDiagnosticReport() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let logsDir = AppLogger.logDirectoryURL
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withFullDate]
+            let dateStr = formatter.string(from: Date())
+            let zipName = "simplebanking-diagnostic-\(dateStr).zip"
+            let zipURL = FileManager.default.temporaryDirectory.appendingPathComponent(zipName)
+            try? FileManager.default.removeItem(at: zipURL)
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+            process.arguments = ["-r", zipURL.path, "."]
+            process.currentDirectoryURL = logsDir
+            try? process.run()
+            process.waitUntilExit()
+
+            DispatchQueue.main.async {
+                guard process.terminationStatus == 0,
+                      FileManager.default.fileExists(atPath: zipURL.path) else {
+                    NSWorkspace.shared.open(logsDir)
+                    return
+                }
+                if let service = NSSharingService(named: .composeEmail) {
+                    service.recipients = ["support@simplebanking.de"]
+                    service.subject = "simplebanking Diagnosebericht \(dateStr)"
+                    service.perform(withItems: [zipURL])
+                }
+            }
+        }
+    }
+
+    @objc private func openLogs() {
+        NSWorkspace.shared.open(AppLogger.logDirectoryURL)
+    }
+
+    @objc private func openDocumentation() {
+        if let url = URL(string: "https://www.simplebanking.de/doc") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func toggleLock() {
@@ -764,27 +1060,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     
     private func showLockIcon() {
         guard let btn = statusItem.button else { return }
-        btn.title = ""
-        
-        // Try to load lock icon from bundle resources
-        if let iconPath = Bundle.main.path(forResource: "lock", ofType: "png"),
-           let icon = NSImage(contentsOfFile: iconPath) {
-            icon.size = NSSize(width: 16, height: 16)
-            icon.isTemplate = false // Show icon as-is (not as template)
-            btn.image = icon
-            btn.imagePosition = .imageOnly
+        statusItem.length = NSStatusItem.variableLength
+
+        let logo = menuBarLogoImage()
+        if let logo {
+            // Logo on left + lock symbol as title
+            btn.image = logo
+            btn.imagePosition = .imageLeft
+            setButtonTitle(btn, " 🔒")
         } else {
-            // Fallback to SF Symbol
-            if let lockIcon = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Gesperrt") {
-                lockIcon.size = NSSize(width: 14, height: 14)
-                lockIcon.isTemplate = true
-                btn.image = lockIcon
-                btn.imagePosition = .imageOnly
-            } else {
-                // Ultimate fallback
-                btn.title = "🔒"
-                btn.image = nil
-            }
+            // No logo: show "€ 🔒"
+            btn.image = nil
+            btn.imagePosition = .noImage
+            setButtonTitle(btn, "€ 🔒")
         }
     }
     
@@ -795,6 +1083,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         img.isTemplate = true
         btn.image = img
         btn.imagePosition = .imageLeft
+        updateMenuBarButton()
     }
 
     @objc private func unlock() {
@@ -842,27 +1131,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Disable items based on setup/lock state
         for item in menu.items {
             if item.isSeparatorItem { continue }
-            
-            // Always enabled: Einrichtungsassistent (100), Updates (202), Einstellungen (200), Beenden (1000)
-            if item.tag == 100 || item.tag == 200 || item.tag == 202 || item.tag == 1000 {
+
+            // Always enabled regardless of state: Updates (202), Support (500), Beenden (1000)
+            if item.tag == 202 || item.tag == 500 || item.tag == 1000 {
                 item.isEnabled = true
                 continue
             }
-            
-            // Not setup: disable everything except Einrichtungsassistent and Beenden
+
+            // Not setup: disable everything else
             if !isSetup {
                 item.isEnabled = false
                 continue
             }
-            
-            // Setup but locked: only Entsperren (999) and Beenden (1000) enabled
+
+            // Setup but locked: only Entsperren (999) enabled
             if locked {
                 item.isEnabled = (item.tag == 999)
                 continue
             }
-            
+
             // Setup and unlocked: enable all
             item.isEnabled = true
+        }
+
+        // Support submenu items are always enabled in every app state
+        if let supportItem = menu.item(withTag: 500), let sub = supportItem.submenu {
+            for item in sub.items where !item.isSeparatorItem {
+                item.isEnabled = true
+            }
         }
     }
 
@@ -882,27 +1178,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func applyLocalizedMenuTitles() {
         guard let menu = statusMenu else { return }
 
-        if let item = menu.item(withTag: 300) {
-            item.title = t("Aktualisieren", "Refresh")
+        menu.item(withTag: 300)?.title = t("Aktualisieren", "Refresh")
+
+        // Auto-hide submenu
+        if let hideItem = menu.item(withTag: 401), let sub = hideItem.submenu {
+            hideItem.title = t("Automatisch verstecken", "Auto-hide")
+            sub.item(withTag: 411)?.title = t("Sofort", "Immediately")
+            sub.item(withTag: 412)?.title = t("Nach 5 Sekunden", "After 5 seconds")
+            sub.item(withTag: 413)?.title = t("Nach 10 Sekunden", "After 10 seconds")
+            sub.item(withTag: 410)?.title = t("Aus", "Off")
         }
-        if let item = menu.item(withTag: 301) {
-            let stateLabel = demoMode ? t("An", "On") : t("Aus", "Off")
-            item.title = "\(t("Demo-Modus", "Demo Mode")): \(stateLabel)"
-        }
-        if let item = menu.item(withTag: 401), let hideSub = item.submenu {
-            item.title = t("Automatisch verstecken", "Auto-hide")
-            hideSub.item(withTag: 410)?.title = t("Aus", "Off")
-            hideSub.item(withTag: 412)?.title = t("10 Sekunden", "10 seconds")
-            hideSub.item(withTag: 413)?.title = t("30 Sekunden", "30 seconds")
-            hideSub.item(withTag: 414)?.title = t("60 Sekunden", "60 seconds")
-        }
+
         if let item = menu.item(withTag: 999) {
             item.title = locked ? t("Entsperren…", "Unlock…") : t("Sperren", "Lock")
         }
-        menu.item(withTag: 100)?.title = t("Einrichtungsassistent…", "Setup Wizard…")
-        menu.item(withTag: 101)?.title = t("Zurücksetzen", "Reset")
+
+        // Einstellungen submenu
+        if let einItem = menu.item(withTag: 400), let sub = einItem.submenu {
+            einItem.title = t("Einstellungen", "Settings")
+            sub.item(withTag: 100)?.title = t("Bankkonto hinzufügen…", "Add Bank Account…")
+            sub.item(withTag: 200)?.title = t("Einstellungen öffnen…", "Open Settings…")
+            // Demo-Modus submenu
+            if let demoItem = sub.item(withTag: 301), let demoSub = demoItem.submenu {
+                demoItem.title = t("Demo-Modus", "Demo Mode")
+                demoSub.item(withTag: 3011)?.title = t("An", "On")
+                demoSub.item(withTag: 3010)?.title = t("Aus", "Off")
+                demoSub.item(withTag: 3012)?.title = t("Umsätze generieren", "Generate Transactions")
+                // sync checkmarks
+                demoSub.item(withTag: 3011)?.state = demoMode ? .on : .off
+                demoSub.item(withTag: 3010)?.state = demoMode ? .off : .on
+            }
+        }
+
         menu.item(withTag: 202)?.title = t("Nach Updates suchen…", "Check for Updates…")
-        menu.item(withTag: 200)?.title = t("Einstellungen…", "Settings…")
+
+        // Support submenu
+        if let supportItem = menu.item(withTag: 500), let sub = supportItem.submenu {
+            supportItem.title = t("Support", "Support")
+            if let diagItem = sub.item(withTag: 501) {
+                diagItem.title = t("Diagnose aktivieren", "Enable Diagnostics")
+                diagItem.state = appLoggingEnabled ? .on : .off
+            }
+            sub.item(withTag: 502)?.title = t("Diagnosebericht versenden…", "Send Diagnostic Report…")
+            sub.item(withTag: 503)?.title = t("Logs öffnen", "Open Logs")
+            sub.item(withTag: 504)?.title = t("Dokumentation", "Documentation")
+            sub.item(withTag: 101)?.title = t("Zurücksetzen", "Reset")
+        }
+
         menu.item(withTag: 1000)?.title = t("Beenden", "Quit")
     }
 
@@ -913,16 +1235,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for item in hideSub.items {
             switch item.tag {
-            case 410:
-                item.state = hideIndex == 0 ? .on : .off
-            case 412:
-                item.state = hideIndex == 2 ? .on : .off
-            case 413:
-                item.state = hideIndex == 3 ? .on : .off
-            case 414:
-                item.state = hideIndex == 4 ? .on : .off
-            default:
-                item.state = .off
+            case 410: item.state = hideIndex == 0 ? .on : .off
+            case 411: item.state = hideIndex == 1 ? .on : .off
+            case 412: item.state = hideIndex == 2 ? .on : .off
+            case 413: item.state = hideIndex == 3 ? .on : .off
+            default:  item.state = .off
             }
         }
     }
@@ -935,11 +1252,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // don't schedule when off
         let secs: TimeInterval?
         switch hideIndex {
-        case 1: secs = 0
-        case 2: secs = 10
-        case 3: secs = 30
-        case 4: secs = 60
-        default: secs = nil
+        case 1: secs = 0   // Sofort
+        case 2: secs = 5   // Nach 5 Sekunden
+        case 3: secs = 10  // Nach 10 Sekunden
+        default: secs = nil // Aus
         }
 
         guard let delay = secs else { return }
@@ -982,10 +1298,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @AppStorage("resetAttempts") private var resetAttemptsLimit: Int = 0
     private var failedAttempts: Int = 0
-    
+    private var isPromptingUnlock: Bool = false
+
     private func promptUnlockIfNeeded() {
         guard locked else { return }
-        
+        guard !isPromptingUnlock else { return }  // prevent modal stacking during nested event loop
+        isPromptingUnlock = true
+        defer { isPromptingUnlock = false }
+        showLockIcon()
+
+        // MasterPasswordPanel uses .floating level + isFloatingPanel, so it
+        // appears above all windows without needing .regular activation policy
+        // (which would show a Dock icon).
+        NSApp.activate(ignoringOtherApps: true)
+
         let panel = MasterPasswordPanel(isUnlock: true)
         let result = panel.runModalWithResult()
         
@@ -1110,7 +1436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastBalance = nil
         txVM.transactions = []
         txVM.resetPaging()
-        lastShownTitle = "— €"
+        lastShownTitle = "—"
         locked = false
         isHiddenBalance = false
         isHoverRevealingBalance = false
@@ -1255,11 +1581,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
         }
-        // Task 2: Navigation callbacks
-        rootView.onPrevAccount = idx > 0 ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
-        rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
-        // "+" immer anzeigen wenn man beim letzten Slot ist (also auch wenn nur 1 Konto)
-        rootView.onAddAccount  = { [weak self] in self?.runSetupWizardForAddingAccount() }
+        // Bank logo
+        if demoMode {
+            rootView.bankLogoImage = NSImage(systemSymbolName: "wallet.pass", accessibilityDescription: "Demo")
+        } else {
+            let flyoutBrand = BankLogoAssets.resolve(displayName: txVM.connectedBankDisplayName,
+                                                      logoID: connectedBankLogoID.isEmpty ? nil : connectedBankLogoID,
+                                                      iban: nil)
+            BankLogoStore.shared.preload(brand: flyoutBrand)
+            rootView.bankLogoImage = BankLogoStore.shared.image(for: flyoutBrand)
+        }
+        // Navigation callbacks — hidden in demo mode
+        if !demoMode {
+            rootView.onPrevAccount = idx > 0 ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
+            rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
+            rootView.onAddAccount  = { [weak self] in self?.runSetupWizardForAddingAccount() }
+        }
         let host = NSHostingController(rootView: rootView)
         popover.contentSize = NSSize(width: 348, height: 170)
         popover.contentViewController = host
@@ -1267,11 +1604,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
+    /// Updates the flyout card in-place after a slot switch (balance + nav arrows), without closing/reopening.
+    private func refreshFlyoutIfVisible() {
+        guard let popover = balancePopover, popover.isShown,
+              let host = popover.contentViewController as? NSHostingController<StatusBalanceFlyoutCardView>
+        else { return }
+        let store = MultibankingStore.shared
+        let idx = store.activeIndex
+        let count = store.slots.count
+        let balanceText = lastBalance.map(formatEURWithCents) ?? "--,-- €"
+        let thresholds = BalanceSignal.normalizedThresholds(
+            low: balanceSignalLowUpperBound,
+            medium: balanceSignalMediumUpperBound
+        )
+        var rootView = StatusBalanceFlyoutCardView(
+            balanceText: balanceText,
+            balanceValue: lastBalance,
+            thresholds: thresholds,
+            isDefaultTheme: themeId == ThemeManager.defaultThemeID,
+            forcedColorScheme: configuredColorScheme()
+        )
+        rootView.onDoubleTap = { [weak self] in
+            self?.balancePopover?.performClose(nil)
+            Task { await self?.openTransactionsPanel() }
+        }
+        let refreshBrand = BankLogoAssets.resolve(displayName: txVM.connectedBankDisplayName,
+                                                   logoID: connectedBankLogoID.isEmpty ? nil : connectedBankLogoID,
+                                                   iban: nil)
+        BankLogoStore.shared.preload(brand: refreshBrand)
+        rootView.bankLogoImage = BankLogoStore.shared.image(for: refreshBrand)
+        if !demoMode {
+            rootView.onPrevAccount = idx > 0 ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
+            rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
+            rootView.onAddAccount = { [weak self] in self?.runSetupWizardForAddingAccount() }
+        }
+        host.rootView = rootView
+    }
+
     @objc private func showTransactions() {
         Task { await openTransactionsPanel() }
     }
 
     private func refreshAsync() async {
+        // Prevent concurrent HBCI calls — banks like Volksbank fail with "Fehlender Dialogkontext"
+        // when two simultaneous requests hit the same HBCI connection.
+        guard !isHBCICallInFlight else {
+            AppLogger.log("refreshAsync: HBCI call already in flight, skipping", category: "Network", level: "WARN")
+            return
+        }
+        isHBCICallInFlight = true
+        defer { isHBCICallInFlight = false }
+
+        let epochAtStart = slotEpoch
         // Demo-Modus: Keine echten API-Calls
         if demoMode {
             var seed = UInt64(truncatingIfNeeded: demoSeed)
@@ -1314,16 +1698,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        // Bail early if the slot changed between timer fire and creds load
+        guard slotEpoch == epochAtStart else {
+            return
+        }
+
         let userId = creds.userId
         let password = creds.password
-        // Demo-Modus kann während async-Fetch aktiviert worden sein → Bank-Info nicht überschreiben
-        if !demoMode { syncConnectedBankIntoViewModel(iban: creds.iban) }
         let normalizedAPIKey = creds.anthropicApiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
         txVM.anthropicApiKey = (normalizedAPIKey?.isEmpty == false) ? normalizedAPIKey : nil
         llmAPIKeyPresent = txVM.anthropicApiKey != nil
 
         do {
             let resp = try await YaxiService.fetchBalances(userId: userId, password: password)
+
+            // Bail if the slot changed while we were awaiting the network response
+            guard slotEpoch == epochAtStart else {
+                return
+            }
 
             if resp.ok, let booked = resp.booked {
                 lastShownTitle = formatEURNoDecimals(booked.amount)
@@ -1357,11 +1749,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             statusItem.button?.title = "— €"
             statusItem.button?.toolTip = "Fehler: \(error.localizedDescription)"
+            txVM.currentBalance = "— €"
             AppLogger.log("Balance refresh failed: \(error.localizedDescription)", category: "Network", level: "ERROR")
         }
     }
 
     private func openTransactionsPanel() async {
+        let epochAtStart = slotEpoch
         txPanel?.show()
         let didTriggerInitialConfetti = triggerInitialConfettiIfNeeded()
         
@@ -1393,6 +1787,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         
         // Live-Modus
+        // Wait for any concurrent HBCI call (e.g. balance refresh) to finish before
+        // fetching transactions — banks fail with "Fehlender Dialogkontext" on parallel calls.
+        var waitMs = 0
+        while isHBCICallInFlight && waitMs < 10_000 {
+            try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s
+            waitMs += 200
+        }
+        guard !isHBCICallInFlight else {
+            AppLogger.log("openTransactionsPanel: HBCI still busy after \(waitMs)ms, skipping", category: "Network", level: "WARN")
+            return
+        }
+        isHBCICallInFlight = true
+        defer { isHBCICallInFlight = false }
+
         if let b = self.lastBalance {
             txVM.currentBalance = formatEURWithCents(b)
         } else {
@@ -1419,10 +1827,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        // Bail early if the slot changed between the panel show and creds load
+        guard slotEpoch == epochAtStart else { return }
+
         let userId = creds.userId
         let password = creds.password
-        // Demo-Modus kann während async-Fetch aktiviert worden sein → Bank-Info nicht überschreiben
-        if !demoMode { syncConnectedBankIntoViewModel(iban: creds.iban) }
         let normalizedAPIKey = creds.anthropicApiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
         txVM.anthropicApiKey = (normalizedAPIKey?.isEmpty == false) ? normalizedAPIKey : nil
         llmAPIKeyPresent = txVM.anthropicApiKey != nil
@@ -1457,6 +1866,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
 
+            // Bail if the slot changed while we were awaiting the network response
+            guard slotEpoch == epochAtStart else {
+                txVM.isLoading = false
+                return
+            }
+
             if (resp.ok ?? false), let tx = resp.transactions {
                 let sortedNetwork = sortTransactionsNewestFirst(tx)
 
@@ -1473,7 +1888,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 if cachedTransactions.isEmpty {
                     txVM.transactions = []
-                    txVM.error = resp.error ?? "No data"
+                    txVM.error = resp.error ?? t("Keine Umsatzdaten verfügbar.", "No transaction data available.")
                     confettiTransactions = []
                 } else {
                     txVM.error = "Offline, zeige gespeicherte Umsätze"
@@ -1481,6 +1896,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
         } catch {
+            guard slotEpoch == epochAtStart else {
+                txVM.isLoading = false
+                return
+            }
             if cachedTransactions.isEmpty {
                 txVM.transactions = []
                 txVM.error = "Fetch failed: \(error.localizedDescription)"
@@ -1525,23 +1944,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return "\(date)|\(amt)|\(cur)|\(creditor)|\(debtor)|\(rem)"
     }
 
-    private func balanceAboveConfettiThreshold(currentBalance: Double?) -> Bool {
-        guard confettiEnabled, confettiOnBalanceThreshold else { return false }
-        guard let currentBalance else { return false }
-        let threshold = max(0, Double(confettiBalanceThreshold))
-        return currentBalance >= threshold
-    }
-
     private func hasNewIncomeForConfetti(in transactions: [TransactionsResponse.Transaction]) -> Bool {
-        guard confettiEnabled, confettiOnNewIncome else { return false }
+        let minAmount = Double(confettiIncomeThreshold)
+        guard minAmount > 0 else { return false }  // 0 = Effekte deaktiviert
         let newestIncoming = transactions
-            .filter { $0.parsedAmount > 0 }
+            .filter { $0.parsedAmount >= minAmount }
             .sorted { a, b in
                 let dateA = a.bookingDate ?? a.valueDate ?? ""
                 let dateB = b.bookingDate ?? b.valueDate ?? ""
-                if dateA != dateB {
-                    return dateA > dateB
-                }
+                if dateA != dateB { return dateA > dateB }
                 return computeTxSignature(a) > computeTxSignature(b)
             }
             .first
@@ -1560,10 +1971,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func maybeTriggerTransactionsConfetti(transactions: [TransactionsResponse.Transaction], currentBalance: Double?) {
-        guard confettiEnabled else { return }
-        let shouldTrigger = balanceAboveConfettiThreshold(currentBalance: currentBalance)
-            || hasNewIncomeForConfetti(in: transactions)
-        guard shouldTrigger else { return }
+        guard hasNewIncomeForConfetti(in: transactions) else { return }
         txVM.confettiTrigger += 1
     }
 
@@ -1723,13 +2131,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let rounded = d.rounded()
 
         let s = Self.eurWholeNumberFormatter.string(from: NSNumber(value: rounded)) ?? "0"
-        return "\(s) €"
+        return s
     }
 
     @objc private func connect() {
         // Defer showing modal panels until the status bar menu fully dismisses.
         DispatchQueue.main.async { [weak self] in
-            self?.runSetupWizardIfNeeded()
+            guard let self else { return }
+            // If a real account already exists, treat this as "add another account"
+            // rather than a full reinstall — same as tapping "+" in the transaction list.
+            let hasRealAccount = CredentialsStore.exists() && !self.demoMode
+            if hasRealAccount {
+                self._runSetupWizardForAddingAccount()
+            } else {
+                self.runSetupWizardIfNeeded()
+            }
         }
     }
 
@@ -1750,8 +2166,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func switchToSlot(index: Int) async {
         let store = MultibankingStore.shared
-        guard store.slots.indices.contains(index) else { return }
+        guard store.slots.indices.contains(index) else {
+            return
+        }
         let slot = store.slots[index]
+
+        // Invalidate any in-flight refreshAsync / openTransactionsPanel from the old slot
+        slotEpoch += 1
 
         // Switch active slot in all data layers
         YaxiService.activeSlotId = slot.id
@@ -1760,21 +2181,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         await YaxiService.sessionStore.reloadForActiveSlot()
         store.setActive(index: index)
 
+        // Apply the new slot's identity to AppStorage + txVM immediately
+        applySlotToViewModel(slot)
+
         // Clear displayed data immediately
         txVM.transactions = []
         txVM.resetPaging()
         txVM.currentBalance = nil
         lastBalance = nil
-        statusItem.button?.title = "…"
+        if !isHiddenBalance { statusItem.button?.title = "…" }
 
-        // Reload balance + transactions
+        // Show cached transactions from DB right away (no network wait)
+        if let cached = try? TransactionsDatabase.loadTransactions(days: 60), !cached.isEmpty {
+            txVM.transactions = sortTransactionsNewestFirst(cached)
+            txVM.resetPaging()
+        }
+
+        // Fetch live balance
         await refreshAsync()
+
+        // Update flyout card in-place with new balance + nav arrows (without closing)
+        refreshFlyoutIfVisible()
+
+        // If the transactions panel is already open, reload live transactions for the new slot
+        if txPanel?.isVisible == true {
+            await openTransactionsPanel()
+        }
+
         updateTxPanelAccountNav()
     }
 
     /// Aktualisiert die < / > / + Callbacks im Transaktions-Panel nach jedem Slot-Wechsel.
     @MainActor private func updateTxPanelAccountNav() {
         guard let nav = txPanel?.accountNav else { return }
+        guard !demoMode else {
+            nav.onPrevAccount = nil
+            nav.onNextAccount = nil
+            nav.onAddAccount  = nil
+            return
+        }
         let store = MultibankingStore.shared
         let idx   = store.activeIndex
         let count = store.slots.count
@@ -1794,53 +2239,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func _runSetupWizardForAddingAccount() {
-        let wizard = SetupWizardPanel(connectAction: { payload, selectedBankName, options, masterPassword in
-            AppLogger.log(
-                "AddAccount connectAction entered ibanPrefix=\(String(payload.iban.prefix(6))) selectedBank=\(selectedBankName ?? "-")",
-                category: "Setup"
-            )
-            let setupResult = try await Self.performSetupConnection(
-                result: payload,
-                selectedBankName: selectedBankName,
-                masterPassword: masterPassword,
-                options: options
-            )
-            return setupResult.bank
-        })
+        let previousSlot = MultibankingStore.shared.activeSlot
+
+        // Neue Slot-ID VOR dem Wizard erstellen und aktivieren,
+        // damit performSetupConnection alle Daten in den richtigen Slot schreibt.
+        let newSlot = BankSlot.makeNew(iban: "", displayName: "", logoId: nil)
+        YaxiService.activeSlotId = newSlot.id
+        CredentialsStore.activeSlotId = newSlot.id
+        TransactionsDatabase.activeSlotId = newSlot.id
+
+        final class AdditionalAccountsBox: @unchecked Sendable { var value: [Routex.Account] = [] }
+        let additionalAccountsBox = AdditionalAccountsBox()
+
+        let wizard = SetupWizardPanel(
+            connectAction: { payload, selectedBankName, options, masterPassword in
+                AppLogger.log(
+                    "AddAccount connectAction ibanPrefix=\(String(payload.iban.prefix(6))) selectedBank=\(selectedBankName ?? "-")",
+                    category: "Setup"
+                )
+                let setupResult = try await Self.performSetupConnection(
+                    result: payload,
+                    selectedBankName: selectedBankName,
+                    masterPassword: masterPassword,
+                    options: options
+                )
+                additionalAccountsBox.value = setupResult.additionalAccounts
+                return setupResult.bank
+            },
+            existingMasterPassword: masterPassword   // Passwort-Schritt überspringen
+        )
 
         switch wizard.runModal() {
         case .realBanking(let pw, let bank):
-            // Build new slot from connected bank info
+            // IBAN aus frisch gespeicherten Credentials lesen
             let creds = try? CredentialsStore.load(masterPassword: pw)
             let normalizedIBAN = (creds?.iban ?? "")
                 .replacingOccurrences(of: " ", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .uppercased()
-            let newSlot = BankSlot.makeNew(
+            let finalSlot = BankSlot(
+                id: newSlot.id,
                 iban: normalizedIBAN,
                 displayName: bank.displayName,
                 logoId: bank.logoId
             )
-            // Switch data layers to new slot before saving credentials
-            YaxiService.activeSlotId = newSlot.id
-            CredentialsStore.activeSlotId = newSlot.id
-            TransactionsDatabase.activeSlotId = newSlot.id
-            // Save credentials under new slot key
-            if let creds = creds, let masterPw = masterPassword as String? {
-                try? CredentialsStore.save(creds, masterPassword: masterPw)
+            MultibankingStore.shared.addSlot(finalSlot)
+
+            // Create extra slots for additional accounts selected in the picker
+            let primarySlotId = newSlot.id
+            for account in additionalAccountsBox.value {
+                let iban = (account.iban ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                guard !iban.isEmpty else { continue }
+                let extraSlot = BankSlot.makeNew(iban: "", displayName: "", logoId: nil)
+                let extraSlotId = extraSlot.id
+                CredentialsStore.activeSlotId = primarySlotId
+                if var extraCreds = try? CredentialsStore.load(masterPassword: pw) {
+                    extraCreds.iban = iban
+                    CredentialsStore.activeSlotId = extraSlotId
+                    try? CredentialsStore.save(extraCreds, masterPassword: pw)
+                }
+                Task { await YaxiService.copyConnectionState(fromSlotId: primarySlotId, toSlotId: extraSlotId) }
+                YaxiService.activeSlotId = extraSlotId
+                YaxiService.storeDiscoveredIBAN(iban)
+                let accountTitle: String = {
+                    let parts = [account.displayName, account.ownerName, String(iban.prefix(12)) + "…"].compactMap { $0?.nilIfEmpty }
+                    return parts.first ?? iban
+                }()
+                let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle, logoId: bank.logoId)
+                MultibankingStore.shared.addSlot(extraBankSlot)
             }
-            MultibankingStore.shared.addSlot(newSlot)
-            updateConnectedBankState(bank, iban: normalizedIBAN)
-            statusItem.button?.toolTip = "Verbunden mit \(bank.displayName)"
+            // Restore to primary slot
+            CredentialsStore.activeSlotId = newSlot.id
+            YaxiService.activeSlotId = newSlot.id
+            TransactionsDatabase.activeSlotId = newSlot.id
+
+            updateTxPanelAccountNav()
+            applySlotToViewModel(finalSlot)   // uses name-first brand resolution (logo + name)
+            statusItem.button?.toolTip = t("Verbunden mit \(bank.displayName)", "Connected to \(bank.displayName)")
             Task { await self.refreshAsync() }
-        case .demoMode:
-            break // ignore demo mode in add-account flow
-        case .cancelled:
-            // Restore previous active slot's data layers
-            if let slot = MultibankingStore.shared.activeSlot {
-                YaxiService.activeSlotId = slot.id
-                CredentialsStore.activeSlotId = slot.id
-                TransactionsDatabase.activeSlotId = slot.id
+
+        case .demoMode, .cancelled:
+            // Vorherigen Slot wiederherstellen
+            let restoreId = previousSlot?.id ?? "legacy"
+            YaxiService.activeSlotId = restoreId
+            CredentialsStore.activeSlotId = restoreId
+            TransactionsDatabase.activeSlotId = restoreId
+            if let prev = previousSlot {
+                MultibankingStore.shared.setActive(index: MultibankingStore.shared.slots.firstIndex(where: { $0.id == prev.id }) ?? 0)
+                applySlotToViewModel(prev)
             }
         }
     }
@@ -1851,6 +2337,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         txVM.transactions = []
         txVM.resetPaging()
         statusItem.button?.title = t("Verbinden…", "Connect…")
+
+        // Ensure legacy slot is active for first-time setup.
+        // If the app was reset while a non-legacy slot was active, activeSlotId would still
+        // hold the old slot ID — causing all setup data to be written under the wrong keys.
+        YaxiService.activeSlotId = "legacy"
+        CredentialsStore.activeSlotId = "legacy"
+        TransactionsDatabase.activeSlotId = "legacy"
+
+        final class AdditionalAccountsBox2: @unchecked Sendable { var value: [Routex.Account] = [] }
+        let additionalAccountsBox2 = AdditionalAccountsBox2()
 
         let wizard = SetupWizardPanel(connectAction: { payload, selectedBankName, options, masterPassword in
             AppLogger.log(
@@ -1863,6 +2359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 masterPassword: masterPassword,
                 options: options
             )
+            additionalAccountsBox2.value = setupResult.additionalAccounts
             return setupResult.bank
         })
 
@@ -1878,12 +2375,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     .replacingOccurrences(of: " ", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .uppercased()
-                updateConnectedBankState(bank, iban: normalizedIBAN)
+                // Ersten Slot in MultibankingStore anlegen (id="legacy" für Erstkonto)
+                let legacySlot = BankSlot(id: "legacy", iban: normalizedIBAN, displayName: bank.displayName, logoId: bank.logoId)
+                MultibankingStore.shared.replaceFirstSlot(with: legacySlot)
+
+                // Create extra slots for additional accounts selected in the picker
+                for account in additionalAccountsBox2.value {
+                    let iban = (account.iban ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    guard !iban.isEmpty else { continue }
+                    let extraSlot = BankSlot.makeNew(iban: "", displayName: "", logoId: nil)
+                    let extraSlotId = extraSlot.id
+                    CredentialsStore.activeSlotId = "legacy"
+                    if var extraCreds = try? CredentialsStore.load(masterPassword: pw) {
+                        extraCreds.iban = iban
+                        CredentialsStore.activeSlotId = extraSlotId
+                        try? CredentialsStore.save(extraCreds, masterPassword: pw)
+                    }
+                    Task { await YaxiService.copyConnectionState(fromSlotId: "legacy", toSlotId: extraSlotId) }
+                    YaxiService.activeSlotId = extraSlotId
+                    YaxiService.storeDiscoveredIBAN(iban)
+                    let accountTitle: String = {
+                        let parts = [account.displayName, account.ownerName, String(iban.prefix(12)) + "…"].compactMap { $0?.nilIfEmpty }
+                        return parts.first ?? iban
+                    }()
+                    let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle, logoId: bank.logoId)
+                    MultibankingStore.shared.addSlot(extraBankSlot)
+                }
+                // Restore to legacy slot
+                CredentialsStore.activeSlotId = "legacy"
+                YaxiService.activeSlotId = "legacy"
+                TransactionsDatabase.activeSlotId = "legacy"
+
+                updateTxPanelAccountNav()
+                applySlotToViewModel(legacySlot)
             } else {
                 updateConnectedBankState(bank)
             }
             statusItem.button?.toolTip = "Verbunden mit \(bank.displayName)"
             Task { await self.refreshAsync() }
+            // After first-time setup: offer to add a second account
+            promptAddAnotherAccount()
         case .demoMode:
             self.demoMode = true
             self.demoSeed = Int.random(in: 1...9999)
@@ -1893,6 +2424,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
     
+    private func promptAddAnotherAccount() {
+        let alert = NSAlert()
+        alert.messageText = t("Weiteres Konto einrichten?", "Add another account?")
+        alert.informativeText = t(
+            "Möchtest du ein weiteres Bankkonto zur App hinzufügen?",
+            "Would you like to add another bank account to the app?"
+        )
+        alert.addButton(withTitle: t("Ja", "Yes"))
+        alert.addButton(withTitle: t("Nein", "No"))
+        if alert.runModal() == .alertFirstButtonReturn {
+            _runSetupWizardForAddingAccount()
+        }
+    }
+
     private enum SetupFlowError: LocalizedError {
         case cancelled
         case bankNotFound
@@ -1920,6 +2465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bank: DiscoveredBank
         let normalizedIBAN: String
         let apiKey: String?
+        let additionalAccounts: [Routex.Account]
     }
 
 
@@ -2030,17 +2576,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return nil
             }
         }()
-        // Diagnostics-Modus aktiviert AppLogger temporär, damit writeTrace (YAXI-Trace)
-        // auch bei SCA-Fehlern (pollRedirect) geschrieben wird.
-        let appLoggerWasEnabled = AppLogger.isEnabled
-        if options.diagnosticsEnabled && !appLoggerWasEnabled {
-            AppLogger.setEnabled(true)
-        }
-        defer {
-            if options.diagnosticsEnabled && !appLoggerWasEnabled {
-                AppLogger.setEnabled(false)
-            }
-        }
         diagnosticsLogger?.log(
             step: "setup",
             event: "attempt_start",
@@ -2048,49 +2583,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
 
         do {
-            let normalizedIBAN = result.iban
-                .replacingOccurrences(of: " ", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .uppercased()
-
             options.onProgress?(.discoveringBank)
-            AppLogger.log("Setup step discover_bank", category: "Setup")
-            _ = try await runSetupStepWithTimeout(step: "configure_bank", logger: diagnosticsLogger) {
-                await YaxiService.configureBackend(iban: normalizedIBAN)
-            }
-            let discoveredBank = try await runSetupStepWithTimeout(step: "discover_bank", logger: diagnosticsLogger) {
-                guard let discoveredBank = await YaxiService.discoverBank() else {
-                    throw SetupFlowError.bankNotFound
-                }
-                return discoveredBank
-            }
+            AppLogger.log("Setup step accounts_flow: using pre-discovered bank", category: "Setup")
 
+            // Bank discovery already happened in SetupWizardPanel.onSearchContinue (discoverBankByTerm).
+            // connectionId is stored in UserDefaults. IBAN will be discovered via accounts() API after SCA.
             let fallbackName = selectedBankName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let discoveredName = discoveredBank.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalBank = discoveredName.isEmpty && !fallbackName.isEmpty
-                ? DiscoveredBank(
-                    id: discoveredBank.id,
-                    displayName: fallbackName,
-                    logoId: discoveredBank.logoId,
-                    credentials: discoveredBank.credentials,
-                    userIdLabel: discoveredBank.userIdLabel,
-                    advice: discoveredBank.advice
-                )
-                : discoveredBank
 
             try await runSetupStepWithTimeout(step: "clear_session_initial", logger: diagnosticsLogger) {
-                await YaxiService.clearSessionState()
+                // Full wipe of connectionData AND in-memory sessions at setup start.
+                //
+                // SessionStore.session(for:) returns shared in-memory state (not slot-scoped).
+                // Sessions written by background refreshes on other slots remain in memory when
+                // the active slot switches to a new setup slot, and bleed into fetchAccounts —
+                // causing "FGW Fehlender Dialogkontext" for FinTS banks (stale dialog token).
+                //
+                // Per YAXI credentials model (docs.yaxi.tech/credentials.html):
+                //   full    → fresh credentials entered → no session benefit
+                //   userId  → decoupled auth (Push-TAN via app) → fresh challenge
+                //   none    → redirect to bank website → fresh auth
+                //   userId+none → YAXI tries decoupled, falls back to redirect if needed
+                // In all cases the setup wizard triggers a fresh auth flow. An old session
+                // from a different slot provides no benefit and may cause stale-dialog errors.
+                // Note: connectionId must NOT be cleared here — it was just stored by bank
+                // selection (storeConnectionInfo) and is required for the accounts() call below.
+                await YaxiService.clearSessionOnly()
             }
 
             let fetchDaysSetting = UserDefaults.standard.integer(forKey: "fetchDays")
             let warmupDays = fetchDaysSetting > 0 ? fetchDaysSetting : 60
             let warmupFrom = setupWarmupFromDate(days: warmupDays)
 
-            options.onProgress?(.requestingApproval)
-            AppLogger.log("Setup step warmup_balances", category: "Setup")
+            // Build finalBank from pre-discovered connectionId + selected bank name
+            let storedConnectionId = UserDefaults.standard.string(forKey: YaxiService.connectionIdKey) ?? ""
+            let finalBank = DiscoveredBank(
+                id: storedConnectionId,
+                displayName: fallbackName.isEmpty ? "Bank" : fallbackName,
+                logoId: nil,
+                credentials: YaxiService.loadStoredCredentials(),
+                userIdLabel: nil,
+                advice: nil
+            )
+
+            // Step 1: accounts() — SCA (einmalige Freigabe per Push-TAN).
+            // Liefert IBAN + connectionData für alle weiteren Aufrufe (recurring consent).
             // Redirect-Flows (z.B. Sparkasse): Nutzer muss sich auf Bank-Website einloggen
             // und SCA bestätigen. Server pollt bis zu 600 s — Swift-Timeout muss größer sein.
-            let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 720, logger: diagnosticsLogger) {
+            options.onProgress?(.requestingApproval)
+            AppLogger.log("Setup step warmup_accounts", category: "Setup")
+            let discoveredAccounts = try await runSetupStepWithTimeout(step: "warmup_accounts", timeout: 720, logger: diagnosticsLogger) {
+                try await YaxiService.fetchAccounts(userId: result.userId, password: result.password)
+            }
+            let selectableAccounts = discoveredAccounts.filter { account in
+                let iban = account.iban?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return !iban.isEmpty
+            }
+            guard !selectableAccounts.isEmpty else {
+                throw SetupFlowError.authenticationFailed(
+                    L10n.t("Kein Konto gefunden. Bitte Bank erneut verbinden.", "No account found. Please reconnect.")
+                )
+            }
+            let selectedAccounts: [Routex.Account]
+            if selectableAccounts.count == 1 {
+                selectedAccounts = [selectableAccounts[0]]
+            } else if let picker = options.onPickAccount {
+                guard let picked = await picker(selectableAccounts), !picked.isEmpty else {
+                    throw SetupFlowError.cancelled
+                }
+                selectedAccounts = picked
+            } else {
+                // No wizard UI available — fall back to first account
+                selectedAccounts = [selectableAccounts[0]]
+            }
+            let primaryAccount = selectedAccounts[0]
+            let additionalAccounts = Array(selectedAccounts.dropFirst())
+            let selectedIBAN = (primaryAccount.iban ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .uppercased()
+            YaxiService.storeDiscoveredIBAN(selectedIBAN)
+            AppLogger.log("Setup: account selected ibanPrefix=\(String(selectedIBAN.prefix(8))) total=\(discoveredAccounts.count) additional=\(additionalAccounts.count)", category: "Setup")
+
+            // Step 2: balances() — nutzt connectionData + IBAN aus accounts().
+            // Kein SCA mehr nötig (recurring consent ist gesetzt).
+            options.onProgress?(.fetchingBalance)
+            AppLogger.log("Setup step warmup_balances", category: "Setup")
+            let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 300, logger: diagnosticsLogger) {
                 try await YaxiService.fetchBalances(
                     userId: result.userId,
                     password: result.password
@@ -2103,7 +2680,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     throw SetupFlowError.authenticationFailed(displayMsg)
                 }
                 let fallback = warmupBalances.scaRequired == true
-                    ? "Freigabe nicht bestätigt. Bitte erneut versuchen und die Anfrage in der Banking-App bestätigen."
+                    ? "Kontostand: Freigabe konnte nicht abgeschlossen werden. Bitte erneut verbinden."
                     : "Kontostandabfrage fehlgeschlagen. Bitte erneut versuchen."
                 throw SetupFlowError.authenticationFailed(
                     warmupBalances.userMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -2112,8 +2689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 )
             }
 
-            // Nur Fortschritt zeigen wenn Kontostand erfolgreich war (sonst SCA noch ausstehend)
-            if warmupBalances.ok { options.onProgress?(.requestingTransactionApproval) }
+            options.onProgress?(.requestingTransactionApproval)
             AppLogger.log("Setup step warmup_transactions", category: "Setup")
             var warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions", timeout: 720, logger: diagnosticsLogger) {
                 try await YaxiService.fetchTransactions(
@@ -2144,7 +2720,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             if !(warmupTransactions.ok ?? false) {
                 let techMsg = warmupTransactions.error?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let fallback = "Umsatzabfrage konnte nicht bestätigt werden. Bitte Freigabe in deiner Banking-App prüfen und erneut verbinden."
+                let fallback = warmupTransactions.scaRequired == true
+                    ? "Umsätze: Freigabe konnte nicht abgeschlossen werden (Schritt 3 von 3). Bitte erneut verbinden."
+                    : "Umsatzabfrage fehlgeschlagen (Schritt 3 von 3). Bitte erneut versuchen."
                 let displayMsg = warmupTransactions.userMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                     ?? techMsg?.nilIfEmpty
                     ?? fallback
@@ -2156,12 +2734,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 throw SetupFlowError.authenticationFailed(displayMsg)
             }
 
+            // IBAN was stored from the selected account above.
+            let storedIBAN = selectedIBAN
+            AppLogger.log("Setup: IBAN stored prefix=\(String(storedIBAN.prefix(8)))", category: "Setup")
+
             options.onProgress?(.savingCredentials)
             let existingAPIKey = try? CredentialsStore.loadAPIKey(masterPassword: masterPassword)
             try await runSetupStepWithTimeout(step: "store_credentials", logger: diagnosticsLogger) {
                 try CredentialsStore.save(
                     StoredCredentials(
-                        iban: normalizedIBAN,
+                        iban: storedIBAN,
                         userId: result.userId,
                         password: result.password,
                         anthropicApiKey: existingAPIKey
@@ -2174,8 +2756,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             AppLogger.log("Setup performSetupConnection success", category: "Setup")
             return SetupConnectResult(
                 bank: finalBank,
-                normalizedIBAN: normalizedIBAN,
-                apiKey: existingAPIKey
+                normalizedIBAN: storedIBAN,
+                apiKey: existingAPIKey,
+                additionalAccounts: additionalAccounts
             )
         } catch {
             let setupError = normalizeSetupError(error)
@@ -2234,6 +2817,7 @@ private struct StatusBalanceFlyoutCardView: View {
     let thresholds: BalanceSignalThresholds
     let isDefaultTheme: Bool
     let forcedColorScheme: ColorScheme?
+    var bankLogoImage: NSImage? = nil
     var onDoubleTap: (() -> Void)? = nil
     // Task 2: Navigation callbacks
     var onPrevAccount: (() -> Void)? = nil
@@ -2309,9 +2893,17 @@ private struct StatusBalanceFlyoutCardView: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "wallet.pass")
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                if let img = bankLogoImage {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                } else {
+                    Image(systemName: "wallet.pass")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
                 Text(L10n.t("Aktueller Kontostand", "Current balance"))
                     .font(.system(size: 14))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
