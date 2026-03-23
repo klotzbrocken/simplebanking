@@ -109,7 +109,7 @@ Session tokens are stored in `UserDefaults`; credentials are AES-GCM encrypted a
 
 | Package | Purpose |
 |---|---|
-| [routex-client-swift](https://github.com/yaxi/routex-client-swift) | YAXI Open Banking Swift SDK |
+| [routex-client-swift](https://github.com/yaxitech/routex-client-swift) | YAXI Open Banking Swift SDK |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) | Local transaction database (SQLite) |
 | [Sparkle](https://sparkle-project.org/) | Auto-update framework |
 
