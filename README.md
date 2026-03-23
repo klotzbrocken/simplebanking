@@ -10,7 +10,7 @@
 
 **macOS menu bar app that shows your current account balance — no decimals, auto-refreshed.**
 
-Powered by [YAXI Open Banking](https://yaxi.de) · PSD2 · Pure Swift · No Node.js
+Powered by [YAXI Open Banking](https://yaxi.tech) · PSD2 · Pure Swift · No Node.js
 
 [Download](#installation) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Report a Bug](https://github.com/klotzbrocken/simplebanking/issues)
 
