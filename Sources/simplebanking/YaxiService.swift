@@ -1352,8 +1352,7 @@ enum YaxiService {
     /// Always creates a file — even when no traceId is available — so that
     /// the call site can be confirmed and the triggering error is recorded.
     static func writeTrace(client: RoutexClient, label: String, ticket: Ticket, error: Error? = nil) async {
-        // Always write trace files regardless of AppLogger.isEnabled —
-        // trace files are diagnostic artifacts separate from the user-visible log.
+        guard AppLogger.isEnabled else { return }
         let logsDir = AppLogger.logDirectoryURL.appendingPathComponent("trace")
         do {
             try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)

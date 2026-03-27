@@ -3,25 +3,47 @@
     <channel>
         <title>simplebanking</title>
         <item>
-            <title>1.2.3</title>
-            <pubDate>Wed, 18 Mar 2026 20:43:05 +0100</pubDate>
-            <sparkle:version>20260318_204300_104</sparkle:version>
-            <sparkle:shortVersionString>1.2.3</sparkle:shortVersionString>
+            <title>1.3.1</title>
+            <pubDate>Fri, 27 Mar 2026 04:58:09 +0100</pubDate>
+            <sparkle:version>20260327_031316_239</sparkle:version>
+            <sparkle:shortVersionString>1.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.3/simplebanking-20260318-204259.dmg" length="10872416" type="application/octet-stream" sparkle:edSignature="XsZdx9FPNM1a5jlnjCuPUXZy8eL3pFRtuLaSk/JsWSXCDn13Znn23KBYsN2XMK1iJCJUMuO/qOoY9kjNOqqvDw=="/>
+            <enclosure url="https://simplebanking.de/download/simplebanking-20260327-045804.dmg" length="13475940" type="application/octet-stream" sparkle:edSignature="Khum/YXafhZXwBUfZN4QqLEeF2Blsl5dPEJzD8dRq0ftmb/4eSjkogNSsIf2n67wg215uAMC/3zv4hjMQtMUDw=="/>
             <sparkle:deltas>
-                <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.3/simplebanking20260318_204300_104-20260318_203842_103.delta" sparkle:deltaFrom="20260318_203842_103" length="10970" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="LetA0wyL+FOjyA2HNDIxt488E8s7puTpxnA2Mtj83/n9ZhstKfEUYQTinWsnDL+GXH3HfwGsbVsvk7Auf8MlAA=="/>
-                <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.3/simplebanking20260318_204300_104-20260318_153556_88.delta" sparkle:deltaFrom="20260318_153556_88" length="409830" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="cJ+an7X7I6GQRq3xNHuNpzrPpPqNG+0hJsd3FxLksAGsoFEczK70hZ2X9iP5H3v3ivzlPOO1S0gBSnlJR2KOAw=="/>
-                <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.3/simplebanking20260318_204300_104-20260318_092125_86.delta" sparkle:deltaFrom="20260318_092125_86" length="422618" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="IU8d52oNaDq0KzwQU5Mtn1UeDsXeS6nnrF067yYC4Fu7ugTdGssoBJx2MFpGiFkdGB8tGtet0cKKhbGVPlY9AQ=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260327_031316_239-20260324_033401_229.delta" sparkle:deltaFrom="20260324_033401_229" length="1520850" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="4jBrsQ6yZZi0Y+61OhNasQ/acwL8vezi4sZSOnomobN60nQD+1brlLSsfod//6sL/1JPnRGjf2w2h3TJk0GyDw=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260327_031316_239-20260322_132034_221.delta" sparkle:deltaFrom="20260322_132034_221" length="1534022" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="zFTyQqJL1bf8ghmOc6dUZYWVAH+QRxDxPxWmJ/bViSycQGdfcoIJTeNSEfZ/FYqX+FCY4w8Zuw/8OgnyZGzyCg=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260327_031316_239-20260322_052621_207.delta" sparkle:deltaFrom="20260322_052621_207" length="4773466" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="sw9mKpi+KMqDHbq7KASibrnr93gUJ5/BzE33L+cVBGRR2rMiUSBnPa36o1sSiCnCFlT9fGE1f2fuNjV5dMTHCA=="/>
             </sparkle:deltas>
         </item>
-<item>
-            <title>1.2.1</title>
-            <pubDate>Sun, 15 Mar 2026 21:01:39 +0100</pubDate>
-            <sparkle:version>20260315_210133_77</sparkle:version>
-            <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
+        <item>
+            <title>1.3.1</title>
+            <pubDate>Tue, 24 Mar 2026 03:34:36 +0100</pubDate>
+            <sparkle:version>20260324_033401_229</sparkle:version>
+            <sparkle:shortVersionString>1.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.2.1/simplebanking-1.2.1.dmg" length="10845078" type="application/octet-stream" sparkle:edSignature="VH0h7tOas11WgbllBzIWWbFrvwc+Aj7BETnE5Td4nx07vVnis5d2uw4x0he+bHhMEZcyQnDh2zBg6g6NQ7gADQ=="/>
+            <enclosure url="https://simplebanking.de/download/simplebanking-20260324-033430.dmg" length="13490596" type="application/octet-stream" sparkle:edSignature="BqQAtpXF143/6VVRpQaKtx4cIK4dL6gJqkprIfh/C/a1v17rcv8Hi/4IImD0DNt4Cgwx8RzqlYKyUqdpGq88AA=="/>
+            <sparkle:deltas>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260324_033401_229-20260322_132034_221.delta" sparkle:deltaFrom="20260322_132034_221" length="530926" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="h0BU76goRlVD1rtbveXKYLsTDeRe9ul6B/ntdb732MwV2NY8KH1pi2izFg7T5qAjeb/8niYLVx2CduHQtMPCCQ=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260324_033401_229-20260322_052621_207.delta" sparkle:deltaFrom="20260322_052621_207" length="3798758" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="DgGt9EXnmX+nMwAdV3L8DhDBLQOEDe860B/o+wqN8XdV9v1hRvv7heNjmGbqv68gh0Iq6/v8MlwSQzcih2VbDw=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260324_033401_229-20260322_051837_206.delta" sparkle:deltaFrom="20260322_051837_206" length="3798646" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="Dcv4zTcNl0VIrjm3InYRKToIAwIFgTMD2XCzBxVwa9uUpVpCEM417W1IIDpyjo+ZsSY05bgCxPq2d6uRjRgJBw=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260324_033401_229-20260322_024553_204.delta" sparkle:deltaFrom="20260322_024553_204" length="3817706" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="QfmL1Z2vJy/d5rbUb4BEYiWRuLGSe8YrdJrwO6rNQjSXOu8YSJH8z3sfSdFsie7CRsN3bbk2aqLlWq+YoupeCw=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260324_033401_229-20260321_031828_197.delta" sparkle:deltaFrom="20260321_031828_197" length="3831062" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="LVbG9Wk5HyDF24gH9b5PSZEEn+wWiKTFJiUTVMhbGK7Q/MQm5GkTmwNPAcwMv7PYRf4sZOppG1znCcCtQoSsCA=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
+            <title>1.2.4</title>
+            <pubDate>Sun, 22 Mar 2026 13:20:42 +0100</pubDate>
+            <sparkle:version>20260322_132034_221</sparkle:version>
+            <sparkle:shortVersionString>1.2.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion>
+            <enclosure url="https://simplebanking.de/download/simplebanking-20260322-131944.dmg" length="13628371" type="application/octet-stream" sparkle:edSignature="EZjUdaRKFqWFVZaTh5DUAE/xxKEKL2H8YuG4IKfnr60lPslTSeUUqzH5NXK6irypWRqqCURPYQ17oC2WsEmJCw=="/>
+            <sparkle:deltas>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260322_132034_221-20260320_195047_189.delta" sparkle:deltaFrom="20260320_195047_189" length="3807962" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="aAG1uzsghaXfMdJh6m7gylHqLTefUnSK5jj6GMXcwd/RZx1y5kpwkbwqf1gsCtYW8YnUhQc5AKw7zSZy+2YACg=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260322_132034_221-20260321_031828_197.delta" sparkle:deltaFrom="20260321_031828_197" length="3751838" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="SWLA/dlvWBZy3tXJNQeZdUs5yb2F72GF/gCGUxBKklHCpK4CegArIWZA1Tb62DRIz7qwkpzHiT3y7znPddTHCQ=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260322_132034_221-20260322_052621_207.delta" sparkle:deltaFrom="20260322_052621_207" length="3694262" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="y3lF0wlnPKPPq/wNBDldPj4iJnbVjL6DfbRvHZFKM7O6twzAIF07vgrLroMo+mVMykYvRtNuuXMA6m4wxQt9BA=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260322_132034_221-20260322_024553_204.delta" sparkle:deltaFrom="20260322_024553_204" length="3743806" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="JRL/2X/L5ON44xNrfKIt/3xhxqTmZZkLQOfY83rav2JEMdO/ux2M9Uj1+PJThulVKjtS5mUCtHleDr4NX2R8AQ=="/>
+                <enclosure url="https://simplebanking.de/download/simplebanking20260322_132034_221-20260322_051837_206.delta" sparkle:deltaFrom="20260322_051837_206" length="3695174" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="T9mhj8oiqP3H0cc7+KejEKfXvY/OiImtYJjDi3o7b/kIf/1+VWvXHxwpB0heYlMEWSWYqFDPoOtJMPVNgbgBCA=="/>
+            </sparkle:deltas>
         </item>
     </channel>
 </rss>

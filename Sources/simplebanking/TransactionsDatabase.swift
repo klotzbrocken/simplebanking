@@ -92,6 +92,12 @@ enum TransactionsDatabase {
             try addColumnIfMissing(db, table: "transactions", column: "slot_id", definition: "TEXT NOT NULL DEFAULT 'legacy'")
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_transactions_slot_id ON transactions(slot_id)")
         }
+        migrator.registerMigration("v7_repair_slot_id") { db in
+            // Repair: transactions accidentally stamped with a temporary UUID slot_id
+            // (can happen if a refresh task was in-flight when the add-account wizard set activeSlotId).
+            // All single-account installs should have slot_id = 'legacy'.
+            try db.execute(sql: "UPDATE transactions SET slot_id = 'legacy' WHERE slot_id != 'legacy'")
+        }
         return migrator
     }
 
@@ -139,7 +145,6 @@ enum TransactionsDatabase {
                             search_text = excluded.search_text,
                             raw_json = excluded.raw_json,
                             updated_at = excluded.updated_at,
-                            slot_id = excluded.slot_id,
                             user_note = user_note,
                             attachment_count = attachment_count
                         """,
@@ -555,6 +560,27 @@ enum TransactionsDatabase {
                     txID,
                 ]
             )
+        }
+    }
+
+    /// Load transactions without a category (or with the fallback "Sonstiges") for AI categorization.
+    static func loadRecordsForCategorization() throws -> [TransactionRecord] {
+        let queue = try makeQueue()
+        return try queue.read { db in
+            try TransactionRecord.fetchAll(db, sql: """
+                SELECT * FROM transactions
+                WHERE (kategorie IS NULL OR kategorie = '' OR kategorie = 'Sonstiges')
+                ORDER BY buchungsdatum DESC LIMIT 200
+                """)
+        }
+    }
+
+    /// Update the category label for a single transaction by tx_id.
+    static func updateKategorie(txID: String, kategorie: String) throws {
+        let queue = try makeQueue()
+        try queue.write { db in
+            try db.execute(sql: "UPDATE transactions SET kategorie = ? WHERE tx_id = ?",
+                           arguments: [kategorie, txID])
         }
     }
 

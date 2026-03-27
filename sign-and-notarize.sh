@@ -4,15 +4,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-APP="$ROOT/SimpleBankingBuild/simplebanking.app"
 OUTDIR="$ROOT/SimpleBankingBuild"
+APP="${APP_PATH:-$ROOT/SimpleBankingBuild/simplebanking.app}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 STAGE_DIR="$OUTDIR/.dmg-stage-$TIMESTAMP"
-DMG_PATH="$OUTDIR/simplebanking-$TIMESTAMP.dmg"
+APP_BASENAME="$(basename "$APP" .app)"
+DMG_PATH="$OUTDIR/${APP_BASENAME}-${TIMESTAMP}.dmg"
 
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 BUILD_FIRST="${BUILD_FIRST:-1}"
+SKIP_APPCAST="${SKIP_APPCAST:-0}"
 
 usage() {
     cat <<EOF
@@ -113,12 +115,21 @@ xcrun stapler staple "$DMG_PATH"
 spctl --assess --type execute --verbose=4 "$APP" || true
 spctl --assess --type open --verbose=4 "$DMG_PATH" || true
 
+if [[ "$SKIP_APPCAST" == "1" ]]; then
+    echo "Appcast-Generierung übersprungen (SKIP_APPCAST=1)"
+    echo
+    echo "Done."
+    echo "App: $APP"
+    echo "DMG: $DMG_PATH"
+    exit 0
+fi
+
 echo "[9/9] Generate appcast.xml"
 SPARKLE_TOOLS="${SPARKLE_TOOLS:-$ROOT/.sparkle-tools}"
 GENERATE_APPCAST="$SPARKLE_TOOLS/bin/generate_appcast"
 if [[ -x "$GENERATE_APPCAST" ]]; then
     APPCAST_OUT="$OUTDIR/appcast.xml"
-    DOWNLOAD_URL_PREFIX="https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/SimpleBankingBuild/"
+    DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://simplebanking.de/download/}"
     "$GENERATE_APPCAST" "$OUTDIR" -o "$APPCAST_OUT" --download-url-prefix "$DOWNLOAD_URL_PREFIX"
     echo "Appcast: $APPCAST_OUT"
     echo "Upload $APPCAST_OUT and the .dmg to your server."

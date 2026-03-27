@@ -59,10 +59,16 @@ final class YaxiOAuthCallback: @unchecked Sendable {
         listener = nil
     }
 
+    /// Called when the bank's redirect hits our localhost callback.
+    /// YaxiService sets this to immediately trigger the first confirmation poll.
+    var onCallbackReceived: (@Sendable () -> Void)?
+
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: .global(qos: .utility))
         // Read the HTTP request (we don't need to parse it, just consume it).
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { _, _, _, _ in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] _, _, _, _ in
+            // Signal before serving HTML so polling starts immediately
+            self?.onCallbackReceived?()
             let html = """
             <!DOCTYPE html>
             <html><head><meta charset="utf-8"><title>Freigabe erteilt</title></head>

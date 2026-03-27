@@ -33,9 +33,18 @@ final class BankLogoStore: ObservableObject {
     private func loadIfNeeded(brand: BankLogoAssets.BankBrand) {
         guard images[brand.id] == nil else { return }
         guard !requestedBrandIDs.contains(brand.id) else { return }
-        guard let scheme = brand.logoURL.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+
+        let scheme = brand.logoURL.scheme?.lowercased() ?? ""
+
+        // Bundled SVG — load synchronously, no caching needed
+        if scheme == "file" {
+            if let image = NSImage(contentsOf: brand.logoURL) {
+                images[brand.id] = image
+            }
             return
         }
+
+        guard scheme == "http" || scheme == "https" else { return }
 
         if let cached = loadImageFromDisk(for: brand.logoURL) {
             images[brand.id] = cached

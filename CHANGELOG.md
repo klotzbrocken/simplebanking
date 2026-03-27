@@ -1,5 +1,36 @@
 # Changelog — simplebanking
 
+## [1.3.1] — 2026-03-27 (Build 20260327_031316_239)
+
+### Neu
+- **Multi-Banking** — Bis zu 3 Bankverbindungen gleichzeitig; schnelles Umschalten über Tabs. Transparentes Upgrade von 1.2.x, keine Neueinrichtung der Konten nötig.
+- **Transaktions-Filter** — Neues Filter-Menü neben „Umsätze": Alle / Einnahmen / Ausgaben / Abos / Fixkosten / Unkategorisiert. Aktiver Filter zeigt Statuszeile mit ×-Button.
+- **Ripple-Effekt** — Wasserwellen-Animation auf der Kontostand-Kachel bei neuen Buchungen (Metal-Shader). Einstellbar: Classic (Konfetti) oder Ripple; optional dauerhaft.
+- **AI-Kategorisierung** *(Experimentell)* — Automatische Kategorisierung über Anthropic Claude, Mistral oder OpenAI. 6 neue Kategorien: Gastronomie, Sparen, Freizeit, Gehalt, Gesundheit, Umbuchung. Läuft bankkontenübergreifend.
+- **Kalender-Heatmap** — 5. Ansicht im Transaktionspanel: monatliche Ausgaben-Heatmap.
+- **Verwendungszweck-Spalte** — Im breiten Panel-Modus (>840 px) eigene Spalte für den Verwendungszweck.
+- **Doppelklick auf Flyout-Karte** — Öffnet direkt das Transaktionspanel.
+- **Universal Binary** — arm64 + x86_64 (macOS 13+).
+
+### Geändert
+- Kontostand pro Bank gecacht → sofortige Anzeige beim Bankwechsel.
+- Kontostand im Transaktionspanel aktualisiert sich nach Refresh.
+- Standardwerte bei Neuinstallation: Flyout-Karte + Ripple aktiv.
+- Refresh-Intervall-Labels in Stunden, Standard 4 Stunden.
+- Neuer Settings-Bereich „Experimentell (Labs)" für AI-Assistent.
+- YAXI-Traces und Setup-Diagnose-Logs nur bei aktiviertem Logging.
+- Privacy-Text aktualisiert (erwähnt YAXI und Anthropic).
+- „Zurücksetzen"-Menüeintrag ohne Warn-Emoji.
+- Node.js/V8-Backend durch `routex-client-swift` (Rust FFI) ersetzt — kein lokaler Prozess mehr.
+
+### Behoben
+- Ripple-Effekt im Universal-Build fehlerhaft (fehlende Metal-Shader).
+- Alle drei KI-Anbieter zeigten „aktiv", obwohl nur einer einen Key hatte.
+- Nach Neuinstallation: unnötige 2FA beim ersten App-Neustart.
+- FGW-Fix: veraltete Session-Daten beim Setup-Flow.
+
+---
+
 ## [Unreleased] — v1.2.0
 
 ### Neu

@@ -1,61 +1,70 @@
 import Foundation
 
 enum TransactionCategory: String, CaseIterable, Codable {
-    case einkommen = "Einkommen"
-    case essenAlltag = "Essen & Alltag"
-    case abosDigital = "Abos & Digital"
-    case shopping = "Shopping"
+    // Existing
+    case einkommen    = "Einkommen"
+    case essenAlltag  = "Essen & Alltag"
+    case abosDigital  = "Abos & Digital"
+    case shopping     = "Shopping"
     case versicherungen = "Versicherungen"
-    case mobilitaet = "Mobilitaet"
+    case mobilitaet   = "Mobilitaet"
     case wohnenKredit = "Wohnen & Kredit"
-    case sonstiges = "Sonstiges"
+    case sonstiges    = "Sonstiges"
+    // AI categories
+    case gastronomie  = "Gastronomie"
+    case sparen       = "Sparen"
+    case freizeit     = "Freizeit"
+    case gehalt       = "Gehalt"
+    case gesundheit   = "Gesundheit"
+    case umbuchung    = "Umbuchungen"
 
     var displayName: String {
         switch self {
-        case .mobilitaet:
-            return "Mobilität"
-        default:
-            return rawValue
+        case .mobilitaet: return "Mobilität"
+        default:          return rawValue
         }
     }
 
     var icon: String {
         switch self {
-        case .einkommen:
-            return "briefcase"
-        case .essenAlltag:
-            return "fork.knife"
-        case .abosDigital:
-            return "play.rectangle"
-        case .shopping:
-            return "cart"
-        case .versicherungen:
-            return "shield"
-        case .mobilitaet:
-            return "car"
-        case .wohnenKredit:
-            return "house"
-        case .sonstiges:
-            return "square.grid.2x2"
+        case .einkommen:     return "briefcase"
+        case .essenAlltag:   return "fork.knife"
+        case .abosDigital:   return "play.rectangle"
+        case .shopping:      return "cart"
+        case .versicherungen: return "shield"
+        case .mobilitaet:    return "car"
+        case .wohnenKredit:  return "house"
+        case .sonstiges:     return "square.grid.2x2"
+        case .gastronomie:   return "fork.knife"
+        case .sparen:        return "chart.line.uptrend.xyaxis"
+        case .freizeit:      return "sportscourt"
+        case .gehalt:        return "eurosign.circle"
+        case .gesundheit:    return "cross.case"
+        case .umbuchung:     return "arrow.triangle.2.circlepath"
         }
     }
 
     static func from(jsonKey: String) -> TransactionCategory? {
         switch jsonKey {
-        case "versicherungen":
-            return .versicherungen
-        case "wohnen_kredit":
-            return .wohnenKredit
-        case "mobilitaet":
-            return .mobilitaet
-        case "abos_digital":
-            return .abosDigital
-        case "shopping":
-            return .shopping
-        case "essen_alltag":
-            return .essenAlltag
-        default:
-            return nil
+        // Existing keys
+        case "versicherungen": return .versicherungen
+        case "wohnen_kredit":  return .wohnenKredit
+        case "mobilitaet":     return .mobilitaet
+        case "abos_digital":   return .abosDigital
+        case "shopping":       return .shopping
+        case "essen_alltag":   return .essenAlltag
+        // AI keys
+        case "gastronomie":    return .gastronomie
+        case "sparen":         return .sparen
+        case "freizeit":       return .freizeit
+        case "gehalt":         return .gehalt
+        case "gesundheit":     return .gesundheit
+        case "umbuchung":      return .umbuchung
+        case "einkaufen":      return .shopping
+        case "transport":      return .mobilitaet
+        case "versicherung":   return .versicherungen
+        case "sonstiges":      return .sonstiges
+        default:               return nil
         }
     }
 

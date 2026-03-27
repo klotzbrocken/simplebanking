@@ -1,9 +1,11 @@
 import AppKit
 import Foundation
+import Routex
 
 enum SetupProgress: Sendable {
     case discoveringBank
     case requestingApproval
+    case fetchingBalance
     case requestingTransactionApproval
     case fetchingTransactions
     case savingCredentials
@@ -11,8 +13,9 @@ enum SetupProgress: Sendable {
     var displayText: String {
         switch self {
         case .discoveringBank: return L10n.t("Bank wird gesucht…", "Searching for bank…")
-        case .requestingApproval: return L10n.t("Freigabe angefordert", "Approval requested")
-        case .requestingTransactionApproval: return L10n.t("Transaktionen freigeben", "Approve transactions")
+        case .requestingApproval: return L10n.t("Freigabe angefordert…", "Approval requested…")
+        case .fetchingBalance: return L10n.t("Kontostand wird abgerufen…", "Fetching balance…")
+        case .requestingTransactionApproval: return L10n.t("Umsätze werden geladen…", "Loading transactions…")
         case .fetchingTransactions: return L10n.t("Umsätze werden geladen…", "Loading transactions…")
         case .savingCredentials: return L10n.t("Daten werden gespeichert…", "Saving data…")
         }
@@ -21,9 +24,7 @@ enum SetupProgress: Sendable {
     var subtitle: String {
         switch self {
         case .requestingApproval:
-            return L10n.t("Push-TAN bestätigen (1/2)", "Confirm Push-TAN (1/2)")
-        case .requestingTransactionApproval:
-            return L10n.t("Push-TAN bestätigen (2/2)", "Confirm Push-TAN (2/2)")
+            return L10n.t("Banking-App öffnen und Freigabe bestätigen", "Open your banking app and confirm the approval")
         default:
             return L10n.t("Bitte warten…", "Please wait…")
         }
@@ -32,6 +33,7 @@ enum SetupProgress: Sendable {
     var iconName: String {
         switch self {
         case .requestingApproval: return "bell.circle.fill"
+        case .fetchingBalance: return "arrow.triangle.2.circlepath.circle.fill"
         case .requestingTransactionApproval: return "arrow.triangle.2.circlepath"
         default: return "arrow.triangle.2.circlepath.circle.fill"
         }
@@ -41,6 +43,7 @@ enum SetupProgress: Sendable {
 struct SetupConnectOptions: Sendable {
     var diagnosticsEnabled: Bool = false
     var onProgress: (@Sendable (SetupProgress) -> Void)?
+    var onPickAccount: (@Sendable ([Routex.Account]) async -> [Routex.Account]?)?
 }
 
 struct SetupConnectActionError: LocalizedError {
@@ -68,6 +71,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         case bankSearch
         case credentials
         case connecting
+        case accountPicker
         case onboarding(page: Int)
     }
 
@@ -85,11 +89,12 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let fieldWidth: CGFloat = 380
 
     private var step: Step = .welcome
-    private var selectedBank: BankLogoAssets.BankBrand?
-    private var filteredBanks: [BankLogoAssets.BankBrand] = []
+    private var selectedConnection: ConnectionInfo?          // selected YAXI bank
+    private var filteredConnections: [ConnectionInfo] = []   // live search results
     private var completedBank: DiscoveredBank?
     private var connectTask: Task<Void, Never>?
     private var discoverTask: Task<Void, Never>? = nil
+    private var searchDebounceTask: Task<Void, Never>? = nil
     private var discoverResult: DiscoveredBank? = nil
     private var hasFailedOnce: Bool = false
     private var diagnosticsLoggingEnabled: Bool = false
@@ -97,6 +102,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     // Wizard-specific state
     private var collectedMasterPassword: String? = nil
+    private var existingMasterPassword: String? = nil  // non-nil when adding a second account
     private var outcome: SetupWizardOutcome = .cancelled
 
     // Master password step controls
@@ -147,8 +153,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     // IBAN not-found mail button
     private let ibanNotFoundMailButton = NSButton(title: "", target: nil, action: nil)
 
-    init(connectAction: @escaping ConnectAction) {
+    // Account picker step
+    private var accountPickerAccounts: [Routex.Account] = []
+    private var accountPickerContinuation: CheckedContinuation<[Routex.Account]?, Never>?
+    private var accountPickerCheckboxes: [NSButton] = []
+
+    init(connectAction: @escaping ConnectAction, existingMasterPassword: String? = nil) {
         self.connectAction = connectAction
+        self.collectedMasterPassword = existingMasterPassword
+        self.existingMasterPassword = existingMasterPassword
 
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
@@ -167,8 +180,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         setupBaseLayout()
         setupControlDefaults()
-        updateSearchResults()
-        render(step: .welcome)
+        // Ist ein Passwort bereits vorhanden, Welcome- und Passwort-Schritt überspringen
+        render(step: existingMasterPassword != nil ? .bankSearch : .welcome)
     }
 
     deinit {
@@ -189,6 +202,11 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     func windowWillClose(_ notification: Notification) {
         if case .connecting = step { return }
+        if case .accountPicker = step {
+            let cont = accountPickerContinuation
+            accountPickerContinuation = nil
+            cont?.resume(returning: nil)
+        }
         NSApp.stopModal(withCode: .abort)
     }
 
@@ -478,6 +496,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         case .bankSearch: fraction = 0.28
         case .credentials: fraction = 0.42
         case .connecting: fraction = 0.57
+        case .accountPicker: fraction = 0.57
         case .onboarding(let page):
             switch page {
             case 0: fraction = 0.71
@@ -500,7 +519,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         clearRootContent()
 
         switch step {
-        case .connecting:
+        case .connecting, .accountPicker:
             panel.standardWindowButton(.closeButton)?.isEnabled = false
         default:
             panel.standardWindowButton(.closeButton)?.isEnabled = true
@@ -517,6 +536,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             renderCredentialsStep()
         case .connecting:
             renderConnectingStep()
+        case .accountPicker:
+            renderAccountPickerStep()
         case .onboarding(let page):
             renderOnboardingPage(page)
         }
@@ -683,34 +704,30 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.spacing = 12
 
         discoverSpinner.stopAnimation(nil)
-        ibanDetectedRow.isHidden = ibanPreviewBank == nil
 
         let iconBox = iconContainer(size: 40, cornerRadius: 12, bg: NSColor(white: 0.5, alpha: 0.12), icon: "building.2.fill", iconSize: 18, tint: .labelColor)
 
         let title = NSTextField(labelWithString: t("Welche Bank nutzt du?", "Which bank do you use?"))
         title.font = .systemFont(ofSize: 19, weight: .semibold)
 
-        let subtitle = NSTextField(wrappingLabelWithString: t("Gib deine IBAN ein – wir finden deine Bank automatisch.", "Enter your IBAN – we'll find your bank automatically."))
+        let subtitle = NSTextField(wrappingLabelWithString: t("Tippe den Namen deiner Bank ein.", "Type the name of your bank."))
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
-
-        ibanField.placeholderString = "DE00 0000 0000 0000 0000 00"
-        ibanField.font = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
 
         let statusRow = NSStackView(views: [discoverSpinner, searchHelperLabel])
         statusRow.orientation = .horizontal
         statusRow.spacing = 6
         statusRow.alignment = .centerY
 
-        let yaxiInfo = infoBox(icon: "info.circle", t("EU Open Banking nach PSD2. simplebanking nutzt YAXI mit echter 1:1-Verbindung ohne Dritte.\n\nNur Lesezugriff. Keine Überweisungen.", "EU Open Banking via PSD2. simplebanking uses YAXI with a direct 1:1 connection, no third parties.\n\nRead-only access. No transfers."))
+        let yaxiInfo = infoBox(icon: "lock.shield.fill", t("Sicher & privat via YAXI Open Banking.\nNiemand außer dir sieht deine Zugangsdaten, Umsätze oder deinen Kontostand.\n\nNur Lesezugriff. Keine Überweisungen.", "Secure & private via YAXI Open Banking.\nNo one but you ever sees your credentials, transactions, or balance.\n\nRead-only access. No transfers."))
 
-        let hasBank = ibanPreviewBank != nil
+        let hasConn = selectedConnection != nil
         let buttonRow = horizontalButtons(
             backTitle: t("Zurück", "Back"),
             backAction: #selector(onSearchBack),
             primaryTitle: t("Weiter", "Continue"),
             primaryAction: #selector(onSearchContinue),
-            primaryEnabled: hasBank
+            primaryEnabled: hasConn
         )
         searchContinueButton = buttonRow.primary
         buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
@@ -718,9 +735,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.addArrangedSubview(iconBox)
         rootStack.addArrangedSubview(title)
         rootStack.addArrangedSubview(subtitle)
-        rootStack.addArrangedSubview(ibanField)
-        rootStack.addArrangedSubview(ibanDetectedRow)
-        rootStack.addArrangedSubview(ibanNotFoundMailButton)
+        if let conn = selectedConnection {
+            bankSearchField.stringValue = conn.displayName
+        }
+        rootStack.addArrangedSubview(bankSearchField)
+        // Always in the stack — updateBankChip() controls isHidden.
+        // This allows autocompleteSelectionChanged() to show it without re-rendering the step.
+        updateBankChip()
+        rootStack.addArrangedSubview(selectedBankChipView)
+        rootStack.addArrangedSubview(statusRow)
         rootStack.addArrangedSubview(yaxiInfo)
         rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(buttonRow.stack)
@@ -728,17 +751,17 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.setCustomSpacing(14, after: iconBox)
         rootStack.setCustomSpacing(4, after: title)
         rootStack.setCustomSpacing(16, after: subtitle)
-        rootStack.setCustomSpacing(8, after: ibanField)
-        rootStack.setCustomSpacing(8, after: ibanDetectedRow)
-        rootStack.setCustomSpacing(12, after: ibanNotFoundMailButton)
+        rootStack.setCustomSpacing(8, after: bankSearchField)
+        rootStack.setCustomSpacing(8, after: selectedBankChipView)
+        rootStack.setCustomSpacing(12, after: statusRow)
         rootStack.setCustomSpacing(16, after: yaxiInfo)
 
-        ibanField.nextKeyView = buttonRow.primary
+        bankSearchField.nextKeyView = buttonRow.primary
         buttonRow.primary.nextKeyView = buttonRow.back
-        buttonRow.back.nextKeyView = ibanField
-        panel.initialFirstResponder = ibanField
+        buttonRow.back.nextKeyView = bankSearchField
+        panel.initialFirstResponder = bankSearchField
         DispatchQueue.main.async { [weak self] in
-            self?.panel.makeFirstResponder(self?.ibanField)
+            self?.panel.makeFirstResponder(self?.bankSearchField)
         }
     }
 
@@ -793,7 +816,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rememberToggle.title = t("Zugangsdaten speichern", "Save credentials")
         rememberToggle.font = .systemFont(ofSize: 13, weight: .medium)
 
-        let rememberSublabel = NSTextField(labelWithString: t("Sicher im macOS Keychain verschlüsselt", "Securely encrypted in macOS Keychain"))
+        let rememberSublabel = NSTextField(labelWithString: t("Verschlüsselt mit deinem Master-Passwort (AES-256)", "Encrypted with your master password (AES-256)"))
         rememberSublabel.font = .systemFont(ofSize: 11)
         rememberSublabel.textColor = .secondaryLabelColor
 
@@ -802,7 +825,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rememberStack.spacing = 2
         rememberStack.alignment = .leading
 
-        fieldViews.append(contentsOf: [rememberStack, credentialsStatusLabel])
+        fieldViews.append(credentialsStatusLabel)
         credentialsStatusLabel.isHidden = credentialsStatusLabel.stringValue.isEmpty
 
         let fields = NSStackView(views: fieldViews)
@@ -810,7 +833,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         fields.spacing = 14
         fields.alignment = .leading
 
-        let securityInfo = infoBox(icon: "checkmark.shield.fill", t("Verschlüsselte Verbindung via PSD2 – deine Daten werden nie auf unseren Servern gespeichert.", "Encrypted connection via PSD2 – your data is never stored on our servers."), tint: .systemGreen)
+        let securityInfo = infoBox(icon: "checkmark.shield.fill", t("Deine Bankdaten werden verschlüsselt lokal gespeichert. Für Kontoabfragen verbindet sich die App mit YAXI. Der optionale KI-Chat sendet Daten an Anthropic.", "Your banking data is stored encrypted locally. For account queries, the app connects to YAXI. The optional AI chat sends data to Anthropic."), tint: .systemGreen)
 
         let buttonRow = horizontalButtons(
             backTitle: t("Zurück", "Back"),
@@ -838,8 +861,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let firstField: NSTextField? = needsUserId ? userField : (needsPassword ? passField : nil)
         if needsUserId { userField.nextKeyView = needsPassword ? passField : buttonRow.primary }
         passField.nextKeyView = buttonRow.primary
-        buttonRow.primary.nextKeyView = rememberToggle
-        rememberToggle.nextKeyView = buttonRow.back
+        buttonRow.primary.nextKeyView = buttonRow.back
         buttonRow.back.nextKeyView = firstField ?? buttonRow.primary
         panel.initialFirstResponder = firstField
         DispatchQueue.main.async { [weak self] in
@@ -874,6 +896,100 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             rootStack.addArrangedSubview($0)
         }
         rootStack.setCustomSpacing(12, after: approvalSpinner)
+    }
+
+    // MARK: - Account Picker
+
+    private func renderAccountPickerStep() {
+        approvalSpinner.stopAnimation(nil)
+        rootStack.alignment = .leading
+        rootStack.spacing = 16
+
+        let titleLabel = NSTextField(labelWithString: t("Konten auswählen", "Choose accounts"))
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+
+        let subtitleLabel = NSTextField(wrappingLabelWithString: t(
+            "Jedes ausgewählte Konto wird separat eingerichtet.",
+            "Each selected account will be set up separately."
+        ))
+        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.preferredMaxLayoutWidth = fieldWidth
+
+        accountPickerCheckboxes = []
+        let checkboxStack = NSStackView()
+        checkboxStack.orientation = .vertical
+        checkboxStack.alignment = .leading
+        checkboxStack.spacing = 8
+
+        for (index, account) in accountPickerAccounts.enumerated() {
+            let iban = account.iban?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let owner = account.ownerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let display = account.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var parts: [String] = []
+            if !display.isEmpty { parts.append(display) }
+            if !owner.isEmpty && owner != display { parts.append(owner) }
+            if !iban.isEmpty { parts.append(iban) }
+            let title = parts.isEmpty
+                ? t("Konto \(index + 1)", "Account \(index + 1)")
+                : parts.joined(separator: " • ")
+            let checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+            checkbox.state = .on
+            checkboxStack.addArrangedSubview(checkbox)
+            accountPickerCheckboxes.append(checkbox)
+        }
+
+        let checkboxContainer: NSView
+        if accountPickerAccounts.count > 4 {
+            let scrollView = NSScrollView()
+            scrollView.hasVerticalScroller = true
+            scrollView.documentView = checkboxStack
+            scrollView.translatesAutoresizingMaskIntoConstraints = false
+            checkboxStack.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                checkboxStack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+                checkboxStack.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+                checkboxStack.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            ])
+            scrollView.heightAnchor.constraint(equalToConstant: 120).isActive = true
+            scrollView.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+            checkboxContainer = scrollView
+        } else {
+            checkboxContainer = checkboxStack
+        }
+
+        let continueBtn = primaryButton(title: t("Weiter", "Continue"), action: #selector(onAccountPickerContinue))
+        continueBtn.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+
+        let cancelBtn = NSButton(title: t("Abbrechen", "Cancel"), target: self, action: #selector(onAccountPickerCancel))
+        cancelBtn.bezelStyle = .inline
+        cancelBtn.font = .systemFont(ofSize: 12)
+
+        [titleLabel, subtitleLabel, checkboxContainer, continueBtn, cancelBtn].forEach {
+            rootStack.addArrangedSubview($0)
+        }
+        rootStack.setCustomSpacing(8, after: subtitleLabel)
+    }
+
+    @objc private func onAccountPickerContinue() {
+        let selected = accountPickerCheckboxes.enumerated().compactMap { (i, btn) in
+            btn.state == .on ? (accountPickerAccounts.indices.contains(i) ? accountPickerAccounts[i] : nil) : nil
+        }
+        let cont = accountPickerContinuation
+        accountPickerContinuation = nil
+        if selected.isEmpty {
+            cont?.resume(returning: nil)
+        } else {
+            render(step: .connecting)
+            cont?.resume(returning: selected)
+        }
+    }
+
+    @objc private func onAccountPickerCancel() {
+        let cont = accountPickerContinuation
+        accountPickerContinuation = nil
+        cont?.resume(returning: nil)
+        // connectTask will throw .cancelled → handleConnectFailure → back to credentials
     }
 
     private func updateProgress(_ progress: SetupProgress) {
@@ -1005,7 +1121,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         features.spacing = 14
         features.alignment = .leading
 
-        let pills = pillsRow([t("PSD2-konform", "PSD2 compliant"), "Open Source", "macOS native"])
+        let pills = pillsRow(["Open Banking", "Open Source", "macOS native"])
 
         let buttonRow = horizontalButtons(
             backTitle: t("Zurück", "Back"),
@@ -1232,8 +1348,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     }
 
     private func updateBankChip() {
-        if let bank = selectedBank {
-            selectedBankChipLabel.stringValue = bank.displayName
+        if let conn = selectedConnection {
+            selectedBankChipLabel.stringValue = conn.displayName
             selectedBankChipView.isHidden = false
             selectedBankChipView.layer?.borderColor = NSColor.controlAccentColor.cgColor
         } else {
@@ -1309,73 +1425,57 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     // MARK: - Actions: Bank Search
 
     @objc private func onSearchFieldChanged(_ notification: Notification) {
-        updateSearchResults()
+        liveSearchBanks()
     }
 
     private func autocompleteSelectionChanged() {
         guard let table = autocompleteTable else { return }
         let idx = table.selectedRow
-        guard idx >= 0, idx < filteredBanks.count else { return }
-        selectedBank = filteredBanks[idx]
+        guard idx >= 0, idx < filteredConnections.count else { return }
+        selectedConnection = filteredConnections[idx]
+        bankSearchField.stringValue = filteredConnections[idx].displayName
         updateBankChip()
         hideAutocompletePanel()
+        searchContinueButton?.isEnabled = true
     }
 
     @objc private func autocompleteTableDoubleClick() {
         autocompleteSelectionChanged()
     }
 
-    private func updateSearchResults() {
-        let query = bankSearchField.stringValue
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
+    private func liveSearchBanks() {
+        let query = bankSearchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let all = BankLogoAssets.brands.sorted {
-            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-        }
-
-        let matches: [BankLogoAssets.BankBrand]
-        if query.isEmpty {
-            matches = Array(all.prefix(40))
-        } else {
-            matches = Array(
-                all.filter { brand in
-                    let display = brand.displayName.lowercased()
-                    return display.contains(query) || brand.keywords.contains(where: { $0.contains(query) })
-                }.prefix(40)
-            )
-        }
-
-        filteredBanks = matches
-
-        guard case .bankSearch = step else { return }
-
-        guard !matches.isEmpty else {
-            if selectedBank != nil {
-                // Bank already selected, just hide panel
-            } else {
-                selectedBank = nil
-                updateBankChip()
-            }
+        guard !query.isEmpty else {
+            filteredConnections = []
             hideAutocompletePanel()
             return
         }
 
-        if let selectedBank, let idx = matches.firstIndex(where: { $0.id == selectedBank.id }) {
-            autocompleteTable?.reloadData()
-            autocompleteTable?.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
-        } else if !query.isEmpty {
-            // New query — pre-select first match but don't commit until user picks
-            autocompleteTable?.reloadData()
-            autocompleteTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
-        } else {
-            autocompleteTable?.reloadData()
-        }
+        searchDebounceTask?.cancel()
+        searchDebounceTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            // 400 ms debounce
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
 
-        if query.isEmpty && selectedBank != nil {
-            hideAutocompletePanel()
-        } else {
-            showAutocompletePanel()
+            let results = await YaxiService.searchBanks(query: query)
+            guard !Task.isCancelled else { return }
+
+            Self.enqueueOnMainRunLoop { [weak self] in
+                guard let self else { return }
+                MainActor.assumeIsolated {
+                    guard case .bankSearch = self.step else { return }
+                    self.filteredConnections = results
+                    guard !results.isEmpty else {
+                        self.hideAutocompletePanel()
+                        return
+                    }
+                    self.autocompleteTable?.reloadData()
+                    self.autocompleteTable?.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+                    self.showAutocompletePanel()
+                }
+            }
         }
     }
 
@@ -1424,7 +1524,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
                 bankSearchField.convert(bankSearchField.bounds, to: nil)
               ) else { return }
 
-        let rowCount = min(filteredBanks.count, 7)
+        let rowCount = min(filteredConnections.count, 7)
         let acPanelHeight = CGFloat(rowCount) * 28 + 4
         let panelFrame = NSRect(
             x: screenFrame.minX,
@@ -1450,15 +1550,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     // MARK: - NSTableViewDataSource
 
     nonisolated func numberOfRows(in tableView: NSTableView) -> Int {
-        MainActor.assumeIsolated { filteredBanks.count }
+        MainActor.assumeIsolated { filteredConnections.count }
     }
 
     // MARK: - NSTableViewDelegate
 
     nonisolated func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         MainActor.assumeIsolated {
-            let name = filteredBanks[row].displayName
-            let cell = NSTextField(labelWithString: name)
+            let conn = filteredConnections[row]
+            let cell = NSTextField(labelWithString: conn.displayName)
             cell.font = .systemFont(ofSize: 13)
             cell.lineBreakMode = .byTruncatingTail
             return cell
@@ -1466,7 +1566,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     }
 
     nonisolated func tableViewSelectionDidChange(_ notification: Notification) {
-        // Selection handled by double-click and keyboard Return
+        MainActor.assumeIsolated {
+            guard let event = NSApp.currentEvent else { return }
+            switch event.type {
+            case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
+                autocompleteSelectionChanged()
+            default:
+                break
+            }
+        }
     }
 
     // MARK: - NSTextFieldDelegate (keyboard navigation)
@@ -1478,7 +1586,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         switch commandSelector {
         case #selector(NSResponder.moveDown(_:)):
-            let next = min(table.selectedRow + 1, filteredBanks.count - 1)
+            let next = min(table.selectedRow + 1, filteredConnections.count - 1)
             table.selectRowIndexes(IndexSet(integer: max(next, 0)), byExtendingSelection: false)
             table.scrollRowToVisible(max(next, 0))
             return true
@@ -1503,39 +1611,39 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     }
 
     @objc private func onSearchContinue() {
-        let rawIBAN = ibanField.stringValue
-            .replacingOccurrences(of: " ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-
-        guard !rawIBAN.isEmpty, ibanPreviewBank != nil else { return }
+        guard let conn = selectedConnection else { return }
 
         searchContinueButton?.isEnabled = false
         discoverSpinner.startAnimation(nil)
         searchHelperLabel.stringValue = ""
 
+        // Build DiscoveredBank from the already-selected ConnectionInfo
+        discoverResult = DiscoveredBank(
+            id: conn.id,
+            displayName: conn.displayName,
+            logoId: conn.logoId,
+            credentials: DiscoveredBankCredentials(
+                full: conn.credentials.full,
+                userId: conn.credentials.userId,
+                none: conn.credentials.none
+            ),
+            userIdLabel: conn.userId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            advice: conn.advice?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        )
+
         discoverTask?.cancel()
-        discoverTask = Task.detached(priority: .userInitiated) { [weak self] in
+        discoverTask = Task.detached(priority: .userInitiated) { [weak self, conn] in
             guard let self else { return }
-
-            await YaxiService.configureBackend(iban: rawIBAN)
+            // Preserve session tokens so YAXI can reuse an existing recurring consent
+            // (push TAN instead of full browser redirect on re-connect).
+            await YaxiService.clearConnectionDataKeepingSessions()
             guard !Task.isCancelled else { return }
-
-            let discovered = await YaxiService.discoverBank()
-            guard !Task.isCancelled else { return }
-
+            YaxiService.storeConnectionInfo(conn)
             Self.enqueueOnMainRunLoop { [weak self] in
                 guard let self else { return }
                 MainActor.assumeIsolated {
                     self.discoverSpinner.stopAnimation(nil)
-                    if let discovered {
-                        self.discoverResult = discovered
-                        self.render(step: .credentials)
-                    } else {
-                        self.searchHelperLabel.stringValue = L10n.t("Ungültige IBAN – bitte prüfen", "Invalid IBAN – please check")
-                        self.searchHelperLabel.textColor = .systemRed
-                        self.searchContinueButton?.isEnabled = true
-                    }
+                    self.render(step: .credentials)
                 }
             }
         }
@@ -1633,30 +1741,26 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     }
 
     @objc private func onCredentialsConnect() {
-        let iban = ibanField.stringValue
-            .replacingOccurrences(of: " ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
         let user = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let pass = passField.stringValue
 
         AppLogger.log(
-            "SetupUI connect tapped ibanPrefix=\(String(iban.prefix(6))) userLen=\(user.count) passLen=\(pass.count)",
+            "SetupUI connect tapped userLen=\(user.count) passLen=\(pass.count)",
             category: "SetupUI"
         )
 
         credentialsStatusLabel.stringValue = ""
         credentialsStatusLabel.isHidden = true
 
-        let bankName = discoverResult?.displayName ?? selectedBank?.displayName
+        let bankName = discoverResult?.displayName ?? selectedConnection?.displayName
         let payload = CredentialsPanel.Result(
-            iban: iban,
+            iban: "",
             userId: user,
             password: pass,
             bankName: bankName
         )
         let options = SetupConnectOptions(
-            diagnosticsEnabled: hasFailedOnce && diagnosticsLoggingEnabled
+            diagnosticsEnabled: AppLogger.isEnabled
         )
         beginConnection(with: payload, selectedBankName: bankName, options: options)
     }
@@ -1682,6 +1786,21 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
                 guard let self else { return }
                 MainActor.assumeIsolated {
                     self.updateProgress(progress)
+                }
+            }
+        }
+        optionsWithProgress.onPickAccount = { [weak self] accounts in
+            return await withCheckedContinuation { (cont: CheckedContinuation<[Routex.Account]?, Never>) in
+                Self.enqueueOnMainRunLoop { [weak self] in
+                    guard let self else {
+                        cont.resume(returning: nil)
+                        return
+                    }
+                    MainActor.assumeIsolated {
+                        self.accountPickerAccounts = accounts
+                        self.accountPickerContinuation = cont
+                        self.render(step: .accountPicker)
+                    }
                 }
             }
         }
@@ -1765,7 +1884,13 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         latestDiagnosticsLogURL = nil
         completedBank = bank
         collectedMasterPassword = masterPassword
-        render(step: .onboarding(page: 0))
+        // Skip onboarding tutorial when adding a second account (password already exists).
+        if collectedMasterPassword != nil && existingMasterPassword != nil {
+            outcome = .realBanking(masterPassword: masterPassword, bank: bank)
+            NSApp.stopModal(withCode: .stop)
+        } else {
+            render(step: .onboarding(page: 0))
+        }
     }
 
     private func handleConnectFailure(message: String, diagnosticsLogURL: URL?) {

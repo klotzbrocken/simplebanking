@@ -7,6 +7,8 @@ struct StoredCredentials: Codable {
     var userId: String
     var password: String
     var anthropicApiKey: String? = nil
+    var mistralApiKey: String? = nil
+    var openaiApiKey: String? = nil
 }
 
 enum CredentialsStoreError: Error, LocalizedError {
@@ -73,6 +75,22 @@ enum CredentialsStore {
         }
     }
 
+    /// Deletes ALL credentials files, DB files and attachments — used by full reset.
+    static func deleteAllData() {
+        guard let appDir = try? appSupportURL() else { return }
+        let fm = FileManager.default
+        if let contents = try? fm.contentsOfDirectory(at: appDir, includingPropertiesForKeys: nil) {
+            for file in contents {
+                let name = file.lastPathComponent
+                if (name.hasPrefix("credentials") && name.hasSuffix(".json"))
+                    || name.hasPrefix("transactions") {
+                    try? fm.removeItem(at: file)
+                }
+            }
+        }
+        try? fm.removeItem(at: appDir.appendingPathComponent("attachments"))
+    }
+
     static func save(_ creds: StoredCredentials, masterPassword: String) throws {
         // Always save to the slot-specific file (never the legacy path)
         let appDir = try appSupportURL()
@@ -132,21 +150,45 @@ enum CredentialsStore {
     }
 
     static func loadAPIKey(masterPassword: String) throws -> String? {
-        let credentials = try load(masterPassword: masterPassword)
-        let key = credentials.anthropicApiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try loadAPIKey(forProvider: .anthropic, masterPassword: masterPassword)
+    }
+
+    static func loadAPIKey(forProvider provider: AIProvider, masterPassword: String) throws -> String? {
+        let creds = try load(masterPassword: masterPassword)
+        let raw: String?
+        switch provider {
+        case .anthropic: raw = creds.anthropicApiKey
+        case .mistral:   raw = creds.mistralApiKey
+        case .openai:    raw = creds.openaiApiKey
+        }
+        let key = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let key, !key.isEmpty else { return nil }
         return key
     }
 
     static func saveAPIKey(_ apiKey: String?, masterPassword: String) throws {
-        var credentials = try load(masterPassword: masterPassword)
+        try saveAPIKey(apiKey, forProvider: .anthropic, masterPassword: masterPassword)
+    }
+
+    static func saveAPIKey(_ apiKey: String?, forProvider provider: AIProvider, masterPassword: String) throws {
+        var creds = try load(masterPassword: masterPassword)
         let normalized = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        credentials.anthropicApiKey = (normalized?.isEmpty == false) ? normalized : nil
-        try save(credentials, masterPassword: masterPassword)
+        let value = (normalized?.isEmpty == false) ? normalized : nil
+        switch provider {
+        case .anthropic: creds.anthropicApiKey = value
+        case .mistral:   creds.mistralApiKey   = value
+        case .openai:    creds.openaiApiKey    = value
+        }
+        try save(creds, masterPassword: masterPassword)
     }
 
     static func hasAPIKey(masterPassword: String) throws -> Bool {
         try loadAPIKey(masterPassword: masterPassword) != nil
+    }
+
+    /// Returns true if the active provider has a key stored.
+    static func hasActiveProviderKey(masterPassword: String) throws -> Bool {
+        try loadAPIKey(forProvider: AIProvider.active, masterPassword: masterPassword) != nil
     }
 
     // MARK: - KDF

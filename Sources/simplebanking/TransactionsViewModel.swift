@@ -1,6 +1,34 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Transaction Filter
+
+enum TxFilter: Int, CaseIterable {
+    case all, income, expense, subscriptions, fixedCosts, uncategorized
+
+    var label: String {
+        switch self {
+        case .all:            return L10n.t("Alle", "All")
+        case .income:         return L10n.t("Einnahmen", "Income")
+        case .expense:        return L10n.t("Ausgaben", "Expenses")
+        case .subscriptions:  return L10n.t("Abos", "Subscriptions")
+        case .fixedCosts:     return L10n.t("Fixkosten", "Fixed costs")
+        case .uncategorized:  return L10n.t("Unkategorisiert", "Uncategorized")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .all:            return "line.3.horizontal.decrease"
+        case .income:         return "arrow.down.circle"
+        case .expense:        return "arrow.up.circle"
+        case .subscriptions:  return "repeat.circle"
+        case .fixedCosts:     return "calendar.badge.clock"
+        case .uncategorized:  return "questionmark.circle"
+        }
+    }
+}
+
 // MARK: - Transactions Panel (paged, SwiftUI)
 
 @MainActor
@@ -26,9 +54,15 @@ final class TransactionsViewModel: ObservableObject {
     @Published var connectedBankLogoID: String? = nil
     @Published var connectedBankIBAN: String? = nil
     @Published var anthropicApiKey: String? = nil
+    @Published var aiProvider: AIProvider = .anthropic
     @Published var confettiTrigger: Int = 0
+    @Published var rippleTrigger: Int = 0
+    @Published var isTanPending: Bool = false
     @Published var enrichmentData: [String: (note: String?, attachmentCount: Int)] = [:]
     @Published private(set) var filteredTransactions: [TransactionsResponse.Transaction] = []
+    @Published var activeFilter: TxFilter = .all {
+        didSet { applyCurrentFilter(resetPage: true) }
+    }
 
     let pageSize: Int = 10
     private let searchDebounceNanoseconds: UInt64 = 150_000_000
@@ -37,6 +71,7 @@ final class TransactionsViewModel: ObservableObject {
     private var queryTask: Task<Void, Never>?
     private var searchIndex: [String] = []
     private var uniqueDateCache: [String] = []
+    private var fixedMerchants: Set<String> = []
 
     deinit {
         queryTask?.cancel()
@@ -101,6 +136,7 @@ final class TransactionsViewModel: ObservableObject {
 
     private func rebuildSearchIndex() {
         searchIndex = transactions.map(buildSearchIndexText)
+        fixedMerchants = FixedCostsAnalyzer.getFixedCostMerchants(transactions: transactions)
     }
 
     private func rebuildUniqueDateCache() {
@@ -115,26 +151,50 @@ final class TransactionsViewModel: ObservableObject {
 
     private func applyCurrentFilter(resetPage: Bool) {
         let variants = queryVariants()
-        if !isSearchActive {
-            filteredTransactions = transactions
-        } else {
-            var results: [TransactionsResponse.Transaction] = []
-            results.reserveCapacity(transactions.count)
 
+        // Step 1: search filter
+        var base: [TransactionsResponse.Transaction]
+        if !isSearchActive {
+            base = transactions
+        } else {
+            base = []
+            base.reserveCapacity(transactions.count)
             for (index, transaction) in transactions.enumerated() {
                 let haystack = index < searchIndex.count ? searchIndex[index] : buildSearchIndexText(for: transaction)
                 if haystack.contains(variants.raw) || haystack.contains(variants.dot) {
-                    results.append(transaction)
+                    base.append(transaction)
                     continue
                 }
                 if !variants.compact.isEmpty, haystack.contains(variants.compact) {
-                    results.append(transaction)
+                    base.append(transaction)
                 }
             }
-
-            filteredTransactions = results
         }
 
+        // Step 2: active filter
+        switch activeFilter {
+        case .all:
+            break
+        case .income:
+            base = base.filter { $0.parsedAmount > 0 }
+        case .expense:
+            base = base.filter { $0.parsedAmount < 0 }
+        case .subscriptions:
+            base = base.filter { tx in
+                guard tx.parsedAmount < 0 else { return false }
+                let merchant = MerchantResolver.resolve(transaction: tx).effectiveMerchant
+                let raw = tx.creditor?.name ?? tx.debtor?.name ?? ""
+                let remittance = (tx.remittanceInformation ?? []).joined(separator: " ")
+                return CancellationLinks.find(merchant: merchant, remittance: remittance) != nil
+                    || CancellationLinks.find(merchant: raw, remittance: remittance) != nil
+            }
+        case .fixedCosts:
+            base = base.filter { FixedCostsAnalyzer.isFixedCost($0, fixedMerchants: fixedMerchants) }
+        case .uncategorized:
+            base = base.filter { TransactionCategorizer.category(for: $0) == .sonstiges }
+        }
+
+        filteredTransactions = base
         rebuildUniqueDateCache()
 
         if resetPage {

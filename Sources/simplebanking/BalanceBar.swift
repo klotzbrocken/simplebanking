@@ -223,7 +223,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
     @AppStorage("swapClickBehavior") private var swapClickBehavior: Bool = false
-    @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.mouseClick.rawValue
+    @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.flyoutCard.rawValue
     @AppStorage("balanceSignalLowUpperBound") private var balanceSignalLowUpperBound: Int = 500
     @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
@@ -237,6 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @AppStorage("lastSeenTxSig") private var lastSeenTxSig: String = ""
     @AppStorage("confettiLastIncomeTxSig") private var confettiLastIncomeTxSig: String = ""
     private var latestTxSig: String = ""
+    private var flyoutRippleTrigger: Int = 0
     
     // Für Balance-Anzeige
     private(set) var lastBalance: Double? = nil
@@ -836,6 +837,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let key = (normalized?.isEmpty == false) ? normalized : nil
                 self.txVM.anthropicApiKey = key
+                self.txVM.aiProvider = AIProvider.active
                 self.llmAPIKeyPresent = key != nil
             }
         }
@@ -1350,12 +1352,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 
                 // Show error with remaining attempts
                 let alert = NSAlert()
-                alert.messageText = "Falsches Passwort"
+                alert.messageText = t("Falsches Passwort", "Wrong password")
                 if resetAttemptsLimit > 0 {
                     let remaining = resetAttemptsLimit - failedAttempts
-                    alert.informativeText = "Das eingegebene Passwort ist nicht korrekt.\n\nNoch \(remaining) Versuch\(remaining == 1 ? "" : "e") bevor alle Daten gelöscht werden."
+                    alert.informativeText = t(
+                        "Das eingegebene Passwort ist nicht korrekt.\n\nNoch \(remaining) Versuch\(remaining == 1 ? "" : "e") bevor alle Daten gelöscht werden.",
+                        "The entered password is incorrect.\n\n\(remaining) attempt\(remaining == 1 ? "" : "s") remaining before all data is deleted."
+                    )
                 } else {
-                    alert.informativeText = "Das eingegebene Passwort ist nicht korrekt."
+                    alert.informativeText = t("Das eingegebene Passwort ist nicht korrekt.", "The entered password is incorrect.")
                 }
                 alert.alertStyle = .warning
                 // Set app icon explicitly
@@ -1389,10 +1394,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !biometricOfferDismissed else { return }
 
         let alert = NSAlert()
-        alert.messageText = "Touch ID aktivieren?"
-        alert.informativeText = "Du kannst simplebanking künftig mit Touch ID entsperren – ohne Passwort eingeben."
-        alert.addButton(withTitle: "Touch ID aktivieren")
-        alert.addButton(withTitle: "Nicht jetzt")
+        alert.messageText = t("Touch ID aktivieren?", "Enable Touch ID?")
+        alert.informativeText = t("Du kannst simplebanking künftig mit Touch ID entsperren – ohne Passwort eingeben.", "You can unlock simplebanking with Touch ID in the future – no password required.")
+        alert.addButton(withTitle: t("Touch ID aktivieren", "Enable Touch ID"))
+        alert.addButton(withTitle: t("Nicht jetzt", "Not now"))
         alert.alertStyle = .informational
 
         if alert.runModal() == .alertFirstButtonReturn {
@@ -1402,8 +1407,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } catch {
                 AppLogger.log("Touch ID save failed: \(error.localizedDescription)", category: "Biometric", level: "WARN")
                 let errorAlert = NSAlert()
-                errorAlert.messageText = "Touch ID konnte nicht aktiviert werden"
-                errorAlert.informativeText = "Touch ID kann in den Einstellungen unter \"Sicherheit\" erneut aktiviert werden."
+                errorAlert.messageText = t("Touch ID konnte nicht aktiviert werden", "Touch ID could not be enabled")
+                errorAlert.informativeText = t("Touch ID kann in den Einstellungen unter \"Sicherheit\" erneut aktiviert werden.", "Touch ID can be enabled again in Settings under \"Security\".")
                 errorAlert.alertStyle = .warning
                 errorAlert.addButton(withTitle: "OK")
                 errorAlert.runModal()
@@ -1414,12 +1419,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func performSecurityReset() {
-        // Delete credentials
-        do { try CredentialsStore.delete() } catch { }
-        do { try TransactionsDatabase.deleteDatabaseFileIfExists() } catch { }
+        // Delete all credentials, DB files, attachments (all slots)
+        CredentialsStore.deleteAllData()
         BiometricStore.clear()
         biometricOfferDismissed = false
-        Task { await YaxiService.clearSessionState() }
+        let allSlotIds = MultibankingStore.shared.slots.map { $0.id } + ["legacy"]
+        Task {
+            for slotId in allSlotIds {
+                CredentialsStore.activeSlotId = slotId
+                await YaxiService.clearSessionState()
+            }
+            CredentialsStore.activeSlotId = "legacy"
+        }
 
         // Reset UserDefaults
         if let bundleID = Bundle.main.bundleIdentifier {
@@ -1448,8 +1459,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         
         // Show notification
         let alert = NSAlert()
-        alert.messageText = "simplebanking wurde zurückgesetzt"
-        alert.informativeText = "Alle Zugangsdaten und Einstellungen wurden gelöscht."
+        alert.messageText = t("simplebanking wurde zurückgesetzt", "simplebanking has been reset")
+        alert.informativeText = t("Alle Zugangsdaten und Einstellungen wurden gelöscht.", "All credentials and settings have been deleted.")
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -1597,6 +1608,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
             rootView.onAddAccount  = { [weak self] in self?.runSetupWizardForAddingAccount() }
         }
+        // Ripple if unread new transactions, or always-on Ripple mode
+        let rippleAlwaysOn = UserDefaults.standard.bool(forKey: "rippleAlwaysOn")
+            && UserDefaults.standard.integer(forKey: "celebrationStyle") == 1
+        if rippleAlwaysOn || (!latestTxSig.isEmpty && latestTxSig != lastSeenTxSig) {
+            rootView.rippleTrigger = max(1, flyoutRippleTrigger)
+        }
         let host = NSHostingController(rootView: rootView)
         popover.contentSize = NSSize(width: 348, height: 170)
         popover.contentViewController = host
@@ -1638,6 +1655,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
             rootView.onAddAccount = { [weak self] in self?.runSetupWizardForAddingAccount() }
         }
+        rootView.rippleTrigger = flyoutRippleTrigger
         host.rootView = rootView
     }
 
@@ -1705,9 +1723,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let userId = creds.userId
         let password = creds.password
-        let normalizedAPIKey = creds.anthropicApiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        txVM.anthropicApiKey = (normalizedAPIKey?.isEmpty == false) ? normalizedAPIKey : nil
-        llmAPIKeyPresent = txVM.anthropicApiKey != nil
+        let activeProvider = AIProvider.active
+        let activeKey = (try? CredentialsStore.loadAPIKey(forProvider: activeProvider, masterPassword: pw))?.nilIfEmpty
+        txVM.anthropicApiKey = activeKey
+        txVM.aiProvider = activeProvider
+        llmAPIKeyPresent = activeKey != nil
 
         do {
             let resp = try await YaxiService.fetchBalances(userId: userId, password: password)
@@ -1721,6 +1741,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lastShownTitle = formatEURNoDecimals(booked.amount)
                 self.lastBalance = AmountParser.parse(booked.amount)
                 self.txVM.currentBalance = self.formatEURWithCents(self.lastBalance ?? 0)
+                // Cache per slot for instant display on next slot switch
+                if let balance = self.lastBalance {
+                    UserDefaults.standard.set(balance, forKey: "simplebanking.cachedBalance.\(YaxiService.activeSlotId)")
+                }
                 applyBalanceDisplayModeConstraints()
                 updateStatusBalanceTitle()
                 statusItem.button?.toolTip = "Kontostand (Auto-Refresh: \(refreshInterval) Min.)"
@@ -1832,9 +1856,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let userId = creds.userId
         let password = creds.password
-        let normalizedAPIKey = creds.anthropicApiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-        txVM.anthropicApiKey = (normalizedAPIKey?.isEmpty == false) ? normalizedAPIKey : nil
-        llmAPIKeyPresent = txVM.anthropicApiKey != nil
+        let activeProvider = AIProvider.active
+        let activeKey = (try? CredentialsStore.loadAPIKey(forProvider: activeProvider, masterPassword: pw))?.nilIfEmpty
+        txVM.anthropicApiKey = activeKey
+        txVM.aiProvider = activeProvider
+        llmAPIKeyPresent = activeKey != nil
 
         txVM.isLoading = true
         txVM.error = nil
@@ -1891,7 +1917,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     txVM.error = resp.error ?? t("Keine Umsatzdaten verfügbar.", "No transaction data available.")
                     confettiTransactions = []
                 } else {
-                    txVM.error = "Offline, zeige gespeicherte Umsätze"
+                    txVM.error = t("Offline, zeige gespeicherte Umsätze", "Offline, showing cached transactions")
                     confettiTransactions = txVM.transactions
                 }
             }
@@ -1905,7 +1931,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 txVM.error = "Fetch failed: \(error.localizedDescription)"
                 confettiTransactions = []
             } else {
-                txVM.error = "Offline, zeige gespeicherte Umsätze"
+                txVM.error = t("Offline, zeige gespeicherte Umsätze", "Offline, showing cached transactions")
                 confettiTransactions = txVM.transactions
             }
         }
@@ -1913,6 +1939,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         txVM.isLoading = false
         if !didTriggerInitialConfetti {
             maybeTriggerTransactionsConfetti(transactions: confettiTransactions, currentBalance: self.lastBalance)
+        }
+
+        // AI categorization — fire-and-forget, silent on error, reloads from DB when done
+        let pwForCategorization = pw
+        let epochForCategorization = slotEpoch
+        let daysForCategorization = daysToFetch
+        Task.detached {
+            await AICategorizationService.runIfEnabled(masterPassword: pwForCategorization)
+            guard await self.slotEpoch == epochForCategorization else { return }
+            if let updated = try? TransactionsDatabase.loadTransactions(days: daysForCategorization), !updated.isEmpty {
+                await MainActor.run {
+                    guard self.slotEpoch == epochForCategorization else { return }
+                    self.txVM.transactions = self.sortTransactionsNewestFirst(updated)
+                }
+            }
         }
     }
 
@@ -1972,13 +2013,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func maybeTriggerTransactionsConfetti(transactions: [TransactionsResponse.Transaction], currentBalance: Double?) {
         guard hasNewIncomeForConfetti(in: transactions) else { return }
-        txVM.confettiTrigger += 1
+        if UserDefaults.standard.integer(forKey: "celebrationStyle") == 1 {
+            txVM.rippleTrigger += 1
+        } else {
+            txVM.confettiTrigger += 1
+        }
     }
 
     private func triggerInitialConfettiIfNeeded() -> Bool {
         guard !confettiInitialShown else { return false }
         confettiInitialShown = true
-        txVM.confettiTrigger += 1
+        if UserDefaults.standard.integer(forKey: "celebrationStyle") == 1 {
+            txVM.rippleTrigger += 1
+        } else {
+            txVM.confettiTrigger += 1
+        }
         return true
     }
 
@@ -1997,7 +2046,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             // Update title with dot if needed.
             updateStatusBalanceTitle()
-            
+
+            // Ripple on flyout if open
+            if isNew {
+                flyoutRippleTrigger += 1
+                refreshFlyoutIfVisible()
+            }
+
             // Send notification for new bookings
             if isNew && showNotifications {
                 let newest = sorted[0]
@@ -2042,27 +2097,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         content.sound      = .default
 
         // Try to attach merchant logo; send notification once we know the result
-        let logoService = MerchantLogoService.shared
-        let domain      = logoService.domain(for: resolvedMerchant.lowercased())
+        let logoService   = MerchantLogoService.shared
+        let merchantKey   = resolvedMerchant.lowercased()
 
         Task {
             var attachment: UNNotificationAttachment? = nil
 
-            if let domain {
+            if !merchantKey.isEmpty {
                 // Use cached image or wait for a fresh fetch (max 3 s)
                 let image: NSImage? = await {
-                    if let cached = logoService.imageCache[domain] { return cached }
-                    logoService.preload(normalizedMerchant: resolvedMerchant)
+                    if let cached = logoService.image(for: merchantKey) { return cached }
+                    logoService.preload(normalizedMerchant: merchantKey)
                     let deadline = Date().addingTimeInterval(3)
                     while Date() < deadline {
                         try? await Task.sleep(nanoseconds: 200_000_000)
-                        if let img = logoService.imageCache[domain] { return img }
+                        if let img = logoService.image(for: merchantKey) { return img }
                     }
                     return nil
                 }()
 
                 if let image {
-                    attachment = Self.makeNotifAttachment(image: image, domain: domain)
+                    attachment = Self.makeNotifAttachment(image: image, domain: merchantKey)
                 }
             }
 
@@ -2102,6 +2157,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .versicherungen:return "🛡️"
         case .mobilitaet:    return "🚗"
         case .wohnenKredit:  return "🏠"
+        case .gastronomie:   return "🍴"
+        case .sparen:        return "💰"
+        case .freizeit:      return "🎭"
+        case .gehalt:        return "💶"
+        case .gesundheit:    return "🏥"
+        case .umbuchung:     return "↔️"
         case .sonstiges:     return "🏷️"
         }
     }
@@ -2189,12 +2250,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         txVM.resetPaging()
         txVM.currentBalance = nil
         lastBalance = nil
-        if !isHiddenBalance { statusItem.button?.title = "…" }
+
+        // Show cached balance instantly (avoids "…" flash when balance is known)
+        if let cachedBalance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double {
+            lastBalance = cachedBalance
+            txVM.currentBalance = formatEURWithCents(cachedBalance)
+            updateStatusBalanceTitle()
+        } else if !isHiddenBalance {
+            statusItem.button?.title = "…"
+        }
 
         // Show cached transactions from DB right away (no network wait)
         if let cached = try? TransactionsDatabase.loadTransactions(days: 60), !cached.isEmpty {
             txVM.transactions = sortTransactionsNewestFirst(cached)
             txVM.resetPaging()
+        }
+
+        // Wait for any in-flight HBCI call to finish before refreshing for the new slot.
+        // The old call was epoch-invalidated above and will return soon.
+        while isHBCICallInFlight {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
 
         // Fetch live balance
@@ -2368,9 +2443,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.masterPassword = pw
             locked = false
             if let creds = try? CredentialsStore.load(masterPassword: pw) {
-                let normalizedAPIKey = creds.anthropicApiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
-                txVM.anthropicApiKey = (normalizedAPIKey?.isEmpty == false) ? normalizedAPIKey : nil
-                llmAPIKeyPresent = txVM.anthropicApiKey != nil
+                let activeProvider = AIProvider.active
+                let activeKey = (try? CredentialsStore.loadAPIKey(forProvider: activeProvider, masterPassword: pw))?.nilIfEmpty
+                txVM.anthropicApiKey = activeKey
+                txVM.aiProvider = activeProvider
+                llmAPIKeyPresent = activeKey != nil
+                _ = creds // suppress unused warning
                 let normalizedIBAN = creds.iban
                     .replacingOccurrences(of: " ", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2412,6 +2490,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 updateConnectedBankState(bank)
             }
             statusItem.button?.toolTip = "Verbunden mit \(bank.displayName)"
+            // Fresh setup — mark legacy slot migration as done so it never wipes sessions on first restart
+            UserDefaults.standard.set(true, forKey: "simplebanking.migration.legacySlotFullReset.v1")
             Task { await self.refreshAsync() }
             // After first-time setup: offer to add a second account
             promptAddAnotherAccount()
@@ -2739,14 +2819,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             AppLogger.log("Setup: IBAN stored prefix=\(String(storedIBAN.prefix(8)))", category: "Setup")
 
             options.onProgress?(.savingCredentials)
-            let existingAPIKey = try? CredentialsStore.loadAPIKey(masterPassword: masterPassword)
+            let existingCreds = try? CredentialsStore.load(masterPassword: masterPassword)
             try await runSetupStepWithTimeout(step: "store_credentials", logger: diagnosticsLogger) {
                 try CredentialsStore.save(
                     StoredCredentials(
                         iban: storedIBAN,
                         userId: result.userId,
                         password: result.password,
-                        anthropicApiKey: existingAPIKey
+                        anthropicApiKey: existingCreds?.anthropicApiKey,
+                        mistralApiKey: existingCreds?.mistralApiKey,
+                        openaiApiKey: existingCreds?.openaiApiKey
                     ),
                     masterPassword: masterPassword
                 )
@@ -2757,7 +2839,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return SetupConnectResult(
                 bank: finalBank,
                 normalizedIBAN: storedIBAN,
-                apiKey: existingAPIKey,
+                apiKey: nil,
                 additionalAccounts: additionalAccounts
             )
         } catch {
@@ -2823,6 +2905,7 @@ private struct StatusBalanceFlyoutCardView: View {
     var onPrevAccount: (() -> Void)? = nil
     var onNextAccount: (() -> Void)? = nil
     var onAddAccount:  (() -> Void)? = nil
+    var rippleTrigger: Int = 0
 
     @Environment(\.colorScheme) private var environmentColorScheme
     @State private var showNav: Bool = false
@@ -2840,6 +2923,8 @@ private struct StatusBalanceFlyoutCardView: View {
                     legacyCard
                 }
             }
+            // Ripple confined to the card tile — double-tap bubbles up to parent
+            .rippleEffect(trigger: rippleTrigger, defaultOrigin: CGPoint(x: 310, y: 130))
             .padding(14)
         }
         .frame(width: 348, height: 170)
