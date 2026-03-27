@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 // MARK: - Merchant Logo Service
-// Fetches monochrome favicons from DuckDuckGo for known merchants
+// Loads bundled SVG logos for known merchants; falls back to DuckDuckGo favicon for unknowns.
 
 @MainActor
 final class MerchantLogoService: ObservableObject {
@@ -11,17 +11,134 @@ final class MerchantLogoService: ObservableObject {
     @Published private(set) var imageCache: [String: NSImage] = [:]
     private var inFlight: Set<String> = []
 
-    // normalized_merchant → domain mapping
-    private static let domainMap: [String: String] = [
-        "rewe": "rewe.de",
-        "nahkauf": "rewe.de",
-        "edeka": "edeka.de",
-        "aldi": "aldi.de",
-        "lidl": "lidl.de",
-        "netto": "netto-online.de",
-        "kaufland": "kaufland.de",
-        "dm": "dm.de",
-        "rossmann": "rossmann.de",
+    // MARK: - Merchant → SVG filename mapping
+    // Key: normalized merchant name (lowercase, trimmed)
+    // Value: SVG filename without extension in Resources/merchant-logos/
+    private static let svgMap: [String: String] = [
+        // Lebensmittel
+        "rewe": "rewe",
+        "nahkauf": "nahkauf",
+        "edeka": "edeka",
+        "marktkauf": "marktkauf",
+        "aldi": "aldi-nord",
+        "aldi nord": "aldi-nord",
+        "aldi sud": "aldi-sued",
+        "aldi süd": "aldi-sued",
+        "lidl": "lidl",
+        "netto": "netto-marken-discount",
+        "netto marken-discount": "netto-marken-discount",
+        "kaufland": "kaufland",
+        "penny": "penny",
+        "norma": "norma",
+        "np discount": "np-discount",
+        "tegut": "tegut",
+        "alnatura": "alnatura",
+        "hit": "hit",
+        "combi": "combi-verbrauchermarkt",
+        "famila": "famila",
+        "v-markt": "v-markt",
+        "mix markt": "mix-markt",
+        "trinkgut": "trinkgut",
+        "getranke hoffmann": "getraenke-hoffmann",
+        "getränke hoffmann": "getraenke-hoffmann",
+        "reformhaus": "reformhaus",
+        "denn's biomarkt": "denns-biomarkt",
+        "denns biomarkt": "denns-biomarkt",
+        "tchibo": "tchibo",
+
+        // Drogerie / Gesundheit / Optik
+        "dm": "dm",
+        "rossmann": "rossmann",
+        "mueller": "mueller",
+        "müller": "mueller",
+        "fielmann": "fielmann",
+        "apollo-optik": "apollo-optik",
+        "apollo optik": "apollo-optik",
+        "budnikowsky": "budnikowsky",
+
+        // Elektronik / Technik
+        "saturn": "saturn",
+        "mediamarkt": "media-markt",
+        "media markt": "media-markt",
+        "expert": "expert",
+        "euronics": "euronics",
+        "mediamax": "mediamax",
+        "hercules": "hercules",
+
+        // DIY / Baumarkt / Einrichten
+        "ikea": "ikea",
+        "obi": "obi",
+        "bauhaus": "bauhaus",
+        "hornbach": "hornbach",
+        "toom": "toom",
+        "hagebaumarkt": "hagebaumarkt",
+        "hellweg": "hellweg",
+        "hammer": "hammer",
+        "tedox": "tedox",
+        "thomas philipps": "thomas-philipps",
+
+        // Möbel / Wohnen
+        "xxxlutz": "xxxlutz",
+        "hoeffner": "hoeffner",
+        "höffner": "hoeffner",
+        "segmuller": "segmueller",
+        "segmüller": "segmueller",
+        "poco": "poco",
+        "roller": "roller",
+        "jysk": "jysk",
+        "daenisches bettenlager": "daenisches-bettenlager",
+        "dänisches bettenlager": "daenisches-bettenlager",
+        "sb-mobel boss": "sb-moebel-boss",
+        "sb-möbel boss": "sb-moebel-boss",
+        "moebel hardeck": "moebel-hardeck",
+        "möbel hardeck": "moebel-hardeck",
+        "moebel kraft": "moebel-kraft",
+        "möbel kraft": "moebel-kraft",
+        "moebel martin": "moebel-martin",
+        "möbel martin": "moebel-martin",
+        "moemax": "moemax",
+        "mömax": "moemax",
+        "porta mobel": "porta-moebel",
+        "porta möbel": "porta-moebel",
+        "dehner": "dehner",
+
+        // Mode / Schuhe / Accessoires
+        "h&m": "hundm",
+        "zara": "zara",
+        "primark": "primark",
+        "deichmann": "deichmann",
+        "c&a": "cunda",
+        "kik": "kik",
+        "new yorker": "new-yorker",
+        "nkd": "nkd",
+        "takko": "takko-fashion",
+        "takko fashion": "takko-fashion",
+        "ernsting's family": "ernstings-family",
+        "ernstings family": "ernstings-family",
+        "peek und cloppenburg": "peek-und-cloppenburg",
+        "peek & cloppenburg": "peek-und-cloppenburg",
+        "breuninger": "breuninger",
+        "galeria": "galeria-karstadt-kaufhof",
+        "galeria karstadt kaufhof": "galeria-karstadt-kaufhof",
+        "woolworth": "woolworth",
+        "tedi": "tedi",
+
+        // Hobby / Sport / Freizeit
+        "intersport": "intersport",
+        "decathlon": "decathlon",
+        "sport 2000": "sport-2000",
+        "fressnapf": "fressnapf",
+        "das futterhaus": "das-futterhaus",
+        "thalia": "thalia",
+        "vedes": "vedes",
+        "zeg": "zeg",
+
+        // Tech (bereits gebundelt via Bank-Logos oder DuckDuckGo)
+        "apple": "apple",
+    ]
+
+    // DuckDuckGo fallback für Händler ohne gebundelte SVG
+    private static let domainFallback: [String: String] = [
         "paypal": "paypal.com",
         "klarna": "klarna.com",
         "amazon": "amazon.de",
@@ -33,13 +150,8 @@ final class MerchantLogoService: ObservableObject {
         "netflix": "netflix.com",
         "spotify": "spotify.com",
         "deutsche bahn": "bahn.de",
-        "ikea": "ikea.de",
-        "saturn": "saturn.de",
-        "mediamarkt": "mediamarkt.de",
         "otto": "otto.de",
         "zalando": "zalando.de",
-        "h&m": "hm.com",
-        "zara": "zara.com",
         "mc donalds": "mcdonalds.de",
         "mcdonald's": "mcdonalds.de",
         "starbucks": "starbucks.de",
@@ -52,18 +164,10 @@ final class MerchantLogoService: ObservableObject {
         "barmer": "barmer.de",
         "aok": "aok.de",
         "dak": "dak.de",
-        "commerzbank": "commerzbank.de",
-        "sparkasse": "sparkasse.de",
-        "postbank": "postbank.de",
-        "ing": "ing.de",
-        "dkb": "dkb.de",
-        "n26": "n26.com",
-        "revolut": "revolut.com",
         "wise": "wise.com",
         "ebay": "ebay.de",
         "etsy": "etsy.com",
         "microsoft": "microsoft.com",
-        "apple": "apple.com",
         "disney+": "disneyplus.com",
         "deezer": "deezer.com",
         "audible": "audible.de",
@@ -74,47 +178,53 @@ final class MerchantLogoService: ObservableObject {
         "dpd": "dpd.de",
         "dhl": "dhl.de",
         "hermes": "myhermes.de",
-        "gls": "gls-pakete.de",
         "ups": "ups.com",
         "fedex": "fedex.de",
     ]
 
     private init() {}
 
-    func domain(for normalizedMerchant: String) -> String? {
-        Self.domainMap[normalizedMerchant.lowercased()]
-    }
-
     func image(for normalizedMerchant: String) -> NSImage? {
-        guard let domain = domain(for: normalizedMerchant) else { return nil }
-        return imageCache[domain]
+        let key = normalizedMerchant.lowercased()
+        return imageCache[key]
     }
 
     func preload(normalizedMerchant: String) {
-        guard let domain = domain(for: normalizedMerchant) else { return }
-        guard imageCache[domain] == nil, !inFlight.contains(domain) else { return }
-        inFlight.insert(domain)
-        Task {
-            await fetchAndCache(domain: domain)
+        let key = normalizedMerchant.lowercased()
+        guard imageCache[key] == nil, !inFlight.contains(key) else { return }
+        inFlight.insert(key)
+
+        // 1. Try bundled SVG
+        if let svgName = Self.svgMap[key],
+           let url = Bundle.main.url(forResource: svgName, withExtension: "svg", subdirectory: "merchant-logos"),
+           let image = NSImage(contentsOf: url) {
+            imageCache[key] = image
+            inFlight.remove(key)
+            return
+        }
+
+        // 2. Fall back to DuckDuckGo favicon
+        if let domain = Self.domainFallback[key] {
+            Task {
+                await fetchAndCache(key: key, domain: domain)
+            }
+        } else {
+            inFlight.remove(key)
         }
     }
 
-    private func fetchAndCache(domain: String) async {
+    private func fetchAndCache(key: String, domain: String) async {
         let urlString = "https://icons.duckduckgo.com/ip3/\(domain).ico"
-        guard let url = URL(string: urlString) else {
-            await MainActor.run { inFlight.remove(domain) }
-            return
-        }
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
+        guard let url = URL(string: urlString),
+              let (data, _) = try? await URLSession.shared.data(from: url),
               !data.isEmpty,
               let image = NSImage(data: data) else {
-            await MainActor.run { inFlight.remove(domain) }
+            await MainActor.run { inFlight.remove(key) }
             return
         }
-        // Farb-Icons (kein isTemplate)
         await MainActor.run {
-            imageCache[domain] = image
-            inFlight.remove(domain)
+            imageCache[key] = image
+            inFlight.remove(key)
         }
     }
 }

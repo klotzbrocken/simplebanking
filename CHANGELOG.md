@@ -1,84 +1,80 @@
 # Changelog — simplebanking
 
-All notable changes to this project will be documented in this file.
-This project adheres to [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [1.3.1] — 2026-03-27 (Build 20260327_031316_239)
+
+### Neu
+- **Multi-Banking** — Bis zu 3 Bankverbindungen gleichzeitig; schnelles Umschalten über Tabs. Transparentes Upgrade von 1.2.x, keine Neueinrichtung der Konten nötig.
+- **Transaktions-Filter** — Neues Filter-Menü neben „Umsätze": Alle / Einnahmen / Ausgaben / Abos / Fixkosten / Unkategorisiert. Aktiver Filter zeigt Statuszeile mit ×-Button.
+- **Ripple-Effekt** — Wasserwellen-Animation auf der Kontostand-Kachel bei neuen Buchungen (Metal-Shader). Einstellbar: Classic (Konfetti) oder Ripple; optional dauerhaft.
+- **AI-Kategorisierung** *(Experimentell)* — Automatische Kategorisierung über Anthropic Claude, Mistral oder OpenAI. 6 neue Kategorien: Gastronomie, Sparen, Freizeit, Gehalt, Gesundheit, Umbuchung. Läuft bankkontenübergreifend.
+- **Kalender-Heatmap** — 5. Ansicht im Transaktionspanel: monatliche Ausgaben-Heatmap.
+- **Verwendungszweck-Spalte** — Im breiten Panel-Modus (>840 px) eigene Spalte für den Verwendungszweck.
+- **Doppelklick auf Flyout-Karte** — Öffnet direkt das Transaktionspanel.
+- **Universal Binary** — arm64 + x86_64 (macOS 13+).
+
+### Geändert
+- Kontostand pro Bank gecacht → sofortige Anzeige beim Bankwechsel.
+- Kontostand im Transaktionspanel aktualisiert sich nach Refresh.
+- Standardwerte bei Neuinstallation: Flyout-Karte + Ripple aktiv.
+- Refresh-Intervall-Labels in Stunden, Standard 4 Stunden.
+- Neuer Settings-Bereich „Experimentell (Labs)" für AI-Assistent.
+- YAXI-Traces und Setup-Diagnose-Logs nur bei aktiviertem Logging.
+- Privacy-Text aktualisiert (erwähnt YAXI und Anthropic).
+- „Zurücksetzen"-Menüeintrag ohne Warn-Emoji.
+- Node.js/V8-Backend durch `routex-client-swift` (Rust FFI) ersetzt — kein lokaler Prozess mehr.
+
+### Behoben
+- Ripple-Effekt im Universal-Build fehlerhaft (fehlende Metal-Shader).
+- Alle drei KI-Anbieter zeigten „aktiv", obwohl nur einer einen Key hatte.
+- Nach Neuinstallation: unnötige 2FA beim ersten App-Neustart.
+- FGW-Fix: veraltete Session-Daten beim Setup-Flow.
 
 ---
 
-## [Unreleased]
+## [Unreleased] — v1.2.0
+
+### Neu
+- **Kalender-Heatmap** — 5. Icon im Transaktionspanel öffnet eine monatliche Heatmap der Buchungen. Rot = Ausgaben, Grün = Eingänge, Intensität entspricht dem Betrag. Navigation zwischen Monaten via `<` / `>`. Doppelklick auf einen Tag öffnet ein Detailblatt mit allen Buchungen des Tages.
+- **Verwendungszweck-Spalte** — Im breiten Panel-Modus (840 px, Green-Button) wird zwischen Empfänger und Betrag eine zusätzliche Spalte mit dem Verwendungszweck angezeigt.
+- **Doppelklick auf Flyout-Karte** — Doppelklick auf die Balance-Flyout-Karte schließt das Popover und öffnet direkt das Transaktionspanel.
+- **Balance-Update bei Refresh** — Der angezeigte Kontostand im Transaktionspanel wird nach einem manuellen Refresh automatisch aktualisiert.
+
+### Geändert
+- **„Zurücksetzen"-Menüeintrag** — Das redundante ⚠︎-Emoji-Präfix wurde entfernt. Das SF-Symbol `exclamationmark.triangle` bleibt als Icon erhalten.
+
+### Behoben (Kalender-Heatmap)
+- Schließen-Button fehlte — Sheet konnte nur per Escape geschlossen werden.
+- Keine Buchungen sichtbar — Die Heatmap las `tx.amount` aus dem `rawJSON`-Decode (immer `nil`). Umgestellt auf `TransactionRecord.betrag` (direkte SQLite-Spalte, korrekte `Double`-Werte).
+- Tage 1–5 fehlten — ID-Kollision zwischen Offset-Zellen (`0…5`) und Tages-Zellen (`1…31`) in zwei separaten `ForEach`-Loops; zusammengeführt in einen einzigen Loop mit eindeutigen Indizes.
+- Erster des Monats zeigte falschen Wochentag — `firstWeekdayOffset` nutzte jetzt einen Plain-Gregorian-Calendar ohne `firstWeekday`-Einstellung und setzt `day = 1` explizit.
+- Betrag am 1. des Monats ca. 1.000 € zu hoch — Umstellung von `datum` (Wertstellungsdatum) auf `buchungsdatum` (Buchungsdatum) für die Tages-Zuordnung. Buchungen, die am letzten Tag des Vormonats gebucht wurden, aber Wertstellung am 1. des Folgemonats haben, erscheinen jetzt im korrekten Monat.
+- Demo-Modus zeigte leere Heatmap — `loadAllTransactions()` liefert im Demo-Modus keine Daten (DB ist leer). Die Heatmap liest jetzt `@AppStorage("demoMode")` / `@AppStorage("demoSeed")` und generiert im Demo-Modus dieselben Fake-Transaktionen wie der Rest der App.
 
 ---
 
-## [1.2.3] — 2026-03-18
+## [1.1.2] — 2026-02-xx
 
-### Fixed
-- `appcast.xml`: corrected GitHub Releases download URLs for Sparkle auto-update
-
----
-
-## [1.2.1] — 2026-03-14
-
-### Added
-- Double-click on flyout card opens transaction panel directly
-- Reference column (Verwendungszweck) shown in wide panel mode (≥ 840 px)
-
-### Fixed
-- Calendar heatmap: balance on the 1st of month was ~1,000 € too high (switched from value date to booking date)
-- Calendar heatmap: days 1–5 missing due to ID collision in ForEach loops
-- Calendar heatmap: first weekday of month displayed incorrectly
-- Calendar heatmap: demo mode showed empty heatmap
-- Calendar heatmap: close button was missing (sheet could only be dismissed via Escape)
+### Behoben
+- Sparkle-Versionsnummern-Format korrigiert: Build-String enthielt Bindestriche, die Sparkle als Pre-Release-Trennzeichen interpretierte und Updates fälschlicherweise als Downgrade einstufte. Format auf `YYYYMMDD_HHMMSS_SEQ` umgestellt.
 
 ---
 
-## [1.2.0] — 2026-03-01
+## [1.1.1] — 2026-02-xx
 
-### Added
-- **Calendar Heatmap** — 5th icon in transaction panel; monthly view with red (expenses) / green (income) intensity. Navigate months via `<` / `>`. Double-click on a day for a detail sheet with all transactions of that day.
-- **Reference column** — In wide panel mode (840 px, green button) a reference/purpose column is shown between payee and amount.
-- **Double-click on flyout card** — closes the popover and opens the transaction panel directly.
-- **Balance update on refresh** — balance in the transaction panel is updated after a manual refresh.
+### Geändert
+- Refresh-Intervall: Standard auf 4 Stunden (240 min) erhöht, Labels zeigen nun „X Stunden".
+- Fehlermeldung bei `RoutexClientError.Unauthorized` wird als lesbare UI-Meldung angezeigt.
+- Alle Logs vereint unter `~/Library/Logs/simplebanking/` (kein Desktop-Log mehr).
 
-### Changed
-- "Reset" menu entry: removed redundant ⚠︎ emoji prefix; SF Symbol `exclamationmark.triangle` is kept as icon.
-
----
-
-## [1.1.2] — 2026-02-25
-
-### Fixed
-- Sparkle version string format: build strings with hyphens were misinterpreted as pre-release tags, causing updates to be flagged as downgrades. Switched to `YYYYMMDD_HHMMSS_SEQ` format.
-- `NSApp.activate` called before Sparkle update check to bring app to foreground reliably.
-- URL prefix fix for Sparkle feed.
-
----
-
-## [1.1.1] — 2026-02-24
-
-### Changed
-- Default refresh interval raised to 4 hours (240 min); labels now display "X hours".
-- `RoutexClientError.Unauthorized` shown as readable UI message instead of raw error.
-- All log output consolidated under `~/Library/Logs/simplebanking/` (no more Desktop log).
-
-### Fixed
-- Sparkasse credential flow reverted to browser redirect.
-- YAXI trace ticket bug: the Trace service was creating a new ticket instead of reusing the original one.
+### Behoben
+- Sparkasse Credential-Flow auf Browser-Redirect zurückgestellt.
+- YAXI-Trace Ticket-Bug: Service „Trace" nutzte fälschlicherweise ein neues Ticket statt das originale wiederzuverwenden.
 
 ---
 
 ## [1.1.0] — 2026-02-24
 
-### Added
-- Node.js/V8 backend fully replaced by `routex-client-swift` (RoutexClient 0.3.0) — no runtime dependency, smaller app bundle, no JIT entitlement required.
-- New Swift source files: `YaxiService.swift`, `YaxiTicketMaker.swift`, `YaxiOAuthCallback.swift`.
-- `sign-and-notarize.sh` no longer needs JIT entitlements.
-
----
-
-[Unreleased]: https://github.com/klotzbrocken/simplebanking/compare/v1.2.3...HEAD
-[1.2.3]: https://github.com/klotzbrocken/simplebanking/compare/v1.2.1...v1.2.3
-[1.2.1]: https://github.com/klotzbrocken/simplebanking/compare/v1.2.0...v1.2.1
-[1.2.0]: https://github.com/klotzbrocken/simplebanking/compare/v1.1.2...v1.2.0
-[1.1.2]: https://github.com/klotzbrocken/simplebanking/compare/v1.1.1...v1.1.2
-[1.1.1]: https://github.com/klotzbrocken/simplebanking/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/klotzbrocken/simplebanking/releases/tag/v1.1.0
+### Neu
+- Node.js/V8-Backend vollständig durch `routex-client-swift` (RoutexClient 0.3.0) ersetzt — keine Laufzeit-Abhängigkeit mehr, kleineres App-Bundle, kein JIT-Entitlement nötig.
+- Neue Dateien: `YaxiService.swift`, `YaxiTicketMaker.swift`, `YaxiOAuthCallback.swift`.
+- `sign-and-notarize.sh` benötigt keine JIT-Entitlements mehr.

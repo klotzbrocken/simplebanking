@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Routex
 import Security
+import UserNotifications
 
 // MARK: - YaxiService
 // Replaces NetworkService + BackendManager. Calls the YAXI API directly via
@@ -1402,12 +1403,17 @@ enum YaxiService {
     }
 
     private static func sendSCANotification() {
-        let script = """
-        display notification "Bitte im Browser bestätigen und danach zurückkehren." with title "Banking-Freigabe erforderlich" sound name "Ping"
-        """
-        let task = Process()
-        task.launchPath = "/usr/bin/osascript"
-        task.arguments = ["-e", script]
-        try? task.run()
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Banking-Freigabe erforderlich"
+            content.body = "Bitte im Browser bestätigen und danach zurückkehren."
+            content.sound = .default
+            let request = UNNotificationRequest(identifier: "sca-\(UUID().uuidString)", content: content, trigger: nil)
+            center.add(request) { error in
+                if let error { AppLogger.log("SCA notification error: \(error)", category: "YaxiService", level: "WARN") }
+            }
+        }
     }
 }

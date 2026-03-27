@@ -6,6 +6,7 @@ private struct TransactionsPanelView: View {
     @ObservedObject var vm: TransactionsViewModel
     let onRefresh: () async -> Void
     @ObservedObject var accountNav: AccountNavModel
+    @ObservedObject private var logoStore = BankLogoStore.shared
     @AppStorage("salaryDay") private var salaryDay: Int = 1
     @AppStorage("dispoLimit") private var dispoLimit: Int = 0
     @AppStorage("targetBuffer") private var targetBuffer: Int = 500
@@ -15,6 +16,7 @@ private struct TransactionsPanelView: View {
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
     @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
     @AppStorage("confettiEffect") private var confettiEffect: Int = ConfettiEffect.money.rawValue
+    @AppStorage("celebrationStyle") private var celebrationStyle: Int = 0
     @AppStorage("balanceSignalLowUpperBound") private var balanceSignalLowUpperBound: Int = 500
     @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
@@ -111,11 +113,22 @@ private struct TransactionsPanelView: View {
         let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.60)
         let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.35)
 
+        let balanceBrand = BankLogoAssets.resolve(displayName: vm.connectedBankDisplayName,
+                                                   logoID: vm.connectedBankLogoID,
+                                                   iban: vm.connectedBankIBAN)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: "wallet.pass")
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                if let img = logoStore.image(for: balanceBrand) {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                } else {
+                    Image(systemName: "wallet.pass")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
                 Text("Aktueller Kontostand")
                     .font(.system(size: 14))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
@@ -149,6 +162,8 @@ private struct TransactionsPanelView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(borderColor, lineWidth: 1)
         )
+        .rippleEffect(trigger: celebrationStyle == 1 ? vm.rippleTrigger : 0,
+                      defaultOrigin: CGPoint(x: 190, y: 65))
     }
 
     private var legacyBalanceCard: some View {
@@ -413,6 +428,7 @@ private struct TransactionsPanelView: View {
         .allowsHitTesting(false)
     }
 
+
     var body: some View {
         VStack(spacing: 0) {
             // Balance Card
@@ -480,18 +496,8 @@ private struct TransactionsPanelView: View {
 
                 Spacer(minLength: 4)
 
-                Button(action: {
-                    guard llmAPIKeyPresent else { return }
-                    showChatSheet = true
-                }) {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(llmAPIKeyPresent ? .secondary : Color(NSColor.placeholderTextColor))
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(!llmAPIKeyPresent)
-                .help(llmAPIKeyPresent ? "AI-Chat öffnen" : "API-Key in Einstellungen hinterlegen")
+                // AI chat temporarily disabled — being rebuilt
+                EmptyView()
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -504,9 +510,9 @@ private struct TransactionsPanelView: View {
             
             // Transactions Header
             HStack(spacing: 6) {
-                Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.primary)
+                FilterMenuButton(activeFilter: vm.activeFilter) { vm.activeFilter = $0 }
+                    .frame(width: 20, height: 20)
+                    .help(L10n.t("Filter", "Filter"))
                 Text("Umsätze")
                     .font(.system(size: 15, weight: .semibold))
                 Spacer()
@@ -532,11 +538,39 @@ private struct TransactionsPanelView: View {
                     .padding(.bottom, 8)
             }
 
-            if vm.isSearchActive {
-                HStack {
-                    Text("\(vm.filteredTransactions.count) Ergebnisse gefunden")
+            // TAN/2FA pending
+            if vm.isTanPending {
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Text("Bitte bestätige in deiner Banking-App")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+            }
+
+            if vm.isSearchActive || vm.activeFilter != .all {
+                HStack(spacing: 6) {
+                    Text("\(vm.filteredTransactions.count) Ergebnisse")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
+                    if vm.activeFilter != .all {
+                        Text("· \(vm.activeFilter.label)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Button(action: { vm.activeFilter = .all }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -669,7 +703,7 @@ private struct TransactionsPanelView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help("Als CSV exportieren")
+                    .help(L10n.t("Als CSV exportieren", "Export as CSV"))
                     
                     // Fixkosten Button
                     Button(action: { showFixedCosts = true }) {
@@ -678,7 +712,7 @@ private struct TransactionsPanelView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help("Fixkosten analysieren")
+                    .help(L10n.t("Fixkosten analysieren", "Analyze fixed costs"))
                     
                     // Financial Health Button
                     Button(action: { showScoreSheet = true }) {
@@ -687,7 +721,7 @@ private struct TransactionsPanelView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help("Financial Health Score")
+                    .help(L10n.t("Financial Health Score", "Financial Health Score"))
 
                     // Abos Button
                     Button(action: { showSubscriptions = true }) {
@@ -696,7 +730,7 @@ private struct TransactionsPanelView: View {
                         .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help("Abos der letzten 60 Tage")
+                    .help(L10n.t("Abos der letzten 60 Tage", "Subscriptions of the last 60 days"))
 
                     // Kalender-Heatmap Button
                     Button(action: { showCalendar.toggle() }) {
@@ -705,7 +739,7 @@ private struct TransactionsPanelView: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help("Ausgaben-Kalender")
+                    .help(L10n.t("Ausgaben-Kalender", "Spending calendar"))
                 }
                 
                 Spacer()
@@ -729,8 +763,10 @@ private struct TransactionsPanelView: View {
             .background(Color.panelBackground) // Light grey background for footer too
         }
         .overlay {
-            ConfettiOverlayView(trigger: vm.confettiTrigger, effectRawValue: confettiEffect)
-                .allowsHitTesting(false)
+            if celebrationStyle == 0 {
+                ConfettiOverlayView(trigger: vm.confettiTrigger, effectRawValue: confettiEffect)
+                    .allowsHitTesting(false)
+            }
         }
         .frame(minWidth: 420, idealWidth: 420, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
         .background(Color.panelBackground) // Light grey background
@@ -757,6 +793,9 @@ private struct TransactionsPanelView: View {
         .onAppear {
             resetInfiniteWindowIfNeeded()
             vm.loadEnrichmentData(bankId: "primary")
+            if celebrationStyle == 1 && UserDefaults.standard.bool(forKey: "rippleAlwaysOn") {
+                vm.rippleTrigger += 1
+            }
         }
         .onChange(of: infiniteScrollEnabled) { _ in
             resetInfiniteWindowIfNeeded()
@@ -1364,6 +1403,7 @@ final class AccountNavModel: ObservableObject {
 
 @MainActor final class TransactionsPanel: NSObject, NSWindowDelegate {
     private let panel: NSPanel
+    var isVisible: Bool { panel.isVisible }
     private let vm: TransactionsViewModel
     let accountNav: AccountNavModel
 
@@ -1651,5 +1691,63 @@ private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegat
 
     @objc private func settingsTapped() {
         onSettings?()
+    }
+}
+
+// MARK: - Filter Menu Button (NSViewRepresentable)
+
+private struct FilterMenuButton: NSViewRepresentable {
+    let activeFilter: TxFilter
+    let onSelect: (TxFilter) -> Void
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton()
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.clicked(_:))
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.activeFilter = activeFilter
+        context.coordinator.onSelect = onSelect
+        let name = activeFilter == .all
+            ? "line.3.horizontal.decrease"
+            : "line.3.horizontal.decrease.circle.fill"
+        if let img = NSImage(systemSymbolName: name, accessibilityDescription: nil) {
+            img.isTemplate = true
+            button.image = img
+        }
+        button.contentTintColor = .labelColor
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject {
+        var activeFilter: TxFilter = .all
+        var onSelect: (TxFilter) -> Void = { _ in }
+
+        @objc func clicked(_ sender: NSButton) {
+            let menu = NSMenu()
+            for filter in TxFilter.allCases {
+                let item = NSMenuItem(title: filter.label, action: #selector(itemSelected(_:)), keyEquivalent: "")
+                item.target = self
+                item.tag = filter.rawValue
+                if let img = NSImage(systemSymbolName: filter.icon, accessibilityDescription: nil) {
+                    img.isTemplate = true
+                    item.image = img
+                }
+                if activeFilter == filter { item.state = .on }
+                menu.addItem(item)
+            }
+            let bounds = sender.bounds
+            menu.popUp(positioning: nil, at: NSPoint(x: bounds.minX, y: bounds.maxY), in: sender)
+        }
+
+        @objc func itemSelected(_ sender: NSMenuItem) {
+            guard let filter = TxFilter(rawValue: sender.tag) else { return }
+            onSelect(filter)
+        }
     }
 }

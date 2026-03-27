@@ -85,6 +85,7 @@ struct SettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
+    @AppStorage("menubarStyle") private var menubarStyle: Int = 0
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
     @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("resetAttempts") private var resetAttempts: Int = 0
@@ -92,6 +93,11 @@ struct SettingsView: View {
     @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
     @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.mouseClick.rawValue
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
+    @AppStorage("apiKeyPresent_anthropic") private var anthropicKeyPresent: Bool = false
+    @AppStorage("apiKeyPresent_mistral") private var mistralKeyPresent: Bool = false
+    @AppStorage("apiKeyPresent_openai") private var openaiKeyPresent: Bool = false
+    @AppStorage(AIProvider.storageKey) private var selectedAIProvider: String = AIProvider.anthropic.rawValue
+    @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
@@ -104,24 +110,37 @@ struct SettingsView: View {
     @AppStorage("fetchDays") private var fetchDays: Int = 60
     @AppStorage("balanceSignalLowUpperBound") private var balanceSignalLowUpperBound: Int = 500
     @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
-    @AppStorage("confettiEnabled") private var confettiEnabled: Bool = true
+    @AppStorage("confettiIncomeThreshold") private var confettiIncomeThreshold: Int = 50
     @AppStorage("confettiEffect") private var confettiEffect: Int = ConfettiEffect.money.rawValue
-    @AppStorage("confettiOnBalanceThreshold") private var confettiOnBalanceThreshold: Bool = true
-    @AppStorage("confettiBalanceThreshold") private var confettiBalanceThreshold: Int = 3000
-    @AppStorage("confettiOnNewIncome") private var confettiOnNewIncome: Bool = true
+    @AppStorage("celebrationStyle") private var celebrationStyle: Int = 1
+    @AppStorage("rippleAlwaysOn") private var rippleAlwaysOn: Bool = false
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     
     @State private var selectedTab: Int = 0
     @State private var showResetConfirmation: Bool = false
     @State private var slotToDelete: BankSlot? = nil
     @State private var showSlotDeleteConfirmation: Bool = false
+    @State private var slotBeingRenamed: BankSlot? = nil
+    @State private var renameText: String = ""
     @ObservedObject private var multibankingStore = MultibankingStore.shared
+    @ObservedObject private var logoStore = BankLogoStore.shared
     @State private var notificationStatus: String = ""
     @State private var touchIDAvailable: Bool = false
     @State private var touchIDEnabled: Bool = false
     @AppStorage("biometricOfferDismissed") private var biometricOfferDismissed: Bool = false
     @State private var anthropicAPIKeyInput: String = ""
     @State private var aiStatusMessage: String = ""
+    private var activeAIProvider: AIProvider {
+        AIProvider(rawValue: selectedAIProvider) ?? .anthropic
+    }
+
+    private var activeProviderHasKey: Bool {
+        switch activeAIProvider {
+        case .anthropic: return anthropicKeyPresent
+        case .mistral:   return mistralKeyPresent
+        case .openai:    return openaiKeyPresent
+        }
+    }
     @State private var availableThemes: [AppTheme] = []
     @State private var logStatusMessage: String = ""
     @State private var logoTapCount: Int = 0
@@ -196,6 +215,9 @@ struct SettingsView: View {
 
         // 2. Delete transactions from DB for this slot
         try? TransactionsDatabase.deleteTransactions(forSlotId: slotId)
+
+        // 2b. Clear Keychain session data for this slot
+        Task { await YaxiService.clearSessionData(forSlotId: slotId) }
 
         // 3. Clear UserDefaults keys for this slot
         let defaults = UserDefaults.standard
@@ -303,17 +325,17 @@ struct SettingsView: View {
             aiStatusMessage = t("Bitte zuerst die Bankverbindung einrichten.", "Please set up the bank connection first.")
             return
         }
-
         guard let masterPassword = requestMasterPassword() else {
             aiStatusMessage = t("Vorgang abgebrochen.", "Operation cancelled.")
             return
         }
-
         do {
             let normalized = anthropicAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            try CredentialsStore.saveAPIKey(normalized, masterPassword: masterPassword)
+            try CredentialsStore.saveAPIKey(normalized, forProvider: activeAIProvider, masterPassword: masterPassword)
             let key = normalized.isEmpty ? nil : normalized
-            llmAPIKeyPresent = key != nil
+            let hasAnyKey = (try? CredentialsStore.hasActiveProviderKey(masterPassword: masterPassword)) ?? false
+            llmAPIKeyPresent = hasAnyKey
+            setProviderKeyPresent(key != nil, for: activeAIProvider)
             publishAPIKeyChanged(key)
             anthropicAPIKeyInput = ""
             aiStatusMessage = key == nil ? t("API-Key entfernt.", "API key removed.") : t("API-Key gespeichert.", "API key saved.")
@@ -322,20 +344,28 @@ struct SettingsView: View {
         }
     }
 
+    private func setProviderKeyPresent(_ present: Bool, for provider: AIProvider) {
+        switch provider {
+        case .anthropic: anthropicKeyPresent = present
+        case .mistral:   mistralKeyPresent = present
+        case .openai:    openaiKeyPresent = present
+        }
+    }
+
     private func removeAnthropicAPIKey() {
         guard CredentialsStore.exists() else {
             aiStatusMessage = t("Keine Zugangsdaten gefunden.", "No credentials found.")
             return
         }
-
         guard let masterPassword = requestMasterPassword() else {
             aiStatusMessage = t("Vorgang abgebrochen.", "Operation cancelled.")
             return
         }
-
         do {
-            try CredentialsStore.saveAPIKey(nil, masterPassword: masterPassword)
-            llmAPIKeyPresent = false
+            try CredentialsStore.saveAPIKey(nil, forProvider: activeAIProvider, masterPassword: masterPassword)
+            let hasAnyKey = (try? CredentialsStore.hasActiveProviderKey(masterPassword: masterPassword)) ?? false
+            llmAPIKeyPresent = hasAnyKey
+            setProviderKeyPresent(false, for: activeAIProvider)
             publishAPIKeyChanged(nil)
             aiStatusMessage = t("API-Key entfernt.", "API key removed.")
         } catch {
@@ -596,33 +626,50 @@ struct SettingsView: View {
             Text(t("AI-Assistent (experimentell)", "AI assistant (experimental)"))
                 .font(ThemeFonts.heading(size: 13))
 
-            Text(t("Anthropic API-Key für Umsatz-Fragen. Der Key wird verschlüsselt gespeichert.", "Anthropic API key for transaction questions. The key is stored encrypted."))
+            Text(t(
+                "Mit einem API‑Key kannst du die AI‑Transaktions‑Kategorisierung aktivieren. Dabei werden Transaktionsdaten (Empfänger, Verwendungszweck, Betrag) zur Kategorisierung an den gewählten KI‑Anbieter übertragen (USA/EU). Der API‑Key wird verschlüsselt lokal gespeichert.",
+                "With an API key you can enable AI transaction categorization. Transaction data (recipient, reference, amount) is sent to the selected AI provider for categorization (USA/EU). The API key is stored encrypted locally."
+            ))
                 .font(ThemeFonts.body(size: 12))
                 .foregroundColor(.secondary)
 
+            // Change 2 — provider picker
+            Picker("", selection: $selectedAIProvider) {
+                ForEach(AIProvider.allCases, id: \.rawValue) { provider in
+                    Text(provider.displayName).tag(provider.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: selectedAIProvider) { _ in
+                anthropicAPIKeyInput = ""
+                aiStatusMessage = ""
+            }
+
             HStack(spacing: 8) {
                 Circle()
-                    .fill(llmAPIKeyPresent ? Color.green : Color.orange)
+                    .fill(activeProviderHasKey ? Color.green : Color.orange)
                     .frame(width: 8, height: 8)
-                Text(llmAPIKeyPresent ? t("API-Key gesetzt", "API key set") : t("Kein API-Key gesetzt", "No API key set"))
+                Text(activeProviderHasKey ? t("API-Key gesetzt", "API key set") : t("Kein API-Key gesetzt", "No API key set"))
                     .font(ThemeFonts.body(size: 12))
                     .foregroundColor(.secondary)
             }
 
-            SecureField("sk-ant-...", text: $anthropicAPIKeyInput)
+            SecureField(activeAIProvider.keyPlaceholder, text: $anthropicAPIKeyInput)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
 
             HStack(spacing: 8) {
-                Button(llmAPIKeyPresent ? t("API-Key aktualisieren", "Update API key") : t("API-Key speichern", "Save API key")) {
+                Button(activeProviderHasKey ? t("API-Key aktualisieren", "Update API key") : t("API-Key speichern", "Save API key")) {
                     saveAnthropicAPIKey()
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(anthropicAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).count < 10
+                          && !activeProviderHasKey)
 
                 Button(t("API-Key entfernen", "Remove API key")) {
                     removeAnthropicAPIKey()
                 }
                 .buttonStyle(.bordered)
-                .disabled(!llmAPIKeyPresent)
+                .disabled(!activeProviderHasKey)
             }
 
             if !aiStatusMessage.isEmpty {
@@ -1034,56 +1081,72 @@ struct SettingsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text(t("Konfetti in der Umsatzliste", "Confetti in transaction list"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Beim Öffnen der Umsatzliste optional anzeigen.", "Optionally show when opening the transaction list."))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-
-                SettingsToggleRow(
-                    title: t("Konfetti aktivieren", "Enable confetti"),
-                    subtitle: t("Effekt grundsätzlich einschalten", "Enable the effect globally"),
-                    isOn: $confettiEnabled
-                )
-
-                HStack {
-                    Text(t("Konfetti-Effekt", "Confetti effect"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Spacer()
-                    Picker("", selection: $confettiEffect) {
-                        ForEach(ConfettiEffect.allCases, id: \.rawValue) { effect in
-                            Text(effect.label).tag(effect.rawValue)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                    .frame(width: 160)
+            HStack {
+                Text(t("Menüleiste", "Menu Bar"))
+                    .font(ThemeFonts.body(size: 13, weight: .medium))
+                Spacer()
+                Picker("", selection: $menubarStyle) {
+                    Text(t("Lang", "Long")).tag(0)
+                    Text(t("Kurz", "Short")).tag(1)
                 }
-                .disabled(!confettiEnabled)
+                .pickerStyle(SegmentedPickerStyle())
+                .frame(width: 120)
+            }
 
-                SettingsToggleRow(
-                    title: t("Bei Kontostand über Schwellwert", "When balance exceeds threshold"),
-                    subtitle: t("Löst aus, wenn dein Kontostand hoch genug ist", "Triggers when your account balance is high enough"),
-                    isOn: $confettiOnBalanceThreshold
-                )
-                .disabled(!confettiEnabled)
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text(t("Effekte", "Effects"))
+                    .font(ThemeFonts.heading(size: 13))
 
                 HStack(spacing: 8) {
-                    TextField("3000", value: $confettiBalanceThreshold, format: .number)
+                    Text(t("Effekte bei Einnahme ab", "Effects from income of"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    TextField("50", value: $confettiIncomeThreshold, format: .number)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(width: 110)
-                        .disabled(!confettiEnabled || !confettiOnBalanceThreshold)
-                    Text(t("€ Schwellwert", "€ threshold"))
+                        .frame(width: 80)
+                    Text("€")
                         .font(ThemeFonts.body(size: 13))
-                        .foregroundColor(.secondary)
                 }
+                Text(t("Effekte erscheinen bei neuen Einnahmen ab diesem Betrag. Setze 0 für keinen Effekt.", "Effects appear for new income above this amount. Set 0 for no effect."))
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundStyle(.secondary)
 
-                SettingsToggleRow(
-                    title: t("Bei neuer Einnahme", "On new income"),
-                    subtitle: t("Löst aus, wenn seit dem letzten Öffnen ein neuer Geldeingang da ist", "Triggers when a new incoming payment appears since the last open"),
-                    isOn: $confettiOnNewIncome
-                )
-                .disabled(!confettiEnabled)
+                HStack {
+                    Text(t("Stil", "Style"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Spacer()
+                    Picker("", selection: $celebrationStyle) {
+                        Text(t("Classic (Konfetti)", "Classic (Confetti)")).tag(0)
+                        Text(t("Ripple", "Ripple")).tag(1)
+                    }
+                    .frame(width: 180)
+                }
+                .disabled(confettiIncomeThreshold == 0)
+
+                if celebrationStyle == 0 {
+                    HStack {
+                        Text(t("Konfetti-Stil", "Confetti style"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Spacer()
+                        Picker("", selection: $confettiEffect) {
+                            ForEach(ConfettiEffect.allCases, id: \.rawValue) { effect in
+                                Text(effect.label).tag(effect.rawValue)
+                            }
+                        }
+                        .frame(width: 160)
+                    }
+                    .disabled(confettiIncomeThreshold == 0)
+                } else {
+                    Text(t("Ripple-Welle erscheint auf der Kontostand-Kachel und im Flyout.", "Ripple wave appears on the balance card and in the flyout."))
+                        .font(ThemeFonts.body(size: 12))
+                        .foregroundStyle(.secondary)
+                    SettingsToggleRow(
+                        title: t("Dauerhaft", "Always on"),
+                        subtitle: t("Ripple bei jedem Öffnen — nicht nur bei neuen Einnahmen.", "Ripple on every open — not only on new income."),
+                        isOn: $rippleAlwaysOn
+                    )
+                }
             }
         }
     }
@@ -1167,9 +1230,58 @@ struct SettingsView: View {
 
                     ForEach(multibankingStore.slots) { slot in
                         HStack(spacing: 12) {
+                            let slotBrand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.iban)
+                            Group {
+                                if let img = logoStore.image(for: slotBrand) {
+                                    Image(nsImage: img)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 28, height: 28)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                } else {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.secondary.opacity(0.12))
+                                        .frame(width: 28, height: 28)
+                                        .overlay(
+                                            Image(systemName: "building.columns")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(.secondary)
+                                        )
+                                }
+                            }
+                            .onAppear { BankLogoStore.shared.preload(brand: slotBrand) }
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(slot.displayName.isEmpty ? t("Konto", "Account") : slot.displayName)
-                                    .font(ThemeFonts.body(size: 13))
+                                if slotBeingRenamed?.id == slot.id {
+                                    HStack(spacing: 6) {
+                                        TextField(t("Name", "Name"), text: $renameText)
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .font(ThemeFonts.body(size: 13))
+                                            .frame(minWidth: 100, maxWidth: 160)
+                                            .onSubmit {
+                                                var updated = slot
+                                                updated.displayName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                MultibankingStore.shared.updateSlot(updated)
+                                                NotificationCenter.default.post(name: Notification.Name("simplebanking.slotRenamed"), object: nil, userInfo: ["slotId": slot.id])
+                                                slotBeingRenamed = nil
+                                            }
+                                        Button(t("OK", "OK")) {
+                                            var updated = slot
+                                            updated.displayName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            MultibankingStore.shared.updateSlot(updated)
+                                            NotificationCenter.default.post(name: Notification.Name("simplebanking.slotRenamed"), object: nil, userInfo: ["slotId": slot.id])
+                                            slotBeingRenamed = nil
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        Button(t("Abbruch", "Cancel")) {
+                                            slotBeingRenamed = nil
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                        .foregroundColor(.secondary)
+                                    }
+                                } else {
+                                    Text(slot.displayName.isEmpty ? t("Konto", "Account") : slot.displayName)
+                                        .font(ThemeFonts.body(size: 13))
+                                }
                                 if !slot.iban.isEmpty {
                                     Text(slot.iban.prefix(4) + " ···· " + slot.iban.suffix(4))
                                         .font(ThemeFonts.body(size: 11))
@@ -1177,16 +1289,26 @@ struct SettingsView: View {
                                 }
                             }
                             Spacer()
-                            Button(action: {
-                                slotToDelete = slot
-                                showSlotDeleteConfirmation = true
-                            }) {
-                                Text(t("Entfernen", "Remove"))
-                                    .foregroundColor(.red)
-                                    .font(ThemeFonts.body(size: 12))
+                            if slotBeingRenamed?.id != slot.id {
+                                Button(action: {
+                                    renameText = slot.displayName
+                                    slotBeingRenamed = slot
+                                }) {
+                                    Image(systemName: "pencil")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                Button(action: {
+                                    slotToDelete = slot
+                                    showSlotDeleteConfirmation = true
+                                }) {
+                                    Text(t("Entfernen", "Remove"))
+                                        .foregroundColor(.red)
+                                        .font(ThemeFonts.body(size: 12))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(multibankingStore.slots.count == 1)
                             }
-                            .buttonStyle(PlainButtonStyle())
-                            .disabled(multibankingStore.slots.count == 1)
                         }
                         .padding(.vertical, 4)
                     }
@@ -1292,6 +1414,14 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                         .frame(width: 100, alignment: .leading)
                     Link("support@simplebanking.de", destination: URL(string: "mailto:support@simplebanking.de")!)
+                        .font(ThemeFonts.body(size: 13))
+                }
+                HStack {
+                    Text("GitHub")
+                        .font(ThemeFonts.body(size: 13))
+                        .foregroundColor(.secondary)
+                        .frame(width: 100, alignment: .leading)
+                    Link("klotzbrocken/simplebanking", destination: URL(string: "https://github.com/klotzbrocken/simplebanking")!)
                         .font(ThemeFonts.body(size: 13))
                 }
             }
@@ -1417,45 +1547,30 @@ struct SettingsView: View {
 
             Divider()
 
-            // Easter-Egg-Assistent
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Easter-Egg-Assistent", "Easter egg assistant"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Wähle den animierten Assistenten (experimentell).", "Choose the animated assistant (experimental)."))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-
-                HStack {
-                    Text(t("Assistent", "Assistant"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { ClippyAgentType(rawValue: UserDefaults.standard.string(forKey: MediumClippy.agentKey) ?? "") ?? .clippy },
-                        set: { UserDefaults.standard.set($0.rawValue, forKey: MediumClippy.agentKey) }
-                    )) {
-                        ForEach(ClippyAgentType.allCases, id: \.self) { agent in
-                            Text(agent.displayName).tag(agent)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(width: 120)
-                }
-            }
+            // Change 3 — AI categorization toggle
+            SettingsToggleRow(
+                title: t("AI-Transaktions-Kategorisierung", "AI Transaction Categorization"),
+                subtitle: t(
+                    "Unkategorisierte Umsätze werden nach dem Abruf automatisch über den aktiven KI-Anbieter kategorisiert.",
+                    "Uncategorized transactions are automatically categorized via the active AI provider after fetching."
+                ),
+                isOn: $aiCategorizationEnabled
+            )
         }
     }
 
     private func resetApp() {
-        // Delete credentials
-        try? CredentialsStore.delete()
-        try? TransactionsDatabase.deleteDatabaseFileIfExists()
+        // Delete all credentials, DB files, attachments (all slots)
+        CredentialsStore.deleteAllData()
+        BiometricStore.clear()
         llmAPIKeyPresent = false
         publishAPIKeyChanged(nil)
-        
+
         // Reset all UserDefaults
         if let bundleID = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: bundleID)
         }
-        
+
         // Close settings and trigger app restart hint
         dismiss()
     }
