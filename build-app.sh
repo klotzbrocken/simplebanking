@@ -30,7 +30,7 @@ fi
 OUTDIR="$ROOT/SimpleBankingBuild"
 APP="$OUTDIR/simplebanking.app"
 ICON_SRC="${ICON_SRC:-$ROOT/Resources/icon_full_black.png}"
-VERSION_BASE="${VERSION_BASE:-1.2.4}"
+VERSION_BASE="${VERSION_BASE:-1.3.1}"
 
 mkdir -p "$OUTDIR"
 rm -rf "$APP"
@@ -57,6 +57,27 @@ BUILD_NUMBER="${BUILD_DATE_NODASH}_${BUILD_TIME_NOCOLON}_${BUILD_SEQ}"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
+# Compile Metal shaders → default.metallib (fallback to precompiled if toolchain unavailable)
+METAL_SRC_DIR="$ROOT/Sources/simplebanking"
+METAL_WORK="$ROOT/.build/metal-work"
+METALLIB_DEST="$APP/Contents/Resources/default.metallib"
+METALLIB_PRECOMPILED="$ROOT/Resources/precompiled/default.metallib"
+rm -rf "$METAL_WORK" && mkdir -p "$METAL_WORK"
+METAL_AIR_FILES=()
+while IFS= read -r -d '' mf; do
+    air="$METAL_WORK/$(basename "${mf%.metal}.air")"
+    xcrun -sdk macosx metal -c "$mf" -o "$air" 2>/dev/null && METAL_AIR_FILES+=("$air")
+done < <(find "$METAL_SRC_DIR" -name "*.metal" -print0)
+if [[ ${#METAL_AIR_FILES[@]} -gt 0 ]]; then
+    xcrun -sdk macosx metallib "${METAL_AIR_FILES[@]}" -o "$METALLIB_DEST"
+    echo "Metal shaders compiled → default.metallib"
+elif [[ -f "$METALLIB_PRECOMPILED" ]]; then
+    cp "$METALLIB_PRECOMPILED" "$METALLIB_DEST"
+    echo "Metal shaders copied from precompiled → default.metallib"
+else
+    echo "Warning: no Metal shaders available — ripple effect will not work"
+fi
+
 # Read Sparkle config (generated once via setup-sparkle.sh)
 SPARKLE_PUBLIC_KEY=""
 SPARKLE_FEED_URL=""
@@ -69,8 +90,6 @@ fi
 
 CATEGORIES_JSON_SRC="$ROOT/Sources/simplebanking/Resources/categories_de.json"
 CLIPPY_PNG_SRC="$ROOT/Sources/simplebanking/Resources/Clippy.png"
-GENIUS_PNG_SRC="$ROOT/Sources/simplebanking/Resources/Genius.png"
-LINKS_PNG_SRC="$ROOT/Sources/simplebanking/Resources/Links.png"
 CLIPPY_ANIMATIONS_SRC="$ROOT/Sources/simplebanking/Resources/animations.json"
 if [[ -f "$CATEGORIES_JSON_SRC" ]]; then
     cp "$CATEGORIES_JSON_SRC" "$APP/Contents/Resources/categories_de.json"
@@ -78,14 +97,16 @@ fi
 if [[ -f "$CLIPPY_PNG_SRC" ]]; then
     cp "$CLIPPY_PNG_SRC" "$APP/Contents/Resources/Clippy.png"
 fi
-[[ -f "$GENIUS_PNG_SRC" ]] && cp "$GENIUS_PNG_SRC" "$APP/Contents/Resources/Genius.png"
-[[ -f "$LINKS_PNG_SRC"  ]] && cp "$LINKS_PNG_SRC"  "$APP/Contents/Resources/Links.png"
 if [[ -f "$CLIPPY_ANIMATIONS_SRC" ]]; then
     cp "$CLIPPY_ANIMATIONS_SRC" "$APP/Contents/Resources/animations.json"
 fi
 BANK_LOGOS_SRC="$ROOT/Sources/simplebanking/Resources/bank-logos"
 if [[ -d "$BANK_LOGOS_SRC" ]]; then
     cp -R "$BANK_LOGOS_SRC" "$APP/Contents/Resources/bank-logos"
+fi
+MERCHANT_LOGOS_SRC="$ROOT/Sources/simplebanking/Resources/merchant-logos"
+if [[ -d "$MERCHANT_LOGOS_SRC" ]]; then
+    cp -R "$MERCHANT_LOGOS_SRC" "$APP/Contents/Resources/merchant-logos"
 fi
 
 # Generate .icns from source PNG if available
@@ -160,8 +181,13 @@ else
     echo "Run 'swift package resolve' to download Sparkle, then rebuild."
 fi
 
-# ad-hoc sign
-codesign --force --deep --sign - "$APP"
+# ad-hoc sign — use dev entitlements (no sandbox; sandbox requires Developer ID)
+DEV_ENTITLEMENTS="$ROOT/Sources/simplebanking/simplebanking-dev.entitlements"
+if [[ -f "$DEV_ENTITLEMENTS" ]]; then
+    codesign --force --deep --sign - --entitlements "$DEV_ENTITLEMENTS" "$APP"
+else
+    codesign --force --deep --sign - "$APP"
+fi
 
 echo "Built app: $APP"
 echo "Version: ${VERSION_BASE} (Build ${BUILD_NUMBER})"

@@ -34,6 +34,7 @@ final class MultibankingStore: ObservableObject {
     private init() {
         load()
         migrateFromLegacyIfNeeded()
+        fixDuplicateDisplayNames()
     }
 
     // MARK: - Public API
@@ -106,6 +107,21 @@ final class MultibankingStore: ObservableObject {
         slots = [legacySlot]
         activeIndex = 0
         save()
-        AppLogger.log("MultibankingStore: migrated legacy account to slot[0] id=legacy", category: "Multibanking")
+    }
+
+    /// One-time corruption fix: if the legacy slot shares a displayName with a newer slot,
+    /// the legacy slot was corrupted by a race condition during second-account setup.
+    /// Clear only the legacy slot's name so IBAN lookup re-derives the correct bank name.
+    /// Non-legacy slots keep their user-chosen names unchanged.
+    private func fixDuplicateDisplayNames() {
+        guard slots.count > 1 else { return }
+        guard let legacyIdx = slots.firstIndex(where: { $0.id == "legacy" }) else { return }
+        let legacyName = slots[legacyIdx].displayName
+        guard !legacyName.isEmpty else { return }
+        let otherHasSameName = slots.indices.contains(where: { $0 != legacyIdx && slots[$0].displayName == legacyName })
+        guard otherHasSameName else { return }
+        // Legacy slot's name is duplicated — it got the second bank's name by mistake. Clear it.
+        slots[legacyIdx] = BankSlot(id: "legacy", iban: slots[legacyIdx].iban, displayName: "", logoId: nil)
+        save()
     }
 }

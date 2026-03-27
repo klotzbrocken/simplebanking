@@ -31,9 +31,6 @@ private struct QueryPlan {
 }
 
 enum LLMService {
-    private static let model = "claude-3-5-haiku-latest"
-    private static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
-
     private static let currencyFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "de_DE")
@@ -110,7 +107,7 @@ enum LLMService {
         let rows = try TransactionsDatabase.executeReadOnlyQuery(sql: safeSQL)
 
         let answer: String
-        if let plan {
+        if let plan, !rows.isEmpty {
             answer = plan.renderAnswer(rows)
         } else {
             answer = try await generateAnswer(
@@ -516,8 +513,8 @@ enum LLMService {
         }
 
         let patterns = [
-            "\\b(?:bei|fuer|fur|für|an|von)\\s+([a-z0-9äöüß&+\\-.]{2,}(?:\\s+[a-z0-9äöüß&+\\-.]{2,}){0,3})",
-            "\\b(?:zu)\\s+([a-z0-9äöüß&+\\-.]{2,}(?:\\s+[a-z0-9äöüß&+\\-.]{2,}){0,3})",
+            "\\b(?:bei|fuer|fur|für|an|von)\\s+([a-z0-9äöüß&+\\-.]{2,})",
+            "\\b(?:zu)\\s+([a-z0-9äöüß&+\\-.]{2,})",
         ]
 
         for pattern in patterns {
@@ -549,8 +546,12 @@ enum LLMService {
         guard trimmed.count >= 2 else { return nil }
 
         let lower = trimmed.lowercased()
-        let stopWords: Set<String> = ["den", "dem", "der", "die", "das", "einem", "einer", "mir", "dir", "ihm", "ihr", "uns", "euch"]
-        if stopWords.contains(lower) {
+        let blocklist: Set<String> = [
+            "den", "dem", "der", "die", "das", "ein", "eine", "einem", "einer",
+            "mir", "dir", "ihm", "ihr", "uns", "euch",
+            "aus", "ein", "ab", "auf", "raus", "hoch", "runter", "weg",
+        ]
+        if blocklist.contains(lower) {
             return nil
         }
 
@@ -751,10 +752,11 @@ enum LLMService {
         - Gib nur SQL zurück.
         """
 
-        return try await requestAnthropicText(
-            systemPrompt: systemPrompt,
-            userPrompt: userPrompt,
+        return try await AIProviderService.complete(
+            provider: AIProvider.active,
             apiKey: apiKey,
+            systemPrompt: systemPrompt,
+            userMessage: userPrompt,
             maxTokens: 520,
             temperature: 0.0
         )
@@ -769,21 +771,6 @@ enum LLMService {
             throw LLMServiceError.invalidResultPayload
         }
 
-        let systemPrompt = """
-        Du bist "simply" der Finanzassistent in der Banking-App "simplebanking".
-        Du duzt den Nutzer immer.
-        Dein Ton ist freundlich, locker und natürlich.
-
-        Regeln:
-        - Antworte auf Deutsch, kurz aber nicht einsilbig.
-        - Formatiere Beträge als Euro (1.234,56 €).
-        - Nutze ausschließlich die bereitgestellten SQL-Ergebnisse.
-        - Wenn keine Daten vorhanden sind, sage das ehrlich und freundlich.
-        - Keine Markdown-Formatierung, kein **fett**, keine #Überschriften.
-        - Fasse zusammen, hebe das Wichtigste hervor und gib wenn sinnvoll einen kurzen Einordnungs-Satz.
-        - Bei langen Listen: nenne die wichtigsten 3 bis 5 Punkte explizit und fasse den Rest zusammen.
-        """
-
         let userPrompt = """
         Frage: \(question)
         Ausgeführtes SQL:
@@ -793,82 +780,14 @@ enum LLMService {
         \(jsonText)
         """
 
-        return try await requestAnthropicText(
-            systemPrompt: systemPrompt,
-            userPrompt: userPrompt,
+        return try await AIProviderService.complete(
+            provider: AIProvider.active,
             apiKey: apiKey,
+            systemPrompt: AIProviderService.QUERY_SYSTEM_PROMPT,
+            userMessage: userPrompt,
             maxTokens: 500,
             temperature: 0.2
         )
     }
-
-    private static func requestAnthropicText(
-        systemPrompt: String,
-        userPrompt: String,
-        apiKey: String,
-        maxTokens: Int,
-        temperature: Double
-    ) async throws -> String {
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 45
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-
-        let payload = AnthropicRequest(
-            model: model,
-            max_tokens: maxTokens,
-            temperature: temperature,
-            system: systemPrompt,
-            messages: [
-                AnthropicRequest.Message(role: "user", content: userPrompt),
-            ]
-        )
-        request.httpBody = try JSONEncoder().encode(payload)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            throw NSError(
-                domain: "simplebanking.llm",
-                code: http.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "Anthropic API Fehler (\(http.statusCode)): \(body)"]
-            )
-        }
-
-        let decoded = try JSONDecoder().decode(AnthropicResponse.self, from: data)
-        let text = decoded.content
-            .filter { $0.type == "text" }
-            .compactMap(\.text)
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !text.isEmpty else {
-            throw LLMServiceError.emptyModelResponse
-        }
-        return text
-    }
 }
 
-private struct AnthropicRequest: Encodable {
-    struct Message: Encodable {
-        let role: String
-        let content: String
-    }
-
-    let model: String
-    let max_tokens: Int
-    let temperature: Double
-    let system: String
-    let messages: [Message]
-}
-
-private struct AnthropicResponse: Decodable {
-    struct Content: Decodable {
-        let type: String
-        let text: String?
-    }
-
-    let content: [Content]
-}
