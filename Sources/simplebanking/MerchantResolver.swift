@@ -53,24 +53,400 @@ enum MerchantResolver {
     ]
 
     private static let merchantAliases: [(needle: String, canonical: String)] = [
+        // Lebensmittel
         ("rewe", "Rewe"),
         ("nahkauf", "Nahkauf"),
         ("edeka", "Edeka"),
+        ("marktkauf", "Marktkauf"),
         ("aldi", "Aldi"),
         ("lidl", "Lidl"),
         ("netto", "Netto"),
         ("kaufland", "Kaufland"),
+        ("penny", "Penny"),
+        ("norma", "Norma"),
+        ("np discount", "NP Discount"),
+        ("tegut", "Tegut"),
+        ("alnatura", "Alnatura"),
+        ("famila", "Famila"),
+        ("combi markt", "Combi"),
+        ("combi verbrauchermarkt", "Combi"),
+        ("v-markt", "V-Markt"),
+        ("mix markt", "Mix Markt"),
+        ("trinkgut", "Trinkgut"),
+        ("getraenke hoffmann", "Getraenke Hoffmann"),
+        ("getränke hoffmann", "Getraenke Hoffmann"),
+        ("reformhaus", "Reformhaus"),
+        ("denns biomarkt", "Denns Biomarkt"),
+        ("denn's biomarkt", "Denns Biomarkt"),
+        ("tchibo", "Tchibo"),
+
+        // Drogerie / Gesundheit / Optik
         ("dm", "dm"),
         ("rossmann", "Rossmann"),
+        ("müller drogerie", "Müller"),
+        ("mueller drogerie", "Müller"),
+        ("müller markt", "Müller"),
+        ("mueller markt", "Müller"),
+        ("müller", "Müller"),
+        ("mueller", "Müller"),
+        ("fielmann", "Fielmann"),
+        ("apollo-optik", "Apollo-Optik"),
+        ("apollo optik", "Apollo-Optik"),
+        ("budnikowsky", "Budnikowsky"),
+        ("douglas", "Douglas"),
+
+        // Elektronik / Technik
+        ("saturn", "Saturn"),
+        ("mediamarkt", "MediaMarkt"),
+        ("media markt", "MediaMarkt"),
+        ("euronics", "Euronics"),
+        ("mediamax", "Mediamax"),
+        ("hercules", "Hercules"),
+        ("thomann", "Thomann"),
+        ("notebooksbilliger", "Notebooksbilliger"),
+        ("gamestop", "Gamestop"),
+        ("game stop", "Gamestop"),
+        ("microsoft 365", "Microsoft 365"),
+        ("microsoft", "Microsoft"),
+        ("garmin", "Garmin"),
+        ("lenovo", "Lenovo"),
+        ("acer", "Acer"),
+        ("expert", "Expert"),
+
+        // DIY / Baumarkt
+        ("ikea", "IKEA"),
+        ("hornbach", "Hornbach"),
+        ("bauhaus", "Bauhaus"),
+        ("hagebaumarkt", "Hagebaumarkt"),
+        ("hellweg", "Hellweg"),
+        ("toom", "Toom"),
+        ("tedox", "Tedox"),
+        ("thomas philipps", "Thomas Philipps"),
+        ("obi", "OBI"),
+
+        // Möbel / Wohnen (oe spellings as canonical so normalizeForSearch matches svgMap)
+        ("xxxlutz", "XXXLutz"),
+        ("höffner", "Höffner"),
+        ("hoeffner", "Höffner"),
+        ("hoffner", "Höffner"),
+        ("segmüller", "Segmüller"),
+        ("segmueller", "Segmüller"),
+        ("segmuller", "Segmüller"),
+        ("poco", "Poco"),
+        ("roller", "Roller"),
+        ("jysk", "JYSK"),
+        ("daenisches bettenlager", "Daenisches Bettenlager"),
+        ("dänisches bettenlager", "Daenisches Bettenlager"),
+        ("danisches bettenlager", "Daenisches Bettenlager"),
+        ("sb-moebel boss", "SB-Moebel Boss"),
+        ("sb-möbel boss", "SB-Moebel Boss"),
+        ("sb-mobel boss", "SB-Moebel Boss"),
+        ("moebel hardeck", "Moebel Hardeck"),
+        ("möbel hardeck", "Moebel Hardeck"),
+        ("moebel kraft", "Moebel Kraft"),
+        ("möbel kraft", "Moebel Kraft"),
+        ("moebel martin", "Moebel Martin"),
+        ("möbel martin", "Moebel Martin"),
+        ("moemax", "Moemax"),
+        ("mömax", "Moemax"),
+        ("porta moebel", "Porta Moebel"),
+        ("porta möbel", "Porta Moebel"),
+        ("porta mobel", "Porta Moebel"),
+        ("dehner", "Dehner"),
+        ("westwing", "Westwing"),
+        ("maisons du monde", "Maisons du Monde"),
+
+        // Mode / Schuhe / Accessoires
+        ("h&m", "H&M"),
+        ("zara", "Zara"),
+        ("primark", "Primark"),
+        ("deichmann", "Deichmann"),
+        ("c&a", "C&A"),
+        ("kik", "KiK"),
+        ("new yorker", "New Yorker"),
+        ("nkd", "NKD"),
+        ("takko fashion", "Takko Fashion"),
+        ("takko", "Takko Fashion"),
+        ("ernstings family", "Ernstings Family"),
+        ("ernsting's family", "Ernstings Family"),
+        ("peek & cloppenburg", "Peek & Cloppenburg"),
+        ("peek und cloppenburg", "Peek & Cloppenburg"),
+        ("breuninger", "Breuninger"),
+        ("galeria karstadt", "Galeria"),
+        ("galeria", "Galeria"),
+        ("woolworth", "Woolworth"),
+        ("tedi", "Tedi"),
+        ("adidas", "Adidas"),
+        ("nike", "Nike"),
+        ("puma", "Puma"),
+        ("gucci", "Gucci"),
+        ("mango", "Mango"),
+        ("sheego", "Sheego"),
+        ("ulla popken", "Ulla Popken"),
+        ("trigema", "Trigema"),
+        ("snipes", "Snipes"),
+        ("bonprix", "Bonprix"),
+        ("madeleine", "Madeleine"),
+        ("net-a-porter", "Net-a-Porter"),
+        ("net a porter", "Net-a-Porter"),
+        ("calida", "Calida"),
+
+        // Online / E-Commerce
+        ("kindle unlimited", "Kindle Unlimited"),
+        ("kindle", "Kindle"),
+        ("amazon music", "Amazon Music"),
+        ("amazon", "Amazon"),
+        ("zalando", "Zalando"),
+        ("about you", "About You"),
+        ("aboutyou", "About You"),
+        ("otto", "Otto"),
+        ("baur", "Baur"),
+        ("flaconi", "Flaconi"),
+        ("spreadshirt", "Spreadshirt"),
+        ("swarovski", "Swarovski"),
+        ("hugendubel", "Hugendubel"),
+        ("yves rocher", "Yves Rocher"),
+        ("yves-rocher", "Yves Rocher"),
+        ("amorelie", "Amorelie"),
+        ("momox fashion", "Momox Fashion"),
+        ("momox", "Momox"),
+        ("contorion", "Contorion"),
+        ("ebay", "eBay"),
+        ("etsy", "Etsy"),
+
+        // Sport / Freizeit
+        ("intersport", "Intersport"),
+        ("decathlon", "Decathlon"),
+        ("sport 2000", "Sport 2000"),
+        ("fressnapf", "Fressnapf"),
+        ("das futterhaus", "Das Futterhaus"),
+        ("thalia", "Thalia"),
+        ("vedes", "Vedes"),
+        ("weight watchers", "Weight Watchers"),
+
+        // Streaming / Video (spezifisch vor generisch)
+        ("apple music", "Apple Music"),
+        ("apple tv+", "Apple TV+"),
+        ("apple tv", "Apple TV"),
+        ("apple arcade", "Apple Arcade"),
+        ("apple icloud", "iCloud"),
+        ("icloud", "iCloud"),
+        ("apple services", "Apple Services"),
+        ("apple", "Apple"),
+        ("netflix", "Netflix"),
+        ("disney+", "Disney+"),
+        ("disney plus", "Disney+"),
+        ("rtl+", "RTL+"),
+        ("rtl plus", "RTL+"),
+        ("dazn", "DAZN"),
+        ("wow / sky", "WOW"),
+        ("wowtv", "WOW"),
+        ("waipu", "Waipu.tv"),
+        ("magentatv", "MagentaTV"),
+        ("magenta tv", "MagentaTV"),
+        ("joyn plus", "Joyn"),
+        ("joyn", "Joyn"),
+        ("paramount+", "Paramount+"),
+        ("paramount plus", "Paramount+"),
+        ("zattoo", "Zattoo"),
+        ("viaplay", "Viaplay"),
+        ("hbo max", "Max"),
+        ("crunchyroll", "Crunchyroll"),
+        ("discovery+", "Discovery+"),
+        ("curiositystream", "CuriosityStream"),
+        ("sky", "Sky"),
+
+        // Musik-Streaming
+        ("spotify", "Spotify"),
+        ("deezer", "Deezer"),
+        ("tidal", "Tidal"),
+        ("soundcloud", "SoundCloud"),
+        ("qobuz", "Qobuz"),
+        ("napster", "Napster"),
+        ("youtube music", "YouTube Music"),
+        ("youtube", "YouTube"),
+
+        // Gaming
+        ("xbox game pass", "Xbox Game Pass"),
+        ("xbox", "Xbox"),
+        ("playstation plus", "PlayStation Plus"),
+        ("playstation", "PlayStation"),
+        ("nintendo switch online", "Nintendo Switch Online"),
+        ("nintendo", "Nintendo"),
+        ("ubisoft+", "Ubisoft+"),
+        ("ubisoft", "Ubisoft"),
+        ("ea play", "EA Play"),
+        ("geforce now", "GeForce Now"),
+        ("humble choice", "Humble Choice"),
+        ("humble", "Humble"),
+
+        // Cloud / Software
+        ("adobe creative cloud", "Adobe"),
+        ("adobe", "Adobe"),
+        ("dropbox", "Dropbox"),
+        ("nordvpn", "NordVPN"),
+        ("google one", "Google One"),
+        ("google", "Google"),
+
+        // Nachrichten
+        ("spiegel+", "Spiegel+"),
+        ("spiegel plus", "Spiegel+"),
+        ("bild+", "Bild+"),
+        ("bild plus", "Bild+"),
+        ("welt+", "Welt+"),
+        ("faz+", "FAZ+"),
+        ("faz plus", "FAZ+"),
+
+        // Fitness / Wellness
+        ("peloton", "Peloton"),
+        ("freeletics", "Freeletics"),
+        ("urban sports club", "Urban Sports Club"),
+        ("mcfit", "McFit"),
+        ("fitness first", "Fitness First"),
+        ("clever fit", "Clever Fit"),
+        ("calm", "Calm"),
+        ("headspace", "Headspace"),
+
+        // Bücher / Bildung
+        ("audible", "Audible"),
+        ("storytel", "Storytel"),
+        ("scribd", "Scribd"),
+        ("duolingo", "Duolingo"),
+
+        // Food / Delivery
+        ("lieferando", "Lieferando"),
+        ("hellofresh", "HelloFresh"),
+        ("hello fresh", "HelloFresh"),
+        ("wolt", "Wolt"),
+        ("mcdonald", "McDonalds"),
+        ("starbucks", "Starbucks"),
+        ("uber eats", "Uber Eats"),
+        ("uber", "Uber"),
+        ("glossybox", "Glossybox"),
+
+        // Telko
+        ("telekom", "Telekom"),
+        ("vodafone", "Vodafone"),
+        ("o2", "O2"),
+        ("1&1", "1&1"),
+        ("congstar", "Congstar"),
+        ("freenet", "Freenet"),
+        ("mobilcom", "Mobilcom"),
+
+        // Logistik / Transport
+        ("deutsche bahn", "Deutsche Bahn"),
+        ("db vertrieb", "Deutsche Bahn"),
+        ("db fernverkehr", "Deutsche Bahn"),
+        ("bahn.de", "Deutsche Bahn"),
+        ("deutsche post", "Deutsche Post"),
+        ("dhl", "DHL"),
+        ("dpd", "DPD"),
+        ("fedex", "FedEx"),
+        ("hermes", "Hermes"),
+        ("ups", "UPS"),
+
+        // Marktplätze / Anzeigen
+        ("kleinanzeigen", "Kleinanzeigen"),
+        ("ebay kleinanzeigen", "Kleinanzeigen"),
+        ("ebay-kleinanzeigen", "Kleinanzeigen"),
+
+        // Medien / TV
+        ("hd plus", "HD+"),
+        ("hd+", "HD+"),
+        ("hdplus", "HD+"),
+
+        // Fintech / Zahlung
         ("paypal", "PayPal"),
         ("klarna", "Klarna"),
-        ("apple services", "Apple Services"),
+        ("wise", "Wise"),
+
+        // Big Tech / SaaS
         ("anthropic", "Anthropic"),
         ("claude.ai", "Claude"),
+        ("claude", "Claude"),
         ("openai", "OpenAI"),
-        ("youtube", "YouTube"),
-        ("amazon", "Amazon"),
-        ("google", "Google"),
+        ("chatgpt", "OpenAI"),
+        ("formspree", "Formspree"),
+
+        // Gesundheit / Kassen
+        ("barmer", "Barmer"),
+        ("aok", "AOK"),
+        ("dak", "DAK"),
+        ("rundfunkbeitrag", "Rundfunkbeitrag"),
+        ("adac", "ADAC"),
+
+        // Versicherungen
+        ("allianz", "Allianz"),
+        ("axa", "AXA"),
+        ("debeka", "Debeka"),
+        ("devk", "DEVK"),
+        ("ergo versicherung", "Ergo"),
+        ("ergo direkt", "Ergo"),
+        ("ergo", "Ergo"),
+        ("generali", "Generali"),
+        ("gothaer", "Gothaer"),
+        ("hallesche", "Hallesche"),
+        ("hanse merkur", "HanseMerkur"),
+        ("hansemerkur", "HanseMerkur"),
+        ("hdi versicherung", "HDI"),
+        ("hdi lebensversicherung", "HDI"),
+        ("hdi", "HDI"),
+        ("huk-coburg", "HUK-Coburg"),
+        ("huk coburg", "HUK-Coburg"),
+        ("huk ", "HUK-Coburg"),
+        ("lvm versicherung", "LVM"),
+        ("lvm ", "LVM"),
+        ("munichener ruck", "Munich Re"),
+        ("munich re", "Munich Re"),
+        ("nurnberger versicherung", "Nürnberger"),
+        ("nuernberger versicherung", "Nürnberger"),
+        ("nürnberger versicherung", "Nürnberger"),
+        ("provinzial", "Provinzial"),
+        ("r+v versicherung", "R+V"),
+        ("r+v lebensversicherung", "R+V"),
+        ("ruv versicherung", "R+V"),
+        ("signal iduna", "Signal Iduna"),
+        ("signal-iduna", "Signal Iduna"),
+        ("sv sparkassenversicherung", "SV SparkassenVersicherung"),
+        ("sv versicherung", "SV SparkassenVersicherung"),
+        ("talanx", "Talanx"),
+        ("versicherungskammer", "Versicherungskammer Bayern"),
+        ("vgh versicherungen", "VGH"),
+        ("vgh ", "VGH"),
+        ("vhv versicherung", "VHV"),
+        ("vhv allgemeine", "VHV"),
+        ("vhv ", "VHV"),
+        ("alte leipziger", "Alte Leipziger"),
+        ("alte-leipziger", "Alte Leipziger"),
+        ("arag versicherung", "ARAG"),
+        ("arag", "ARAG"),
+        ("bayerische versicherung", "Die Bayerische"),
+        ("die bayerische", "Die Bayerische"),
+        ("continentale", "Continentale"),
+        ("wuestenrot", "Wüstenrot"),
+        ("wüstenrot", "Wüstenrot"),
+        ("württembergische", "Württembergische"),
+        ("wurttembergische", "Württembergische"),
+        ("zurich versicherung", "Zurich"),
+        ("zurich insurance", "Zurich"),
+        ("zurich gruppe", "Zurich"),
+
+        // Tankstellen
+        ("aral", "Aral"),
+        ("shell", "Shell"),
+        ("esso", "Esso"),
+        ("hem tankstell", "HEM"),
+        ("hem ", "HEM"),
+        ("avia tankstell", "Avia"),
+        ("avia ", "Avia"),
+        ("jet tankstell", "JET"),
+        ("jet ", "JET"),
+        ("totalenergies", "Total Energies"),
+        ("total tankstell", "Total Energies"),
+        ("tamoil", "Tamoil"),
+
+        // Sonstiges
+        ("parship", "Parship"),
     ]
 
     private static let legalFormCanonical: [String: String] = [
@@ -279,6 +655,12 @@ enum MerchantResolver {
             return makeResolution(merchant: cardIntermediaryMerchant, source: "card_processor_intermediary", confidence: 0.35)
         }
 
+        // ABWA structured format — check remittance before falling back to raw payee name,
+        // because some banks use terminal IDs (e.g. "Debitk.1 2028-12") as the creditor name.
+        if let abwaMerchant = extractABWAMerchant(from: purpose) ?? extractABWAMerchant(from: additional) {
+            return makeResolution(merchant: abwaMerchant, source: "abwa_format", confidence: 0.88)
+        }
+
         if let payee, !payee.isEmpty {
             return makeResolution(merchant: payee, source: "empfaenger", confidence: 0.9)
         }
@@ -475,6 +857,17 @@ enum MerchantResolver {
             return cleanMerchantName(merchant)
         }
         if let merchant = firstCapture(in: text, pattern: "(?i)ihr\\s+einkauf\\s+bei\\s+(.+)$") {
+            return cleanMerchantName(merchant)
+        }
+        return nil
+    }
+
+    private static func extractABWAMerchant(from text: String?) -> String? {
+        guard let text else { return nil }
+        // ISO 20022 ABWA structured format used in card transactions by some German banks:
+        // e.g. "ABWA+CRV.Cafeteria Jung Sti/Street/City/Country/PostalCode"
+        // Captures the merchant name between the dot and the first slash.
+        if let merchant = firstCapture(in: text, pattern: "ABWA\\+[A-Z0-9]+\\.([^/\\n]{2,80})/") {
             return cleanMerchantName(merchant)
         }
         return nil

@@ -4,7 +4,7 @@ import SwiftUI
 // MARK: - Transaction Filter
 
 enum TxFilter: Int, CaseIterable {
-    case all, income, expense, subscriptions, fixedCosts, uncategorized
+    case all, income, expense, subscriptions, fixedCosts, uncategorized, pending
 
     var label: String {
         switch self {
@@ -14,6 +14,7 @@ enum TxFilter: Int, CaseIterable {
         case .subscriptions:  return L10n.t("Abos", "Subscriptions")
         case .fixedCosts:     return L10n.t("Fixkosten", "Fixed costs")
         case .uncategorized:  return L10n.t("Unkategorisiert", "Uncategorized")
+        case .pending:        return L10n.t("Vorgemerkt", "Pending")
         }
     }
 
@@ -25,6 +26,7 @@ enum TxFilter: Int, CaseIterable {
         case .subscriptions:  return "repeat.circle"
         case .fixedCosts:     return "calendar.badge.clock"
         case .uncategorized:  return "questionmark.circle"
+        case .pending:        return "clock.badge.questionmark"
         }
     }
 }
@@ -50,18 +52,30 @@ final class TransactionsViewModel: ObservableObject {
     @Published var fromDate: String?
     @Published var toDate: String?
     @Published var currentBalance: String?
+    @Published var currentBalanceFetchedAt: Date? = nil
     @Published var connectedBankDisplayName: String = ""
     @Published var connectedBankLogoID: String? = nil
+    @Published var connectedBankLogoImage: NSImage? = nil
     @Published var connectedBankIBAN: String? = nil
+    @Published var connectedBankCurrency: String? = nil
+    @Published var connectedBankNickname: String? = nil
     @Published var anthropicApiKey: String? = nil
     @Published var aiProvider: AIProvider = .anthropic
     @Published var confettiTrigger: Int = 0
     @Published var rippleTrigger: Int = 0
     @Published var isTanPending: Bool = false
     @Published var enrichmentData: [String: (note: String?, attachmentCount: Int)] = [:]
+    @AppStorage("unifiedModeEnabled") var unifiedModeEnabled: Bool = false
+    @Published var slotMap: [String: BankSlot] = [:]
+    @Published var internalTransferIDs: Set<String> = []
+    @Published var loadError: Error? = nil
     @Published private(set) var filteredTransactions: [TransactionsResponse.Transaction] = []
     @Published var activeFilter: TxFilter = .all {
         didSet { applyCurrentFilter(resetPage: true) }
+    }
+
+    var isUnifiedMode: Bool {
+        unifiedModeEnabled && MultibankingStore.shared.slots.count > 1
     }
 
     let pageSize: Int = 10
@@ -192,6 +206,8 @@ final class TransactionsViewModel: ObservableObject {
             base = base.filter { FixedCostsAnalyzer.isFixedCost($0, fixedMerchants: fixedMerchants) }
         case .uncategorized:
             base = base.filter { TransactionCategorizer.category(for: $0) == .sonstiges }
+        case .pending:
+            base = base.filter { $0.status == "pending" }
         }
 
         filteredTransactions = base
@@ -265,6 +281,60 @@ final class TransactionsViewModel: ObservableObject {
 
     func prevPage() {
         page = max(page - 1, 0)
+    }
+
+    /// Detect internal transfers between own accounts.
+    /// Scans the last 30 days / 1,000 rows (O(n²) cap) — see TODOS.md for indexed future approach.
+    /// Matches: counterparty IBAN is one of our own IBANs + same absolute amount (±€0.01 fee tolerance) + bookingDate within ±1 day.
+    func detectInternalTransfers(ownIBANs: Set<String>) {
+        guard !ownIBANs.isEmpty else {
+            internalTransferIDs = []
+            return
+        }
+        let cutoff = Calendar(identifier: .gregorian).date(byAdding: .day, value: -30, to: Date()) ?? Date()
+        let cutoffStr = Self.isoDateFormatter.string(from: cutoff)
+        let candidates = transactions
+            .filter { ($0.bookingDate ?? $0.valueDate ?? "") >= cutoffStr }
+            .prefix(1000)
+
+        var found: Set<String> = []
+        let list = Array(candidates)
+        for i in 0..<list.count {
+            let a = list[i]
+            let aIBAN = a.creditor?.iban ?? a.debtor?.iban ?? ""
+            guard ownIBANs.contains(aIBAN) else { continue }
+            let aAmt = abs(a.parsedAmount)
+            let aDate = a.bookingDate ?? a.valueDate ?? ""
+            let aID = TransactionRecord.fingerprint(for: a)
+            for j in (i + 1)..<list.count {
+                let b = list[j]
+                let bIBAN = b.creditor?.iban ?? b.debtor?.iban ?? ""
+                guard ownIBANs.contains(bIBAN) else { continue }
+                let bAmt = abs(b.parsedAmount)
+                guard abs(aAmt - bAmt) < 0.015 else { continue }  // ±€0.01 tolerance for transfer fees
+                let bDate = b.bookingDate ?? b.valueDate ?? ""
+                guard Self.dayDiff(aDate, bDate) <= 1 else { continue }
+                let bID = TransactionRecord.fingerprint(for: b)
+                found.insert(aID)
+                found.insert(bID)
+            }
+        }
+        internalTransferIDs = found
+    }
+
+    private static let isoDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static func dayDiff(_ a: String, _ b: String) -> Int {
+        guard let da = isoDateFormatter.date(from: a),
+              let db = isoDateFormatter.date(from: b) else { return Int.max }
+        return abs(Calendar(identifier: .gregorian).dateComponents([.day], from: da, to: db).day ?? Int.max)
     }
 
     func loadEnrichmentData(bankId: String) {

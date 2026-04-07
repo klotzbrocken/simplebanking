@@ -54,7 +54,16 @@ enum FinancialHealthScorer {
         return formatter
     }()
 
-    static func score(transactions: [TransactionsResponse.Transaction], salaryDay: Int = 1, dispoLimit: Int = 0, targetBuffer: Int = 500, targetSavingsRate: Int = 20) -> FinancialHealthScore {
+    static func score(
+        transactions: [TransactionsResponse.Transaction],
+        salaryDay: Int = 1,
+        dispoLimit: Int = 0,
+        targetBuffer: Int = 500,
+        targetSavingsRate: Int = 20,
+        stabilityOutlierMultiplier: Double = 3.0,
+        coverageRatioWeight: Double = 0.6,
+        fixedCostWarningRatio: Double = 0.70
+    ) -> FinancialHealthScore {
         func amt(_ t: TransactionsResponse.Transaction) -> Double {
             t.parsedAmount
         }
@@ -63,6 +72,9 @@ enum FinancialHealthScorer {
             let dateStr = t.bookingDate ?? t.valueDate ?? ""
             return dateFormatter.date(from: dateStr)
         }
+
+        // Pending-Umsätze raus — noch nicht final, verzerren den Score
+        let transactions = transactions.filter { $0.status != "pending" }
 
         // Sortiere Transaktionen nach Datum
         let sortedTx = transactions.sorted { (dateOf($0) ?? .distantPast) < (dateOf($1) ?? .distantPast) }
@@ -112,7 +124,7 @@ enum FinancialHealthScorer {
         let bufferTarget = max(Double(targetBuffer), 100.0)  // Mindestens 100€
         let margin = totalIncome - totalExpenseWithSavings
         let absoluteMargin = clamp01(margin / bufferTarget)
-        let incomeCoverage = clamp01(coverageRatio * 0.6 + absoluteMargin * 0.4)
+        let incomeCoverage = clamp01(coverageRatio * coverageRatioWeight + absoluteMargin * (1.0 - coverageRatioWeight))
 
         // 2. Savings Rate (Türkis) - Sparüberweisungen zählen als Sparen!
         let effectiveSavings = (totalIncome - totalExpense)  // Ohne Sparüberweisungen
@@ -123,7 +135,7 @@ enum FinancialHealthScorer {
         // Fixkosten wie Miete sollen nicht als "Ausreißer" gewertet werden
         let variableAmounts = variableExpenseTransactions.map { abs(amt($0)) }
         let avgVariable = variableAmounts.isEmpty ? 0 : variableAmounts.reduce(0, +) / Double(variableAmounts.count)
-        let highOutliers = variableAmounts.filter { $0 > avgVariable * 3 }.count
+        let highOutliers = variableAmounts.filter { $0 > avgVariable * stabilityOutlierMultiplier }.count
         let stability = clamp01(1.0 - (Double(highOutliers) / 5.0))
 
         // 4. Dispo-Statistik: Berechne täglichen Kontostand

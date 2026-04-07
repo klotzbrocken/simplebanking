@@ -34,7 +34,8 @@ private enum FixedCostsFormatters {
 /// Recurring payment identified from transaction clustering
 struct RecurringPayment: Identifiable {
     let id = UUID()
-    let merchant: String           // Extracted/normalized merchant name
+    let merchant: String           // Extracted/normalized merchant name (display)
+    let groupKey: String           // Unique key used for exclusion: "merchant" or "merchant|ibanSuffix"
     let averageAmount: Double      // Average monthly amount (absolute)
     let occurrences: Int           // Number of occurrences found
     let months: Int                // Number of distinct months
@@ -109,8 +110,12 @@ enum FixedCostsAnalyzer {
         for tx in expenses {
             let merchant = extractEffectiveMerchant(tx)
             let iban = tx.creditor?.iban ?? tx.debtor?.iban ?? ""
-            // Use merchant + last 8 chars of IBAN as key (to group same account)
-            let ibanSuffix = iban.isEmpty ? "" : String(iban.suffix(8))
+            // For known services (Netflix, Telekom, etc.) the merchant name is the
+            // unique identifier — drop the IBAN suffix so transactions that happen
+            // to come via different sub-accounts (e.g. Telekom Inkasso rotation,
+            // PayPal sub-IBANs) still land in the same cluster.
+            let isKnown = categoryForMerchant(merchant) != .other
+            let ibanSuffix = (iban.isEmpty || isKnown) ? "" : String(iban.suffix(8))
             let key = ibanSuffix.isEmpty ? merchant : "\(merchant)|\(ibanSuffix)"
             grouped[key, default: []].append(tx)
         }
@@ -121,13 +126,19 @@ enum FixedCostsAnalyzer {
         for (groupKey, txList) in grouped {
             // Remove IBAN suffix from display name
             let merchant = groupKey.contains("|") ? String(groupKey.split(separator: "|").first ?? "") : groupKey
-            if let payment = analyzeRecurrence(merchant: merchant, transactions: txList) {
+            if let payment = analyzeRecurrence(merchant: merchant, groupKey: groupKey, transactions: txList) {
                 recurring.append(payment)
             }
         }
-        
-        // Sort by amount (highest first)
-        return recurring.sorted { $0.averageAmount > $1.averageAmount }
+
+        // Filter out merchants the user has explicitly excluded.
+        // Reading directly from UserDefaults so HealthScorer + Report also respect it.
+        let excludedRaw = UserDefaults.standard.string(forKey: "fixedCosts.excluded") ?? ""
+        let excluded = Set(excludedRaw.components(separatedBy: "\n").filter { !$0.isEmpty })
+
+        return recurring
+            .filter { excluded.isEmpty || !excluded.contains($0.groupKey) }
+            .sorted { $0.averageAmount > $1.averageAmount }
     }
     
     // MARK: - Fixed Cost Detection
@@ -498,39 +509,46 @@ enum FixedCostsAnalyzer {
     
     // MARK: - Recurrence Analysis
     
-    private static func analyzeRecurrence(merchant: String, transactions: [TransactionsResponse.Transaction]) -> RecurringPayment? {
-        guard transactions.count >= 2 else { return nil }
-        
+    private static func analyzeRecurrence(merchant: String, groupKey: String, transactions: [TransactionsResponse.Transaction]) -> RecurringPayment? {
+        // Known services (Netflix, Spotify, Telekom, etc.) need less evidence
+        let isKnownMerchant = categoryForMerchant(merchant) != .other
+
+        // Require 2+ transactions; known services can surface with just 1 occurrence
+        guard transactions.count >= 2 || (transactions.count >= 1 && isKnownMerchant) else { return nil }
+
         let cal = Calendar(identifier: .gregorian)
-        
+
         // Get amounts and dates
         let amounts = transactions.map { abs(amt($0)) }
         let dates = transactions.compactMap { date($0) }
-        
+
         guard !amounts.isEmpty, !dates.isEmpty else { return nil }
-        
+
         // Calculate average amount
         let avgAmount = amounts.reduce(0, +) / Double(amounts.count)
-        
-        // Check amount consistency (within 20% of average)
+
+        // Check amount consistency. Raised from 0.25 → 0.35 to catch variable bills
+        // (electricity, gas, water) which can swing 20-30% seasonally.
         let amountVariance = amounts.map { abs($0 - avgAmount) / avgAmount }.max() ?? 1.0
-        guard amountVariance < 0.25 else { return nil } // Too much variance
-        
+        guard amountVariance < 0.35 else { return nil }
+
         // Count distinct months and years
         let monthSet = Set(dates.map { cal.dateComponents([.year, .month], from: $0) })
         let distinctMonths = monthSet.count
         let yearSet = Set(dates.map { cal.component(.year, from: $0) })
         let distinctYears = yearSet.count
-        
-        // Need at least 2 distinct months of data
-        guard distinctMonths >= 2 else { return nil }
-        
+
+        // Require 2 distinct months; known services accepted with 1 month
+        guard distinctMonths >= 2 || isKnownMerchant else { return nil }
+
         // Determine frequency
         var frequency = determineFrequency(dates: dates, cal: cal)
-        
-        // Stricter rules for yearly: need at least 2 distinct years
+
+        // For yearly: can't confirm with < 2 distinct years of data.
+        // Instead of hard-dropping, fall through as irregular so at least
+        // known yearly merchants (Adobe, insurance) still appear.
         if frequency == .yearly && distinctYears < 2 {
-            return nil // Not enough data to confirm yearly pattern
+            frequency = .irregular
         }
         
         // If frequency is irregular but we have consistent monthly data, treat as monthly
@@ -557,6 +575,7 @@ enum FixedCostsAnalyzer {
         
         return RecurringPayment(
             merchant: merchant,
+            groupKey: groupKey,
             averageAmount: avgAmount,
             occurrences: transactions.count,
             months: distinctMonths,
@@ -593,21 +612,22 @@ enum FixedCostsAnalyzer {
     
     private static func calculateConfidence(occurrences: Int, months: Int, amountVariance: Double, frequency: PaymentFrequency) -> Double {
         var conf = 0.5
-        
-        // More occurrences = higher confidence
-        conf += min(0.2, Double(occurrences - 2) * 0.05)
-        
-        // More months = higher confidence
-        conf += min(0.15, Double(months - 2) * 0.05)
-        
+
+        // More occurrences = higher confidence (clamped so single-occurrence known
+        // merchants don't go negative; they stay at 0.5 base)
+        conf += min(0.2, max(0.0, Double(occurrences - 2) * 0.05))
+
+        // More months = higher confidence (same clamp)
+        conf += min(0.15, max(0.0, Double(months - 2) * 0.05))
+
         // Lower amount variance = higher confidence
         conf += (1.0 - amountVariance) * 0.1
-        
+
         // Regular frequency = higher confidence
         if frequency != .irregular {
             conf += 0.1
         }
-        
+
         return min(1.0, max(0.0, conf))
     }
 }
@@ -620,28 +640,39 @@ struct FixedCostsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var animProgress: Double = 0
     @State private var sonstigeExpanded = false
-    @AppStorage("fixedCosts.hidden") private var hiddenRaw: String = ""
+    @State private var excludedExpanded = false
+    // "fixedCosts.excluded" is the canonical key — also read by FixedCostsAnalyzer.analyze()
+    // so exclusions propagate to the Health Score and simple.report automatically.
+    @AppStorage("fixedCosts.excluded") private var excludedRaw: String = ""
 
-    // MARK: Hidden set helpers
+    // MARK: Exclusion set helpers
 
-    private var hiddenSet: Set<String> {
-        Set(hiddenRaw.components(separatedBy: "\n").filter { !$0.isEmpty })
+    private var excludedSet: Set<String> {
+        Set(excludedRaw.components(separatedBy: "\n").filter { !$0.isEmpty })
     }
 
-    private func hide(_ merchant: String) {
-        var s = hiddenSet
+    private func exclude(_ merchant: String) {
+        var s = excludedSet
         s.insert(merchant)
-        hiddenRaw = s.joined(separator: "\n")
+        excludedRaw = s.joined(separator: "\n")
     }
 
-    private func resetHidden() {
-        hiddenRaw = ""
+    private func include(_ merchant: String) {
+        var s = excludedSet
+        s.remove(merchant)
+        excludedRaw = s.joined(separator: "\n")
     }
 
-    // MARK: Derived data (all excluding hidden)
+    private func resetExcluded() {
+        excludedRaw = ""
+    }
+
+    // MARK: Derived data (all excluding user-excluded)
 
     private var visiblePayments: [RecurringPayment] {
-        payments.filter { !hiddenSet.contains($0.merchant) }
+        // analyze() already filters exclusions, but guard here too for
+        // immediate visual feedback when user excludes within the open sheet.
+        payments.filter { !excludedSet.contains($0.groupKey) }
     }
 
     private func monthlyAmount(_ p: RecurringPayment) -> Double {
@@ -663,11 +694,11 @@ struct FixedCostsView: View {
         }
     }
 
-    private typealias MerchantRow = (merchant: String, amount: Double, category: PaymentCategory)
+    private typealias MerchantRow = (merchant: String, groupKey: String, amount: Double, category: PaymentCategory)
 
     private var sortedVisible: [MerchantRow] {
         visiblePayments
-            .map { p -> MerchantRow in (p.merchant, monthlyAmount(p), p.category) }
+            .map { p -> MerchantRow in (p.merchant, p.groupKey, monthlyAmount(p), p.category) }
             .sorted { $0.amount > $1.amount }
     }
 
@@ -708,27 +739,6 @@ struct FixedCostsView: View {
                 }
                 .padding(.horizontal)
 
-                // Hidden-banner (nur sichtbar wenn etwas ausgeblendet ist)
-                if !hiddenSet.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "eye.slash")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        Text("\(hiddenSet.count) \(hiddenSet.count == 1 ? "Posten" : "Posten") ausgeblendet")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Button("Zurücksetzen") { resetHidden() }
-                            .font(.system(size: 12))
-                            .buttonStyle(PlainButtonStyle())
-                            .foregroundColor(.accentColor)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
-                    .padding(.horizontal)
-                }
-
                 // Summary Boxes
                 HStack(spacing: 16) {
                     FixedCostsSummaryBox(title: "Monatlich", value: fmt(totalMonthly), color: .orange, icon: "calendar")
@@ -760,8 +770,8 @@ struct FixedCostsView: View {
                                 color: merchantColors[index % merchantColors.count]
                             )
                             .contextMenu {
-                                Button { hide(item.merchant) } label: {
-                                    Label("Ausblenden", systemImage: "eye.slash")
+                                Button { exclude(item.groupKey) } label: {
+                                    Label("Kein Fixkost — entfernen", systemImage: "hand.raised.slash")
                                 }
                             }
                         }
@@ -798,8 +808,8 @@ struct FixedCostsView: View {
                                         isSubRow: true
                                     )
                                     .contextMenu {
-                                        Button { hide(item.merchant) } label: {
-                                            Label("Ausblenden", systemImage: "eye.slash")
+                                        Button { exclude(item.groupKey) } label: {
+                                            Label("Kein Fixkost — entfernen", systemImage: "hand.raised.slash")
                                         }
                                     }
                                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -807,6 +817,65 @@ struct FixedCostsView: View {
                             }
                         }
                     }
+                }
+
+                // Ausgeschlossene Händler — aufklappbar am Ende
+                if !excludedSet.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                excludedExpanded.toggle()
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "hand.raised.slash")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                Text("Ausgeblendet (\(excludedSet.count))")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Image(systemName: excludedExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        if excludedExpanded {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Spacer()
+                                    Button("Alle einschließen") { resetExcluded() }
+                                        .font(.system(size: 12))
+                                        .buttonStyle(PlainButtonStyle())
+                                        .foregroundColor(.accentColor)
+                                }
+                                .padding(.horizontal, 12)
+                                ForEach(excludedSet.sorted(), id: \.self) { key in
+                                    let displayName = key.contains("|") ? String(key.split(separator: "|").first ?? Substring(key)) : key
+                                    HStack {
+                                        Text(displayName)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary.opacity(0.7))
+                                            .strikethrough(true, color: .secondary.opacity(0.4))
+                                        Spacer()
+                                        Button("Einschließen") { include(key) }
+                                            .font(.system(size: 11))
+                                            .buttonStyle(PlainButtonStyle())
+                                            .foregroundColor(.accentColor.opacity(0.8))
+                                    }
+                                    .padding(.horizontal, 12)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.04)))
+                    .padding(.horizontal)
                 }
 
                 Spacer(minLength: 20)

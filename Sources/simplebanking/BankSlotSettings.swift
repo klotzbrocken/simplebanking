@@ -1,0 +1,108 @@
+import Foundation
+
+// MARK: - Per-Account Settings
+
+struct BankSlotSettings: Codable {
+    var salaryDay: Int = 1
+    var dispoLimit: Int = 0
+    var targetBuffer: Int = 500
+    var targetSavingsRate: Int = 20
+    var fetchDays: Int = 60
+    var balanceSignalLowUpperBound: Int = 500
+    var balanceSignalMediumUpperBound: Int = 2000
+    /// Fixed salary amount — also sets MoneyMood green threshold (Option C). 0 = auto-detect.
+    var salaryAmount: Int = 0
+    /// 0 = Anfang des Monats (day 1, ±4 d), 1 = Mitte (day 15, ±4 d), 2 = Individuell (exact salaryDay).
+    var salaryDayPreset: Int = 2
+
+    /// Effective center day for the salary period, derived from preset.
+    var effectiveSalaryDay: Int {
+        switch salaryDayPreset {
+        case 0: return 1
+        case 1: return 15
+        default: return salaryDay
+        }
+    }
+
+    /// Tolerance in days around the effective salary day for income detection.
+    var salaryDayTolerance: Int { salaryDayPreset == 2 ? 0 : 4 }
+
+    init(
+        salaryDay: Int = 1,
+        dispoLimit: Int = 0,
+        targetBuffer: Int = 500,
+        targetSavingsRate: Int = 20,
+        fetchDays: Int = 60,
+        balanceSignalLowUpperBound: Int = 500,
+        balanceSignalMediumUpperBound: Int = 2000,
+        salaryAmount: Int = 0,
+        salaryDayPreset: Int = 2
+    ) {
+        self.salaryDay = salaryDay
+        self.dispoLimit = dispoLimit
+        self.targetBuffer = targetBuffer
+        self.targetSavingsRate = targetSavingsRate
+        self.fetchDays = fetchDays
+        self.balanceSignalLowUpperBound = balanceSignalLowUpperBound
+        self.balanceSignalMediumUpperBound = balanceSignalMediumUpperBound
+        self.salaryAmount = salaryAmount
+        self.salaryDayPreset = salaryDayPreset
+    }
+
+    // Custom decoder: use decodeIfPresent for every field so that JSON saved
+    // by older app versions (missing newer fields) doesn't cause a decode failure.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        salaryDay                    = (try? c.decodeIfPresent(Int.self, forKey: .salaryDay)) ?? 1
+        dispoLimit                   = (try? c.decodeIfPresent(Int.self, forKey: .dispoLimit)) ?? 0
+        targetBuffer                 = (try? c.decodeIfPresent(Int.self, forKey: .targetBuffer)) ?? 500
+        targetSavingsRate            = (try? c.decodeIfPresent(Int.self, forKey: .targetSavingsRate)) ?? 20
+        fetchDays                    = (try? c.decodeIfPresent(Int.self, forKey: .fetchDays)) ?? 60
+        balanceSignalLowUpperBound   = (try? c.decodeIfPresent(Int.self, forKey: .balanceSignalLowUpperBound)) ?? 500
+        balanceSignalMediumUpperBound = (try? c.decodeIfPresent(Int.self, forKey: .balanceSignalMediumUpperBound)) ?? 2000
+        salaryAmount                 = (try? c.decodeIfPresent(Int.self, forKey: .salaryAmount)) ?? 0
+        salaryDayPreset              = (try? c.decodeIfPresent(Int.self, forKey: .salaryDayPreset)) ?? 2
+    }
+}
+
+// MARK: - Store
+
+enum BankSlotSettingsStore {
+    private static func key(for slotId: String) -> String {
+        "simplebanking.slotSettings.\(slotId)"
+    }
+
+    /// Loads settings for a slot. On first access, migrates from global AppStorage defaults.
+    static func load(slotId: String) -> BankSlotSettings {
+        let ud = UserDefaults.standard
+        if let data = ud.data(forKey: key(for: slotId)),
+           let settings = try? JSONDecoder().decode(BankSlotSettings.self, from: data) {
+            return settings
+        }
+        // Migration: use existing global defaults as starting values for new per-slot storage
+        let migratedFetch   = ud.integer(forKey: "fetchDays")
+        let migratedLow     = ud.integer(forKey: "balanceSignalLowUpperBound")
+        let migratedMedium  = ud.integer(forKey: "balanceSignalMediumUpperBound")
+        let migratedSalary  = ud.integer(forKey: "salaryDay")
+        let migratedBuffer  = ud.integer(forKey: "targetBuffer")
+        let migratedSavings = ud.integer(forKey: "targetSavingsRate")
+        return BankSlotSettings(
+            salaryDay:                  max(1, migratedSalary  == 0 ? 1   : migratedSalary),
+            dispoLimit:                 ud.integer(forKey: "dispoLimit"),
+            targetBuffer:               max(100, migratedBuffer  == 0 ? 500  : migratedBuffer),
+            targetSavingsRate:          max(1, migratedSavings == 0 ? 20  : migratedSavings),
+            fetchDays:                  max(30, migratedFetch   == 0 ? 60  : migratedFetch),
+            balanceSignalLowUpperBound: migratedLow    == 0 ? 500  : migratedLow,
+            balanceSignalMediumUpperBound: migratedMedium == 0 ? 2000 : migratedMedium
+        )
+    }
+
+    static func save(_ settings: BankSlotSettings, slotId: String) {
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        UserDefaults.standard.set(data, forKey: key(for: slotId))
+    }
+
+    static func delete(slotId: String) {
+        UserDefaults.standard.removeObject(forKey: key(for: slotId))
+    }
+}

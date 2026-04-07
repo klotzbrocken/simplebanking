@@ -349,6 +349,37 @@ enum BankLogoAssets {
             .lowercased()
     }
 
+    // MARK: - Dark Mode Detection
+
+    /// Gibt true zurück wenn das Logo dieser Bank im Dark Mode invertiert werden soll.
+    /// Kriterien: SVG hat data-maskable="true" UND data-primary-color mit Luminanz < 0.15.
+    static func isDark(brandId: String) -> Bool { darkBrandIDs.contains(brandId) }
+
+    private static let darkBrandIDs: Set<String> = {
+        var result: Set<String> = []
+        let pattern = #"data-primary-color="(#[0-9A-Fa-f]{6})""#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return result }
+        for brand in brands {
+            guard brand.logoURL.isFileURL,
+                  let svg = try? String(contentsOf: brand.logoURL),
+                  svg.contains("data-maskable=\"true\"") else { continue }
+            let ns = svg as NSString
+            guard let match = regex.firstMatch(in: svg, range: NSRange(location: 0, length: ns.length)),
+                  let range = Range(match.range(at: 1), in: svg) else { continue }
+            if isHexColorDark(String(svg[range])) { result.insert(brand.id) }
+        }
+        return result
+    }()
+
+    private static func isHexColorDark(_ hex: String) -> Bool {
+        let h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard h.count == 6, let n = UInt64(h, radix: 16) else { return false }
+        let r = Double((n >> 16) & 0xFF) / 255
+        let g = Double((n >> 8)  & 0xFF) / 255
+        let b = Double(n         & 0xFF) / 255
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.15
+    }
+
     /// Returns a file URL to a bundled SVG in Resources/bank-logos/, or falls back to a placeholder.
     private static func bundled(_ name: String) -> URL {
         if let url = Bundle.main.url(forResource: name, withExtension: "svg", subdirectory: "bank-logos") {

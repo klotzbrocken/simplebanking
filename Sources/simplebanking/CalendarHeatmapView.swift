@@ -5,17 +5,29 @@ struct CalendarHeatmapView: View {
     @AppStorage("demoMode") private var demoMode: Bool = false
     @AppStorage("demoSeed") private var demoSeed: Int = 123456
 
+    @StateObject private var logoStore = SubscriptionLogoStore.shared
+
     @State private var records: [TransactionRecord] = []
     @State private var isLoading = true
-
     @State private var displayedMonth: Date = {
         let comps = Calendar.current.dateComponents([.year, .month], from: Date())
         return Calendar.current.date(from: comps) ?? Date()
     }()
+    @State private var selectedDay: Int? = nil   // nil = Monatsansicht
+    @State private var hasAutoNavigated = false
+
+    // Sheet state
+    @State private var showDaySheet = false
+    @State private var sheetDay: Int = 0
+    @State private var sheetDayData: DayData = DayData()
+
+    @Environment(\.dismiss) private var dismiss
+
+    // MARK: - Calendar helpers
 
     private var gregorian: Calendar {
         var cal = Calendar(identifier: .gregorian)
-        cal.firstWeekday = 2 // Monday
+        cal.firstWeekday = 2
         return cal
     }
 
@@ -40,13 +52,10 @@ struct CalendarHeatmapView: View {
     }
 
     private var firstWeekdayOffset: Int {
-        // Explizit Tag=1 setzen, damit Zeitzoneneffekte etc. keinen falschen Tag liefern
         var comps = Calendar(identifier: .gregorian).dateComponents([.year, .month], from: displayedMonth)
         comps.day = 1
         guard let firstOfMonth = Calendar(identifier: .gregorian).date(from: comps) else { return 0 }
-        // weekday: 1=So, 2=Mo, 3=Di, 4=Mi, 5=Do, 6=Fr, 7=Sa (Gregorian, unveränderlich)
         let weekday = Calendar(identifier: .gregorian).component(.weekday, from: firstOfMonth)
-        // Mo-first Offset: Mo=0, Di=1, Mi=2, Do=3, Fr=4, Sa=5, So=6
         return (weekday + 5) % 7
     }
 
@@ -55,6 +64,8 @@ struct CalendarHeatmapView: View {
         fmt.dateFormat = "yyyy-MM"
         return fmt.string(from: displayedMonth)
     }
+
+    // MARK: - Data
 
     struct DayData {
         var expenseTotal: Double = 0
@@ -66,7 +77,7 @@ struct CalendarHeatmapView: View {
         var result: [Int: DayData] = [:]
         let monthKey = displayedMonthKey
         for rec in records {
-            let dateStr = rec.buchungsdatum
+            let dateStr = rec.datum
             guard dateStr.count >= 10,
                   String(dateStr.prefix(7)) == monthKey,
                   let day = Int(String(dateStr.dropFirst(8).prefix(2))) else { continue }
@@ -79,13 +90,76 @@ struct CalendarHeatmapView: View {
         return result
     }
 
-    private var maxDayActivity: Double {
-        let maxExp = dataByDay.values.map { $0.expenseTotal }.max() ?? 0
-        let maxInc = dataByDay.values.map { $0.incomeTotal }.max() ?? 0
-        let maxCnt = Double(dataByDay.values.map { $0.records.count }.max() ?? 1)
-        if maxExp > 0 { return maxExp }
-        if maxInc > 0 { return maxInc }
-        return maxCnt
+    private var maxDayExpense: Double {
+        dataByDay.values.map { $0.expenseTotal }.max() ?? 1
+    }
+
+    private var maxDayIncome: Double {
+        dataByDay.values.map { $0.incomeTotal }.max() ?? 1
+    }
+
+    /// Gelb → Orange → Rot → Dunkelrot (Ausgaben)
+    private func expenseColor(intensity: Double) -> Color {
+        guard intensity > 0 else { return Color.clear }
+        let t = min(1.0, intensity)
+        let hue        = 0.13 * (1 - t)          // 0.13 (gelb) → 0.0 (rot)
+        let saturation = 0.75 + 0.25 * t
+        let brightness = 0.88 - 0.42 * t          // hell → dunkelrot
+        return Color(hue: hue, saturation: saturation, brightness: brightness)
+    }
+
+    /// Hellgrün → Dunkelgrün (Einnahmen)
+    private func incomeColor(intensity: Double) -> Color {
+        guard intensity > 0 else { return Color.clear }
+        let t = min(1.0, intensity)
+        let saturation = 0.35 + 0.55 * t
+        let brightness = 0.72 - 0.32 * t
+        return Color(hue: 0.33, saturation: saturation, brightness: brightness)
+    }
+
+    /// Abos erkannt pro Tag: Tag → [displayName]
+    private var abosByDay: [Int: [String]] {
+        var result: [Int: [String]] = [:]
+        let monthKey = displayedMonthKey
+        for rec in records {
+            guard rec.betrag < 0 else { continue }
+            let dateStr = rec.datum
+            guard dateStr.count >= 10,
+                  String(dateStr.prefix(7)) == monthKey,
+                  let day = Int(String(dateStr.dropFirst(8).prefix(2))) else { continue }
+            let remittance = rec.verwendungszweck ?? ""
+            guard let entry = CancellationLinks.find(merchant: rec.effectiveMerchant, remittance: remittance)
+                           ?? CancellationLinks.find(merchant: rec.normalizedMerchant, remittance: remittance)
+            else { continue }
+            var list = result[day] ?? []
+            if !list.contains(entry.displayName) { list.append(entry.displayName) }
+            result[day] = list
+        }
+        return result
+    }
+
+    // MARK: - Summary helpers
+
+    /// Label für die Summary-Card: Tagesname wenn Tag gewählt, sonst Monatsname
+    private var summaryLabel: String {
+        guard let day = selectedDay else { return monthTitle }
+        var comps = Calendar.current.dateComponents([.year, .month], from: displayedMonth)
+        comps.day = day
+        let date = Calendar.current.date(from: comps) ?? displayedMonth
+        let fmt = DateFormatter()
+        fmt.dateFormat = "d. MMMM"
+        fmt.locale = Locale(identifier: "de_DE")
+        return fmt.string(from: date)
+    }
+
+    private var summaryExpense: Double {
+        if let day = selectedDay { return dataByDay[day]?.expenseTotal ?? 0 }
+        return dataByDay.values.reduce(0) { $0 + $1.expenseTotal }
+    }
+
+    private var summaryIncome: Double {
+        if let day = selectedDay { return dataByDay[day]?.incomeTotal ?? 0 }
+        return dataByDay.values.reduce(0) { $0 + $1.incomeTotal }
     }
 
     private func formatAmount(_ value: Double) -> String {
@@ -99,18 +173,12 @@ struct CalendarHeatmapView: View {
 
     private let weekdayLabels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
-    @Environment(\.dismiss) private var dismiss
-    @State private var showDaySheet = false
-    @State private var selectedDay: Int = 0
-    @State private var selectedDayData: DayData = DayData()
-    @State private var hasAutoNavigated = false
+    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // ── Navigation (kein Monatstitel — steht in der Kachel) ─────
             HStack {
-                Text(monthTitle)
-                    .font(.system(size: 16, weight: .semibold))
                 Spacer()
                 HStack(spacing: 12) {
                     Button { navigateMonth(-1) } label: {
@@ -135,11 +203,18 @@ struct CalendarHeatmapView: View {
                     .buttonStyle(PlainButtonStyle())
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
 
-            // Weekday header
+            // ── Summary Card (Balance-Card-Stil) ─────────────────────────
+            summaryPanel
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+            // ── Kalender-Block (Wochentage + Grid) mit Rahmen ───────────
+            VStack(spacing: 0) {
+            // Wochentagsbezeichnungen
             HStack(spacing: 0) {
                 ForEach(weekdayLabels, id: \.self) { label in
                     Text(label)
@@ -149,135 +224,231 @@ struct CalendarHeatmapView: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 6)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
 
+            // Kalender-Grid
+            // Immer 6 Reihen (42 Zellen) → gleiche Zellhöhe in jedem Monat.
+            // GeometryReader bestimmt die verfügbare Höhe; kein Spacer nötig.
             if isLoading {
                 Spacer()
-                ProgressView()
-                    .controlSize(.regular)
-                    .padding()
+                ProgressView().controlSize(.regular).padding()
                 Spacer()
             } else {
-                let data = dataByDay
-                let maxActivity = maxDayActivity
+                let data     = dataByDay
+                let maxExp   = maxDayExpense
+                let maxInc   = maxDayIncome
+                let abos     = abosByDay
+                let offset   = firstWeekdayOffset
+                let days     = daysInMonth
 
-                let offset = firstWeekdayOffset
-                let totalCells = offset + daysInMonth
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7),
-                    spacing: 4
-                ) {
-                    ForEach(0..<totalCells, id: \.self) { index in
-                        let day = index - offset + 1
-                        if day < 1 {
-                            Color.clear.frame(height: 62)
-                        } else {
-                            let dayData = data[day]
-                            let hasTx = dayData != nil
-                            let expense = dayData?.expenseTotal ?? 0
-                            let income = dayData?.incomeTotal ?? 0
-                            let txCount = Double(dayData?.records.count ?? 0)
+                GeometryReader { geo in
+                    let spacing: CGFloat = 4
+                    // cellH = exakt 1/6 der verfügbaren Höhe minus Abstände
+                    // Kein zusätzliches vertikales Padding auf den Zellen!
+                    let cellH = (geo.size.height - 5 * spacing) / 6
 
-                            let activity: Double = expense > 0 ? expense : (income > 0 ? income : txCount)
-                            let intensity: Double = hasTx ? min(1.0, activity / max(1, maxActivity)) : 0
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: spacing), count: 7),
+                        spacing: spacing
+                    ) {
+                        // 42 Zellen = 6 × 7; Zellen außerhalb des Monats sind leer
+                        ForEach(0..<42, id: \.self) { index in
+                            let day = index - offset + 1
+                            if day < 1 || day > days {
+                                Color.clear.frame(height: cellH)
+                            } else {
+                                let dayData        = data[day]
+                                let hasTx          = dayData != nil
+                                let expense        = dayData?.expenseTotal ?? 0
+                                let income         = dayData?.incomeTotal  ?? 0
+                                let expIntensity   = expense > 0 ? min(1.0, expense / max(1, maxExp)) : 0
+                                let incIntensity   = income  > 0 ? min(1.0, income  / max(1, maxInc)) : 0
+                                let expenseDom     = expense >= income
+                                let isSelected     = selectedDay == day
 
-                            let bgColor: Color = {
-                                if !hasTx { return Color(NSColor.quaternaryLabelColor).opacity(0.06) }
-                                if expense > 0 { return Color.red.opacity(0.04 + intensity * 0.12) }
-                                if income > 0  { return Color.green.opacity(0.04 + intensity * 0.08) }
-                                return Color.blue.opacity(0.04 + intensity * 0.08)
-                            }()
-                            let barColor: Color = {
-                                if !hasTx { return Color.clear }
-                                if expense > 0 { return Color.red.opacity(0.20 + intensity * 0.70) }
-                                if income > 0  { return Color.green.opacity(0.20 + intensity * 0.60) }
-                                return Color.blue.opacity(0.20 + intensity * 0.50)
-                            }()
+                                let heatColor: Color = {
+                                    if !hasTx { return Color.clear }
+                                    return expenseDom ? expenseColor(intensity: expIntensity)
+                                                      : incomeColor(intensity: incIntensity)
+                                }()
+                                let bgColor: Color = {
+                                    if isSelected { return Color.accentColor.opacity(0.15) }
+                                    if !hasTx     { return Color(NSColor.quaternaryLabelColor).opacity(0.06) }
+                                    return heatColor.opacity(0.18)
+                                }()
 
-                            VStack(spacing: 3) {
-                                Text("\(day)")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(hasTx ? .primary : Color(NSColor.secondaryLabelColor))
-                                if expense > 0 {
-                                    Text(formatAmount(expense))
-                                        .font(.system(size: 9))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                } else if income > 0 {
-                                    Text("+\(formatAmount(income))")
-                                        .font(.system(size: 9))
-                                        .foregroundColor(Color.green.opacity(0.8))
-                                        .lineLimit(1)
-                                } else if hasTx {
-                                    Text("\(dayData!.records.count)×")
-                                        .font(.system(size: 9))
-                                        .foregroundColor(.secondary)
-                                } else {
-                                    Text(" ").font(.system(size: 9))
+                                let dayAbos = abos[day] ?? []
+
+                                VStack(spacing: 3) {
+                                    Text("\(day)")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(hasTx ? .primary : Color(NSColor.secondaryLabelColor))
+                                        .padding(.top, 4)
+
+                                    if !dayAbos.isEmpty {
+                                        HStack(spacing: 3) {
+                                            ForEach(dayAbos.prefix(3), id: \.self) { name in
+                                                aboIcon(name: name)
+                                            }
+                                        }
+                                    } else {
+                                        Color.clear.frame(height: 22)
+                                    }
+
+                                    Spacer(minLength: 0)
+
+                                    Rectangle()
+                                        .fill(hasTx ? heatColor : Color.clear)
+                                        .frame(height: 3)
+                                        .cornerRadius(1.5)
+                                        .padding(.bottom, 3)
                                 }
-                                Rectangle()
-                                    .fill(barColor)
-                                    .frame(height: 4)
-                                    .cornerRadius(2)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 62)
-                            .padding(.vertical, 4)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(bgColor))
-                            .onTapGesture(count: 2) {
-                                if let d = dayData {
-                                    selectedDay = day
-                                    selectedDayData = d
-                                    showDaySheet = true
+                                .frame(maxWidth: .infinity)
+                                .frame(height: cellH)
+                                .padding(.horizontal, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(bgColor)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .strokeBorder(
+                                                    isSelected ? Color.accentColor.opacity(0.4) : Color.clear,
+                                                    lineWidth: 1
+                                                )
+                                        )
+                                )
+                                .onTapGesture(count: 2) {
+                                    if let d = dayData {
+                                        sheetDay     = day
+                                        sheetDayData = d
+                                        showDaySheet = true
+                                    }
+                                }
+                                .onTapGesture(count: 1) {
+                                    if dayData != nil {
+                                        selectedDay = (selectedDay == day) ? nil : day
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 .padding(.horizontal, 12)
-
-                Spacer(minLength: 0)
-
-                if dataByDay.isEmpty {
-                    Text("Keine Buchungen in diesem Monat")
-                        .font(.system(size: 12))
-                        .foregroundColor(Color(NSColor.tertiaryLabelColor))
-                        .padding(.bottom, 4)
-                }
-
-                // Legend
-                HStack(spacing: 20) {
-                    Spacer(minLength: 0)
-                    legendItem(color: Color.red.opacity(0.20), label: "Niedrig")
-                    legendItem(color: Color.red.opacity(0.55), label: "Mittel")
-                    legendItem(color: Color.red.opacity(0.90), label: "Hoch")
-                    legendItem(color: Color.green.opacity(0.40), label: "Eingang")
-                    Spacer(minLength: 0)
-                }
-                .padding(.bottom, 20)
+                .padding(.bottom, 10)
             }
+            } // end calendar VStack
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.cardBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
+                    )
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
         .frame(width: 420, height: 620)
         .background(Color.panelBackground)
         .onAppear { loadFromDatabase() }
         .sheet(isPresented: $showDaySheet) {
             CalendarDaySheet(
-                day: selectedDay,
+                day: sheetDay,
                 month: displayedMonth,
-                records: selectedDayData.records
+                records: sheetDayData.records
             )
         }
     }
 
-    private func legendItem(color: Color, label: String) -> some View {
-        HStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 12, height: 12)
-            Text(label).font(.system(size: 11)).foregroundColor(.secondary)
+    // MARK: - Summary Panel (Balance-Card-Stil)
+
+    private var summaryPanel: some View {
+        let expBigger = summaryExpense >= summaryIncome
+
+        let topText:    String = expBigger ? "-\(formatAmount(summaryExpense))" : "+\(formatAmount(summaryIncome))"
+        let topColor:   Color  = expBigger
+            ? (summaryExpense > 0 ? Color.expenseRed   : Color(NSColor.tertiaryLabelColor))
+            : (summaryIncome  > 0 ? Color.incomeGreen  : Color(NSColor.tertiaryLabelColor))
+
+        let bottomText:  String = expBigger ? "+\(formatAmount(summaryIncome))" : "-\(formatAmount(summaryExpense))"
+        let bottomColor: Color  = expBigger
+            ? (summaryIncome  > 0 ? Color.incomeGreen  : Color(NSColor.tertiaryLabelColor))
+            : (summaryExpense > 0 ? Color.expenseRed   : Color(NSColor.tertiaryLabelColor))
+
+        return VStack(alignment: .leading, spacing: 8) {
+            // Label: Monatsname (kein Tag gewählt) oder Tagesname
+            HStack(spacing: 6) {
+                if selectedDay != nil {
+                    Image(systemName: "calendar.day.timeline.left")
+                        .font(.system(size: 13))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
+                Text(summaryLabel)
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+            }
+
+            // Größter Wert oben (32 pt bold)
+            Text(topText)
+                .font(.system(size: 32, weight: .bold))
+                .foregroundColor(topColor)
+                .monospacedDigit()
+
+            // Kleinerer Wert darunter (13 pt)
+            Text(bottomText)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(bottomColor)
+                .monospacedDigit()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
+                )
+        )
+        .animation(.easeInOut(duration: 0.15), value: selectedDay)
     }
+
+    // MARK: - Abo Icon
+
+    @ViewBuilder
+    private func aboIcon(name: String) -> some View {
+        let logoService = MerchantLogoService.shared
+        let key = logoService.effectiveLogoKey(
+            normalizedMerchant: name.lowercased(),
+            empfaenger: name,
+            verwendungszweck: ""
+        )
+        ZStack {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color.secondary.opacity(0.1))
+                .frame(width: 22, height: 22)
+            if let img = logoService.image(for: key) {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 22, height: 22)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+            } else {
+                Image(systemName: "play.rectangle")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .onAppear { logoService.preload(normalizedMerchant: key) }
+    }
+
+    // MARK: - Navigation & Loading
 
     private func navigateMonth(_ delta: Int) {
         if let newDate = gregorian.date(byAdding: .month, value: delta, to: displayedMonth) {
             displayedMonth = newDate
+            selectedDay = nil
         }
     }
 
@@ -294,6 +465,7 @@ struct CalendarHeatmapView: View {
                     records = converted
                     isLoading = false
                     jumpToLatestWithDataIfNeeded()
+                    preloadAboLogos()
                 }
                 return
             }
@@ -303,6 +475,7 @@ struct CalendarHeatmapView: View {
                     records = loaded
                     isLoading = false
                     jumpToLatestWithDataIfNeeded()
+                    preloadAboLogos()
                 }
             } catch {
                 await MainActor.run {
@@ -311,6 +484,11 @@ struct CalendarHeatmapView: View {
                 }
             }
         }
+    }
+
+    private func preloadAboLogos() {
+        let allNames = Set(abosByDay.values.flatMap { $0 })
+        logoStore.preloadInitial(displayNames: Array(allNames))
     }
 
     private func jumpToLatestWithDataIfNeeded() {
@@ -331,7 +509,7 @@ struct CalendarHeatmapView: View {
         fmt.dateFormat = "yyyy-MM"
         let key = fmt.string(from: month)
         return records.contains { rec in
-            rec.buchungsdatum.count >= 7 && String(rec.buchungsdatum.prefix(7)) == key
+            rec.datum.count >= 7 && String(rec.datum.prefix(7)) == key
         }
     }
 }

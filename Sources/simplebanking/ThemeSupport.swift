@@ -14,6 +14,12 @@ struct AppTheme: Identifiable, Equatable {
     let cardDarkHex: String
     let panelLightHex: String
     let panelDarkHex: String
+    // Optional per-appearance overrides for amount colors.
+    // If nil, positiveHex / negativeHex are used for both light and dark.
+    let positiveLightHex: String?
+    let positiveDarkHex: String?
+    let negativeLightHex: String?
+    let negativeDarkHex: String?
 
     static let fallback = AppTheme(
         id: "default",
@@ -26,12 +32,20 @@ struct AppTheme: Identifiable, Equatable {
         cardLightHex: "#FFFFFF",
         cardDarkHex: "#333333",
         panelLightHex: "#EBEBEB",
-        panelDarkHex: "#1F1F1F"
+        panelDarkHex: "#1F1F1F",
+        positiveLightHex: nil,
+        positiveDarkHex: nil,
+        negativeLightHex: nil,
+        negativeDarkHex: nil
     )
 
     var accentColor: NSColor { Self.color(from: accentHex, fallback: .controlAccentColor) }
     var positiveColor: NSColor { Self.color(from: positiveHex, fallback: .systemGreen) }
     var negativeColor: NSColor { Self.color(from: negativeHex, fallback: .systemRed) }
+    var positiveLightColor: NSColor { Self.color(from: positiveLightHex ?? positiveHex, fallback: .systemGreen) }
+    var positiveDarkColor: NSColor  { Self.color(from: positiveDarkHex  ?? positiveHex, fallback: .systemGreen) }
+    var negativeLightColor: NSColor { Self.color(from: negativeLightHex ?? negativeHex, fallback: .systemRed) }
+    var negativeDarkColor: NSColor  { Self.color(from: negativeDarkHex  ?? negativeHex, fallback: .systemRed) }
     var cardLightColor: NSColor { Self.color(from: cardLightHex, fallback: .white) }
     var cardDarkColor: NSColor { Self.color(from: cardDarkHex, fallback: NSColor(white: 0.2, alpha: 1.0)) }
     var panelLightColor: NSColor { Self.color(from: panelLightHex, fallback: NSColor(white: 0.92, alpha: 1.0)) }
@@ -98,9 +112,8 @@ final class ThemeManager: @unchecked Sendable {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             for (filename, content) in Self.builtInThemes {
                 let target = directory.appendingPathComponent(filename)
-                if !fileManager.fileExists(atPath: target.path) {
-                    try content.write(to: target, atomically: true, encoding: .utf8)
-                }
+                // Always overwrite built-in themes so updates from app upgrades apply
+                try content.write(to: target, atomically: true, encoding: .utf8)
             }
         } catch {
             print("[Theme] Failed to ensure themes directory: \(error.localizedDescription)")
@@ -191,7 +204,11 @@ final class ThemeManager: @unchecked Sendable {
             cardLightHex: values["cardlight"] ?? fallback.cardLightHex,
             cardDarkHex: values["carddark"] ?? fallback.cardDarkHex,
             panelLightHex: values["panellight"] ?? fallback.panelLightHex,
-            panelDarkHex: values["paneldark"] ?? fallback.panelDarkHex
+            panelDarkHex: values["paneldark"] ?? fallback.panelDarkHex,
+            positiveLightHex: values["positivelight"],
+            positiveDarkHex: values["positivedark"],
+            negativeLightHex: values["negativelight"],
+            negativeDarkHex: values["negativedark"]
         )
     }
 
@@ -244,27 +261,33 @@ final class ThemeManager: @unchecked Sendable {
         name=Norton Commander
         bodyFont=Menlo
         headingFont=Menlo Bold
-        accent=#00AAAA
-        positive=#00AA00
-        negative=#AA0000
-        cardLight=#0000AA
+        accent=#00CCCC
+        positive=#00CC00
+        negative=#FF3333
+        cardLight=#D6E4FF
         cardDark=#0000AA
-        panelLight=#000055
-        panelDark=#000055
+        panelLight=#B8CEFF
+        panelDark=#000077
         """,
         "gameboy.cfg": """
-        # simplebanking Theme
+        # simplebanking Theme — Game Boy (Mockup palette)
         id=gameboy
         name=Game Boy
         bodyFont=Courier New
         headingFont=Courier New Bold
-        accent=#0F380F
-        positive=#306230
-        negative=#8BAC0F
-        cardLight=#9BBC0F
-        cardDark=#0F380F
-        panelLight=#8BAC0F
-        panelDark=#0F380F
+        accent=#8CC040
+        positive=#8CC040
+        negative=#D06850
+        # Light mode: dark amounts on sage green for readability
+        positiveLight=#2A5820
+        negativeLight=#8B2A18
+        # Dark mode: bright lime / coral on dark olive (matches mockup)
+        positiveDark=#8CC040
+        negativeDark=#D06850
+        cardLight=#D4E8B0
+        cardDark=#2B3A18
+        panelLight=#C0D49C
+        panelDark=#3A4B28
         """
     ]
 }
@@ -291,11 +314,21 @@ enum ThemeFonts {
 
 extension Color {
     static var expenseRed: Color {
-        Color(nsColor: ThemeManager.shared.currentTheme.negativeColor)
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let theme = ThemeManager.shared.currentTheme
+            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+                ? theme.negativeDarkColor
+                : theme.negativeLightColor
+        })
     }
 
     static var incomeGreen: Color {
-        Color(nsColor: ThemeManager.shared.currentTheme.positiveColor)
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let theme = ThemeManager.shared.currentTheme
+            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+                ? theme.positiveDarkColor
+                : theme.positiveLightColor
+        })
     }
 
     static var cardBackground: Color {

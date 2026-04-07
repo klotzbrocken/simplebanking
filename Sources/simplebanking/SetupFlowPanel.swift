@@ -104,6 +104,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private var collectedMasterPassword: String? = nil
     private var existingMasterPassword: String? = nil  // non-nil when adding a second account
     private var outcome: SetupWizardOutcome = .cancelled
+    var collectedNickname: String? = nil              // optional per-account short label
+    private weak var nicknameTextField: NSTextField?
 
     // Master password step controls
     private let masterPassField = NSSecureTextField(string: "")
@@ -499,7 +501,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         case .accountPicker: fraction = 0.57
         case .onboarding(let page):
             switch page {
-            case 0: fraction = 0.71
+            case 0: fraction = existingMasterPassword != nil ? 1.0 : 0.71
             case 1: fraction = 0.85
             case 2: fraction = 1.0
             default: fraction = 0
@@ -813,17 +815,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             fieldViews.append(adviceLabel)
         }
 
-        rememberToggle.title = t("Zugangsdaten speichern", "Save credentials")
-        rememberToggle.font = .systemFont(ofSize: 13, weight: .medium)
-
-        let rememberSublabel = NSTextField(labelWithString: t("Verschlüsselt mit deinem Master-Passwort (AES-256)", "Encrypted with your master password (AES-256)"))
-        rememberSublabel.font = .systemFont(ofSize: 11)
-        rememberSublabel.textColor = .secondaryLabelColor
-
-        let rememberStack = NSStackView(views: [rememberToggle, rememberSublabel])
-        rememberStack.orientation = .vertical
-        rememberStack.spacing = 2
-        rememberStack.alignment = .leading
+        // Credentials are always saved (required for auto-refresh).
+        // Show as a static info line instead of a toggle to avoid misleading the user.
+        let credStorageInfo = NSTextField(labelWithString: t(
+            "🔒 Zugangsdaten werden verschlüsselt gespeichert (AES-256)",
+            "🔒 Credentials are stored encrypted (AES-256)"
+        ))
+        credStorageInfo.font = .systemFont(ofSize: 11)
+        credStorageInfo.textColor = .secondaryLabelColor
+        fieldViews.append(credStorageInfo)
 
         fieldViews.append(credentialsStatusLabel)
         credentialsStatusLabel.isHidden = credentialsStatusLabel.stringValue.isEmpty
@@ -905,12 +905,25 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.alignment = .leading
         rootStack.spacing = 16
 
+        // Sort: Girokonto (current) first — that's what this app is designed for.
+        // Others follow in a sensible order; within each type keep original API order.
+        let typePriority: (Routex.AccountType?) -> Int = { type in
+            switch type {
+            case .current:   return 0
+            case .savings:   return 1
+            case .callMoney: return 2
+            case .card:      return 3
+            default:         return 4
+            }
+        }
+        accountPickerAccounts = accountPickerAccounts.sorted { typePriority($0.type) < typePriority($1.type) }
+
         let titleLabel = NSTextField(labelWithString: t("Konten auswählen", "Choose accounts"))
         titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
 
         let subtitleLabel = NSTextField(wrappingLabelWithString: t(
-            "Jedes ausgewählte Konto wird separat eingerichtet.",
-            "Each selected account will be set up separately."
+            "Wähle die Konten, die Du in simplebanking sehen möchtest. Für die meisten Nutzer reicht das Girokonto.",
+            "Choose which accounts to include. For most users the checking account is sufficient."
         ))
         subtitleLabel.font = .systemFont(ofSize: 13)
         subtitleLabel.textColor = .secondaryLabelColor
@@ -926,15 +939,31 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             let iban = account.iban?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let owner = account.ownerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let display = account.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let product = account.productName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let currency = account.currency?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let typeLabel: String = {
+                switch account.type {
+                case .current:   return t("Girokonto", "Checking")
+                case .savings:   return t("Sparkonto", "Savings")
+                case .callMoney: return t("Tagesgeld", "Call money")
+                case .card:      return t("Kreditkarte", "Credit card")
+                default: return ""
+                }
+            }()
             var parts: [String] = []
+            if !typeLabel.isEmpty { parts.append(typeLabel) }
             if !display.isEmpty { parts.append(display) }
+            if !product.isEmpty && product != display { parts.append(product) }
             if !owner.isEmpty && owner != display { parts.append(owner) }
+            if !currency.isEmpty { parts.append(currency) }
             if !iban.isEmpty { parts.append(iban) }
             let title = parts.isEmpty
                 ? t("Konto \(index + 1)", "Account \(index + 1)")
-                : parts.joined(separator: " • ")
+                : parts.joined(separator: " · ")
             let checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
-            checkbox.state = .on
+            // Pre-select only Girokonten (current); unknown type also gets pre-selected
+            // since we can't tell what it is — better to include than to miss the main account.
+            checkbox.state = (account.type == .current || account.type == nil) ? .on : .off
             checkboxStack.addArrangedSubview(checkbox)
             accountPickerCheckboxes.append(checkbox)
         }
@@ -1041,7 +1070,22 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         let tipBox = infoBox(icon: "lightbulb.fill", t("Tipp: Klick auf den Kontostand in der Menüleiste, um deine Umsätze zu durchsuchen.", "Tip: Click on your balance in the menu bar to browse your transactions."))
 
-        let nextBtn = primaryButton(title: t("Weiter", "Continue"), action: #selector(onOnboardingNext(_:)))
+        // Nickname field
+        let nicknameLabel = NSTextField(labelWithString: t("Kurzname (optional)", "Nickname (optional)"))
+        nicknameLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        nicknameLabel.textColor = .secondaryLabelColor
+
+        let nicknameField = NSTextField(string: collectedNickname ?? "")
+        nicknameField.placeholderString = t("z.B. Privat, Reisen, USD…", "e.g. Personal, Travel, USD…")
+        nicknameField.font = .systemFont(ofSize: 13)
+        nicknameField.isBezeled = true
+        nicknameField.bezelStyle = .roundedBezel
+        nicknameField.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        self.nicknameTextField = nicknameField
+
+        let isAddingAccount = existingMasterPassword != nil
+        let nextTitle = isAddingAccount ? t("Fertig", "Done") : t("Weiter", "Continue")
+        let nextBtn = primaryButton(title: nextTitle, action: #selector(onOnboardingNext(_:)))
         nextBtn.tag = 0
         nextBtn.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
@@ -1049,7 +1093,11 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.addArrangedSubview(titleLabel)
         rootStack.addArrangedSubview(bankConnected)
         rootStack.addArrangedSubview(body)
-        rootStack.addArrangedSubview(tipBox)
+        if !isAddingAccount {
+            rootStack.addArrangedSubview(tipBox)
+        }
+        rootStack.addArrangedSubview(nicknameLabel)
+        rootStack.addArrangedSubview(nicknameField)
         rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(nextBtn)
 
@@ -1057,7 +1105,11 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.setCustomSpacing(4, after: titleLabel)
         rootStack.setCustomSpacing(6, after: bankConnected)
         rootStack.setCustomSpacing(20, after: body)
-        rootStack.setCustomSpacing(20, after: tipBox)
+        if !isAddingAccount {
+            rootStack.setCustomSpacing(20, after: tipBox)
+        }
+        rootStack.setCustomSpacing(4, after: nicknameLabel)
+        rootStack.setCustomSpacing(16, after: nicknameField)
     }
 
     private func renderOnboardingPage1() {
@@ -1760,7 +1812,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             bankName: bankName
         )
         let options = SetupConnectOptions(
-            diagnosticsEnabled: AppLogger.isEnabled
+            diagnosticsEnabled: diagnosticsLoggingEnabled
         )
         beginConnection(with: payload, selectedBankName: bankName, options: options)
     }
@@ -1855,7 +1907,13 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     @objc private func onOnboardingNext(_ sender: NSButton) {
         guard case .onboarding(let page) = step else { return }
-        let totalPages = 3
+        // Save nickname from page 0
+        if page == 0 {
+            let text = nicknameTextField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            collectedNickname = text.isEmpty ? nil : text
+        }
+        // Second-account flow: only page 0, then done
+        let totalPages = existingMasterPassword != nil ? 1 : 3
         if page < totalPages - 1 {
             render(step: .onboarding(page: page + 1))
         } else {
@@ -1884,13 +1942,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         latestDiagnosticsLogURL = nil
         completedBank = bank
         collectedMasterPassword = masterPassword
-        // Skip onboarding tutorial when adding a second account (password already exists).
-        if collectedMasterPassword != nil && existingMasterPassword != nil {
-            outcome = .realBanking(masterPassword: masterPassword, bank: bank)
-            NSApp.stopModal(withCode: .stop)
-        } else {
-            render(step: .onboarding(page: 0))
-        }
+        // Always show page 0 (success + nickname input) — for second account it's the only page.
+        render(step: .onboarding(page: 0))
     }
 
     private func handleConnectFailure(message: String, diagnosticsLogURL: URL?) {

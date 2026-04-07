@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "simplebanking", targets: ["simplebanking"])
+        .executable(name: "simplebanking", targets: ["simplebanking"]),
+        .executable(name: "simplebanking-mcp", targets: ["simplebanking-mcp"])
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
@@ -28,6 +29,8 @@ let package = Package(
                 .copy("Resources/Clippy.png"),
                 .copy("Resources/animations.json"),
                 .copy("Resources/bank-logos"),
+                .copy("Resources/Fonts/SpaceMono-Regular.ttf"),
+                .copy("Resources/Fonts/SpaceMono-Bold.ttf"),
             ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -35,6 +38,18 @@ let package = Package(
                 .linkedFramework("AuthenticationServices"),
                 .linkedFramework("Security")
             ]
+        ),
+        .executableTarget(
+            name: "simplebanking-mcp",
+            path: "Sources/simplebanking-mcp",
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
+        .testTarget(
+            name: "simplebankingTests",
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
+            path: "Tests/simplebankingTests"
         )
     ]
 )

@@ -8,6 +8,9 @@ struct BankSlot: Codable, Identifiable, Equatable {
     var iban: String
     var displayName: String
     var logoId: String?
+    var currency: String? = nil   // ISO-Code, z.B. "EUR", "USD" — auto aus Balance-API
+    var nickname: String? = nil   // nutzer-definierbares Kürzel, z.B. "Privat", "Reisen"
+    var customColor: String? = nil  // user-chosen hex color (without #), e.g. "FF5500"
 
     static func makeNew(iban: String, displayName: String, logoId: String?) -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: iban, displayName: displayName, logoId: logoId)
@@ -43,13 +46,23 @@ final class MultibankingStore: ObservableObject {
         slots.append(slot)
         activeIndex = slots.count - 1
         save()
+        // Auto-enable unified mode when user has more than one bank connected.
+        if slots.count > 1 {
+            UserDefaults.standard.set(true, forKey: "unifiedModeEnabled")
+        }
     }
 
     func removeSlot(id: String) {
         guard let idx = slots.firstIndex(where: { $0.id == id }) else { return }
+        // Purge transactions for this slot from local DB.
+        try? TransactionsDatabase.deleteTransactions(forSlotId: id)
         slots.remove(at: idx)
         if activeIndex >= slots.count { activeIndex = max(0, slots.count - 1) }
         save()
+        // Auto-disable unified mode when back to a single account.
+        if slots.count <= 1 {
+            UserDefaults.standard.set(false, forKey: "unifiedModeEnabled")
+        }
     }
 
     func setActive(index: Int) {
@@ -61,6 +74,44 @@ final class MultibankingStore: ObservableObject {
     func updateSlot(_ slot: BankSlot) {
         guard let idx = slots.firstIndex(where: { $0.id == slot.id }) else { return }
         slots[idx] = slot
+        save()
+    }
+
+    func updateCurrency(_ currency: String, forSlotId id: String) {
+        guard let idx = slots.firstIndex(where: { $0.id == id }) else { return }
+        guard slots[idx].currency != currency else { return }
+        slots[idx].currency = currency
+        save()
+    }
+
+    func updateNickname(_ nickname: String?, forSlotId id: String) {
+        guard let idx = slots.firstIndex(where: { $0.id == id }) else { return }
+        slots[idx].nickname = nickname
+        save()
+    }
+
+    func updateCustomColor(_ hex: String?, forSlotId id: String) {
+        guard let idx = slots.firstIndex(where: { $0.id == id }) else { return }
+        slots[idx].customColor = hex
+        save()
+    }
+
+    /// Injects ephemeral demo slots without persisting to UserDefaults.
+    func injectDemoSlots(_ demoSlots: [BankSlot]) {
+        slots = demoSlots
+        activeIndex = 0
+    }
+
+    /// Restores slots that were active before demo mode and persists them.
+    func restoreDemoSlots(_ previousSlots: [BankSlot], activeIndex previousIndex: Int) {
+        slots = previousSlots
+        activeIndex = previousSlots.indices.contains(previousIndex) ? previousIndex : 0
+        save()
+    }
+
+    func moveSlot(from source: IndexSet, to destination: Int) {
+        slots.move(fromOffsets: source, toOffset: destination)
+        if !slots.indices.contains(activeIndex) { activeIndex = 0 }
         save()
     }
 

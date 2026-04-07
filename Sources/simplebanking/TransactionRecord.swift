@@ -24,6 +24,8 @@ struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
     let searchText: String
     let rawJSON: String
     let updatedAt: String
+    let status: String  // "pending", "booked", "invoiced", "paid", "canceled"
+    var slotId: String = "legacy"  // which bank slot this transaction belongs to
 
     enum CodingKeys: String, CodingKey {
         case txID = "tx_id"
@@ -45,6 +47,8 @@ struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
         case searchText = "search_text"
         case rawJSON = "raw_json"
         case updatedAt = "updated_at"
+        case status
+        case slotId = "slot_id"
     }
 
     init(transaction: TransactionsResponse.Transaction, updatedAt: String) throws {
@@ -92,6 +96,7 @@ struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
         )
         self.rawJSON = rawJSON
         self.updatedAt = updatedAt
+        self.status = transaction.status ?? "booked"
     }
 
     func toTransaction() -> TransactionsResponse.Transaction? {
@@ -102,6 +107,7 @@ struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
         if let kategorie, !kategorie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             transaction.category = kategorie
         }
+        transaction.slotId = slotId
         return transaction
     }
 
