@@ -3,6 +3,80 @@ import ServiceManagement
 import SwiftUI
 import UserNotifications
 
+// Breite des Gehaltseingang-Pickers ("31. des Monats") — via Font-Metriken + Button-Chrome
+private let _settingsGehaltsPickerWidth: CGFloat = {
+    let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    let textWidth = ("31. des Monats" as NSString).size(withAttributes: [.font: font]).width
+    // NSPopUpButton chrome: linke Border+Padding (~12px) + Pfeil+Abstand rechts (~30px)
+    return ceil(textWidth) + 42
+}()
+
+// MARK: - Fixed-Width NSPopUpButton & AccountMenuPicker
+
+/// NSPopUpButton-Subklasse, die intrinsicContentSize auf eine feste Breite zwingt.
+/// Nötig, weil SwiftUI frame(width:) bei NSViewRepresentable ignoriert wird wenn
+/// intrinsicContentSize > proposed width ist.
+private class _FixedWidthPopUpButton: NSPopUpButton {
+    var targetWidth: CGFloat = 160
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: targetWidth, height: super.intrinsicContentSize.height)
+    }
+}
+
+/// Typsicherer NSViewRepresentable-Picker mit erzwungener Breite.
+private struct AccountMenuPicker<T: Hashable>: NSViewRepresentable {
+    var items: [(title: String, value: T)]
+    @Binding var selection: T
+    var width: CGFloat
+
+    func makeNSView(context: Context) -> _FixedWidthPopUpButton {
+        let btn = _FixedWidthPopUpButton()
+        btn.targetWidth = width
+        btn.target = context.coordinator
+        btn.action = #selector(Coordinator.changed(_:))
+        return btn
+    }
+
+    func updateNSView(_ btn: _FixedWidthPopUpButton, context: Context) {
+        btn.targetWidth = width
+        context.coordinator.parent = self
+        let newTitles = items.map(\.title)
+        if btn.itemTitles != newTitles {
+            btn.removeAllItems()
+            for item in items {
+                let mi = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
+                mi.representedObject = _Box(item.value)
+                btn.menu?.addItem(mi)
+            }
+        }
+        if let idx = items.firstIndex(where: { $0.value == selection }),
+           btn.indexOfSelectedItem != idx {
+            btn.selectItem(at: idx)
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: _FixedWidthPopUpButton, context: Context) -> CGSize? {
+        CGSize(width: width, height: nsView.fittingSize.height)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject {
+        var parent: AccountMenuPicker
+        init(_ p: AccountMenuPicker) { parent = p }
+        @objc func changed(_ sender: NSPopUpButton) {
+            if let box = sender.selectedItem?.representedObject as? _Box<T> {
+                parent.selection = box.value
+            }
+        }
+    }
+}
+
+private final class _Box<V>: NSObject {
+    let value: V
+    init(_ v: V) { value = v }
+}
+
 // MARK: - Settings View
 
 enum AppearanceMode: Int, CaseIterable {
@@ -87,17 +161,23 @@ struct SettingsView: View {
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
     @AppStorage("menubarStyle") private var menubarStyle: Int = 0
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
+    @AppStorage("globalHotkeyEnabled") private var globalHotkeyEnabled: Bool = true
+    @AppStorage("globalHotkeyKeyCode") private var globalHotkeyKeyCode: Int = 1      // kVK_ANSI_S
+    @AppStorage("globalHotkeyModifiers") private var globalHotkeyModifiers: Int = 4352 // controlKey | cmdKey
     @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("resetAttempts") private var resetAttempts: Int = 0
     @AppStorage("swapClickBehavior") private var swapClickBehavior: Bool = false
     @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
-    @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.mouseClick.rawValue
+    @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.flyoutCard.rawValue
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
     @AppStorage("apiKeyPresent_anthropic") private var anthropicKeyPresent: Bool = false
     @AppStorage("apiKeyPresent_mistral") private var mistralKeyPresent: Bool = false
     @AppStorage("apiKeyPresent_openai") private var openaiKeyPresent: Bool = false
     @AppStorage(AIProvider.storageKey) private var selectedAIProvider: String = AIProvider.anthropic.rawValue
     @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
+    @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
+    @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
+    @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
@@ -115,13 +195,24 @@ struct SettingsView: View {
     @AppStorage("celebrationStyle") private var celebrationStyle: Int = 1
     @AppStorage("rippleAlwaysOn") private var rippleAlwaysOn: Bool = false
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
-    
+
+    // Sicherheit
+    @AppStorage("passwordRequired") private var passwordRequired: Bool = true
+
+    // Score Fine-Tuning
+    @AppStorage("scoreStabilityMultiplier") private var scoreStabilityMultiplier: Double = 3.0
+    @AppStorage("scoreCoverageWeight") private var scoreCoverageWeight: Double = 0.6
+    @AppStorage("scoreFixedCostWarningRatio") private var scoreFixedCostWarningRatio: Double = 0.70
+    @AppStorage("scoreSalaryToleranceDays") private var scoreSalaryToleranceDays: Int = 5
+
     @State private var selectedTab: Int = 0
     @State private var showResetConfirmation: Bool = false
     @State private var slotToDelete: BankSlot? = nil
     @State private var showSlotDeleteConfirmation: Bool = false
     @State private var slotBeingRenamed: BankSlot? = nil
     @State private var renameText: String = ""
+    @State private var nicknameText: String = ""
+    @State private var slotColorSelection: [String: Color] = [:]
     @ObservedObject private var multibankingStore = MultibankingStore.shared
     @ObservedObject private var logoStore = BankLogoStore.shared
     @State private var notificationStatus: String = ""
@@ -144,10 +235,27 @@ struct SettingsView: View {
     @State private var availableThemes: [AppTheme] = []
     @State private var logStatusMessage: String = ""
     @State private var logoTapCount: Int = 0
+    @State private var logoCacheClearStatus: String = ""
+    @State private var mcpConfigCopied: Bool = false
+    @State private var mcpSetupState: MCPSetupState = .idle
+
+    private enum MCPSetupState: Equatable {
+        case idle, success, alreadySet, error(String)
+    }
     @State private var merchantResolutionStatusMessage: String = ""
     @State private var didInitialMerchantRefresh: Bool = false
+
+    // Konten-Tab: per-Konto-Einstellungen
+    @State private var selectedSettingsSlotId: String? = nil
+    @State private var currentSlotSettings: BankSlotSettings = BankSlotSettings()
+    @State private var detectedSalary: Int = 0
+    // Sicherheits-Tab: Passwort deaktivieren
+    @State private var showDisablePasswordSheet: Bool = false
+    @State private var disablePasswordConfirmed: Bool = false
+    @State private var disablePasswordError: String = ""
     
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     private func t(_ de: String, _ en: String) -> String {
         L10n.t(de, en)
@@ -233,7 +341,10 @@ struct SettingsView: View {
         ]
         for key in keysToRemove { defaults.removeObject(forKey: key) }
 
-        // 4. Remove from store
+        // 4. Remove slot settings
+        BankSlotSettingsStore.delete(slotId: slotId)
+
+        // 5. Remove from store
         MultibankingStore.shared.removeSlot(id: slotId)
 
         // 5. Notify BalanceBar so it can react
@@ -374,7 +485,10 @@ struct SettingsView: View {
     }
 
     private var appVersionString: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let channel = Bundle.main.object(forInfoDictionaryKey: "SBDistributionChannel") as? String
+        if let channel { return "\(v) (\(channel))" }
+        return v
     }
 
     private var appBuildString: String {
@@ -404,6 +518,74 @@ struct SettingsView: View {
         } catch {
             logStatusMessage = "\(t("Leeren fehlgeschlagen", "Clearing failed")): \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Slot Settings
+
+    private func loadSlotSettings() {
+        if selectedSettingsSlotId == nil {
+            selectedSettingsSlotId = multibankingStore.slots.first?.id
+        }
+        if let id = selectedSettingsSlotId {
+            currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
+            autoDetectSalaryForDisplay(slotId: id)
+        }
+    }
+
+    private func autoDetectSalaryForDisplay(slotId: String) {
+        let settings = currentSlotSettings
+        DispatchQueue.global(qos: .userInitiated).async {
+            let txs = (try? TransactionsDatabase.loadUnifiedTransactions(slots: [slotId], days: 90)) ?? []
+            let detected = SalaryProgressCalculator.detectedIncome(salaryDay: settings.effectiveSalaryDay, tolerance: settings.salaryDayTolerance, transactions: txs)
+            DispatchQueue.main.async {
+                let detectedInt = Int(detected.rounded())
+                detectedSalary = detectedInt
+                // Pre-fill comfort zone from detected salary if user hasn't changed it yet (still at default 2000)
+                if detectedInt > 0 && currentSlotSettings.balanceSignalMediumUpperBound == 2000 {
+                    let refSalary = currentSlotSettings.salaryAmount > 0 ? currentSlotSettings.salaryAmount : detectedInt
+                    currentSlotSettings.balanceSignalMediumUpperBound = suggestedComfortZone(
+                        salary: refSalary,
+                        low: currentSlotSettings.balanceSignalLowUpperBound)
+                    saveCurrentSlotSettings()
+                }
+            }
+        }
+    }
+
+    private func suggestedComfortZone(salary: Int, low: Int) -> Int {
+        let fromSalary = salary > 0 ? salary / 4 : 0
+        let fromLow    = low * 5
+        return max(max(fromSalary, fromLow), low + 1)
+    }
+
+    private func saveCurrentSlotSettings() {
+        guard let id = selectedSettingsSlotId else { return }
+        BankSlotSettingsStore.save(currentSlotSettings, slotId: id)
+        NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
+    }
+
+    // MARK: - Disable Password
+
+    private func disablePasswordWithVerification() {
+        disablePasswordError = ""
+        guard let pw = requestMasterPassword() else { return }
+        guard (try? CredentialsStore.load(masterPassword: pw)) != nil else {
+            disablePasswordError = t("Falsches Passwort.", "Wrong password.")
+            return
+        }
+        do {
+            try BiometricStore.saveForAutoUnlock(password: pw)
+            passwordRequired = false
+            disablePasswordConfirmed = false
+            showDisablePasswordSheet = false
+        } catch {
+            disablePasswordError = "\(t("Speichern fehlgeschlagen", "Saving failed")): \(error.localizedDescription)"
+        }
+    }
+
+    private func reenablePassword() {
+        BiometricStore.clearAutoUnlock()
+        passwordRequired = true
     }
 
     private func refreshMerchantResolutionData(pipelineEnabled: Bool) {
@@ -438,20 +620,23 @@ struct SettingsView: View {
                 TabButton(title: t("Allgemein", "General"), icon: "gearshape", isSelected: selectedTab == 0) {
                     selectedTab = 0
                 }
-                TabButton(title: t("Finanzen", "Finance"), icon: "chart.pie", isSelected: selectedTab == 1) {
+                TabButton(title: t("Konten", "Accounts"), icon: "building.columns", isSelected: selectedTab == 1) {
                     selectedTab = 1
                 }
-                TabButton(title: t("Verhalten", "Behavior"), icon: "cursorarrow.click.2", isSelected: selectedTab == 2) {
+                TabButton(title: t("Finanzen", "Finance"), icon: "chart.pie", isSelected: selectedTab == 2) {
                     selectedTab = 2
                 }
-                TabButton(title: t("Sicherheit", "Security"), icon: "lock.shield", isSelected: selectedTab == 3) {
+                TabButton(title: t("Verhalten", "Behavior"), icon: "cursorarrow.click.2", isSelected: selectedTab == 3) {
                     selectedTab = 3
                 }
-                TabButton(title: t("Über", "About"), icon: "info.circle", isSelected: selectedTab == 4) {
+                TabButton(title: t("Sicherheit", "Security"), icon: "lock.shield", isSelected: selectedTab == 4) {
                     selectedTab = 4
                 }
-                TabButton(title: "Labs", icon: "flask", isSelected: selectedTab == 5) {
+                TabButton(title: t("Über", "About"), icon: "info.circle", isSelected: selectedTab == 5) {
                     selectedTab = 5
+                }
+                TabButton(title: "Labs", icon: "flask", isSelected: selectedTab == 6) {
+                    selectedTab = 6
                 }
             }
             .padding(.horizontal, 16)
@@ -467,14 +652,16 @@ struct SettingsView: View {
                     case 0:
                         generalSettings
                     case 1:
-                        financeSettings
+                        accountsSettings
                     case 2:
-                        behaviorSettings
+                        financeSettings
                     case 3:
-                        securitySettings
+                        behaviorSettings
                     case 4:
-                        aboutSection
+                        securitySettings
                     case 5:
+                        aboutSection
+                    case 6:
                         labsSettings
                     default:
                         EmptyView()
@@ -545,9 +732,12 @@ struct SettingsView: View {
             normalizeBalanceSignalThresholds()
         }
         .onChange(of: selectedTab) { tab in
-            if tab == 3 {
+            if tab == 4 {
                 touchIDAvailable = BiometricStore.isAvailable
                 touchIDEnabled = BiometricStore.hasSavedPassword
+            }
+            if tab == 1 {
+                loadSlotSettings()
             }
         }
         .alert(t("simplebanking zurücksetzen?", "Reset simplebanking?"), isPresented: $showResetConfirmation) {
@@ -598,27 +788,32 @@ struct SettingsView: View {
                 isOn: $loadTransactionsOnStart
             )
 
-            Divider()
-
-            // Refresh Interval
-            HStack(alignment: .top) {
+            HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Abfrage-Intervall", "Refresh interval"))
+                    Text(t("Kurzbefehl", "Shortcut"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Wie oft soll der Kontostand automatisch abgefragt werden?", "How often should the balance be refreshed automatically?"))
+                    Text(t("Flyout oder Kontostand ein-/ausblenden", "Show flyout or toggle balance"))
                         .font(ThemeFonts.body(size: 11))
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                Picker("", selection: $refreshInterval) {
-                    ForEach(RefreshInterval.allCases, id: \.rawValue) { interval in
-                        Text(interval.label).tag(interval.rawValue)
-                    }
-                }
-                .pickerStyle(MenuPickerStyle())
-                .frame(width: 150)
+                HotkeyRecorderView(keyCode: $globalHotkeyKeyCode, modifiers: $globalHotkeyModifiers)
+                    .frame(width: 90, height: 24)
+                    .opacity(globalHotkeyEnabled ? 1.0 : 0.4)
+                    .allowsHitTesting(globalHotkeyEnabled)
+                    .onChange(of: globalHotkeyKeyCode) { _ in postHotkeyChanged() }
+                    .onChange(of: globalHotkeyModifiers) { _ in postHotkeyChanged() }
+                Toggle("", isOn: $globalHotkeyEnabled)
+                    .toggleStyle(SwitchToggleStyle())
+                    .labelsHidden()
+                    .onChange(of: globalHotkeyEnabled) { _ in postHotkeyChanged() }
             }
+
         }
+    }
+
+    private func postHotkeyChanged() {
+        NotificationCenter.default.post(name: Notification.Name("simplebanking.globalHotkeyChanged"), object: nil)
     }
 
     private var aiAssistantSettings: some View {
@@ -680,196 +875,501 @@ struct SettingsView: View {
         }
     }
     
-    // MARK: - Finance Settings
-    
-    private var financeSettings: some View {
+    // MARK: - Accounts Settings
+
+    private var accountsSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Abruf-Zeitraum
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Abruf-Zeitraum", "Fetch range"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Wie viele Tage an Transaktionen sollen abgerufen werden?", "How many days of transactions should be fetched?"))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Picker("", selection: $fetchDays) {
-                    Text(t("30 Tage", "30 days")).tag(30)
-                    Text(t("60 Tage", "60 days")).tag(60)
-                    Text(t("90 Tage", "90 days")).tag(90)
-                    Text(t("180 Tage", "180 days")).tag(180)
-                    Text(t("365 Tage", "365 days")).tag(365)
-                }
-                .pickerStyle(MenuPickerStyle())
-                .frame(width: 130)
-            }
 
-            Divider()
-
-            // Balance-Ampel (nur Default-Theme)
+            // --- Verbundene Konten ---
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Balance-Ampel", "Balance signal"))
+                Text(t("Verbundene Konten", "Connected Accounts"))
                     .font(ThemeFonts.heading(size: 13))
-                Text(t(
-                    "Farb- und Statusanzeige für den Kontostand in der Umsatzliste.",
-                    "Color and status display for the account balance in the transaction list."
-                ))
-                .font(ThemeFonts.body(size: 12))
-                .foregroundColor(.secondary)
 
-                if !isDefaultThemeSelected {
-                    Text(t("Nur im Default-Theme aktiv.", "Only active in the Default theme."))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack(spacing: 8) {
-                    TextField("500", value: balanceSignalLowBinding, format: .number)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(width: 110)
-                        .disabled(!isDefaultThemeSelected)
-                    Text(t("Niedriger Stand bis (€)", "Low balance up to (€)"))
-                        .font(ThemeFonts.body(size: 13))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack(spacing: 8) {
-                    TextField("2000", value: balanceSignalMediumBinding, format: .number)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(width: 110)
-                        .disabled(!isDefaultThemeSelected)
-                    Text(t("Mittlerer Stand bis (€)", "Medium balance up to (€)"))
-                        .font(ThemeFonts.body(size: 13))
-                        .foregroundColor(.secondary)
-                }
-
-                let low = Int(normalizedBalanceSignalThresholds.lowUpperBound)
-                let medium = Int(normalizedBalanceSignalThresholds.mediumUpperBound)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Circle().fill(BalanceSignal.style(for: .overdraft).amountColor).frame(width: 10, height: 10)
-                        Text(t("< 0 €: Konto überzogen", "< 0 €: Account overdrawn"))
-                            .font(ThemeFonts.body(size: 11))
-                    }
-                    HStack(spacing: 8) {
-                        Circle().fill(BalanceSignal.style(for: .low).amountColor).frame(width: 10, height: 10)
-                        Text(t("0 € bis unter \(low) €: Niedriger Stand", "0 € to below \(low) €: Low balance"))
-                            .font(ThemeFonts.body(size: 11))
-                    }
-                    HStack(spacing: 8) {
-                        Circle().fill(BalanceSignal.style(for: .medium).amountColor).frame(width: 10, height: 10)
-                        Text(t("\(low) € bis \(medium) €: Mittlerer Stand", "\(low) € to \(medium) €: Medium balance"))
-                            .font(ThemeFonts.body(size: 11))
-                    }
-                    HStack(spacing: 8) {
-                        Circle().fill(BalanceSignal.style(for: .good).amountColor).frame(width: 10, height: 10)
-                        Text(t("> \(medium) €: Gutes Polster", "> \(medium) €: Healthy buffer"))
-                            .font(ThemeFonts.body(size: 11))
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.cardBackground)
-                )
-                .opacity(isDefaultThemeSelected ? 1 : 0.7)
-            }
-
-            Divider()
-            
-            // Gehaltsdatum
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Gehaltseingang", "Salary incoming day"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Tag des Monats, an dem dein Gehalt eingeht. Die Finanzanalyse wird entsprechend berechnet.", "Day of month when salary arrives. Financial analysis uses this setting."))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                HStack(spacing: 6) {
-                    Picker("", selection: $salaryDay) {
-                        ForEach(1...31, id: \.self) { day in
-                            Text("\(day).").tag(day)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                    .frame(minWidth: 80)
-                    Text(t("des Monats", "of month"))
+                if multibankingStore.slots.isEmpty {
+                    Text(t("Kein Konto verbunden.", "No account connected."))
                         .font(ThemeFonts.body(size: 12))
                         .foregroundColor(.secondary)
+                } else {
+                    List {
+                    ForEach(multibankingStore.slots) { slot in
+                        HStack(spacing: 12) {
+                            let slotBrand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.iban)
+                            Group {
+                                if let img = logoStore.image(for: slotBrand) {
+                                    let invertSlot = colorScheme == .dark && BankLogoAssets.isDark(brandId: slotBrand?.id ?? "")
+                                    if invertSlot {
+                                        Image(nsImage: img).resizable().scaledToFit()
+                                            .frame(width: 28, height: 28)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                            .colorInvert()
+                                    } else {
+                                        Image(nsImage: img).resizable().scaledToFit()
+                                            .frame(width: 28, height: 28)
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
+                                } else {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.secondary.opacity(0.12))
+                                        .frame(width: 28, height: 28)
+                                        .overlay(Image(systemName: "building.columns").font(.system(size: 12)).foregroundColor(.secondary))
+                                }
+                            }
+                            .onAppear { BankLogoStore.shared.preload(brand: slotBrand) }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                if slotBeingRenamed?.id == slot.id {
+                                    HStack(spacing: 6) {
+                                        TextField(t("Kurzname", "Nickname"), text: $nicknameText)
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .font(ThemeFonts.body(size: 13))
+                                            .frame(minWidth: 100, maxWidth: 160)
+                                            .onSubmit {
+                                                let trimmed = nicknameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                MultibankingStore.shared.updateNickname(trimmed.isEmpty ? nil : trimmed, forSlotId: slot.id)
+                                                slotBeingRenamed = nil
+                                            }
+                                        Button(t("OK", "OK")) {
+                                            let trimmed = nicknameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            MultibankingStore.shared.updateNickname(trimmed.isEmpty ? nil : trimmed, forSlotId: slot.id)
+                                            slotBeingRenamed = nil
+                                        }.buttonStyle(PlainButtonStyle())
+                                        Button(t("Abbruch", "Cancel")) { slotBeingRenamed = nil }
+                                            .buttonStyle(PlainButtonStyle()).foregroundColor(.secondary)
+                                    }
+                                } else {
+                                    HStack(spacing: 4) {
+                                        Text(slot.displayName.isEmpty ? t("Konto", "Account") : slot.displayName)
+                                            .font(ThemeFonts.body(size: 13))
+                                        if let nick = slot.nickname {
+                                            Text(nick)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                                .background(Capsule().fill(Color(NSColor.quaternaryLabelColor)))
+                                                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                                        }
+                                    }
+                                }
+                                if !slot.iban.isEmpty {
+                                    HStack(spacing: 4) {
+                                        Text(slot.iban.prefix(4) + " ···· " + slot.iban.suffix(4))
+                                            .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                        if let curr = slot.currency {
+                                            Text(curr)
+                                                .font(.system(size: 10, weight: .medium))
+                                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                                .background(Capsule().fill(Color(NSColor.quaternaryLabelColor)))
+                                                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer()
+                            if slotBeingRenamed?.id != slot.id {
+                                // Color picker for slot accent color
+                                let currentColor: Color = {
+                                    if let c = slotColorSelection[slot.id] { return c }
+                                    if let hex = slot.customColor, let c = Color(hex: hex) { return c }
+                                    if let logoId = slot.logoId,
+                                       let hex = GeneratedBankColors.primaryColor(forLogoId: logoId),
+                                       let c = Color(hex: hex) { return c }
+                                    return Color.accentColor
+                                }()
+                                ColorPicker("", selection: Binding(
+                                    get: { slotColorSelection[slot.id] ?? currentColor },
+                                    set: { newColor in
+                                        slotColorSelection[slot.id] = newColor
+                                        if let nsColor = NSColor(newColor).usingColorSpace(.sRGB) {
+                                            let r = Int(nsColor.redComponent * 255)
+                                            let g = Int(nsColor.greenComponent * 255)
+                                            let b = Int(nsColor.blueComponent * 255)
+                                            let hex = String(format: "%02X%02X%02X", r, g, b)
+                                            MultibankingStore.shared.updateCustomColor(hex, forSlotId: slot.id)
+                                        }
+                                    }
+                                ), supportsOpacity: false)
+                                .labelsHidden()
+                                .frame(width: 28, height: 22)
+                                Button(action: {
+                                    nicknameText = slot.nickname ?? ""
+                                    slotBeingRenamed = slot
+                                }) {
+                                    Image(systemName: "pencil").foregroundColor(.secondary)
+                                }.buttonStyle(PlainButtonStyle())
+                                Button(action: {
+                                    slotToDelete = slot
+                                    showSlotDeleteConfirmation = true
+                                }) {
+                                    Text(t("Entfernen", "Remove"))
+                                        .foregroundColor(.red).font(ThemeFonts.body(size: 12))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .disabled(multibankingStore.slots.count == 1)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                        .listRowSeparator(.hidden)
+                    }
+                    .onMove { source, destination in
+                        multibankingStore.moveSlot(from: source, to: destination)
+                    }
+                    }
+                    .listStyle(.plain)
+                    .scrollDisabled(true)
+                    .frame(height: CGFloat(multibankingStore.slots.count) * 54)
                 }
-            }
-            
-            Divider()
-            
-            // Ziel-Puffer
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Monatlicher Ziel-Puffer", "Monthly target buffer"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Wie viel sollte nach Abzug aller Ausgaben übrig bleiben? Beeinflusst die Einnahmen-Deckung im Score.", "How much should remain after all expenses? Affects income coverage in the score."))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 8) {
-                    TextField("500", value: $targetBuffer, format: .number)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(width: 100)
-                    
-                    Text("€")
+
+                Button(action: {
+                    NotificationCenter.default.post(name: Notification.Name("simplebanking.addAccount"), object: nil)
+                }) {
+                    Label(t("Konto hinzufügen", "Add account"), systemImage: "plus.circle")
                         .font(ThemeFonts.body(size: 13))
-                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .foregroundColor(.accentColor)
+            }
+            .alert(t("Konto entfernen?", "Remove account?"), isPresented: $showSlotDeleteConfirmation, presenting: slotToDelete) { slot in
+                Button(t("Entfernen", "Remove"), role: .destructive) { deleteSlot(id: slot.id) }
+                Button(t("Abbrechen", "Cancel"), role: .cancel) {}
+            } message: { slot in
+                Text(t(
+                    "Das Konto \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" und alle zugehörigen Daten werden unwiderruflich gelöscht.",
+                    "The account \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" and all its data will be permanently deleted."
+                ))
+            }
+
+            Divider()
+
+            // --- Abfrage-Intervall ---
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Abfrage-Intervall", "Refresh interval"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Wie oft soll der Kontostand automatisch abgefragt werden?", "How often should the balance be refreshed automatically?"))
+                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                }
+                Spacer()
+                AccountMenuPicker(
+                    items: RefreshInterval.allCases.map { (title: $0.label, value: $0.rawValue) },
+                    selection: $refreshInterval,
+                    width: _settingsGehaltsPickerWidth
+                )
+                .padding(.trailing, 14)
+            }
+
+            Divider()
+
+            // --- Per-Konto-Einstellungen ---
+            if !multibankingStore.slots.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(t("Konto-Einstellungen", "Account Settings"))
+                        .font(ThemeFonts.heading(size: 13))
+                    Text(t("Jede Einstellung gilt individuell für das ausgewählte Konto.", "Each setting applies individually to the selected account."))
+                        .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+
+                    // Account picker
+                    HStack {
+                        Text(t("Konto", "Account"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Spacer()
+                        AccountMenuPicker(
+                            items: multibankingStore.slots.map { slot in
+                                (title: slot.nickname ?? (slot.displayName.isEmpty ? slot.iban.suffix(8).description : slot.displayName),
+                                 value: Optional(slot.id))
+                            },
+                            selection: $selectedSettingsSlotId,
+                            width: _settingsGehaltsPickerWidth
+                        )
+                        .padding(.trailing, 14)
+                        .onChange(of: selectedSettingsSlotId) { id in
+                            if let id {
+                                currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
+                                autoDetectSalaryForDisplay(slotId: id)
+                            }
+                        }
+                    }
+
+                    if selectedSettingsSlotId != nil {
+                        VStack(alignment: .leading, spacing: 12) {
+
+                            // Abruf-Zeitraum
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t("Abruf-Zeitraum", "Fetch range"))
+                                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                                    Text(t("Wie viele Tage an Transaktionen sollen abgerufen werden?", "How many days of transactions to fetch?"))
+                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                AccountMenuPicker(
+                                    items: [
+                                        (title: t("30 Tage", "30 days"), value: 30),
+                                        (title: t("60 Tage", "60 days"), value: 60),
+                                        (title: t("90 Tage", "90 days"), value: 90),
+                                        (title: t("180 Tage", "180 days"), value: 180),
+                                        (title: t("365 Tage", "365 days"), value: 365),
+                                    ],
+                                    selection: Binding(
+                                        get: { currentSlotSettings.fetchDays },
+                                        set: { currentSlotSettings.fetchDays = $0; saveCurrentSlotSettings() }
+                                    ),
+                                    width: _settingsGehaltsPickerWidth
+                                )
+                                .padding(.trailing, 14)
+                            }
+
+                            Divider()
+
+                            // Gehaltseingang
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(t("Gehaltseingang", "Salary incoming day"))
+                                    .font(ThemeFonts.body(size: 13, weight: .medium))
+                                HStack(spacing: 6) {
+                                    ForEach([
+                                        (0, t("Anfang", "Start")),
+                                        (1, t("Mitte", "Mid")),
+                                        (2, t("Individuell", "Custom"))
+                                    ], id: \.0) { preset, label in
+                                        Button(action: {
+                                            currentSlotSettings.salaryDayPreset = preset
+                                            saveCurrentSlotSettings()
+                                            autoDetectSalaryForDisplay(slotId: selectedSettingsSlotId ?? "")
+                                        }) {
+                                            Text(label)
+                                                .font(ThemeFonts.body(size: 12))
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 4)
+                                                .background(currentSlotSettings.salaryDayPreset == preset
+                                                    ? Color.accentColor.opacity(0.15) : Color.clear)
+                                                .cornerRadius(6)
+                                                .overlay(RoundedRectangle(cornerRadius: 6)
+                                                    .stroke(currentSlotSettings.salaryDayPreset == preset
+                                                        ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: 1))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                if currentSlotSettings.salaryDayPreset == 0 {
+                                    Text(t("Tag 1, ±4 Tage Toleranz", "Day 1, ±4 days tolerance"))
+                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                } else if currentSlotSettings.salaryDayPreset == 1 {
+                                    Text(t("Tag 15, ±4 Tage Toleranz", "Day 15, ±4 days tolerance"))
+                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                } else {
+                                    HStack(spacing: 6) {
+                                        AccountMenuPicker(
+                                            items: (1...31).map { day in
+                                                (title: t("\(day). des Monats", "Day \(day)"), value: day)
+                                            },
+                                            selection: Binding(
+                                                get: { currentSlotSettings.salaryDay },
+                                                set: { v in
+                                                    currentSlotSettings.salaryDay = v
+                                                    saveCurrentSlotSettings()
+                                                    autoDetectSalaryForDisplay(slotId: selectedSettingsSlotId ?? "")
+                                                }
+                                            ),
+                                            width: _settingsGehaltsPickerWidth
+                                        )
+                                        Text(t("Genau dieser Tag", "Exact day"))
+                                            .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            // Ziel-Puffer
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t("Monatlicher Ziel-Puffer", "Monthly target buffer"))
+                                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                                    Text(t("Wie viel soll nach allen Ausgaben übrig bleiben?", "How much should remain after all expenses?"))
+                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    TextField("500", value: Binding(
+                                        get: { currentSlotSettings.targetBuffer },
+                                        set: { currentSlotSettings.targetBuffer = $0; saveCurrentSlotSettings() }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                            }
+
+                            Divider()
+
+                            // Ziel-Sparrate
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t("Ziel-Sparrate", "Target savings rate"))
+                                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                                    Text(t("Ziel-Sparquote (50/30/20 Regel: 20 %)", "Target savings ratio (50/30/20 rule: 20%)"))
+                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    TextField("20", value: Binding(
+                                        get: { currentSlotSettings.targetSavingsRate },
+                                        set: { currentSlotSettings.targetSavingsRate = $0; saveCurrentSlotSettings() }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("%").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                            }
+
+                            Divider()
+
+                            // Dispositionskredit
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t("Dispositionskredit", "Overdraft limit"))
+                                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                                    Text(t("Dispo-Limit für die Score-Statistik. 0 = kein Dispo.", "Overdraft limit for score stats. 0 = none."))
+                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                HStack(spacing: 6) {
+                                    TextField("0", value: Binding(
+                                        get: { currentSlotSettings.dispoLimit },
+                                        set: { currentSlotSettings.dispoLimit = $0; saveCurrentSlotSettings() }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                            }
+
+                            Divider()
+
+                            // Money Mood
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(t("Money Mood", "Money Mood"))
+                                    .font(ThemeFonts.body(size: 13, weight: .medium))
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        TextField("500", value: Binding(
+                                            get: { currentSlotSettings.balanceSignalLowUpperBound },
+                                            set: { v in
+                                                currentSlotSettings.balanceSignalLowUpperBound = max(0, v)
+                                                if currentSlotSettings.balanceSignalMediumUpperBound <= currentSlotSettings.balanceSignalLowUpperBound {
+                                                    currentSlotSettings.balanceSignalMediumUpperBound = currentSlotSettings.balanceSignalLowUpperBound + 1
+                                                }
+                                                saveCurrentSlotSettings()
+                                            }
+                                        ), format: .number)
+                                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                                        Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                            .frame(width: 16, alignment: .leading)
+                                    }
+                                    .frame(width: 185)
+                                    Text(t("Kritische Schwelle", "Critical threshold"))
+                                        .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+                                }
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        let refSalary = currentSlotSettings.salaryAmount > 0
+                                            ? currentSlotSettings.salaryAmount
+                                            : detectedSalary
+                                        let placeholder = refSalary > 0
+                                            ? "\(suggestedComfortZone(salary: refSalary, low: currentSlotSettings.balanceSignalLowUpperBound))"
+                                            : "1500"
+                                        TextField(placeholder, value: Binding(
+                                            get: { currentSlotSettings.balanceSignalMediumUpperBound },
+                                            set: { v in
+                                                let clamped = max(currentSlotSettings.balanceSignalLowUpperBound + 1, v)
+                                                currentSlotSettings.balanceSignalMediumUpperBound = clamped
+                                                saveCurrentSlotSettings()
+                                            }
+                                        ), format: .number)
+                                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                                        Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                            .frame(width: 16, alignment: .leading)
+                                    }
+                                    .frame(width: 185)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(t("Komfortzone bis", "Comfort zone up to"))
+                                            .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+                                        let refSalary = currentSlotSettings.salaryAmount > 0
+                                            ? currentSlotSettings.salaryAmount
+                                            : detectedSalary
+                                        if refSalary > 0 {
+                                            let quarter = refSalary / 4
+                                            Text(t("Vorschlag: \(quarter) € (¼ Gehalt)", "Suggested: \(quarter) € (¼ salary)"))
+                                                .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary.opacity(0.7))
+                                        }
+                                    }
+                                }
+                                // Nettogehalt — setzt gleichzeitig die MoneyMood-Grün-Schwelle
+                                HStack(spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        let placeholder = detectedSalary > 0
+                                            ? "\(detectedSalary)"
+                                            : "0"
+                                        TextField(placeholder, value: Binding(
+                                            get: { currentSlotSettings.salaryAmount },
+                                            set: { v in
+                                                let clamped = max(0, v)
+                                                currentSlotSettings.salaryAmount = clamped
+                                                if clamped > 0 {
+                                                    // Update comfort zone to salary/4 (suggested value)
+                                                    currentSlotSettings.balanceSignalMediumUpperBound = suggestedComfortZone(
+                                                        salary: clamped,
+                                                        low: currentSlotSettings.balanceSignalLowUpperBound)
+                                                    // Low threshold must stay below comfort zone
+                                                    if currentSlotSettings.balanceSignalLowUpperBound >= currentSlotSettings.balanceSignalMediumUpperBound {
+                                                        currentSlotSettings.balanceSignalLowUpperBound = max(0, currentSlotSettings.balanceSignalMediumUpperBound - 1)
+                                                    }
+                                                }
+                                                saveCurrentSlotSettings()
+                                            }
+                                        ), format: .number)
+                                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                                        Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                            .frame(width: 16, alignment: .leading)
+                                    }
+                                    .frame(width: 185)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(t("Nettogehalt / Monat", "Monthly net salary"))
+                                            .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+                                        if currentSlotSettings.salaryAmount == 0 {
+                                            let hint = detectedSalary > 0
+                                                ? t("Erkannt: \(detectedSalary) €", "Detected: \(detectedSalary) €")
+                                                : t("Setzt MoneyMood-Grün-Schwelle + Ring", "Sets MoneyMood green threshold + ring")
+                                            Text(hint)
+                                                .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary.opacity(0.7))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.top, 12)
+                        .padding(.bottom, 12)
+                        .padding(.leading, 12)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.cardBackground))
+                    }
                 }
             }
-            
-            Divider()
-            
-            // Ziel-Sparrate
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Ziel-Sparrate", "Target savings rate"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Wie viel Prozent deines Einkommens möchtest du sparen? Faustregel: 20% (50/30/20 Regel).", "How much of your income do you want to save? Rule of thumb: 20% (50/30/20 rule)."))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 8) {
-                    TextField("20", value: $targetSavingsRate, format: .number)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(width: 80)
-                    
-                    Text("%")
-                        .font(ThemeFonts.body(size: 13))
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Divider()
-            
-            // Dispositionskredit
-            VStack(alignment: .leading, spacing: 8) {
-                Text(t("Dispositionskredit", "Overdraft limit"))
-                    .font(ThemeFonts.heading(size: 13))
-                Text(t("Dein Dispo-Limit für die Statistik. Leer lassen, wenn kein Dispo vorhanden.", "Your overdraft limit for statistics. Leave empty if no overdraft exists."))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 8) {
-                    TextField("0", value: $dispoLimit, format: .number)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .frame(width: 100)
-                    
-                    Text("€")
-                        .font(ThemeFonts.body(size: 13))
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Divider()
-            
-            // Info-Box
+        }
+        .onAppear { loadSlotSettings() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            if selectedSettingsSlotId != nil { autoDetectSalaryForDisplay(slotId: selectedSettingsSlotId!) }
+        }
+    }
+
+    // MARK: - Finance Settings
+
+    private var financeSettings: some View {
+        VStack(alignment: .leading, spacing: 16) {
+
+            // Info-Box: Wie wird der Score berechnet?
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle")
@@ -877,38 +1377,163 @@ struct SettingsView: View {
                     Text(t("Wie wird der Financial Health Score berechnet?", "How is the Financial Health Score calculated?"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
                 }
-                
+
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Circle().fill(Color.green).frame(width: 10, height: 10)
-                        Text(t("Einnahmendeckung: Verhältnis + Puffer (\(targetBuffer)€)", "Income coverage: ratio + buffer (\(targetBuffer)€)"))
+                        Text(t("Einnahmendeckung: Verhältnis Einnahmen / Ausgaben + absoluter Puffer", "Income coverage: income/expense ratio + absolute buffer margin"))
                             .font(ThemeFonts.body(size: 11))
                     }
                     HStack(spacing: 8) {
                         Circle().fill(Color.cyan).frame(width: 10, height: 10)
-                        Text(t("Sparrate: Ziel ist \(targetSavingsRate)% Überschuss", "Savings rate: target is \(targetSavingsRate)% surplus"))
+                        Text(t("Sparrate: Effektiver Cashflow-Überschuss vs. Ziel-Sparrate", "Savings rate: effective cashflow surplus vs. target rate"))
                             .font(ThemeFonts.body(size: 11))
                     }
                     HStack(spacing: 8) {
                         Circle().fill(Color.red).frame(width: 10, height: 10)
-                        Text(t("Stabilität: Variable Ausgaben ohne Fixkosten", "Stability: variable expenses without fixed costs"))
+                        Text(t("Stabilität: Anteil ungewöhnlich hoher variabler Ausgaben", "Stability: share of unusually high variable expenses"))
                             .font(ThemeFonts.body(size: 11))
-                    }
-                    if dispoLimit > 0 {
-                        HStack(spacing: 8) {
-                            Circle().fill(Color.orange).frame(width: 10, height: 10)
-                            Text(t("Dispo-Nutzung: Tage & Höhe im Minus", "Overdraft usage: days and depth below zero"))
-                                .font(ThemeFonts.body(size: 11))
-                        }
                     }
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.cardBackground)
-                )
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.cardBackground))
             }
+
+            Divider()
+
+            // Stabilitäts-Multiplikator
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t("Stabilitäts-Schwelle", "Stability threshold"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(t(
+                            "Eine Ausgabe gilt als Ausreißer, wenn sie mehr als X-mal so hoch ist wie der Durchschnitt. Kleiner Wert = strenger.",
+                            "A transaction counts as an outlier if it is more than X times the average. Lower = stricter."
+                        ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text(String(format: "%.1f×", scoreStabilityMultiplier))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                        .frame(width: 40, alignment: .trailing)
+                }
+                Slider(value: $scoreStabilityMultiplier, in: 1.0...5.0, step: 0.5)
+                    .frame(maxWidth: .infinity)
+                HStack {
+                    Text(t("1× (streng)", "1× (strict)"))
+                        .font(ThemeFonts.body(size: 10))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(t("5× (locker)", "5× (lenient)"))
+                        .font(ThemeFonts.body(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Divider()
+
+            // Einnahmendeckung: Verhältnis vs. Puffer-Gewichtung
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t("Einnahmendeckung: Gewichtung", "Income coverage: weighting"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(t(
+                            "Anteil des Verhältnis-Scores (vs. Puffer-Score) an der Einnahmendeckung.",
+                            "Share of the ratio score (vs. buffer score) in income coverage."
+                        ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text(t("\(Int(scoreCoverageWeight * 100))% Verhältnis / \(Int((1 - scoreCoverageWeight) * 100))% Puffer",
+                           "\(Int(scoreCoverageWeight * 100))% ratio / \(Int((1 - scoreCoverageWeight) * 100))% buffer"))
+                        .font(ThemeFonts.body(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 130, alignment: .trailing)
+                }
+                Slider(value: $scoreCoverageWeight, in: 0.1...0.9, step: 0.1)
+                    .frame(maxWidth: .infinity)
+                HStack {
+                    Text(t("Puffer-betont", "Buffer-heavy"))
+                        .font(ThemeFonts.body(size: 10))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(t("Verhältnis-betont", "Ratio-heavy"))
+                        .font(ThemeFonts.body(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Divider()
+
+            // Fixkosten-Warnschwelle
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t("Fixkosten-Warnschwelle", "Fixed cost warning ratio"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(t(
+                            "Ab welchem Anteil am Einkommen gelten Fixkosten als kritisch? Empfehlung: 70%.",
+                            "Above which share of income are fixed costs considered critical? Recommended: 70%."
+                        ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text("\(Int(scoreFixedCostWarningRatio * 100))%")
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                        .frame(width: 40, alignment: .trailing)
+                }
+                Slider(value: $scoreFixedCostWarningRatio, in: 0.5...1.0, step: 0.05)
+                    .frame(maxWidth: .infinity)
+                HStack {
+                    Text("50%")
+                        .font(ThemeFonts.body(size: 10))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("100%")
+                        .font(ThemeFonts.body(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Divider()
+
+            // Gehaltstoleranz
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Gehaltstoleranz (Tage)", "Salary tolerance (days)"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t(
+                        "Wie viele Tage vor/nach dem Gehaltsdatum gilt ein Eingang noch als Gehalt?",
+                        "How many days before/after salary day is an income still counted as salary?"
+                    ))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
+                }
+                Spacer()
+                Stepper("\(scoreSalaryToleranceDays) \(t("Tage", "days"))", value: $scoreSalaryToleranceDays, in: 1...14)
+                    .font(ThemeFonts.body(size: 13))
+            }
+
+            Divider()
+
+            // Reset-Button
+            Button(action: {
+                scoreStabilityMultiplier = 3.0
+                scoreCoverageWeight = 0.6
+                scoreFixedCostWarningRatio = 0.70
+                scoreSalaryToleranceDays = 5
+            }) {
+                Text(t("Auf Standard zurücksetzen", "Reset to defaults"))
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(PlainButtonStyle())
         }
     }
     
@@ -1134,7 +1759,7 @@ struct SettingsView: View {
                                 Text(effect.label).tag(effect.rawValue)
                             }
                         }
-                        .frame(width: 160)
+                        .frame(width: 185)
                     }
                     .disabled(confettiIncomeThreshold == 0)
                 } else {
@@ -1170,7 +1795,7 @@ struct SettingsView: View {
                         }) {
                             Text(t("Touch ID deaktivieren", "Disable Touch ID"))
                                 .foregroundColor(.white)
-                                .padding(.horizontal, 16)
+                                .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
                                 .background(Color(NSColor.systemOrange))
                                 .cornerRadius(8)
@@ -1184,10 +1809,10 @@ struct SettingsView: View {
                             biometricOfferDismissed = false
                         }) {
                             Text(t("Beim nächsten Entsperren anbieten", "Offer on next unlock"))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 7)
-                                .background(Color(NSColor.controlAccentColor))
                                 .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 8)
+                                .background(Color(NSColor.controlAccentColor))
                                 .cornerRadius(8)
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -1219,111 +1844,56 @@ struct SettingsView: View {
 
             Divider()
 
-            // MARK: Connected Accounts
+            // MARK: App-Passwort deaktivieren
+            VStack(alignment: .leading, spacing: 8) {
+                Text(t("App-Passwort", "App password"))
+                    .font(ThemeFonts.heading(size: 13))
 
-            if multibankingStore.slots.count > 0 {
-                Divider()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(t("Verbundene Konten", "Connected Accounts"))
-                        .font(ThemeFonts.heading(size: 13))
-
-                    ForEach(multibankingStore.slots) { slot in
-                        HStack(spacing: 12) {
-                            let slotBrand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.iban)
-                            Group {
-                                if let img = logoStore.image(for: slotBrand) {
-                                    Image(nsImage: img)
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(width: 28, height: 28)
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                } else {
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color.secondary.opacity(0.12))
-                                        .frame(width: 28, height: 28)
-                                        .overlay(
-                                            Image(systemName: "building.columns")
-                                                .font(.system(size: 12))
-                                                .foregroundColor(.secondary)
-                                        )
-                                }
-                            }
-                            .onAppear { BankLogoStore.shared.preload(brand: slotBrand) }
-                            VStack(alignment: .leading, spacing: 2) {
-                                if slotBeingRenamed?.id == slot.id {
-                                    HStack(spacing: 6) {
-                                        TextField(t("Name", "Name"), text: $renameText)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .font(ThemeFonts.body(size: 13))
-                                            .frame(minWidth: 100, maxWidth: 160)
-                                            .onSubmit {
-                                                var updated = slot
-                                                updated.displayName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                                                MultibankingStore.shared.updateSlot(updated)
-                                                NotificationCenter.default.post(name: Notification.Name("simplebanking.slotRenamed"), object: nil, userInfo: ["slotId": slot.id])
-                                                slotBeingRenamed = nil
-                                            }
-                                        Button(t("OK", "OK")) {
-                                            var updated = slot
-                                            updated.displayName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            MultibankingStore.shared.updateSlot(updated)
-                                            NotificationCenter.default.post(name: Notification.Name("simplebanking.slotRenamed"), object: nil, userInfo: ["slotId": slot.id])
-                                            slotBeingRenamed = nil
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
-                                        Button(t("Abbruch", "Cancel")) {
-                                            slotBeingRenamed = nil
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
-                                        .foregroundColor(.secondary)
-                                    }
-                                } else {
-                                    Text(slot.displayName.isEmpty ? t("Konto", "Account") : slot.displayName)
-                                        .font(ThemeFonts.body(size: 13))
-                                }
-                                if !slot.iban.isEmpty {
-                                    Text(slot.iban.prefix(4) + " ···· " + slot.iban.suffix(4))
-                                        .font(ThemeFonts.body(size: 11))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            Spacer()
-                            if slotBeingRenamed?.id != slot.id {
-                                Button(action: {
-                                    renameText = slot.displayName
-                                    slotBeingRenamed = slot
-                                }) {
-                                    Image(systemName: "pencil")
-                                        .foregroundColor(.secondary)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                Button(action: {
-                                    slotToDelete = slot
-                                    showSlotDeleteConfirmation = true
-                                }) {
-                                    Text(t("Entfernen", "Remove"))
-                                        .foregroundColor(.red)
-                                        .font(ThemeFonts.body(size: 12))
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                .disabled(multibankingStore.slots.count == 1)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .alert(t("Konto entfernen?", "Remove account?"), isPresented: $showSlotDeleteConfirmation, presenting: slotToDelete) { slot in
-                    Button(t("Entfernen", "Remove"), role: .destructive) {
-                        deleteSlot(id: slot.id)
-                    }
-                    Button(t("Abbrechen", "Cancel"), role: .cancel) {}
-                } message: { slot in
+                if passwordRequired {
                     Text(t(
-                        "Das Konto \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" und alle zugehörigen Daten werden unwiderruflich gelöscht.",
-                        "The account \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" and all its data will be permanently deleted."
+                        "Das App-Passwort schützt deine Bankdaten vor unbefugtem Zugriff.",
+                        "The app password protects your banking data from unauthorized access."
                     ))
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.secondary)
+
+                    Button(action: {
+                        disablePasswordConfirmed = false
+                        disablePasswordError = ""
+                        showDisablePasswordSheet = true
+                    }) {
+                        Text(t("App-Passwort deaktivieren…", "Disable app password…"))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color(NSColor.systemOrange))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: "lock.open.fill")
+                            .foregroundColor(.orange)
+                        Text(t(
+                            "App-Passwort ist deaktiviert. Die App startet ohne Passwort-Abfrage.",
+                            "App password is disabled. The app starts without a password prompt."
+                        ))
+                        .font(ThemeFonts.body(size: 12))
+                        .foregroundColor(.secondary)
+                    }
+                    Button(action: { reenablePassword() }) {
+                        Text(t("App-Passwort wieder aktivieren", "Re-enable app password"))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color(NSColor.controlAccentColor))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
+            }
+            .sheet(isPresented: $showDisablePasswordSheet) {
+                disablePasswordSheet
             }
 
             Divider()
@@ -1340,7 +1910,7 @@ struct SettingsView: View {
                          ? t("Alle Konten zurücksetzen…", "Reset all accounts…")
                          : t("Zurücksetzen…", "Reset…"))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(Color.expenseRed)
                         .cornerRadius(8)
@@ -1352,6 +1922,100 @@ struct SettingsView: View {
             touchIDAvailable = BiometricStore.isAvailable
             touchIDEnabled = BiometricStore.hasSavedPassword
         }
+    }
+
+    // MARK: - Disable Password Sheet
+
+    private var disablePasswordSheet: some View {
+        VStack(spacing: 20) {
+            // Icon + Titel
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(.orange)
+                Text(t("App-Passwort deaktivieren", "Disable app password"))
+                    .font(ThemeFonts.heading(size: 18, weight: .bold))
+                Text(t(
+                    "Ohne Passwort hat jede Person mit Zugang zu deinem Mac direkten Einblick in alle deine Bankdaten.",
+                    "Without a password, anyone with access to your Mac can directly view all your banking data."
+                ))
+                .font(ThemeFonts.body(size: 13))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Warnung-Box
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    t("Nicht empfohlen", "Not recommended"),
+                    systemImage: "shield.slash.fill"
+                )
+                .font(ThemeFonts.body(size: 13, weight: .medium))
+                .foregroundColor(.orange)
+
+                Text(t(
+                    "Dein Passwort wird im Schlüsselbund gespeichert, damit die App automatisch entsperren kann. Die Verschlüsselung bleibt erhalten — aber der Schutz vor unbefugtem Zugriff entfällt.",
+                    "Your password will be stored in the Keychain so the app can auto-unlock. Encryption stays intact — but protection against unauthorized access is removed."
+                ))
+                .font(ThemeFonts.body(size: 12))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+
+            // Bestätigungs-Checkbox
+            HStack(alignment: .top, spacing: 10) {
+                Toggle("", isOn: $disablePasswordConfirmed)
+                    .toggleStyle(CheckboxToggleStyle())
+                    .labelsHidden()
+                Text(t(
+                    "Jaja, verstanden. Ich möchte das App-Passwort trotzdem deaktivieren.",
+                    "Yes, I understand. I still want to disable the app password."
+                ))
+                .font(ThemeFonts.body(size: 13))
+                .fixedSize(horizontal: false, vertical: true)
+                .onTapGesture { disablePasswordConfirmed.toggle() }
+            }
+
+            // Fehlermeldung
+            if !disablePasswordError.isEmpty {
+                Text(disablePasswordError)
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.red)
+            }
+
+            // Buttons
+            HStack(spacing: 12) {
+                Button(t("Abbrechen", "Cancel")) {
+                    showDisablePasswordSheet = false
+                    disablePasswordConfirmed = false
+                    disablePasswordError = ""
+                }
+                .buttonStyle(PlainButtonStyle())
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.controlBackgroundColor)))
+
+                Button(action: { disablePasswordWithVerification() }) {
+                    Text(t("Passwort deaktivieren", "Disable password"))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(disablePasswordConfirmed ? Color.orange : Color(NSColor.disabledControlTextColor).opacity(0.3))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(!disablePasswordConfirmed)
+            }
+        }
+        .padding(28)
+        .frame(width: 420)
     }
     
     // MARK: - About Section
@@ -1547,6 +2211,18 @@ struct SettingsView: View {
 
             Divider()
 
+            // Gehaltsring
+            SettingsToggleRow(
+                title: t("Gehaltsring anzeigen", "Show Salary Ring"),
+                subtitle: t(
+                    "Zeigt einen Ring im Flyout und in der Umsatzliste, der angibt wie viel vom Gehalt noch übrig ist. Wird im Mehrkonto-Ansicht automatisch ausgeblendet.",
+                    "Shows a ring in the flyout and transaction list indicating how much of the salary remains. Hidden automatically in multi-account view."
+                ),
+                isOn: $monthRingEnabled
+            )
+
+            Divider()
+
             // Change 3 — AI categorization toggle
             SettingsToggleRow(
                 title: t("AI-Transaktions-Kategorisierung", "AI Transaction Categorization"),
@@ -1556,6 +2232,191 @@ struct SettingsView: View {
                 ),
                 isOn: $aiCategorizationEnabled
             )
+
+            Divider()
+
+            // Brandfetch Logos
+            SettingsToggleRow(
+                title: t("Brandfetch Händler-Logos", "Brandfetch Merchant Logos"),
+                subtitle: t(
+                    "Lädt Logos bekannter Marken über Brandfetch. Es werden ausschließlich Firmennamen (keine IBANs, Beträge oder Transaktionsdaten) übermittelt.",
+                    "Fetches logos for known brands via Brandfetch. Only company names are transmitted — no IBANs, amounts, or transaction data."
+                ),
+                isOn: $brandfetchEnabled
+            )
+
+            if brandfetchEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(t("Brandfetch Client ID", "Brandfetch Client ID"))
+                        .font(ThemeFonts.body(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    TextField(t("Client ID (c=...)", "Client ID (c=...)"), text: $brandfetchClientId)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .font(ThemeFonts.body(size: 12))
+                }
+                .padding(.leading, 4)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            Divider()
+
+            // Claude / MCP
+            mcpSettings
+
+            Divider()
+
+            // Logo Cache löschen
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Logo-Cache löschen", "Clear Logo Cache"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t(
+                        "Alle gespeicherten Logos werden gelöscht und beim nächsten Anzeigen neu geladen.",
+                        "All cached logos are deleted and reloaded on next display."
+                    ))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
+                    if !logoCacheClearStatus.isEmpty {
+                        Text(logoCacheClearStatus)
+                            .font(ThemeFonts.body(size: 11))
+                            .foregroundColor(.secondary)
+                            .transition(.opacity)
+                    }
+                }
+                Spacer()
+                Button(t("Löschen", "Clear")) {
+                    MerchantLogoService.shared.clearCache()
+                    logoCacheClearStatus = t("Cache geleert.", "Cache cleared.")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        logoCacheClearStatus = ""
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: brandfetchEnabled)
+    }
+
+    // MARK: - MCP Settings
+
+    private var mcpConfigJSON: String {
+        let mcpPath = Bundle.main.bundlePath + "/Contents/MacOS/simplebanking-mcp"
+        return """
+        {
+          "mcpServers": {
+            "simplebanking": {
+              "command": "\(mcpPath)"
+            }
+          }
+        }
+        """
+    }
+
+    private func autoSetupMCP() {
+        let configURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
+        let mcpPath = Bundle.main.bundlePath + "/Contents/MacOS/simplebanking-mcp"
+
+        var config: [String: Any] = [:]
+        var existingData: Data? = nil
+        if let data = try? Data(contentsOf: configURL) {
+            existingData = data
+            if let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                config = parsed
+            }
+        }
+
+        if let existing = (config["mcpServers"] as? [String: Any])?["simplebanking"] as? [String: Any],
+           existing["command"] as? String == mcpPath {
+            mcpSetupState = .alreadySet
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { mcpSetupState = .idle }
+            return
+        }
+
+        if let data = existingData, !data.isEmpty {
+            let backupURL = configURL.deletingLastPathComponent()
+                .appendingPathComponent("claude_desktop_config.backup.json")
+            try? data.write(to: backupURL, options: .atomic)
+        }
+
+        var servers = config["mcpServers"] as? [String: Any] ?? [:]
+        servers["simplebanking"] = ["command": mcpPath]
+        config["mcpServers"] = servers
+
+        guard let data = try? JSONSerialization.data(withJSONObject: config,
+                                                     options: [.prettyPrinted, .sortedKeys]),
+              (try? data.write(to: configURL, options: .atomic)) != nil else {
+            mcpSetupState = .error(t("Schreiben fehlgeschlagen", "Write failed"))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { mcpSetupState = .idle }
+            return
+        }
+        mcpSetupState = .success
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { mcpSetupState = .idle }
+    }
+
+    private var mcpSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(t("Claude / MCP", "Claude / MCP"))
+                .font(ThemeFonts.heading(size: 13))
+
+            Text(t(
+                "Der integrierte MCP-Server ermöglicht Claude Desktop direkten Lesezugriff auf deine lokalen Transaktionsdaten — ohne laufende App, ohne Internet.",
+                "The built-in MCP server lets Claude Desktop read your local transaction data directly — no running app, no internet required."
+            ))
+            .font(ThemeFonts.body(size: 12))
+            .foregroundColor(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(t(
+                    "Füge dies in ~/Library/Application Support/Claude/claude_desktop_config.json ein:",
+                    "Add this to ~/Library/Application Support/Claude/claude_desktop_config.json:"
+                ))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
+
+                Text(mcpConfigJSON)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.primary.opacity(0.8))
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.05))
+                    .cornerRadius(6)
+            }
+
+            HStack(spacing: 8) {
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(mcpConfigJSON, forType: .string)
+                    mcpConfigCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { mcpConfigCopied = false }
+                } label: {
+                    Label(
+                        mcpConfigCopied ? t("Kopiert!", "Copied!") : t("Config kopieren", "Copy config"),
+                        systemImage: mcpConfigCopied ? "checkmark" : "doc.on.doc"
+                    )
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    autoSetupMCP()
+                } label: {
+                    switch mcpSetupState {
+                    case .idle:
+                        Label(t("Automatisch einrichten", "Set up automatically"), systemImage: "sparkles")
+                    case .success:
+                        Label(t("Eingerichtet! Claude neu starten.", "Done! Restart Claude."), systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                    case .alreadySet:
+                        Label(t("Bereits eingerichtet", "Already configured"), systemImage: "checkmark")
+                    case .error(let msg):
+                        Label(msg, systemImage: "xmark.circle")
+                            .foregroundColor(.red)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(mcpSetupState != .idle)
+            }
         }
     }
 
@@ -1563,8 +2424,17 @@ struct SettingsView: View {
         // Delete all credentials, DB files, attachments (all slots)
         CredentialsStore.deleteAllData()
         BiometricStore.clear()
+        BiometricStore.clearAutoUnlock()
         llmAPIKeyPresent = false
         publishAPIKeyChanged(nil)
+
+        // Clear YAXI keychain sessions for all slots
+        let allSlotIds = MultibankingStore.shared.slots.map { $0.id } + ["legacy"]
+        Task {
+            for slotId in allSlotIds {
+                await YaxiService.clearSessionData(forSlotId: slotId)
+            }
+        }
 
         // Reset all UserDefaults
         if let bundleID = Bundle.main.bundleIdentifier {
