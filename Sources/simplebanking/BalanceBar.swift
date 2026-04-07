@@ -1,10 +1,22 @@
 import AppKit
+import Combine
 import Foundation
 import Routex
 import SwiftUI
 import UserNotifications
 import ServiceManagement
 
+extension Notification.Name {
+    static let slotSettingsChanged = Notification.Name("simplebanking.slotSettingsChanged")
+}
+
+// Custom vertical alignment: aligns ring center with balance-amount text center.
+private extension VerticalAlignment {
+    private enum BalanceTextCenter: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat { d.height / 2 }
+    }
+    static let balanceTextCenter = VerticalAlignment(BalanceTextCenter.self)
+}
 
 // MARK: - Credentials Panel (custom, because NSAlert sizing is limited)
 
@@ -213,9 +225,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
 
     @AppStorage("demoMode") private var demoMode: Bool = false
+    @AppStorage("demoStyle") private var demoStyle: Int = 0   // 0 = single, 1 = multi
     @AppStorage("demoSeed") private var demoSeed: Int = 123456
+    private var updateChecker: UpdateChecker?
 
-    @AppStorage("hideIndex") private var hideIndex: Int = 2 // 0=off, 1=immediate, 2=5s, 3=10s
+    private var isMultiDemo: Bool { demoMode && demoStyle == 1 }
+
+    // Backup storage for slot state before multi-demo was activated
+    private var demoPreviousSlots: [BankSlot] = []
+    private var demoPreviousActiveIndex: Int = 0
+    private var demoPreviousUnifiedMode: Bool = false
+
+    private var hideIndex: Int {
+        get { UserDefaults.standard.object(forKey: "hideIndex") as? Int ?? 2 }
+        set { UserDefaults.standard.set(newValue, forKey: "hideIndex") }
+    }
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage("menubarStyle") private var menubarStyle: Int = 1  // 0=lang (fixed), 1=kurz (dynamic)
     @AppStorage("refreshInterval") private var refreshInterval: Int = 60
@@ -234,10 +258,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @AppStorage("connectedBankDisplayName") private var connectedBankDisplayName: String = ""
     @AppStorage("connectedBankLogoID") private var connectedBankLogoID: String = ""
 
-    @AppStorage("lastSeenTxSig") private var lastSeenTxSig: String = ""
     @AppStorage("confettiLastIncomeTxSig") private var confettiLastIncomeTxSig: String = ""
-    private var latestTxSig: String = ""
+    /// Per-slot dict: latest tx sig observed from YAXI (not yet "seen" by opening the panel).
+    private var latestTxSigBySlot: [String: String] = [:]
     private var flyoutRippleTrigger: Int = 0
+    private var logoObserver: AnyCancellable?
+    private var txObserver: AnyCancellable?
+
+    // MARK: - Per-slot lastSeenTxSig helpers
+
+    private func lastSeenTxSig(for slotId: String) -> String {
+        UserDefaults.standard.string(forKey: "simplebanking.lastSeenTxSig.\(slotId)") ?? ""
+    }
+
+    private func setLastSeenTxSig(_ sig: String, for slotId: String) {
+        UserDefaults.standard.set(sig, forKey: "simplebanking.lastSeenTxSig.\(slotId)")
+    }
+
+    /// One-time migration: copy old scalar lastSeenTxSig → legacy slot key.
+    private func migrateLastSeenTxSigIfNeeded() {
+        let legacyKey = "simplebanking.lastSeenTxSig.legacy"
+        guard UserDefaults.standard.string(forKey: legacyKey) == nil,
+              let old = UserDefaults.standard.string(forKey: "lastSeenTxSig"), !old.isEmpty else { return }
+        UserDefaults.standard.set(old, forKey: legacyKey)
+    }
     
     // Für Balance-Anzeige
     private(set) var lastBalance: Double? = nil
@@ -256,21 +300,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastShownTitle: String = "—"
     
     private var settingsPanel: SettingsPanel?
-    private var updateChecker: UpdateChecker?
     private var refreshIntervalObserver: Any?
     private var apiKeyObserver: Any?
     private var languageObserver: Any?
     private var balanceDisplayModeObserver: Any?
+    private var addAccountObserver: Any?
+    private var globalHotkeyObserver: Any?
     private var didTriggerAutoSetupThisLaunch: Bool = false
     // After a missed SCA redirect, pause auto-refresh to avoid burning through the bank's
     // daily SCA authorization limit (e.g. Sparkasse allows ~4 redirects per day).
     private var scaBackoffUntil: Date? = nil
 
     private func decoratedTitle(_ title: String) -> String {
-        // New booking indicator: dot if unseen newer transactions exist.
-        if !latestTxSig.isEmpty, latestTxSig != lastSeenTxSig {
-            return "\(title)  ●"
+        // New booking indicator: dot if any slot has unseen newer transactions.
+        let hasNew = latestTxSigBySlot.contains { slotId, sig in
+            !sig.isEmpty && sig != lastSeenTxSig(for: slotId)
         }
+        if hasNew { return "\(title)  ●" }
         return title
     }
 
@@ -323,6 +369,150 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return sized
     }
 
+    /// Computes the unified balance string for the menu bar (all slots summed).
+    /// Returns nil if unified mode is off, no slots have cached balances, or only one slot exists.
+    private func computeUnifiedBalanceTitle() -> String? {
+        guard txVM.isUnifiedMode else { return nil }
+        let slots = MultibankingStore.shared.slots
+        guard slots.count > 1 else { return nil }
+        // Read cached balances; skip slots without a cached value (never synced)
+        var byCurrency: [String: Double] = [:]
+        for slot in slots {
+            guard let balance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double else { continue }
+            let currency = slot.currency ?? "EUR"
+            byCurrency[currency, default: 0] += balance
+        }
+        guard !byCurrency.isEmpty else { return nil }
+        // Sort by abs(balance) descending, cap at 2 currencies + "+N"
+        let sorted = byCurrency.sorted { abs($0.value) > abs($1.value) }
+        func fmt(_ currency: String, _ amount: Double) -> String {
+            let symbol: String
+            switch currency {
+            case "EUR": symbol = "€"
+            case "USD": symbol = "$"
+            case "GBP": symbol = "£"
+            case "CHF": symbol = "₣"
+            default: symbol = currency
+            }
+            let absAmt = abs(amount)
+            let formatted: String
+            if absAmt >= 1000 {
+                formatted = String(format: "%.0f", absAmt)
+                    .reversed()
+                    .enumerated()
+                    .map { $0.offset > 0 && $0.offset % 3 == 0 ? ".\(String($0.element))" : String($0.element) }
+                    .reversed()
+                    .joined()
+            } else {
+                formatted = String(format: "%.0f", absAmt)
+            }
+            return amount < 0 ? "-\(symbol) \(formatted)" : "\(symbol) \(formatted)"
+        }
+        let shown = sorted.prefix(2)
+        let overflow = sorted.count - 2
+        var parts = shown.map { fmt($0.key, $0.value) }
+        if overflow > 0 { parts.append("+\(overflow)") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Builds per-slot display items for the unified flyout card.
+    private func computeFlyoutSlots() -> [FlyoutSlotItem] {
+        let store = MultibankingStore.shared
+        return store.slots.map { slot in
+            let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.iban)
+            BankLogoStore.shared.preload(brand: brand)
+            let logo = BankLogoStore.shared.image(for: brand)
+            let balance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double
+            let currency = slot.currency ?? "EUR"
+            let symbol: String
+            switch currency {
+            case "EUR": symbol = "€"
+            case "USD": symbol = "$"
+            case "GBP": symbol = "£"
+            case "CHF": symbol = "₣"
+            default: symbol = currency
+            }
+            let balText: String
+            if let b = balance {
+                let absAmt = abs(b)
+                let formatted: String
+                if absAmt >= 1000 {
+                    formatted = String(format: "%.0f", absAmt)
+                        .reversed()
+                        .enumerated()
+                        .map { $0.offset > 0 && $0.offset % 3 == 0 ? ".\(String($0.element))" : String($0.element) }
+                        .reversed()
+                        .joined()
+                } else {
+                    formatted = String(format: "%.0f", absAmt)
+                }
+                balText = b < 0 ? "-\(symbol) \(formatted)" : "\(symbol) \(formatted)"
+            } else {
+                balText = "--"
+            }
+            let barColor: Color
+            if let hex = slot.customColor, let c = Color(hex: hex) {
+                barColor = c
+            } else if let logoId = slot.logoId,
+                      let hex = GeneratedBankColors.primaryColor(forLogoId: logoId),
+                      let c = Color(hex: hex) {
+                barColor = c
+            } else {
+                barColor = Color.secondary.opacity(0.4)
+            }
+            return FlyoutSlotItem(
+                logo: logo,
+                brandId: brand?.id,
+                balanceText: balText,
+                isNegative: balance.map { $0 < 0 } ?? false,
+                barColor: barColor,
+                nickname: slot.nickname
+            )
+        }
+    }
+
+    /// Computes the unified total balance (Double) for the flyout card.
+    private func computeUnifiedFlyoutTotal() -> Double? {
+        guard txVM.isUnifiedMode else { return nil }
+        let slots = MultibankingStore.shared.slots
+        guard slots.count > 1 else { return nil }
+        var total = 0.0
+        var hasAny = false
+        for slot in slots {
+            guard let b = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double else { continue }
+            total += b
+            hasAny = true
+        }
+        return hasAny ? total : nil
+    }
+
+    /// Ring fraction: balance / salaryReference, 0…1.
+    /// Uses salary (manual or auto-detected from loaded transactions) as 100% mark.
+    /// Falls back to balanceSignalMediumUpperBound only when no salary is known.
+    private func computeGreenZoneFraction() -> Double {
+        let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        let s = BankSlotSettingsStore.load(slotId: slotId)
+        let reference: Int
+        if s.salaryAmount > 0 {
+            reference = s.salaryAmount
+        } else {
+            let detected = SalaryProgressCalculator.detectedIncome(
+                salaryDay: s.effectiveSalaryDay,
+                tolerance: s.salaryDayTolerance,
+                transactions: txVM.transactions)
+            reference = detected > 0 ? Int(detected.rounded()) : s.balanceSignalMediumUpperBound
+        }
+        return SalaryProgressCalculator.greenZoneFraction(
+            balance: lastBalance,
+            mediumThreshold: reference)
+    }
+
+    /// Computes the unified total balance for the flyout card (formatted with cents).
+    private func computeUnifiedFlyoutBalanceText() -> String? {
+        guard let total = computeUnifiedFlyoutTotal() else { return nil }
+        return formatEURWithCents(total)
+    }
+
     private func updateMenuBarButton() {
         guard let button = statusItem?.button else { return }
         guard !locked else { return }
@@ -331,11 +521,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let logo = menuBarLogoImage()
 
         // Logo on the LEFT, text on the right.
+        // In unified mode: use building.columns.fill SF Symbol instead of active slot logo.
         // If no logo: "€" is prepended to the title text instead.
-        button.image = logo
-        button.imagePosition = logo != nil ? .imageLeft : .noImage
+        if txVM.isUnifiedMode && (!demoMode || isMultiDemo) {
+            let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            if let unifiedIcon = NSImage(systemSymbolName: "building.columns.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) {
+                unifiedIcon.isTemplate = true
+                button.image = unifiedIcon
+                button.imagePosition = .imageLeft
+            } else {
+                button.image = logo
+                button.imagePosition = logo != nil ? .imageLeft : .noImage
+            }
+        } else {
+            button.image = logo
+            button.imagePosition = logo != nil ? .imageLeft : .noImage
+        }
 
-        let p = logo != nil ? " " : "€ "  // prefix: space after logo, or "€ " when no logo
+        let p = " "  // small gap; currency symbol is part of the formatted amount
 
         // TAN / 2FA pending
         if isTanPending {
@@ -357,8 +561,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        // Normal balance
-        setButtonTitle(button, "\(p)\(decoratedTitle(lastShownTitle))")
+        // Normal balance (unified sum when in unified mode)
+        if let unifiedTitle = computeUnifiedBalanceTitle() {
+            let indicator = latestTxSigBySlot.contains { id, sig in !sig.isEmpty && sig != lastSeenTxSig(for: id) } ? "  ●" : ""
+            setButtonTitle(button, "\(unifiedTitle)\(indicator)")
+        } else {
+            setButtonTitle(button, "\(p)\(decoratedTitle(lastShownTitle))")
+        }
         statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
     }
 
@@ -482,6 +691,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         txVM.connectedBankDisplayName = resolvedName
         txVM.connectedBankLogoID = resolvedLogo.isEmpty ? nil : resolvedLogo
         txVM.connectedBankIBAN = normalizedIBAN.isEmpty ? nil : normalizedIBAN
+        txVM.connectedBankCurrency = slot.currency
+        txVM.connectedBankNickname = slot.nickname
+
+        // Kick off logo download immediately so the balance card and titlebar
+        // have the image ready (or nearly ready) when SwiftUI re-renders.
+        let brand = BankLogoAssets.resolve(displayName: resolvedName,
+                                           logoID: resolvedLogo.isEmpty ? nil : resolvedLogo,
+                                           iban: normalizedIBAN.isEmpty ? nil : normalizedIBAN)
+        BankLogoStore.shared.preload(brand: brand)
+        txVM.connectedBankLogoImage = BankLogoStore.shared.image(for: brand)
     }
 
     private func updateConnectedBankState(_ bank: DiscoveredBank, iban: String? = nil) {
@@ -500,13 +719,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         connectedBankLogoID = ""
         txVM.connectedBankDisplayName = ""
         txVM.connectedBankLogoID = nil
+        txVM.connectedBankLogoImage = nil
         txVM.connectedBankIBAN = nil
+        txVM.connectedBankCurrency = nil
+        txVM.connectedBankNickname = nil
     }
 
     private let txVM = TransactionsViewModel()
     private var txPanel: TransactionsPanel?
     private var statusMenu: NSMenu?
     private var balancePopover: NSPopover?
+    private var isFlyoutHovered: Bool = false
     private var statusButtonTrackingArea: NSTrackingArea?
     private var isHoverRevealingBalance: Bool = false
 
@@ -534,7 +757,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let eurWholeNumberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "de_DE")
-        formatter.numberStyle = .decimal
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "EUR"
         formatter.maximumFractionDigits = 0
         formatter.minimumFractionDigits = 0
         return formatter
@@ -595,6 +819,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        // One-time migration: copy scalar lastSeenTxSig → per-slot key for legacy slot.
+        migrateLastSeenTxSigIfNeeded()
+
         installEditMenu()
         do {
             try TransactionsDatabase.migrate()
@@ -612,7 +839,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        
+        statusItem.autosaveName = "com.simplebanking.statusItem"
+
         if let btn = statusItem.button {
              // Create a dummy image to force layout height/alignment
              let img = NSImage(size: NSSize(width: 1, height: 16), flipped: false) { _ in true } // 1x16 to ensure height
@@ -629,13 +857,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         installStatusButtonTracking()
 
+        // When a bank logo finishes downloading, refresh the flyout and menu bar button
+        // so the correct icon appears without needing a manual account switch.
+        logoObserver = BankLogoStore.shared.$images
+            .receive(on: DispatchQueue.main)
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.refreshFlyoutIfVisible()
+                self?.updateMenuBarButton()
+                self?.updateTxPanelAccountNav()
+                self?.updateTxPanelLogoImage()
+            }
+
+        // When transactions are loaded (from DB cache or network), refresh the flyout so the
+        // ring fraction is correct even if the flyout was opened before the first refresh.
+        txObserver = txVM.$transactions
+            .receive(on: DispatchQueue.main)
+            .dropFirst()
+            .sink { [weak self] _ in self?.refreshFlyoutIfVisible() }
+
+        // When per-slot settings change (e.g. Kritische Schwelle), refresh the flyout so
+        // MoneyMood and thresholds update immediately without reopening.
+        NotificationCenter.default.addObserver(forName: .slotSettingsChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshFlyoutIfVisible()
+        }
+
+        // Register UserDefaults defaults (only apply when key has no stored value).
+        UserDefaults.standard.register(defaults: ["celebrationStyle": 1])
+
         // Unlock on startup if encrypted credentials exist (but not in demo mode)
         if CredentialsStore.exists() && !demoMode {
-            locked = true
-            promptUnlockIfNeeded()
+            let pwRequired = UserDefaults.standard.object(forKey: "passwordRequired") as? Bool ?? true
+            if !pwRequired, let autoPw = BiometricStore.loadAutoUnlockPassword() {
+                // Auto-unlock without prompt
+                if let _ = try? CredentialsStore.load(masterPassword: autoPw) {
+                    masterPassword = autoPw
+                    locked = false
+                    Task { await refreshAsync() }
+                } else {
+                    // Auto-unlock password mismatch → fall back to prompt
+                    locked = true
+                    promptUnlockIfNeeded()
+                }
+            } else {
+                locked = true
+                promptUnlockIfNeeded()
+            }
         } else if demoMode {
             // Demo mode starts unlocked with demo data
             locked = false
+            if demoStyle == 1 { activateMultiDemo() }
             Task { await refreshAsync() }
         }
 
@@ -657,7 +928,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ── Automatisch verstecken (submenu) ─────────────────────────────
         let hideSub = NSMenu()
 
-        let immediateItem = NSMenuItem(title: t("Sofort", "Immediately"), action: #selector(setHideImmediate), keyEquivalent: "")
+        let immediateItem = NSMenuItem(title: t("2 Sekunden", "2 Seconds"), action: #selector(setHideImmediate), keyEquivalent: "")
         immediateItem.tag = 411
         immediateItem.state = (hideIndex == 1) ? .on : .off
         hideSub.addItem(immediateItem)
@@ -671,6 +942,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tenSecItem.tag = 413
         tenSecItem.state = (hideIndex == 3) ? .on : .off
         hideSub.addItem(tenSecItem)
+
+        let twentySecItem = NSMenuItem(title: t("Nach 20 Sekunden", "After 20 seconds"), action: #selector(setHide60), keyEquivalent: "")
+        twentySecItem.tag = 414
+        twentySecItem.state = (hideIndex == 4) ? .on : .off
+        hideSub.addItem(twentySecItem)
 
         let offItem = NSMenuItem(title: t("Aus", "Off"), action: #selector(setHideOff), keyEquivalent: "")
         offItem.tag = 410
@@ -692,6 +968,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             img.isTemplate = true; lockItem.image = img
         }
         menu.addItem(lockItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // ── Einstellungen (submenu) ───────────────────────────────────────
@@ -710,14 +987,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Demo-Modus submenu
         let demoSub = NSMenu()
 
-        let demoOnItem = NSMenuItem(title: t("An", "On"), action: #selector(setDemoOn), keyEquivalent: "")
-        demoOnItem.tag = 3011
-        demoOnItem.state = demoMode ? .on : .off
-        demoSub.addItem(demoOnItem)
+        let demoSingleItem = NSMenuItem(title: t("Single-Banking", "Single Banking"), action: #selector(setDemoSingle), keyEquivalent: "")
+        demoSingleItem.tag = 3011
+        demoSingleItem.state = (demoMode && !isMultiDemo) ? .on : .off
+        demoSub.addItem(demoSingleItem)
+
+        let demoMultiItem = NSMenuItem(title: t("Multi-Banking", "Multi Banking"), action: #selector(setDemoMulti), keyEquivalent: "")
+        demoMultiItem.tag = 3013
+        demoMultiItem.state = isMultiDemo ? .on : .off
+        demoSub.addItem(demoMultiItem)
 
         let demoOffItem = NSMenuItem(title: t("Aus", "Off"), action: #selector(setDemoOff), keyEquivalent: "")
         demoOffItem.tag = 3010
-        demoOffItem.state = demoMode ? .off : .on
+        demoOffItem.state = !demoMode ? .on : .off
         demoSub.addItem(demoOffItem)
 
         demoSub.addItem(NSMenuItem.separator())
@@ -740,39 +1022,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(einstellungenItem)
         menu.addItem(NSMenuItem.separator())
 
-        // ── Nach Updates suchen ───────────────────────────────────────────
-        let updateItem = NSMenuItem(title: t("Nach Updates suchen…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "u")
-        updateItem.tag = 202
-        if let img = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil) {
-            img.isTemplate = true; updateItem.image = img
-        }
-        menu.addItem(updateItem)
-
         // ── Support (submenu) ─────────────────────────────────────────────
         let supportSub = NSMenu()
 
         let diagEnableItem = NSMenuItem(title: t("Diagnose aktivieren", "Enable Diagnostics"), action: #selector(toggleSupportDiagnostics), keyEquivalent: "")
         diagEnableItem.tag = 501
+        diagEnableItem.target = self
         diagEnableItem.state = appLoggingEnabled ? .on : .off
         supportSub.addItem(diagEnableItem)
 
         let diagReportItem = NSMenuItem(title: t("Diagnosebericht versenden…", "Send Diagnostic Report…"), action: #selector(sendDiagnosticReport), keyEquivalent: "")
         diagReportItem.tag = 502
+        diagReportItem.target = self
         supportSub.addItem(diagReportItem)
 
         supportSub.addItem(NSMenuItem.separator())
 
         let openLogsItem = NSMenuItem(title: t("Logs öffnen", "Open Logs"), action: #selector(openLogs), keyEquivalent: "")
         openLogsItem.tag = 503
+        openLogsItem.target = self
         supportSub.addItem(openLogsItem)
 
         let docItem = NSMenuItem(title: t("Dokumentation", "Documentation"), action: #selector(openDocumentation), keyEquivalent: "")
         docItem.tag = 504
+        docItem.target = self
         supportSub.addItem(docItem)
 
         supportSub.addItem(NSMenuItem.separator())
 
         let forgetItem = NSMenuItem(title: t("Zurücksetzen", "Reset"), action: #selector(resetApp), keyEquivalent: "")
+        forgetItem.target = self
         forgetItem.tag = 101
         if let img = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil) {
             img.isTemplate = true
@@ -787,6 +1066,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             img.isTemplate = true; supportItem.image = img
         }
         menu.addItem(supportItem)
+        menu.addItem(NSMenuItem.separator())
+
+        // ── Nach Updates suchen ───────────────────────────────────────────
+        let updateItem = NSMenuItem(title: t("Nach Updates suchen…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.tag = 202
+        menu.addItem(updateItem)
         menu.addItem(NSMenuItem.separator())
 
         // ── Beenden ───────────────────────────────────────────────────────
@@ -804,6 +1089,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         syncAutoHideMenuState()
 
         txPanel = TransactionsPanel(vm: txVM, onRefresh: { [weak self] in
+            // Only open/refresh if the panel is already visible.
+            // This prevents onChange(of: unifiedModeEnabled) in TransactionsPanelView
+            // from auto-opening the panel when unified mode is toggled from the flyout.
+            guard self?.txPanel?.isVisible == true else { return }
             await self?.openTransactionsPanel()
         }, onSettings: { [weak self] in
             self?.showSettings()
@@ -899,13 +1188,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        addAccountObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.addAccount"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.connect()
+        }
+
         refresh()
 
         // Preload subscription logos once so the Abos sheet can render icons immediately.
         SubscriptionLogoStore.shared.preloadInitial(displayNames: LogoAssets.allDisplayNames)
 
-        updateChecker = UpdateChecker()
         autoStartSetupWizardIfNeeded()
+
+        setupGlobalHotkey()
+        globalHotkeyObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.globalHotkeyChanged"),
+            object: nil, queue: .main
+        ) { [weak self] _ in self?.setupGlobalHotkey() }
+
+        updateChecker = UpdateChecker()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -920,6 +1224,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = balanceDisplayModeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = addAccountObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = globalHotkeyObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -941,56 +1251,143 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { await refreshAsync() }
     }
 
+    // Called from SetupFlowPanel outcome — activates single demo
     @objc private func toggleDemoMode() {
-        demoMode.toggle()
+        if !demoMode { setDemoSingle() } else { setDemoOff() }
+    }
+
+    @objc private func setDemoSingle() {
+        let wasMulti = isMultiDemo
+        if wasMulti { tearDownMultiDemo() }
+        demoStyle = 0
+        demoMode = true
+        demoSeed = Int.random(in: 1...Int.max)
+        txVM.anthropicApiKey = nil
+        txVM.connectedBankDisplayName = "Demo-Bank"
+        txVM.connectedBankLogoID = nil
+        txVM.connectedBankIBAN = nil
+        var seed = UInt64(truncatingIfNeeded: demoSeed)
+        let fake = FakeData.demoBalance(seed: &seed)
+        lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
+        lastBalance = fake
+        txVM.currentBalance = formatEURWithCents(fake)
+        applyBalanceDisplayModeConstraints()
+        updateStatusBalanceTitle()
+        updateMenuBarButton()
+        statusItem.button?.toolTip = "🎭 Demo-Modus: Single-Banking"
         rebuildMenuTitleForDemoMode()
-        if demoMode {
-            randomizeDemo() // Shuffle on enable
-            txVM.anthropicApiKey = nil
-            txVM.connectedBankDisplayName = "Demo-Bank"
-            txVM.connectedBankLogoID = nil
-            txVM.connectedBankIBAN = nil
-            // Sofort Fake-Kontostand anzeigen – gleiche Funktion wie refreshAsync/openTransactionsPanel
-            var seed = UInt64(truncatingIfNeeded: demoSeed)
-            let fake = FakeData.demoBalance(seed: &seed)
-            lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
-            lastBalance = fake
-            txVM.currentBalance = formatEURWithCents(fake)
-            applyBalanceDisplayModeConstraints()
-            updateStatusBalanceTitle()
-            statusItem.button?.toolTip = "Demo Mode: Zufälliger Kontostand"
+    }
+
+    @objc private func setDemoMulti() {
+        let wasMulti = isMultiDemo
+        if wasMulti { tearDownMultiDemo() }
+        demoStyle = 1
+        demoMode = true
+        demoSeed = Int.random(in: 1...Int.max)
+        activateMultiDemo()
+        rebuildMenuTitleForDemoMode()
+    }
+
+    @objc private func setDemoOff() {
+        guard demoMode else { return }
+        if isMultiDemo { tearDownMultiDemo() }
+        demoMode = false
+        demoStyle = 0
+        txVM.transactions = []
+        txVM.resetPaging()
+        rebuildMenuTitleForDemoMode()
+        // Apply the live slot BEFORE checking credentials — CredentialsStore context
+        // (slot ID) must be set correctly, otherwise exists() returns false and the
+        // menu shows "Verbinden" even though credentials are stored on disk.
+        if let slot = MultibankingStore.shared.activeSlot {
+            applySlotToViewModel(slot)
+        }
+        updateTxPanelAccountNav()
+        if CredentialsStore.exists() {
+            locked = true
+            showLockIcon()
+            promptUnlockIfNeeded()
         } else {
-            // Demo aus: Wechsel zu Live-Modus
-            if CredentialsStore.exists() {
-                // Credentials vorhanden → Passwort abfragen
-                locked = true
-                showLockIcon()
-                promptUnlockIfNeeded()
-            } else {
-                // Keine Credentials → Zeige Verbindungs-Hinweis
-                statusItem.button?.title = t("Verbinden…", "Connect…")
-                statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
-            }
-            // Kontoname/-logo sofort aus aktivem Slot wiederherstellen
-            if let slot = MultibankingStore.shared.activeSlot {
-                applySlotToViewModel(slot)
-            }
-            updateTxPanelAccountNav()
+            statusItem.button?.title = t("Verbinden…", "Connect…")
+            statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
         }
     }
 
     @objc private func randomizeDemo() {
         demoSeed = Int.random(in: 1...Int.max)
-        let seed = demoSeed
-        Task.detached { TransactionsDatabase.writeDemoDB(seed: seed) }
+        guard demoMode else { return }
+        if isMultiDemo {
+            tearDownMultiDemo()
+            activateMultiDemo()
+        }
+        Task { await refreshAsync() }
     }
 
-    @objc private func setDemoOn() {
-        if !demoMode { toggleDemoMode() }
+    private func activateMultiDemo() {
+        // Backup current slot state
+        demoPreviousSlots = MultibankingStore.shared.slots
+        demoPreviousActiveIndex = MultibankingStore.shared.activeIndex
+        demoPreviousUnifiedMode = UserDefaults.standard.bool(forKey: "unifiedModeEnabled")
+
+        // Pick 3 distinct random banks
+        var seed = UInt64(truncatingIfNeeded: demoSeed)
+        let brands = BankLogoAssets.brands
+        var usedIndices = Set<Int>()
+        var picked: [BankLogoAssets.BankBrand] = []
+        while picked.count < 3 && picked.count < brands.count {
+            let idx = Int(FakeData.nextDouble(&seed) * Double(brands.count))
+            guard idx >= 0 && idx < brands.count else { continue }
+            if usedIndices.insert(idx).inserted {
+                picked.append(brands[idx])
+            }
+        }
+
+        let demoSlots = picked.enumerated().map { i, brand -> BankSlot in
+            BankSlot(id: "demo-slot-\(i)", iban: "DE\(String(format: "%020d", i))",
+                     displayName: brand.displayName, logoId: brand.id)
+        }
+        MultibankingStore.shared.injectDemoSlots(demoSlots)
+
+        // Keep user's unified mode preference — don't force it on for demo
+
+        // Compute per-slot balances and store for flyout; save demo-specific slot settings
+        var total = 0.0
+        for (i, slot) in demoSlots.enumerated() {
+            let b = FakeData.demoBalance(seed: &seed, slotProfile: i)
+            UserDefaults.standard.set(b, forKey: "simplebanking.cachedBalance.\(slot.id)")
+            total += b
+            var settings = BankSlotSettingsStore.load(slotId: slot.id)
+            settings.salaryDay  = FakeData.demoSalaryDay(slotProfile: i)
+            settings.dispoLimit = FakeData.demoDispoLimit(slotProfile: i)
+            BankSlotSettingsStore.save(settings, slotId: slot.id)
+        }
+
+        lastBalance = total
+        lastShownTitle = formatEURNoDecimals(String(format: "%.2f", total))
+        txVM.currentBalance = formatEURWithCents(total)
+        txVM.connectedBankDisplayName = "Demo"
+        txVM.connectedBankLogoID = nil
+        txVM.connectedBankIBAN = nil
+        applyBalanceDisplayModeConstraints()
+        updateStatusBalanceTitle()
+        updateMenuBarButton()
+        statusItem.button?.toolTip = "🎭 Demo-Modus: Multi-Banking"
+
+        // Preload logos for flyout
+        for slot in demoSlots {
+            let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: nil)
+            BankLogoStore.shared.preload(brand: brand)
+        }
     }
 
-    @objc private func setDemoOff() {
-        if demoMode { toggleDemoMode() }
+    private func tearDownMultiDemo() {
+        for i in 0..<3 {
+            UserDefaults.standard.removeObject(forKey: "simplebanking.cachedBalance.demo-slot-\(i)")
+            BankSlotSettingsStore.delete(slotId: "demo-slot-\(i)")
+        }
+        MultibankingStore.shared.restoreDemoSlots(demoPreviousSlots, activeIndex: demoPreviousActiveIndex)
+        txVM.unifiedModeEnabled = demoPreviousUnifiedMode
+        demoPreviousSlots = []
     }
 
     @objc private func toggleSupportDiagnostics() {
@@ -1047,6 +1444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
              lock()
         }
     }
+
     
     private func lock() {
         // Clear credentials from memory for security
@@ -1058,8 +1456,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hideTimer?.invalidate()
         hideTimer = nil
         balancePopover?.performClose(nil)
+        txPanel?.close()   // close detail view so it can't block unlock
         showLockIcon()
-        statusItem.button?.toolTip = "Gesperrt – Rechtsklick zum Entsperren"
+        statusItem.button?.toolTip = "Gesperrt – Doppelklick oder Rechtsklick zum Entsperren"
     }
     
     private func showLockIcon() {
@@ -1067,17 +1466,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.length = NSStatusItem.variableLength
 
         let logo = menuBarLogoImage()
-        if let logo {
-            // Logo on left + lock symbol as title
-            btn.image = logo
-            btn.imagePosition = .imageLeft
-            setButtonTitle(btn, " 🔒")
+        btn.image = logo
+        btn.imagePosition = logo != nil ? .imageLeft : .noImage
+
+        // Build monochrome lock title using SF Symbol (adapts to light/dark menu bar)
+        let prefix = logo != nil ? " " : "€ "
+        let attrTitle = NSMutableAttributedString(
+            string: prefix,
+            attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)]
+        )
+        if let lockSym = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: "Gesperrt"),
+           let lockImg = lockSym.withSymbolConfiguration(
+               NSImage.SymbolConfiguration(pointSize: 11, weight: .medium))?.copy() as? NSImage {
+            lockImg.isTemplate = true
+            let att = NSTextAttachment()
+            att.image = lockImg
+            attrTitle.append(NSAttributedString(attachment: att))
         } else {
-            // No logo: show "€ 🔒"
-            btn.image = nil
-            btn.imagePosition = .noImage
-            setButtonTitle(btn, "€ 🔒")
+            attrTitle.append(NSAttributedString(string: "🔒"))
         }
+        btn.attributedTitle = attrTitle
     }
     
     private func hideLockIcon() {
@@ -1103,6 +1511,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// and right-click context menu work inside NSTextField / NSSecureTextField
     /// even when the app uses `.accessory` activation policy (no menu bar).
     private func installEditMenu() {
+        if NSApp.mainMenu == nil {
+            NSApp.mainMenu = NSMenu()
+        }
+
+        // App menu with Cmd+Q → close visible windows (not quit)
+        let appMenu = NSMenu()
+        let closeItem = NSMenuItem(title: t("Fenster schließen", "Close Window"), action: #selector(closeVisibleWindows), keyEquivalent: "q")
+        appMenu.addItem(closeItem)
+        let appMenuItem = NSMenuItem(title: "simplebanking", action: nil, keyEquivalent: "")
+        appMenuItem.submenu = appMenu
+        NSApp.mainMenu?.addItem(appMenuItem)
+
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
@@ -1114,16 +1534,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         editItem.submenu = editMenu
-
-        if NSApp.mainMenu == nil {
-            NSApp.mainMenu = NSMenu()
-        }
         NSApp.mainMenu?.addItem(editItem)
+    }
+
+    @objc private func closeVisibleWindows() {
+        var closed = false
+        if txPanel?.isVisible == true {
+            txPanel?.close()
+            closed = true
+        }
+        // Close settings window if visible
+        for window in NSApp.windows where window.isVisible && window.title == L10n.t("Einstellungen", "Settings") {
+            window.orderOut(nil)
+            closed = true
+        }
+        // If no windows were open, do nothing (don't quit)
+        _ = closed
     }
 
     // NSMenuDelegate
     func menuWillOpen(_ menu: NSMenu) {
-        let isSetup = CredentialsStore.exists()
+        let isSetup = CredentialsStore.exists() || demoMode
         applyLocalizedMenuTitles()
         syncAutoHideMenuState()
         
@@ -1173,11 +1604,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         applyHideTimer()
     }
 
-    @objc private func setHideOff() { hideIndex = 0; applyHideTimer() }
-    @objc private func setHideImmediate() { hideIndex = 1; applyHideTimer() }
-    @objc private func setHide10() { hideIndex = 2; applyHideTimer() }
-    @objc private func setHide30() { hideIndex = 3; applyHideTimer() }
-    @objc private func setHide60() { hideIndex = 4; applyHideTimer() }
+    @objc private func setHideOff() { hideIndex = 0; restartHideTimer() }
+    @objc private func setHideImmediate() { hideIndex = 1; restartHideTimer() }
+    @objc private func setHide10() { hideIndex = 2; restartHideTimer() }
+    @objc private func setHide30() { hideIndex = 3; restartHideTimer() }
+    @objc private func setHide60() { hideIndex = 4; restartHideTimer() }
+
+    /// Force-restart the hide timer (used when the user changes the hide setting).
+    private func restartHideTimer() {
+        hideTimer?.invalidate()
+        hideTimer = nil
+        applyHideTimer()
+    }
 
     private func applyLocalizedMenuTitles() {
         guard let menu = statusMenu else { return }
@@ -1187,16 +1625,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Auto-hide submenu
         if let hideItem = menu.item(withTag: 401), let sub = hideItem.submenu {
             hideItem.title = t("Automatisch verstecken", "Auto-hide")
-            sub.item(withTag: 411)?.title = t("Sofort", "Immediately")
+            sub.item(withTag: 411)?.title = t("2 Sekunden", "2 Seconds")
             sub.item(withTag: 412)?.title = t("Nach 5 Sekunden", "After 5 seconds")
             sub.item(withTag: 413)?.title = t("Nach 10 Sekunden", "After 10 seconds")
+            sub.item(withTag: 414)?.title = t("Nach 20 Sekunden", "After 20 seconds")
             sub.item(withTag: 410)?.title = t("Aus", "Off")
         }
 
         if let item = menu.item(withTag: 999) {
             item.title = locked ? t("Entsperren…", "Unlock…") : t("Sperren", "Lock")
         }
-
         // Einstellungen submenu
         if let einItem = menu.item(withTag: 400), let sub = einItem.submenu {
             einItem.title = t("Einstellungen", "Settings")
@@ -1205,12 +1643,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Demo-Modus submenu
             if let demoItem = sub.item(withTag: 301), let demoSub = demoItem.submenu {
                 demoItem.title = t("Demo-Modus", "Demo Mode")
-                demoSub.item(withTag: 3011)?.title = t("An", "On")
+                demoSub.item(withTag: 3011)?.title = t("Single-Banking", "Single Banking")
+                demoSub.item(withTag: 3013)?.title = t("Multi-Banking", "Multi Banking")
                 demoSub.item(withTag: 3010)?.title = t("Aus", "Off")
                 demoSub.item(withTag: 3012)?.title = t("Umsätze generieren", "Generate Transactions")
                 // sync checkmarks
-                demoSub.item(withTag: 3011)?.state = demoMode ? .on : .off
-                demoSub.item(withTag: 3010)?.state = demoMode ? .off : .on
+                demoSub.item(withTag: 3011)?.state = (demoMode && !isMultiDemo) ? .on : .off
+                demoSub.item(withTag: 3013)?.state = isMultiDemo ? .on : .off
+                demoSub.item(withTag: 3010)?.state = !demoMode ? .on : .off
             }
         }
 
@@ -1243,6 +1683,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case 411: item.state = hideIndex == 1 ? .on : .off
             case 412: item.state = hideIndex == 2 ? .on : .off
             case 413: item.state = hideIndex == 3 ? .on : .off
+            case 414: item.state = hideIndex == 4 ? .on : .off
             default:  item.state = .off
             }
         }
@@ -1250,30 +1691,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyHideTimer() {
         syncAutoHideMenuState()
-        hideTimer?.invalidate()
-        hideTimer = nil
 
         // don't schedule when off
         let secs: TimeInterval?
         switch hideIndex {
-        case 1: secs = 0   // Sofort
+        case 1: secs = 2   // 2 Sekunden
         case 2: secs = 5   // Nach 5 Sekunden
         case 3: secs = 10  // Nach 10 Sekunden
+        case 4: secs = 20  // Nach 20 Sekunden
         default: secs = nil // Aus
         }
 
-        guard let delay = secs else { return }
-
-        // If delay is immediate and we're currently visible → hide now.
-        if delay == 0 {
-            if !isHiddenBalance {
-                hideBalance()
+        guard let delay = secs else {
+            hideTimer?.invalidate()
+            hideTimer = nil
+            // "Aus" — balance always visible; show immediately if currently hidden
+            if isHiddenBalance && !locked {
+                isHiddenBalance = false
+                isHoverRevealingBalance = false
+                hideLockIcon()
+                updateStatusBalanceTitle()
+                statusItem.button?.toolTip = ""
             }
             return
         }
 
         // Only schedule auto-hide when we are currently visible.
         guard !isHiddenBalance else { return }
+
+        // Don't reset an already-running timer — prevents balance refreshes
+        // from restarting the countdown and making the hide feel delayed.
+        if hideTimer?.isValid == true { return }
 
         hideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -1283,6 +1731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func hideBalance() {
+        balancePopover?.performClose(nil)
         guard !isHiddenBalance else { return }
         isHiddenBalance = true
         isHoverRevealingBalance = false
@@ -1322,7 +1771,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch result {
         case .password(let pw):
             do {
-                _ = try CredentialsStore.load(masterPassword: pw)
+                if demoMode {
+                    // In demo mode there are no credential files to decrypt.
+                    // Verify the password directly against the Keychain master password.
+                    guard BiometricStore.verifyPasswordDirectly(pw) else {
+                        throw NSError(domain: "simplebanking.auth", code: -1,
+                                      userInfo: [NSLocalizedDescriptionKey: "Wrong password"])
+                    }
+                } else {
+                    _ = try CredentialsStore.load(masterPassword: pw)
+                }
                 masterPassword = pw
                 locked = false
                 isHiddenBalance = false
@@ -1424,12 +1882,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Delete all credentials, DB files, attachments (all slots)
         CredentialsStore.deleteAllData()
         BiometricStore.clear()
+        BiometricStore.clearAutoUnlock()
         biometricOfferDismissed = false
         let allSlotIds = MultibankingStore.shared.slots.map { $0.id } + ["legacy"]
         Task {
             for slotId in allSlotIds {
-                CredentialsStore.activeSlotId = slotId
-                await YaxiService.clearSessionState()
+                await YaxiService.clearSessionData(forSlotId: slotId)
             }
             CredentialsStore.activeSlotId = "legacy"
         }
@@ -1487,12 +1945,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusButtonTrackingArea = area
     }
 
+    private var hoverExitWork: DispatchWorkItem?
+
     @objc(mouseEntered:) func mouseEntered(_ event: NSEvent) {
+        hoverExitWork?.cancel()
+        hoverExitWork = nil
         revealBalanceOnHoverIfNeeded()
     }
 
     @objc(mouseExited:) func mouseExited(_ event: NSEvent) {
-        hideHoverRevealIfNeeded()
+        hoverExitWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.hideHoverRevealIfNeeded()
+        }
+        hoverExitWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     @objc private func statusItemClicked() {
@@ -1511,7 +1978,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Swapped (true):  Single=Transactions, Double=Balance action
         // Balance action itself is configurable (toggle hide/show or flyout card).
         if ev.type == .leftMouseUp {
-            if locked { return }
+            if locked {
+                // Double-click while locked: show unlock dialog directly
+                if ev.clickCount >= 2 {
+                    pendingLeftClick?.cancel()
+                    pendingLeftClick = nil
+                    promptUnlockIfNeeded()
+                }
+                return
+            }
             
             if ev.clickCount >= 2 {
                 pendingLeftClick?.cancel()
@@ -1574,10 +2049,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         popover.behavior = .transient
         popover.animates = true
 
-        let balanceText = lastBalance.map(formatEURWithCents) ?? "--,-- €"
+        let isUnified = txVM.isUnifiedMode && (!demoMode || isMultiDemo)
+        let balanceText = isUnified
+            ? (computeUnifiedFlyoutBalanceText() ?? "--,-- €")
+            : (lastBalance.map(formatEURWithCents) ?? "--,-- €")
+        let activeSlotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        let activeSlotCfg = BankSlotSettingsStore.load(slotId: activeSlotId)
         let thresholds = BalanceSignal.normalizedThresholds(
-            low: balanceSignalLowUpperBound,
-            medium: balanceSignalMediumUpperBound
+            low: activeSlotCfg.balanceSignalLowUpperBound,
+            medium: activeSlotCfg.balanceSignalMediumUpperBound
         )
         let store = MultibankingStore.shared
         let idx = store.activeIndex
@@ -1594,36 +2074,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
         }
-        // Bank logo
-        if demoMode {
-            rootView.bankLogoImage = NSImage(systemSymbolName: "wallet.pass", accessibilityDescription: "Demo")
-        } else {
-            let flyoutBrand = BankLogoAssets.resolve(displayName: txVM.connectedBankDisplayName,
-                                                      logoID: connectedBankLogoID.isEmpty ? nil : connectedBankLogoID,
-                                                      iban: nil)
-            BankLogoStore.shared.preload(brand: flyoutBrand)
-            rootView.bankLogoImage = BankLogoStore.shared.image(for: flyoutBrand)
+        rootView.onHoverChanged = { [weak self] hovering in
+            self?.isFlyoutHovered = hovering
         }
-        // Navigation callbacks — hidden in demo mode
-        if !demoMode {
-            rootView.onPrevAccount = idx > 0 ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
-            rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
-            rootView.onAddAccount  = { [weak self] in self?.runSetupWizardForAddingAccount() }
+        if isUnified {
+            // Unified flyout: show aggregated card with per-slot pills, no cycle button
+            rootView.unifiedSlots = computeFlyoutSlots()
+            rootView.unifiedTotalBalance = computeUnifiedFlyoutTotal()
+        } else {
+            // Bank logo
+            if demoMode {
+                rootView.bankLogoImage = NSImage(systemSymbolName: "wallet.pass", accessibilityDescription: "Demo")
+            } else {
+                let flyoutBrand = BankLogoAssets.resolve(displayName: txVM.connectedBankDisplayName,
+                                                          logoID: connectedBankLogoID.isEmpty ? nil : connectedBankLogoID,
+                                                          iban: nil)
+                BankLogoStore.shared.preload(brand: flyoutBrand)
+                rootView.bankLogoImage = BankLogoStore.shared.image(for: flyoutBrand)
+                rootView.bankLogoBrandId = flyoutBrand?.id
+            }
+            rootView.currency = MultibankingStore.shared.activeSlot?.currency
+            rootView.nickname = MultibankingStore.shared.activeSlot?.nickname
+            rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
         }
         // Ripple if unread new transactions, or always-on Ripple mode
         let rippleAlwaysOn = UserDefaults.standard.bool(forKey: "rippleAlwaysOn")
             && UserDefaults.standard.integer(forKey: "celebrationStyle") == 1
-        if rippleAlwaysOn || (!latestTxSig.isEmpty && latestTxSig != lastSeenTxSig) {
+        let hasUnseenTx = latestTxSigBySlot.contains { slotId, sig in !sig.isEmpty && sig != lastSeenTxSig(for: slotId) }
+        if rippleAlwaysOn || hasUnseenTx {
             rootView.rippleTrigger = max(1, flyoutRippleTrigger)
         }
+        // Ensure transactions are loaded before computing the ring fraction.
+        // Without this, the ring is empty on first flyout open (before panel is opened).
+        if txVM.transactions.isEmpty {
+            let days = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
+            let daysToUse = days > 0 ? days : 60
+            if demoMode {
+                // Replay the same seed sequence as openTransactionsPanel so transactions are identical.
+                if isMultiDemo {
+                    var seed = UInt64(truncatingIfNeeded: demoSeed)
+                    let slots = MultibankingStore.shared.slots
+                    let activeIdx = MultibankingStore.shared.activeIndex
+                    for (i, slot) in slots.enumerated() {
+                        _ = FakeData.demoBalance(seed: &seed, slotProfile: i)
+                        let slotTx = FakeData.generateDemoTransactions(seed: &seed, days: daysToUse, slotId: slot.id, slotProfile: i)
+                        if i == activeIdx { txVM.transactions = slotTx }
+                    }
+                } else {
+                    var seed = UInt64(truncatingIfNeeded: demoSeed)
+                    _ = FakeData.demoBalance(seed: &seed)
+                    txVM.transactions = FakeData.generateDemoTransactions(seed: &seed, days: daysToUse)
+                }
+            } else {
+                if txVM.isUnifiedMode {
+                    let allSlotIds = MultibankingStore.shared.slots.map { $0.id }
+                    if let cached = try? TransactionsDatabase.loadUnifiedTransactions(slots: allSlotIds, days: daysToUse), !cached.isEmpty {
+                        txVM.transactions = sortTransactionsNewestFirst(cached)
+                    }
+                } else if let cached = try? TransactionsDatabase.loadTransactions(days: daysToUse), !cached.isEmpty {
+                    txVM.transactions = sortTransactionsNewestFirst(cached)
+                }
+            }
+        }
+        rootView.greenZoneFraction = computeGreenZoneFraction()
+        rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
+        applyFlyoutDots(to: &rootView)
+        let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
         let host = NSHostingController(rootView: rootView)
-        popover.contentSize = NSSize(width: 348, height: 170)
+        popover.contentSize = NSSize(width: 348, height: hasDots ? 192 : 170)
         popover.contentViewController = host
         balancePopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        // If auto-hide is enabled, close the flyout after the same delay.
+        // This handles the case where the balance is already hidden when the flyout opens
+        // (the main auto-hide timer already fired and won't fire again for this cycle).
+        let flyoutDelay: TimeInterval? = hideIndex == 1 ? 2 : hideIndex == 2 ? 5 : hideIndex == 3 ? 10 : hideIndex == 4 ? 20 : nil
+        if let delay = flyoutDelay {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.balancePopover?.isShown == true else { return }
+                if self.isFlyoutHovered {
+                    // Mouse is over the flyout — defer close until mouse leaves
+                    self.deferFlyoutCloseUntilMouseLeaves()
+                    return
+                }
+                self.balancePopover?.performClose(nil)
+            }
+        }
     }
 
-    /// Updates the flyout card in-place after a slot switch (balance + nav arrows), without closing/reopening.
+    /// Polls until the mouse leaves the flyout, then closes it.
+    private func deferFlyoutCloseUntilMouseLeaves() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.balancePopover?.isShown == true else { return }
+            if self.isFlyoutHovered {
+                self.deferFlyoutCloseUntilMouseLeaves()
+            } else {
+                self.balancePopover?.performClose(nil)
+            }
+        }
+    }
+
+    /// Updates the flyout card in-place after a slot switch, without closing/reopening.
     private func refreshFlyoutIfVisible() {
         guard let popover = balancePopover, popover.isShown,
               let host = popover.contentViewController as? NSHostingController<StatusBalanceFlyoutCardView>
@@ -1631,10 +2183,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let store = MultibankingStore.shared
         let idx = store.activeIndex
         let count = store.slots.count
-        let balanceText = lastBalance.map(formatEURWithCents) ?? "--,-- €"
+        let isUnified = txVM.isUnifiedMode && (!demoMode || isMultiDemo)
+        let balanceText = isUnified
+            ? (computeUnifiedFlyoutBalanceText() ?? "--,-- €")
+            : (lastBalance.map(formatEURWithCents) ?? "--,-- €")
+        let refreshSlotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        let refreshSlotCfg = BankSlotSettingsStore.load(slotId: refreshSlotId)
         let thresholds = BalanceSignal.normalizedThresholds(
-            low: balanceSignalLowUpperBound,
-            medium: balanceSignalMediumUpperBound
+            low: refreshSlotCfg.balanceSignalLowUpperBound,
+            medium: refreshSlotCfg.balanceSignalMediumUpperBound
         )
         var rootView = StatusBalanceFlyoutCardView(
             balanceText: balanceText,
@@ -1647,18 +2204,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
         }
-        let refreshBrand = BankLogoAssets.resolve(displayName: txVM.connectedBankDisplayName,
-                                                   logoID: connectedBankLogoID.isEmpty ? nil : connectedBankLogoID,
-                                                   iban: nil)
-        BankLogoStore.shared.preload(brand: refreshBrand)
-        rootView.bankLogoImage = BankLogoStore.shared.image(for: refreshBrand)
-        if !demoMode {
-            rootView.onPrevAccount = idx > 0 ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
-            rootView.onNextAccount = idx < count - 1 ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
-            rootView.onAddAccount = { [weak self] in self?.runSetupWizardForAddingAccount() }
+        rootView.onHoverChanged = { [weak self] hovering in
+            self?.isFlyoutHovered = hovering
+        }
+        if isUnified {
+            rootView.unifiedSlots = computeFlyoutSlots()
+            rootView.unifiedTotalBalance = computeUnifiedFlyoutTotal()
+        } else {
+            let refreshBrand = BankLogoAssets.resolve(displayName: txVM.connectedBankDisplayName,
+                                                       logoID: connectedBankLogoID.isEmpty ? nil : connectedBankLogoID,
+                                                       iban: nil)
+            BankLogoStore.shared.preload(brand: refreshBrand)
+            rootView.bankLogoImage = BankLogoStore.shared.image(for: refreshBrand)
+            rootView.bankLogoBrandId = refreshBrand?.id
+            rootView.currency = MultibankingStore.shared.activeSlot?.currency
+            rootView.nickname = MultibankingStore.shared.activeSlot?.nickname
+            rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
         }
         rootView.rippleTrigger = flyoutRippleTrigger
+        rootView.greenZoneFraction = computeGreenZoneFraction()
+        rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
+        applyFlyoutDots(to: &rootView)
+        let hasDots = store.slots.count > 1 && (!demoMode || isMultiDemo)
+        popover.contentSize = NSSize(width: 348, height: hasDots ? 192 : 170)
         host.rootView = rootView
+    }
+
+    /// Populates dot-indicator data on a flyout rootView.
+    private func applyFlyoutDots(to rootView: inout StatusBalanceFlyoutCardView) {
+        let store = MultibankingStore.shared
+        guard store.slots.count > 1, (!demoMode || isMultiDemo) else { return }
+        rootView.allSlots = computeFlyoutSlots()
+        rootView.activeSlotIndex = store.activeIndex
+        rootView.isUnifiedMode = txVM.isUnifiedMode
+        rootView.onSwitchToIndex = { [weak self] i in
+            guard let self else { return }
+            self.txVM.unifiedModeEnabled = false
+            Task { await self.switchToSlot(index: i) }
+        }
+        rootView.onActivateUnified = { [weak self] in
+            guard let self else { return }
+            self.txVM.unifiedModeEnabled = true
+            self.refreshFlyoutIfVisible()
+        }
     }
 
     @objc private func showTransactions() {
@@ -1670,6 +2258,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // when two simultaneous requests hit the same HBCI connection.
         guard !isHBCICallInFlight else {
             AppLogger.log("refreshAsync: HBCI call already in flight, skipping", category: "Network", level: "WARN")
+            // Schedule a retry for the currently active slot once the in-flight call finishes.
+            // Without this, switching slots while another account is doing SCA silently drops
+            // the new slot's refresh request — it never gets data until the timer fires again.
+            let epochWhenQueued = slotEpoch
+            Task {
+                while isHBCICallInFlight {
+                    try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
+                }
+                // Only retry if the slot hasn't changed again since we queued
+                guard slotEpoch == epochWhenQueued else { return }
+                await refreshAsync()
+            }
             return
         }
         isHBCICallInFlight = true
@@ -1678,6 +2278,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let epochAtStart = slotEpoch
         // Demo-Modus: Keine echten API-Calls
         if demoMode {
+            if isMultiDemo {
+                var seed = UInt64(truncatingIfNeeded: demoSeed)
+                var total = 0.0
+                for (i, slot) in MultibankingStore.shared.slots.enumerated() {
+                    let b = FakeData.demoBalance(seed: &seed, slotProfile: i)
+                    UserDefaults.standard.set(b, forKey: "simplebanking.cachedBalance.\(slot.id)")
+                    total += b
+                }
+                // In unified mode show the aggregate; in per-slot mode show the active slot's balance.
+                let displayBalance: Double
+                if txVM.isUnifiedMode {
+                    displayBalance = total
+                } else if let slotId = MultibankingStore.shared.activeSlot?.id {
+                    let slotBalance = UserDefaults.standard.double(forKey: "simplebanking.cachedBalance.\(slotId)")
+                    displayBalance = slotBalance > 0 ? slotBalance : total
+                } else {
+                    displayBalance = total
+                }
+                lastBalance = displayBalance
+                lastShownTitle = formatEURNoDecimals(String(format: "%.2f", displayBalance))
+                txVM.currentBalance = formatEURWithCents(displayBalance)
+                applyBalanceDisplayModeConstraints()
+                updateStatusBalanceTitle()
+                applyHideTimer()
+                return
+            }
             var seed = UInt64(truncatingIfNeeded: demoSeed)
             let fake = FakeData.demoBalance(seed: &seed)
             lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
@@ -1743,6 +2369,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lastShownTitle = formatEURNoDecimals(booked.amount)
                 self.lastBalance = AmountParser.parse(booked.amount)
                 self.txVM.currentBalance = self.formatEURWithCents(self.lastBalance ?? 0)
+                self.txVM.currentBalanceFetchedAt = Date()
+                if !booked.currency.isEmpty {
+                    if !demoMode {
+                        MultibankingStore.shared.updateCurrency(booked.currency, forSlotId: YaxiService.activeSlotId)
+                    }
+                    self.txVM.connectedBankCurrency = booked.currency
+                }
                 // Cache per slot for instant display on next slot switch
                 if let balance = self.lastBalance {
                     UserDefaults.standard.set(balance, forKey: "simplebanking.cachedBalance.\(YaxiService.activeSlotId)")
@@ -1788,21 +2421,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Demo-Modus: Komplett synthetische Daten ohne API-Calls
         if demoMode {
             txVM.anthropicApiKey = nil
+            let daysToFetch: Int = {
+                let d = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
+                return d > 0 ? d : 60
+            }()
+            txVM.fromDate = isoDateDaysAgo(daysToFetch)
+            txVM.toDate = isoDateDaysAgo(0)
+
+            if isMultiDemo {
+                var seed = UInt64(truncatingIfNeeded: demoSeed)
+                let demoSlots = MultibankingStore.shared.slots
+                let activeIdx = MultibankingStore.shared.activeIndex
+                var slotMap: [String: BankSlot] = [:]
+                var allTx: [TransactionsResponse.Transaction] = []
+                var total = 0.0
+
+                // Always generate all slots so per-slot cached balances stay consistent.
+                // Only keep the transactions relevant to the current view mode.
+                for (i, slot) in demoSlots.enumerated() {
+                    slotMap[slot.id] = slot
+                    let b = FakeData.demoBalance(seed: &seed, slotProfile: i)
+                    UserDefaults.standard.set(b, forKey: "simplebanking.cachedBalance.\(slot.id)")
+                    total += b
+                    let slotTx = FakeData.generateDemoTransactions(seed: &seed, days: daysToFetch, slotId: slot.id, slotProfile: i)
+                    if txVM.isUnifiedMode {
+                        allTx.append(contentsOf: slotTx)
+                    } else if i == activeIdx {
+                        allTx = slotTx  // per-slot view: show only the active account
+                        // Update balance card to this slot's balance, not the total
+                        let slotBalance = UserDefaults.standard.double(forKey: "simplebanking.cachedBalance.\(slot.id)")
+                        txVM.currentBalance = formatEURWithCents(slotBalance)
+                        lastBalance = slotBalance
+                    }
+                }
+                if txVM.isUnifiedMode {
+                    txVM.currentBalance = formatEURWithCents(total)
+                    lastBalance = total
+                }
+                allTx.sort { ($0.bookingDate ?? "") > ($1.bookingDate ?? "") }
+                txVM.slotMap = slotMap
+                txVM.transactions = allTx
+                txVM.resetPaging()
+                txVM.isLoading = false
+                return
+            }
+
+            // Single-Banking demo
             txVM.connectedBankDisplayName = "Demo-Bank"
             txVM.connectedBankLogoID = nil
             txVM.connectedBankIBAN = nil
             var seed = UInt64(truncatingIfNeeded: demoSeed)
             let fakeBalance = FakeData.demoBalance(seed: &seed)
             txVM.currentBalance = formatEURWithCents(fakeBalance)
-            
-            let fetchDaysDemo = UserDefaults.standard.integer(forKey: "fetchDays")
-            let daysToFetch = fetchDaysDemo > 0 ? fetchDaysDemo : 60
-            let from = isoDateDaysAgo(daysToFetch)
-            let to = isoDateDaysAgo(0)
-            txVM.fromDate = from
-            txVM.toDate = to
-            
-            // Generiere synthetische Transaktionen mit wiederkehrenden Zahlungen
             txVM.transactions = FakeData.generateDemoTransactions(seed: &seed, days: daysToFetch)
             txVM.resetPaging()
             txVM.isLoading = false
@@ -1813,6 +2483,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         
         // Live-Modus
+        if let b = self.lastBalance {
+            txVM.currentBalance = formatEURWithCents(b)
+        } else {
+            txVM.currentBalance = "--,-- €"
+        }
+
+        // Load from local DB immediately — panel shows instant data while network loads.
+        // Opening the transactions panel counts as "seen" for new-booking indicator.
+        let fetchDaysPreview = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
+        let daysToPreview = fetchDaysPreview > 0 ? fetchDaysPreview : 60
+        let activeSlotIdNow = TransactionsDatabase.activeSlotId
+        if txVM.isUnifiedMode {
+            let allSlotIds = MultibankingStore.shared.slots.map { $0.id }
+            if let cached = try? TransactionsDatabase.loadUnifiedTransactions(slots: allSlotIds, days: daysToPreview), !cached.isEmpty {
+                let slotMap = Dictionary(uniqueKeysWithValues: MultibankingStore.shared.slots.map { ($0.id, $0) })
+                txVM.slotMap = slotMap
+                txVM.transactions = sortTransactionsNewestFirst(cached)
+                txVM.resetPaging()
+                let ownIBANs = Set(MultibankingStore.shared.slots.compactMap { $0.iban }.filter { !$0.isEmpty })
+                txVM.detectInternalTransfers(ownIBANs: ownIBANs)
+            }
+            // Mark all slots as seen when opening unified view
+            for (slotId, sig) in latestTxSigBySlot where !sig.isEmpty {
+                setLastSeenTxSig(sig, for: slotId)
+            }
+        } else {
+            if let cached = try? TransactionsDatabase.loadTransactions(days: daysToPreview), !cached.isEmpty {
+                txVM.transactions = sortTransactionsNewestFirst(cached)
+                txVM.resetPaging()
+            }
+            if let sig = latestTxSigBySlot[activeSlotIdNow], !sig.isEmpty {
+                setLastSeenTxSig(sig, for: activeSlotIdNow)
+            }
+        }
+        updateStatusBalanceTitle()
+
         // Wait for any concurrent HBCI call (e.g. balance refresh) to finish before
         // fetching transactions — banks fail with "Fehlender Dialogkontext" on parallel calls.
         var waitMs = 0
@@ -1826,17 +2532,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         isHBCICallInFlight = true
         defer { isHBCICallInFlight = false }
-
-        if let b = self.lastBalance {
-            txVM.currentBalance = formatEURWithCents(b)
-        } else {
-            txVM.currentBalance = "--,-- €"
-        }
-
-        // Opening the transactions panel counts as "seen".
-        if !latestTxSig.isEmpty {
-            lastSeenTxSig = latestTxSig
-        }
 
         if locked { promptUnlockIfNeeded() }
         guard !locked, let pw = masterPassword else {
@@ -1867,14 +2562,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         txVM.isLoading = true
         txVM.error = nil
 
-        let fetchDaysSetting = UserDefaults.standard.integer(forKey: "fetchDays")
+        let fetchDaysSetting = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
         let daysToFetch = fetchDaysSetting > 0 ? fetchDaysSetting : 60
         // Do not force 365-day network sync on each panel open, because this can
         // repeatedly trigger SCA/TAN at some banks. Historical data remains in SQLite.
         let syncDays = daysToFetch
         let from = isoDateDaysAgo(syncDays)
         let to = Self.iso8601UTCFormatter.string(from: Date())
-        
+
         txVM.fromDate = isoDateDaysAgo(daysToFetch)
         txVM.toDate = to
 
@@ -1883,8 +2578,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             cachedTransactions = try TransactionsDatabase.loadTransactions(days: daysToFetch)
             if !cachedTransactions.isEmpty {
-                txVM.transactions = sortTransactionsNewestFirst(cachedTransactions)
-                txVM.resetPaging()
+                if !txVM.isUnifiedMode {
+                    txVM.transactions = sortTransactionsNewestFirst(cachedTransactions)
+                    txVM.resetPaging()
+                }
                 confettiTransactions = txVM.transactions
             }
         } catch {
@@ -1947,13 +2644,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let pwForCategorization = pw
         let epochForCategorization = slotEpoch
         let daysForCategorization = daysToFetch
+        let unifiedForCategorization = txVM.isUnifiedMode
+        let slotIdsForCategorization = MultibankingStore.shared.slots.map { $0.id }
         Task.detached {
             await AICategorizationService.runIfEnabled(masterPassword: pwForCategorization)
             guard await self.slotEpoch == epochForCategorization else { return }
-            if let updated = try? TransactionsDatabase.loadTransactions(days: daysForCategorization), !updated.isEmpty {
-                await MainActor.run {
-                    guard self.slotEpoch == epochForCategorization else { return }
-                    self.txVM.transactions = self.sortTransactionsNewestFirst(updated)
+            if unifiedForCategorization {
+                if let updated = try? TransactionsDatabase.loadUnifiedTransactions(slots: slotIdsForCategorization, days: daysForCategorization), !updated.isEmpty {
+                    await MainActor.run {
+                        guard self.slotEpoch == epochForCategorization else { return }
+                        self.txVM.transactions = self.sortTransactionsNewestFirst(updated)
+                    }
+                }
+            } else {
+                if let updated = try? TransactionsDatabase.loadTransactions(days: daysForCategorization), !updated.isEmpty {
+                    await MainActor.run {
+                        guard self.slotEpoch == epochForCategorization else { return }
+                        self.txVM.transactions = self.sortTransactionsNewestFirst(updated)
+                    }
                 }
             }
         }
@@ -2036,15 +2744,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func checkNewBookings(userId: String, password: String) async {
         // Avoid noisy UI if locked/hidden; still compute indicator.
         let from = isoDateDaysAgo(7)
+        let slotId = TransactionsDatabase.activeSlotId
         do {
             let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
             guard (resp.ok ?? false), let tx = resp.transactions, !tx.isEmpty else { return }
             let sorted = tx.sorted { ($0.bookingDate ?? $0.valueDate ?? "") > ($1.bookingDate ?? $1.valueDate ?? "") }
             let sig = computeTxSignature(sorted[0])
-            
-            // Check if this is a new transaction
-            let isNew = !lastSeenTxSig.isEmpty && sig != lastSeenTxSig && sig != latestTxSig
-            latestTxSig = sig
+
+            // Check if this is a new transaction (compare against per-slot seen key)
+            let seenSig = lastSeenTxSig(for: slotId)
+            let prevLatest = latestTxSigBySlot[slotId] ?? ""
+            let isNew = !seenSig.isEmpty && sig != seenSig && sig != prevLatest
+            latestTxSigBySlot[slotId] = sig
 
             // Update title with dot if needed.
             updateStatusBalanceTitle()
@@ -2055,7 +2766,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 refreshFlyoutIfVisible()
             }
 
-            // Send notification for new bookings
+            // Send notification for new bookings (dedup: only once across all slots in unified mode)
             if isNew && showNotifications {
                 let newest = sorted[0]
                 sendNewBookingNotification(transaction: newest)
@@ -2295,16 +3006,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             nav.onPrevAccount = nil
             nav.onNextAccount = nil
             nav.onAddAccount  = nil
+            // Multi-demo: Dot-Navigation zwischen Demo-Slots erlauben
+            if isMultiDemo {
+                let count = MultibankingStore.shared.slots.count
+                nav.onSwitchToIndex = count > 1
+                    ? { [weak self] i in Task { await self?.switchToSlot(index: i) } } : nil
+            } else {
+                nav.onSwitchToIndex = nil
+            }
             return
         }
         let store = MultibankingStore.shared
         let idx   = store.activeIndex
         let count = store.slots.count
-        nav.onPrevAccount = idx > 0
-            ? { [weak self] in Task { await self?.switchToSlot(index: idx - 1) } } : nil
-        nav.onNextAccount = idx < count - 1
-            ? { [weak self] in Task { await self?.switchToSlot(index: idx + 1) } } : nil
-        nav.onAddAccount  = { [weak self] in self?.runSetupWizardForAddingAccount() }
+        nav.onPrevAccount = nil
+        nav.onNextAccount = count > 1
+            ? { [weak self] in Task { await self?.switchToSlot(index: (idx + 1) % count) } } : nil
+        nav.onAddAccount  = nil
+        nav.onSwitchToIndex = count > 1
+            ? { [weak self] i in Task { await self?.switchToSlot(index: i) } } : nil
+        nav.prevAccountLogo = nil
+        nav.nextAccountLogo = nil
+        nav.prevAccountBrandId = nil
+        nav.nextAccountBrandId = nil
+        nav.prevAccountCurrency = nil
+        nav.nextAccountCurrency = nil
+        nav.prevAccountNickname = nil
+        nav.nextAccountNickname = nil
+        if count > 1 {
+            let nextSlot = store.slots[(idx + 1) % count]
+            let brand = BankLogoAssets.resolve(displayName: nextSlot.displayName, logoID: nextSlot.logoId, iban: nextSlot.iban)
+            BankLogoStore.shared.preload(brand: brand)
+            nav.nextAccountLogo = BankLogoStore.shared.image(for: brand)
+            nav.nextAccountBrandId = brand?.id
+            nav.nextAccountCurrency = nextSlot.currency
+            nav.nextAccountNickname = nextSlot.nickname
+        }
+    }
+
+    /// Pushes the current slot's resolved logo image directly into txVM so the
+    /// balance card in the transaction panel updates imperatively (not via @ObservedObject timing).
+    @MainActor private func updateTxPanelLogoImage() {
+        guard !demoMode else { return }
+        let brand = BankLogoAssets.resolve(
+            displayName: txVM.connectedBankDisplayName,
+            logoID: txVM.connectedBankLogoID,
+            iban: txVM.connectedBankIBAN
+        )
+        if let img = BankLogoStore.shared.image(for: brand) {
+            txVM.connectedBankLogoImage = img
+        }
     }
 
     // MARK: - Task 3: Add account wizard
@@ -2338,7 +3089,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     result: payload,
                     selectedBankName: selectedBankName,
                     masterPassword: masterPassword,
-                    options: options
+                    options: options,
+                    slotId: YaxiService.activeSlotId,
+                    connectionIdKeySnapshot: YaxiService.connectionIdKey
                 )
                 additionalAccountsBox.value = setupResult.additionalAccounts
                 return setupResult.bank
@@ -2358,7 +3111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 id: newSlot.id,
                 iban: normalizedIBAN,
                 displayName: bank.displayName,
-                logoId: bank.logoId
+                logoId: bank.logoId,
+                nickname: wizard.collectedNickname
             )
             MultibankingStore.shared.addSlot(finalSlot)
 
@@ -2434,7 +3188,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 result: payload,
                 selectedBankName: selectedBankName,
                 masterPassword: masterPassword,
-                options: options
+                options: options,
+                slotId: YaxiService.activeSlotId,
+                connectionIdKeySnapshot: YaxiService.connectionIdKey
             )
             additionalAccountsBox2.value = setupResult.additionalAccounts
             return setupResult.bank
@@ -2456,7 +3212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .uppercased()
                 // Ersten Slot in MultibankingStore anlegen (id="legacy" für Erstkonto)
-                let legacySlot = BankSlot(id: "legacy", iban: normalizedIBAN, displayName: bank.displayName, logoId: bank.logoId)
+                let legacySlot = BankSlot(id: "legacy", iban: normalizedIBAN, displayName: bank.displayName, logoId: bank.logoId, nickname: wizard.collectedNickname)
                 MultibankingStore.shared.replaceFirstSlot(with: legacySlot)
 
                 // Create extra slots for additional accounts selected in the picker
@@ -2498,9 +3254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // After first-time setup: offer to add a second account
             promptAddAnotherAccount()
         case .demoMode:
-            self.demoMode = true
-            self.demoSeed = Int.random(in: 1...9999)
-            Task { await self.refreshAsync() }
+            self.setDemoSingle()
         case .cancelled:
             break
         }
@@ -2642,7 +3396,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         result: CredentialsPanel.Result,
         selectedBankName: String?,
         masterPassword: String,
-        options: SetupConnectOptions
+        options: SetupConnectOptions,
+        slotId: String = "legacy",
+        connectionIdKeySnapshot: String = "simplebanking.yaxi.connectionId"
     ) async throws -> SetupConnectResult {
         AppLogger.log("Setup performSetupConnection start", category: "Setup")
         let diagnosticsLogger: SetupDiagnosticsLogger? = {
@@ -2692,17 +3448,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 await YaxiService.clearSessionOnly()
             }
 
-            let fetchDaysSetting = UserDefaults.standard.integer(forKey: "fetchDays")
-            let warmupDays = fetchDaysSetting > 0 ? fetchDaysSetting : 60
+            let warmupFetchSetting = BankSlotSettingsStore.load(slotId: slotId).fetchDays
+            let warmupDays = warmupFetchSetting > 0 ? warmupFetchSetting : 60
             let warmupFrom = setupWarmupFromDate(days: warmupDays)
 
             // Build finalBank from pre-discovered connectionId + selected bank name
-            let storedConnectionId = UserDefaults.standard.string(forKey: YaxiService.connectionIdKey) ?? ""
+            let storedConnectionId = UserDefaults.standard.string(forKey: connectionIdKeySnapshot) ?? ""
             let finalBank = DiscoveredBank(
                 id: storedConnectionId,
                 displayName: fallbackName.isEmpty ? "Bank" : fallbackName,
                 logoId: nil,
-                credentials: YaxiService.loadStoredCredentials(slotId: "legacy"),
+                credentials: YaxiService.loadStoredCredentials(slotId: slotId),
                 userIdLabel: nil,
                 advice: nil
             )
@@ -2879,6 +3635,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateChecker?.checkForUpdates()
     }
 
+    private func setupGlobalHotkey() {
+        let defaults = UserDefaults.standard
+        let enabled = defaults.object(forKey: "globalHotkeyEnabled") as? Bool ?? true
+        let rawKeyCode = defaults.integer(forKey: "globalHotkeyKeyCode")
+        let keyCode = rawKeyCode > 0 ? rawKeyCode : 1
+        let rawModifiers = defaults.integer(forKey: "globalHotkeyModifiers")
+        let modifiers = rawModifiers > 0 ? rawModifiers : 4352
+
+        if enabled {
+            GlobalHotkeyManager.shared.register(keyCode: keyCode, carbonModifiers: modifiers)
+            GlobalHotkeyManager.shared.onTriggered = { @Sendable [weak self] in
+                MainActor.assumeIsolated { self?.performBalancePrimaryAction() }
+            }
+        } else {
+            GlobalHotkeyManager.shared.unregister()
+        }
+    }
+
     private func setupRefreshTimer() {
         timer?.invalidate()
         timer = nil
@@ -2895,6 +3669,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+private struct FlyoutSlotItem {
+    var logo: NSImage?
+    var brandId: String?
+    var balanceText: String
+    var isNegative: Bool
+    var barColor: Color
+    var nickname: String?
+}
+
+/// Liquid-glass backdrop — blurs the desktop behind the popover (behindWindow).
+private struct FlyoutVibrancyBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .popover
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
+}
+
 private struct StatusBalanceFlyoutCardView: View {
     let balanceText: String
     let balanceValue: Double?
@@ -2902,107 +3697,258 @@ private struct StatusBalanceFlyoutCardView: View {
     let isDefaultTheme: Bool
     let forcedColorScheme: ColorScheme?
     var bankLogoImage: NSImage? = nil
+    var bankLogoBrandId: String? = nil
+    var balanceFetchedAt: Date? = nil
     var onDoubleTap: (() -> Void)? = nil
-    // Task 2: Navigation callbacks
-    var onPrevAccount: (() -> Void)? = nil
-    var onNextAccount: (() -> Void)? = nil
-    var onAddAccount:  (() -> Void)? = nil
+    var onHoverChanged: ((Bool) -> Void)? = nil
+    var currency: String? = nil
+    var nickname: String? = nil
     var rippleTrigger: Int = 0
+    var unifiedSlots: [FlyoutSlotItem]? = nil
+    var unifiedTotalBalance: Double? = nil
+    var greenZoneFraction: Double = 0     // 0...1, balance / referenceIncome ("Bin ich im grünen Bereich?")
+    var dispoLimit: Int = 0               // overdraft limit in € for dispo-mode ring
+    @AppStorage("greenZoneRingEnabled") private var greenZoneRingEnabled: Bool = true
+    // Dot indicators — all slots regardless of mode
+    var allSlots: [FlyoutSlotItem]? = nil
+    var activeSlotIndex: Int = 0
+    var isUnifiedMode: Bool = false
+    var onSwitchToIndex: ((Int) -> Void)? = nil
+    var onActivateUnified: (() -> Void)? = nil
 
     @Environment(\.colorScheme) private var environmentColorScheme
-    @State private var showNav: Bool = false
 
     private var activeColorScheme: ColorScheme {
         forcedColorScheme ?? environmentColorScheme
     }
 
+    private var hasDots: Bool { (allSlots?.count ?? 0) > 1 }
+
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                if isDefaultTheme {
+                if unifiedSlots != nil {
+                    unifiedCard
+                } else if isDefaultTheme {
                     defaultThemeCard
                 } else {
                     legacyCard
                 }
             }
-            // Ripple confined to the card tile — double-tap bubbles up to parent
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, hasDots ? 2 : 14)
+            .onTapGesture(count: 2) { onDoubleTap?() }
+            // Ripple only on the balance card, not the dot row
             .rippleEffect(trigger: rippleTrigger, defaultOrigin: CGPoint(x: 310, y: 130))
-            .padding(14)
-        }
-        .frame(width: 348, height: 170)
-        .background(Color.panelBackground)
-        .preferredColorScheme(forcedColorScheme)
-        .onTapGesture(count: 2) { onDoubleTap?() }
-        .overlay(alignment: .top) {
-            if showNav || onPrevAccount != nil || onNextAccount != nil || onAddAccount != nil {
-                HStack {
-                    // Left: previous account
-                    if let prev = onPrevAccount {
-                        Button(action: prev) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 13, weight: .semibold))
+
+            // Account dot indicators
+            if hasDots, let slots = allSlots {
+                HStack(spacing: 8) {
+                    ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
+                        let isActive = !isUnifiedMode && idx == activeSlotIndex
+                        Button {
+                            guard !isActive else { return }
+                            onSwitchToIndex?(idx)
+                        } label: {
+                            Capsule()
+                                .fill(isActive ? item.barColor : Color(NSColor.tertiaryLabelColor))
+                                .frame(width: isActive ? 24 : 8, height: 8)
+                                .animation(.easeInOut(duration: 0.3), value: isActive)
+                                .frame(height: 24)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .opacity(showNav ? 1 : 0)
                     }
-                    Spacer()
-                    // Right: next account or add account
-                    if let next = onNextAccount {
-                        Button(action: next) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .buttonStyle(.plain)
-                        .opacity(showNav ? 1 : 0)
-                    } else if let add = onAddAccount {
-                        Button(action: add) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .buttonStyle(.plain)
-                        .opacity(showNav ? 1 : 0)
+                    // "Alle Konten" dot → shows unified aggregated view in flyout
+                    let unifiedActive = isUnifiedMode
+                    Button {
+                        guard !unifiedActive else { return }
+                        onActivateUnified?()
+                    } label: {
+                        Capsule()
+                            .fill(unifiedActive ? Color.accentColor : Color(NSColor.tertiaryLabelColor))
+                            .frame(width: unifiedActive ? 24 : 8, height: 8)
+                            .animation(.easeInOut(duration: 0.3), value: unifiedActive)
+                            .frame(height: 24)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .animation(.easeInOut(duration: 0.15), value: showNav)
+                .padding(.top, 2)
+                .padding(.bottom, 8)
             }
         }
-        .onHover { hovering in showNav = hovering }
+        .frame(width: 348, height: hasDots ? 192 : 170)
+        .background(FlyoutVibrancyBackground())
+        .preferredColorScheme(forcedColorScheme)
+        .onHover { hovering in onHoverChanged?(hovering) }
+    }
+
+    private func formatBalanceTimestamp(_ date: Date?) -> String {
+        guard let date else { return L10n.t("Kontostand", "Balance") }
+        let cal = Calendar.current
+        let hour = cal.component(.hour, from: date)
+        let dayLabel: String
+        if cal.isDateInToday(date) { dayLabel = L10n.t("Heute", "Today") }
+        else if cal.isDateInYesterday(date) { dayLabel = L10n.t("Gestern", "Yesterday") }
+        else if let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: Date()),
+                cal.isDate(date, inSameDayAs: twoDaysAgo) { dayLabel = L10n.t("Vorgestern", "2 days ago") }
+        else {
+            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
+            dayLabel = df.string(from: date)
+        }
+        return L10n.t("Kontostand \(dayLabel), \(hour) Uhr", "Balance \(dayLabel), \(hour):00")
+    }
+
+    private var unifiedCard: some View {
+        let slots = unifiedSlots ?? []
+        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
+        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
+
+        // BalanceSignal color — consistent with main panel's unifiedBalanceCard
+        let totalSignalColor: Color = {
+            let level = BalanceSignal.classify(balance: unifiedTotalBalance, thresholds: thresholds)
+            return BalanceSignal.style(for: level).amountColor
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            // Pills row — same structure as unifiedBalanceCard in TransactionsPanelView
+            HStack(spacing: 10) {
+                ForEach(Array(slots.enumerated()), id: \.offset) { _, item in
+                    HStack(spacing: 6) {
+                        if let img = item.logo {
+                            let invert = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: item.brandId ?? "")
+                            Group {
+                                if invert {
+                                    Image(nsImage: img).resizable().scaledToFit()
+                                        .frame(width: 16, height: 16)
+                                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                                        .colorInvert()
+                                } else {
+                                    Image(nsImage: img).resizable().scaledToFit()
+                                        .frame(width: 16, height: 16)
+                                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                                }
+                            }
+                        } else {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(item.barColor.opacity(0.30))
+                                .frame(width: 16, height: 16)
+                        }
+                        if let nick = item.nickname {
+                            Text(nick)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                                .lineLimit(1)
+                        }
+                        Text(item.balanceText)
+                            .font(.system(size: 11)).monospacedDigit()
+                            .foregroundColor(item.isNegative ? Color(hex: "C4614D") : Color(NSColor.secondaryLabelColor))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(item.barColor.opacity(0.10)))
+                    .overlay(Capsule().stroke(item.barColor.opacity(0.30), lineWidth: 0.5))
+                }
+                Spacer()
+            }
+
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    // Total balance — 30pt bold, matches defaultThemeCard
+                    Text(balanceText)
+                        .font(.system(size: 30, weight: .bold, design: .default))
+                        .monospacedDigit()
+                        .foregroundColor(totalSignalColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    // Context label — 13pt semibold (matches main panel)
+                    Text(L10n.t("Aggregierter Kontostand", "Aggregated Balance"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
+                Spacer()
+                // Ring hidden in unified/multi-bank view — no single salary reference
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(LinearGradient(
+                        colors: [Color.accentColor.opacity(0.06), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(borderColor, lineWidth: 1)
+        )
     }
 
     private var defaultThemeCard: some View {
         let level = BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)
         let style = BalanceSignal.style(for: level)
         let displayBalance = balanceValue == nil ? "--,-- €" : balanceText
-        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.60)
-        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.35)
+        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
+        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let img = bankLogoImage {
-                    Image(nsImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: bankLogoBrandId ?? "")
+                    if invertActive {
+                        Image(nsImage: img)
+                            .resizable().scaledToFit()
+                            .frame(width: 18, height: 18)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .colorInvert()
+                    } else {
+                        Image(nsImage: img)
+                            .resizable().scaledToFit()
+                            .frame(width: 18, height: 18)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
                 } else {
                     Image(systemName: "wallet.pass")
                         .font(.system(size: 16))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text(L10n.t("Aktueller Kontostand", "Current balance"))
+                Text(formatBalanceTimestamp(balanceFetchedAt))
                     .font(.system(size: 14))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
+                if let nick = nickname {
+                    Text(nick)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(Color(NSColor.quaternaryLabelColor)))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
+                Spacer()
             }
 
-            Text(displayBalance)
-                .font(.system(size: 30, weight: .bold, design: .default))
-                .foregroundColor(style.amountColor)
-
-            Text(style.localizedStatusText)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(style.statusColor)
+            HStack(alignment: .balanceTextCenter, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(displayBalance)
+                        .font(.system(size: 30, weight: .bold, design: .default))
+                        .foregroundColor(style.amountColor)
+                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                    Text(style.localizedStatusText)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(style.statusColor)
+                }
+                Spacer()
+                if greenZoneRingEnabled {
+                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit)
+                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -3028,6 +3974,7 @@ private struct StatusBalanceFlyoutCardView: View {
 
     private var legacyCard: some View {
         let displayBalance = balanceValue == nil ? "--,-- €" : balanceText
+        let balColor: Color = (balanceValue ?? 0) < 0 ? .expenseRed : ((balanceValue ?? 0) > 0 ? .incomeGreen : .primary)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "creditcard")
@@ -3038,9 +3985,15 @@ private struct StatusBalanceFlyoutCardView: View {
                     .foregroundColor(.secondary)
             }
 
-            Text(displayBalance)
-                .font(.system(size: 30, weight: .bold, design: .default))
-                .foregroundColor((balanceValue ?? 0) < 0 ? .expenseRed : ((balanceValue ?? 0) > 0 ? .incomeGreen : .primary))
+            HStack(alignment: .center, spacing: 12) {
+                Text(displayBalance)
+                    .font(.system(size: 30, weight: .bold, design: .default))
+                    .foregroundColor(balColor)
+                Spacer()
+                if greenZoneRingEnabled {
+                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)

@@ -7,28 +7,30 @@ private struct TransactionsPanelView: View {
     let onRefresh: () async -> Void
     @ObservedObject var accountNav: AccountNavModel
     @ObservedObject private var logoStore = BankLogoStore.shared
-    @AppStorage("salaryDay") private var salaryDay: Int = 1
-    @AppStorage("dispoLimit") private var dispoLimit: Int = 0
-    @AppStorage("targetBuffer") private var targetBuffer: Int = 500
-    @AppStorage("targetSavingsRate") private var targetSavingsRate: Int = 20
-    @AppStorage("fetchDays") private var fetchDays: Int = 60
+    @ObservedObject private var multibankingStore = MultibankingStore.shared
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
     @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
     @AppStorage("confettiEffect") private var confettiEffect: Int = ConfettiEffect.money.rawValue
-    @AppStorage("celebrationStyle") private var celebrationStyle: Int = 0
-    @AppStorage("balanceSignalLowUpperBound") private var balanceSignalLowUpperBound: Int = 500
-    @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
+    @AppStorage("celebrationStyle") private var celebrationStyle: Int = 1
+    @AppStorage("scoreStabilityMultiplier") private var scoreStabilityMultiplier: Double = 3.0
+    @AppStorage("scoreCoverageWeight") private var scoreCoverageWeight: Double = 0.6
+    @AppStorage("scoreFixedCostWarningRatio") private var scoreFixedCostWarningRatio: Double = 0.70
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
+    @AppStorage("showTransactionCategories") private var showCategories: Bool = false
+    @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @Environment(\.colorScheme) private var environmentColorScheme
     
     @State private var showAccountNav = false
+    @State private var autoShowNavTask: Task<Void, Never>? = nil
     @State private var showScoreSheet = false
     @State private var showFixedCosts = false
+    @State private var fixedCostPayments: [RecurringPayment] = []
     @State private var showSubscriptions = false
     @State private var showCalendar = false
     @State private var panelIsWide: Bool = false
+    @State private var greenZoneFractionCached: Double = 0
     @State private var chatDraft = ""
     @State private var chatMessages: [ChatMessage] = []
     @State private var chatState: ChatState = .idle
@@ -98,11 +100,220 @@ private struct TransactionsPanelView: View {
         colorScheme ?? environmentColorScheme
     }
 
+    private var activeSlotSettings: BankSlotSettings {
+        BankSlotSettingsStore.load(slotId: multibankingStore.activeSlot?.id ?? "legacy")
+    }
+
     private var normalizedBalanceThresholds: BalanceSignalThresholds {
-        BalanceSignal.normalizedThresholds(
-            low: balanceSignalLowUpperBound,
-            medium: balanceSignalMediumUpperBound
+        let s = activeSlotSettings
+        return BalanceSignal.normalizedThresholds(
+            low: s.balanceSignalLowUpperBound,
+            medium: s.balanceSignalMediumUpperBound
         )
+    }
+
+    /// Green-zone fraction: cached, recomputed when balance or transaction count changes.
+    private var greenZoneFraction: Double { greenZoneFractionCached }
+
+    private func recomputeGreenZone() {
+        let s = activeSlotSettings
+        let balance = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
+        // Ring reference: salary takes priority over the MoneyMood medium threshold.
+        // If salaryAmount is set manually, use it. Otherwise auto-detect from transactions.
+        // Fallback to balanceSignalMediumUpperBound only when no salary is known.
+        let reference: Int
+        if s.salaryAmount > 0 {
+            reference = s.salaryAmount
+        } else {
+            let detected = SalaryProgressCalculator.detectedIncome(
+                salaryDay: s.effectiveSalaryDay,
+                tolerance: s.salaryDayTolerance,
+                transactions: vm.transactions)
+            reference = detected > 0 ? Int(detected.rounded()) : s.balanceSignalMediumUpperBound
+        }
+        greenZoneFractionCached = SalaryProgressCalculator.greenZoneFraction(
+            balance: balance,
+            mediumThreshold: reference)
+    }
+
+    /// Load 90 days of transaction history for FixedCosts analysis.
+    /// Uses a wider window than the normal view (fetchDays) so that subscriptions
+    /// charging early in the month always have 2+ occurrences (e.g., day-1 charge in
+    /// February + March, even when today is April 4 and the normal 60-day cutoff is Feb 4).
+    private func recomputeFixedCosts() {
+        let slots: [String]? = vm.isUnifiedMode
+            ? MultibankingStore.shared.slots.map { $0.id }
+            : [TransactionsDatabase.activeSlotId]
+        let extended = (try? TransactionsDatabase.loadUnifiedTransactions(slots: slots, days: 90))
+            ?? vm.transactions
+        fixedCostPayments = FixedCostsAnalyzer.analyze(transactions: extended)
+    }
+
+    /// Returns the slot's display color: custom > generated > fallback gray.
+    private func slotDisplayColor(for slot: BankSlot) -> Color {
+        if let hex = slot.customColor, let c = Color(hex: hex) { return c }
+        if let logoId = slot.logoId, let hex = GeneratedBankColors.primaryColor(forLogoId: logoId), let c = Color(hex: hex) { return c }
+        return Color.secondary.opacity(0.4)
+    }
+
+    /// Formats a balance value as German-locale string with currency symbol at the end, e.g. "1.234,56 €".
+    private func formatBalance(_ amount: Double, currency: String) -> String {
+        let symbol: String
+        switch currency {
+        case "USD": symbol = "$"
+        case "GBP": symbol = "£"
+        default:    symbol = "€"
+        }
+        let formatted = Self.amountFormatter.string(from: NSNumber(value: abs(amount))) ?? String(format: "%.2f", abs(amount))
+        let sign = amount < 0 ? "-" : ""
+        return "\(sign)\(formatted) \(symbol)"
+    }
+
+    /// Balance card for unified mode: same visual size as defaultThemeBalanceCard.
+    /// Shows total/per-slot sum prominently, then a compact slot icon strip below.
+    private var unifiedBalanceCard: some View {
+        let slots = multibankingStore.slots
+        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.60)
+        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.35)
+
+        // Compute per-slot balances for display
+        let slotBalances: [(slot: BankSlot, balance: Double?)] = slots.map { slot in
+            let b = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double
+            return (slot, b)
+        }
+        // Sum all available balances (same currency only if all match, else show per-slot)
+        let currencies = Set(slots.compactMap { $0.currency ?? "EUR" })
+        let allSameCurrency = currencies.count <= 1
+        let totalBalance: Double? = allSameCurrency
+            ? slotBalances.reduce(nil) { acc, item in item.balance.map { (acc ?? 0) + $0 } }
+            : nil
+        let displayCurrency = currencies.first ?? "EUR"
+
+        // Apply BalanceSignal to unified total — scale thresholds by slot count so
+        // the sentiment colors stay consistent with individual account cards.
+        let slotCount = max(1, slots.count)
+        let aggregatedThresholds = BalanceSignalThresholds(
+            lowUpperBound: normalizedBalanceThresholds.lowUpperBound * Double(slotCount),
+            mediumUpperBound: normalizedBalanceThresholds.mediumUpperBound * Double(slotCount)
+        )
+        let totalSignalColor: Color = {
+            let level = BalanceSignal.classify(balance: totalBalance, thresholds: aggregatedThresholds)
+            return BalanceSignal.style(for: level).amountColor
+        }()
+
+        let leftContent = VStack(alignment: .leading, spacing: 8) {
+            // Row 1: slot icons strip — mirrors single-account card's logo+timestamp row
+            HStack(spacing: 10) {
+                ForEach(slotBalances, id: \.slot.id) { item in
+                    let slot = item.slot
+                    let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.iban)
+                    let barColor = slotDisplayColor(for: slot)
+                    HStack(spacing: 6) {
+                        if let img = logoStore.image(for: brand) {
+                            let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: brand?.id ?? "")
+                            if invertActive {
+                                Image(nsImage: img).resizable().scaledToFit()
+                                    .frame(width: 16, height: 16)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    .colorInvert()
+                            } else {
+                                Image(nsImage: img).resizable().scaledToFit()
+                                    .frame(width: 16, height: 16)
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                            }
+                        } else {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(barColor.opacity(0.30))
+                                .frame(width: 16, height: 16)
+                        }
+                        if let nick = slot.nickname {
+                            Text(nick)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                                .lineLimit(1)
+                        }
+                        if let b = item.balance {
+                            Text(formatBalance(b, currency: slot.currency ?? "EUR"))
+                                .font(.system(size: 11))
+                                .foregroundColor(b < 0 ? Color.expenseRed : Color(NSColor.secondaryLabelColor))
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(barColor.opacity(0.10)))
+                    .overlay(Capsule().stroke(barColor.opacity(0.30), lineWidth: 0.5))
+                }
+                Spacer()
+            }
+
+            // Row 2: aggregated balance — same 32pt bold as single-account card
+            if let total = totalBalance {
+                Text(formatBalance(total, currency: displayCurrency))
+                    .font(.system(size: 32, weight: .bold, design: .default))
+                    .foregroundColor(totalSignalColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.trailing, 0)
+            } else if slotBalances.isEmpty || slotBalances.allSatisfy({ $0.balance == nil }) {
+                Text("--,-- €")
+                    .font(.system(size: 32, weight: .bold, design: .default))
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 0)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(slotBalances.prefix(2), id: \.slot.id) { item in
+                        if let b = item.balance {
+                            Text(formatBalance(b, currency: item.slot.currency ?? "EUR"))
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundColor(b < 0 ? Color.expenseRed : (b > 0 ? Color.incomeGreen : .primary))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.trailing, 0)
+            }
+
+            // Row 3: context label — mirrors "Gutes Polster" position in single-account card
+            Text(L10n.t("Aggregierter Kontostand", "Aggregated Balance"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        let ringVisible = monthRingEnabled && !vm.isUnifiedMode
+        return Group {
+            if panelIsWide {
+                HStack(alignment: .center, spacing: 0) {
+                    leftContent
+                    PaycheckRightZoneView(
+                        salaryDay: activeSlotSettings.effectiveSalaryDay,
+                        salaryDayTolerance: activeSlotSettings.salaryDayTolerance,
+                        iban: nil,
+                        ringFraction: greenZoneFraction,
+                        showRing: ringVisible
+                    )
+                }
+            } else {
+                HStack(alignment: .center, spacing: 0) {
+                    leftContent
+                    if ringVisible {
+                        GreenZoneRing(fraction: greenZoneFraction)
+                            .padding(.leading, 12)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.accentColor.opacity(0.06), .clear],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+        )
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(borderColor, lineWidth: 1))
     }
 
     private var defaultThemeBalanceCard: some View {
@@ -116,22 +327,40 @@ private struct TransactionsPanelView: View {
         let balanceBrand = BankLogoAssets.resolve(displayName: vm.connectedBankDisplayName,
                                                    logoID: vm.connectedBankLogoID,
                                                    iban: vm.connectedBankIBAN)
-        return VStack(alignment: .leading, spacing: 8) {
+        let leftContent = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let img = logoStore.image(for: balanceBrand) {
-                    Image(nsImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                if let img = vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
+                    let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: balanceBrand?.id ?? "")
+                    if invertActive {
+                        Image(nsImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .colorInvert()
+                    } else {
+                        Image(nsImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
                 } else {
                     Image(systemName: "wallet.pass")
                         .font(.system(size: 16))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text("Aktueller Kontostand")
+                Text(formatBalanceTimestamp(vm.currentBalanceFetchedAt))
                     .font(.system(size: 14))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
+                if let nick = vm.connectedBankNickname {
+                    Text(nick)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(Color(NSColor.quaternaryLabelColor)))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
+                Spacer()
             }
 
             Text(displayBalance)
@@ -143,6 +372,29 @@ private struct TransactionsPanelView: View {
                 .foregroundColor(style.statusColor)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+
+        let ringVisible = monthRingEnabled && !vm.isUnifiedMode
+        return HStack(alignment: .center, spacing: 0) {
+            leftContent
+                .frame(minHeight: 108)
+            if panelIsWide {
+                PaycheckRightZoneView(
+                    salaryDay: activeSlotSettings.effectiveSalaryDay,
+                    salaryDayTolerance: activeSlotSettings.salaryDayTolerance,
+                    iban: vm.connectedBankIBAN,
+                    ringFraction: greenZoneFraction,
+                    balance: parsedBalance,
+                    dispoLimit: activeSlotSettings.dispoLimit,
+                    showRing: ringVisible
+                )
+                .transition(.opacity)
+            } else if ringVisible {
+                GreenZoneRing(fraction: greenZoneFraction, balance: parsedBalance, dispoLimit: activeSlotSettings.dispoLimit)
+                    .padding(.leading, 12)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: panelIsWide)
         .padding(16)
         .background(
             ZStack {
@@ -162,8 +414,6 @@ private struct TransactionsPanelView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(borderColor, lineWidth: 1)
         )
-        .rippleEffect(trigger: celebrationStyle == 1 ? vm.rippleTrigger : 0,
-                      defaultOrigin: CGPoint(x: 190, y: 65))
     }
 
     private var legacyBalanceCard: some View {
@@ -172,7 +422,7 @@ private struct TransactionsPanelView: View {
                 Image(systemName: "creditcard")
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
-                Text("Aktueller Kontostand")
+                Text(formatBalanceTimestamp(vm.currentBalanceFetchedAt))
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
             }
@@ -192,6 +442,56 @@ private struct TransactionsPanelView: View {
         )
     }
     
+    @ViewBuilder
+    private func bankNavLogoView(_ logo: NSImage?, brandId: String?, chevron: String) -> some View {
+        HStack(alignment: .center, spacing: 3) {
+            // Left chevron — always reserved so logo stays in fixed position
+            Image(systemName: "chevron.left")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 12, height: 18)
+                .opacity(chevron == "chevron.left" ? 1 : 0)
+            // Logo — always at same position
+            let invert = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: brandId ?? "")
+            if let logo {
+                if invert {
+                    Image(nsImage: logo).resizable().scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .colorInvert()
+                } else {
+                    Image(nsImage: logo).resizable().scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+            } else {
+                Color.clear.frame(width: 18, height: 18)
+            }
+            // Right chevron — always reserved
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 12, height: 18)
+                .opacity(chevron == "chevron.right" ? 1 : 0)
+        }
+    }
+
+    private func formatBalanceTimestamp(_ date: Date?) -> String {
+        guard let date else { return "Kontostand" }
+        let cal = Calendar.current
+        let hour = cal.component(.hour, from: date)
+        let dayLabel: String
+        if cal.isDateInToday(date) {
+            dayLabel = "Heute"
+        } else if cal.isDateInYesterday(date) {
+            dayLabel = "Gestern"
+        } else if let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: Date()),
+                  cal.isDate(date, inSameDayAs: twoDaysAgo) {
+            dayLabel = "Vorgestern"
+        } else {
+            dayLabel = Self.dayFormatter.string(from: date)
+        }
+        return "Kontostand \(dayLabel), \(hour) Uhr"
+    }
+
     private func formatDateDE(_ dateStr: String) -> String {
         guard let date = Self.inputDateFormatter.date(from: dateStr) else { return dateStr }
 
@@ -238,7 +538,7 @@ private struct TransactionsPanelView: View {
         } else {
             rawName = fallbackRecipientRaw(t)
         }
-        return truncateRecipient(rawName)
+        return truncateRecipient(rawName, maxWords: panelIsWide ? 3 : 2)
     }
 
     private func fallbackRecipientRaw(_ t: TransactionsResponse.Transaction) -> String {
@@ -250,7 +550,7 @@ private struct TransactionsPanelView: View {
         }
     }
 
-    private func truncateRecipient(_ raw: String) -> String {
+    private func truncateRecipient(_ raw: String, maxWords: Int = 2) -> String {
         let clean = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if clean.isEmpty { return "(ohne Name)" }
         let words = clean.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
@@ -259,11 +559,17 @@ private struct TransactionsPanelView: View {
         if words[1].hasPrefix("(") {
             return words[1].hasSuffix(")") ? words.prefix(2).joined(separator: " ") : words[0]
         }
-        return words.prefix(2).joined(separator: " ")
+        return words.prefix(maxWords).joined(separator: " ")
     }
 
     private func category(for transaction: TransactionsResponse.Transaction) -> TransactionCategory {
         TransactionCategorizer.category(for: transaction)
+    }
+
+    /// Returns the bank brand color for a transaction's slot in unified mode.
+    private func slotColor(for transaction: TransactionsResponse.Transaction) -> Color? {
+        guard let slotId = transaction.slotId, let slot = vm.slotMap[slotId] else { return nil }
+        return slotDisplayColor(for: slot)
     }
 
     private var displayedTransactions: [TransactionsResponse.Transaction] {
@@ -433,101 +739,123 @@ private struct TransactionsPanelView: View {
         VStack(spacing: 0) {
             // Balance Card
             Group {
-                if isDefaultTheme {
+                if vm.isUnifiedMode {
+                    unifiedBalanceCard
+                } else if isDefaultTheme {
                     defaultThemeBalanceCard
                 } else {
                     legacyBalanceCard
                 }
             }
-            .overlay(alignment: .trailing) {
-                HStack(spacing: 4) {
-                    if let prev = accountNav.onPrevAccount {
-                        Button(action: prev) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 13, weight: .semibold))
-                                .padding(6)
-                        }
-                        .buttonStyle(.plain)
-                        .opacity(showAccountNav ? 1 : 0)
-                    }
-                    if let next = accountNav.onNextAccount {
-                        Button(action: next) {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
-                                .padding(6)
-                        }
-                        .buttonStyle(.plain)
-                        .opacity(showAccountNav ? 1 : 0)
-                    } else if let add = accountNav.onAddAccount {
-                        Button(action: add) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 13, weight: .semibold))
-                                .padding(6)
-                        }
-                        .buttonStyle(.plain)
-                        .opacity(showAccountNav ? 1 : 0)
-                    }
-                }
-                .animation(.easeInOut(duration: 0.15), value: showAccountNav)
-                .padding(.trailing, 20)
+            .onDisappear { autoShowNavTask?.cancel() }
+            .onHover { hovering in
+                showAccountNav = hovering
             }
-            .onHover { hovering in showAccountNav = hovering }
+            .rippleEffect(trigger: celebrationStyle == 1 ? vm.rippleTrigger : 0,
+                          defaultOrigin: CGPoint(x: 190, y: 65))
             .padding(.horizontal, 16)
             .padding(.top, 16)
-            .padding(.bottom, 12)
+            .padding(.bottom, multibankingStore.slots.count > 1 ? 8 : 12)
 
-            // Search Field
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14))
-                    .foregroundColor(Color(NSColor.placeholderTextColor))
-                TextField("Umsätze durchsuchen...", text: $vm.query)
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .font(.system(size: 14))
-                if !vm.query.isEmpty {
-                    Button(action: {
-                        vm.query = ""
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(Color(NSColor.placeholderTextColor))
+            // Account dot indicators — slot dots + "Alle Konten" dot
+            if multibankingStore.slots.count > 1 {
+                HStack(spacing: 8) {
+                    // One dot per slot
+                    ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
+                        let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
+                        let color = slotDisplayColor(for: slot)
+                        Capsule()
+                            .fill(isActive ? color : Color(NSColor.tertiaryLabelColor))
+                            .frame(width: isActive ? 24 : 8, height: 8)
+                            .animation(.easeInOut(duration: 0.3), value: isActive)
+                            .onTapGesture {
+                                guard !isActive else { return }
+                                if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
+                                accountNav.onSwitchToIndex?(idx)
+                            }
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    // "Alle Konten" dot
+                    let unifiedActive = vm.unifiedModeEnabled
+                    Capsule()
+                        .fill(unifiedActive ? Color.accentColor : Color(NSColor.tertiaryLabelColor))
+                        .frame(width: unifiedActive ? 24 : 8, height: 8)
+                        .animation(.easeInOut(duration: 0.3), value: unifiedActive)
+                        .onTapGesture {
+                            guard !unifiedActive else { return }
+                            vm.unifiedModeEnabled = true
+                        }
                 }
-
-                Spacer(minLength: 4)
-
-                // AI chat temporarily disabled — being rebuilt
-                EmptyView()
+                .padding(.bottom, 10)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.cardBackground)
-            )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-            
-            // Transactions Header
-            HStack(spacing: 6) {
-                FilterMenuButton(activeFilter: vm.activeFilter) { vm.activeFilter = $0 }
-                    .frame(width: 20, height: 20)
-                    .help(L10n.t("Filter", "Filter"))
-                Text("Umsätze")
-                    .font(.system(size: 15, weight: .semibold))
-                Spacer()
+
+            // Search + Icons — same row
+            HStack(spacing: 8) {
+                // Search field — flexible
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13))
+                        .foregroundColor(Color(NSColor.placeholderTextColor))
+                    TextField("Suchen...", text: $vm.query)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.system(size: 13))
+                    if !vm.query.isEmpty {
+                        Button(action: { vm.query = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(Color(NSColor.placeholderTextColor))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.cardBackground))
+
+                // Icons
                 if vm.isLoading {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.8)
-                } else if !infiniteScrollEnabled {
-                    Text("\(min(vm.page + 1, vm.totalPages))/\(vm.totalPages)")
-                        .font(.system(size: 13))
+                }
+                Menu {
+                    Button(L10n.t("Als CSV exportieren", "Export as CSV")) {
+                        exportTransactionsCSV(vm.transactions)
+                    }
+                    Divider()
+                    let months: [ReportMonth] = [.current, .current.previous, .current.previous.previous]
+                    let monthLabels = [
+                        L10n.t("Aktueller Monat", "Current month"),
+                        L10n.t("Vorheriger Monat", "Previous month"),
+                        L10n.t("Vorletzter Monat", "Month before last")
+                    ]
+                    ForEach(Array(zip(months, monthLabels).enumerated()), id: \.offset) { _, pair in
+                        let (month, label) = pair
+                        Button("\(label) (\(month.shortLabel))") {
+                            exportSimpleReport(month: month)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15))
                         .foregroundColor(.secondary)
                 }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .tint(.secondary)
+                .help(L10n.t("Exportieren", "Export"))
+                Button(action: { showCategories.toggle() }) {
+                    Image(systemName: showCategories ? "tag.fill" : "tag")
+                        .font(.system(size: 15))
+                        .foregroundColor(showCategories ? Color(NSColor.labelColor) : .secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(L10n.t("Kategorien ein-/ausblenden", "Show/hide categories"))
+                FilterMenuButton(activeFilter: vm.activeFilter) { vm.activeFilter = $0 }
+                    .frame(width: 20, height: 20)
+                    .help(L10n.t("Filter", "Filter"))
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+            .padding(.bottom, 12)
             
             // Error
             if let err = vm.error {
@@ -596,15 +924,20 @@ private struct TransactionsPanelView: View {
                             if infiniteScrollEnabled {
                                 let currentMonthKey = monthKey(for: group.date)
                                 let previousMonthKey = index > 0 ? monthKey(for: groupedTransactions[index - 1].date) : nil
-                                if previousMonthKey != currentMonthKey {
-                                    HStack {
+                                if index > 0 && previousMonthKey != currentMonthKey {
+                                    HStack(spacing: 8) {
+                                        Rectangle()
+                                            .frame(height: 0.5)
+                                            .foregroundColor(.secondary.opacity(0.3))
                                         Text(monthLabel(for: group.date))
-                                            .font(.system(size: 12, weight: .semibold))
+                                            .font(.system(size: 11, weight: .semibold))
                                             .foregroundColor(.secondary)
-                                            .textCase(.none)
-                                        Spacer(minLength: 0)
+                                            .fixedSize()
+                                        Rectangle()
+                                            .frame(height: 0.5)
+                                            .foregroundColor(.secondary.opacity(0.3))
                                     }
-                                    .padding(.top, index == 0 ? 4 : 12)
+                                    .padding(.top, 12)
                                     .padding(.bottom, 3)
                                 }
                             }
@@ -621,6 +954,8 @@ private struct TransactionsPanelView: View {
                                 let txID = TransactionRecord.fingerprint(for: t)
                                 let enrichment = vm.enrichmentData[txID]
                                 let resolution = MerchantResolver.resolve(transaction: t)
+                                let rowSlotColor: Color? = vm.isUnifiedMode ? slotColor(for: t) : nil
+                                let isTransfer = vm.isUnifiedMode && vm.internalTransferIDs.contains(txID)
                                 TransactionRowNew(
                                     transaction: t,
                                     category: category(for: t),
@@ -633,8 +968,12 @@ private struct TransactionsPanelView: View {
                                     attachmentCount: enrichment?.attachmentCount ?? 0,
                                     bankId: "primary",
                                     onEnrichmentChanged: { vm.loadEnrichmentData(bankId: "primary") },
-                                    isWide: panelIsWide
+                                    isWide: panelIsWide,
+                                    slotColor: rowSlotColor,
+                                    isInternalTransfer: isTransfer,
+                                    showCategories: showCategories
                                 )
+                                .opacity(t.status == "pending" ? 0.65 : 1.0)
                                 .onAppear {
                                     loadMoreTransactionsIfNeeded(current: t)
                                 }
@@ -679,32 +1018,35 @@ private struct TransactionsPanelView: View {
             
             // Pagination Footer
             HStack {
-                if !infiniteScrollEnabled {
+                // Ko-fi
+                Button(action: {
+                    if let url = URL(string: "https://ko-fi.com/N4N11K1NC") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }) {
+                    Image(systemName: "cup.and.saucer")
+                        .font(.system(size: 15))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(L10n.t("Support simplebanking", "Support simplebanking"))
+
+                if !infiniteScrollEnabled && vm.page > 0 {
                     Button(action: { vm.prevPage() }) {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 12, weight: .medium))
-                            Text("Zurück")
+                            Text("Neuere")
                                 .font(.system(size: 14))
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .foregroundColor(vm.page > 0 ? .primary : Color(NSColor.placeholderTextColor))
-                    .disabled(vm.page == 0)
+                    .foregroundColor(.primary)
                 }
-                
+
                 Spacer()
-                
+
                 HStack(spacing: 16) {
-                    // CSV Export Button
-                    Button(action: { exportTransactionsCSV(vm.transactions) }) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("Als CSV exportieren", "Export as CSV"))
-                    
                     // Fixkosten Button
                     Button(action: { showFixedCosts = true }) {
                         Image(systemName: "repeat.circle")
@@ -744,18 +1086,17 @@ private struct TransactionsPanelView: View {
                 
                 Spacer()
                 
-                if !infiniteScrollEnabled {
+                if !infiniteScrollEnabled && vm.page < vm.totalPages - 1 {
                     Button(action: { vm.nextPage() }) {
                         HStack(spacing: 4) {
-                            Text("Weiter")
+                            Text("Ältere")
                                 .font(.system(size: 14))
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 12, weight: .medium))
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .foregroundColor(vm.page < vm.totalPages - 1 ? .primary : Color(NSColor.placeholderTextColor))
-                    .disabled(vm.page >= vm.totalPages - 1)
+                    .foregroundColor(.primary)
                 }
             }
             .padding(.horizontal, 20)
@@ -773,7 +1114,9 @@ private struct TransactionsPanelView: View {
         .tint(Color.themeAccent)
         .preferredColorScheme(colorScheme)
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { newWidth in
-            panelIsWide = newWidth >= 700
+            withAnimation(.easeInOut(duration: 0.2)) {
+                panelIsWide = newWidth >= 700
+            }
         }
         .onChange(of: llmAPIKeyPresent) { enabled in
             if !enabled {
@@ -796,9 +1139,17 @@ private struct TransactionsPanelView: View {
             if celebrationStyle == 1 && UserDefaults.standard.bool(forKey: "rippleAlwaysOn") {
                 vm.rippleTrigger += 1
             }
+            recomputeGreenZone()
+        }
+        .onChange(of: vm.transactions.count) { _ in
+            recomputeGreenZone()
         }
         .onChange(of: infiniteScrollEnabled) { _ in
             resetInfiniteWindowIfNeeded()
+        }
+        .onChange(of: vm.unifiedModeEnabled) { _ in
+            // Reload transactions when user toggles unified mode.
+            Task { await onRefresh() }
         }
         .onChange(of: vm.filteredTransactions.count) { _ in
             if infiniteScrollEnabled {
@@ -815,14 +1166,20 @@ private struct TransactionsPanelView: View {
         .sheet(isPresented: $showScoreSheet) {
             FinancialHealthScoreView(
                 transactions: vm.transactions,
-                salaryDay: salaryDay,
-                dispoLimit: dispoLimit,
-                targetBuffer: targetBuffer,
-                targetSavingsRate: targetSavingsRate
+                salaryDay: activeSlotSettings.salaryDay,
+                dispoLimit: activeSlotSettings.dispoLimit,
+                targetBuffer: activeSlotSettings.targetBuffer,
+                targetSavingsRate: activeSlotSettings.targetSavingsRate,
+                stabilityOutlierMultiplier: scoreStabilityMultiplier,
+                coverageRatioWeight: scoreCoverageWeight,
+                fixedCostWarningRatio: scoreFixedCostWarningRatio
             )
         }
         .sheet(isPresented: $showFixedCosts) {
-            FixedCostsView(payments: FixedCostsAnalyzer.analyze(transactions: vm.transactions))
+            FixedCostsView(payments: fixedCostPayments)
+        }
+        .onChange(of: showFixedCosts) { isShown in
+            if isShown { recomputeFixedCosts() }
         }
         .sheet(isPresented: $showSubscriptions) {
             SubscriptionsView(transactions: vm.transactions)
@@ -875,7 +1232,17 @@ private struct TransactionsPanelView: View {
 
     // Computed property - wird bei jeder Änderung neu berechnet
     private var currentScore: FinancialHealthScore {
-        FinancialHealthScorer.score(transactions: vm.transactions, salaryDay: salaryDay, dispoLimit: dispoLimit, targetBuffer: targetBuffer, targetSavingsRate: targetSavingsRate)
+        let s = activeSlotSettings
+        return FinancialHealthScorer.score(
+            transactions: vm.transactions,
+            salaryDay: s.salaryDay,
+            dispoLimit: s.dispoLimit,
+            targetBuffer: s.targetBuffer,
+            targetSavingsRate: s.targetSavingsRate,
+            stabilityOutlierMultiplier: scoreStabilityMultiplier,
+            coverageRatioWeight: scoreCoverageWeight,
+            fixedCostWarningRatio: scoreFixedCostWarningRatio
+        )
     }
     
     // MARK: - CSV Export
@@ -909,6 +1276,50 @@ private struct TransactionsPanelView: View {
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "CSV-Export fehlgeschlagen"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
+    }
+
+    // MARK: - simple.report Export
+
+    private func exportSimpleReport(month: ReportMonth) {
+        guard let slot = multibankingStore.activeSlot else { return }
+        // Load 90 days for recurring/fixed-cost detection — same window as FixedCostsView.
+        // vm.transactions only covers fetchDays (default 60) which misses early-month
+        // subscriptions and cuts off quarterly patterns entirely.
+        let slots: [String]? = vm.isUnifiedMode
+            ? MultibankingStore.shared.slots.map { $0.id }
+            : [TransactionsDatabase.activeSlotId]
+        let allTxs = (try? TransactionsDatabase.loadUnifiedTransactions(slots: slots, days: 90))
+            ?? vm.transactions
+        let monthTxs = month.filter(allTxs)
+        let prevTxs  = month.previous.filter(allTxs)
+
+        let report  = MonthlyReportBuilder().build(
+            slot: slot, month: month,
+            transactions: monthTxs,
+            previousMonth: prevTxs,
+            allTransactions: allTxs
+        )
+        let pdfData = MonthlyReportPDFRenderer().render(report: report)
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        let safeName = (slot.nickname ?? slot.displayName)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: " ", with: "-")
+        panel.nameFieldStringValue = "simple-report_\(safeName)_\(month.fileLabel).pdf"
+
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try pdfData.write(to: url)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "simple.report Export fehlgeschlagen"
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
                 alert.runModal()
@@ -990,12 +1401,35 @@ private struct TransactionRowNew: View {
     let bankId: String
     let onEnrichmentChanged: () -> Void
     var isWide: Bool = false
+    var slotColor: Color? = nil
+    var isInternalTransfer: Bool = false
+    var showCategories: Bool = false
+
+    private var isPending: Bool { transaction.status == "pending" }
 
     @ObservedObject private var logoService = MerchantLogoService.shared
     @State private var showDetail: Bool = false
 
+    private var empfaengerText: String {
+        [transaction.creditor?.name, transaction.debtor?.name]
+            .compactMap { $0 }.joined(separator: " ")
+    }
+
+    private var verwendungszweckText: String {
+        ((transaction.remittanceInformation ?? []) + [transaction.additionalInformation])
+            .compactMap { $0 }.joined(separator: " ")
+    }
+
+    private var logoKey: String {
+        logoService.effectiveLogoKey(
+            normalizedMerchant: normalizedMerchant,
+            empfaenger: empfaengerText,
+            verwendungszweck: verwendungszweckText
+        )
+    }
+
     private var merchantLogo: NSImage? {
-        logoService.image(for: normalizedMerchant)
+        logoService.image(for: logoKey)
     }
 
     var body: some View {
@@ -1005,17 +1439,31 @@ private struct TransactionRowNew: View {
                     if let logo = merchantLogo {
                         Image(nsImage: logo)
                             .resizable()
-                            .scaledToFit()
-                            .frame(width: 14, height: 14)
+                            .scaledToFill()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                            .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
                     } else {
                         Image(systemName: category.icon)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.secondary)
+                            .frame(width: 20, height: 20)
                     }
-                    Text(name)
-                        .font(.system(size: 14, weight: .medium))
-                        .lineLimit(1)
-                        .foregroundColor(.primary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name)
+                            .font(.system(size: 14, weight: .medium))
+                            .lineLimit(1)
+                            .foregroundColor(.primary)
+                        if showCategories {
+                            Text(category.rawValue)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                                .lineLimit(1)
+                        }
+                    }
                 }
                 if isWide {
                     let remittance = transaction.remittanceInformation?.first ?? ""
@@ -1041,13 +1489,34 @@ private struct TransactionRowNew: View {
                             .foregroundColor(Color(NSColor.tertiaryLabelColor))
                     }
                 }
-                Text(amount)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(amountColor)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(amount)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(amountColor)
+                    if isPending {
+                        Text(L10n.t("Vorgemerkt", "Pending"))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.orange.opacity(0.12)))
+                    }
+                }
             }
 
-            if !matchBadges.isEmpty {
+            if isInternalTransfer || !matchBadges.isEmpty {
                 HStack(spacing: 6) {
+                    if isInternalTransfer {
+                        Label(L10n.t("Eigenüberweisung", "Own Transfer"), systemImage: "arrow.left.arrow.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(Color(NSColor.quaternaryLabelColor).opacity(0.18))
+                            )
+                    }
                     ForEach(matchBadges, id: \.self) { badge in
                         Text(badge)
                             .font(.system(size: 10, weight: .semibold))
@@ -1069,6 +1538,15 @@ private struct TransactionRowNew: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.cardBackground)
         )
+        // 3px leading color bar for bank attribution in unified mode
+        .overlay(alignment: .leading) {
+            if let color = slotColor {
+                color
+                    .frame(width: 3)
+                    .padding(.vertical, 4)
+                    .clipShape(RoundedRectangle(cornerRadius: 1.5))
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             showDetail = true
@@ -1099,7 +1577,7 @@ private struct TransactionRowNew: View {
             )
         }
         .onAppear {
-            MerchantLogoService.shared.preload(normalizedMerchant: normalizedMerchant)
+            MerchantLogoService.shared.preload(normalizedMerchant: logoKey)
         }
     }
 }
@@ -1399,6 +1877,15 @@ final class AccountNavModel: ObservableObject {
     @Published var onPrevAccount: (() -> Void)? = nil
     @Published var onNextAccount: (() -> Void)? = nil
     @Published var onAddAccount:  (() -> Void)? = nil
+    @Published var onSwitchToIndex: ((Int) -> Void)? = nil
+    @Published var prevAccountLogo: NSImage? = nil
+    @Published var nextAccountLogo: NSImage? = nil
+    @Published var prevAccountBrandId: String? = nil
+    @Published var nextAccountBrandId: String? = nil
+    @Published var prevAccountCurrency: String? = nil
+    @Published var nextAccountCurrency: String? = nil
+    @Published var prevAccountNickname: String? = nil
+    @Published var nextAccountNickname: String? = nil
 }
 
 @MainActor final class TransactionsPanel: NSObject, NSWindowDelegate {
@@ -1439,8 +1926,8 @@ final class AccountNavModel: ObservableObject {
         panel.title = "simplebanking"
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
-        panel.isFloatingPanel = true
-        panel.level = .floating
+        panel.isFloatingPanel = false
+        panel.hidesOnDeactivate = false
         if #available(macOS 11.0, *) {
             panel.toolbarStyle = .unifiedCompact
         }
@@ -1494,12 +1981,16 @@ final class AccountNavModel: ObservableObject {
         clippy.resumeAutonomousModeIfEnabled(on: panel.contentView)
     }
 
+    func close() {
+        panel.orderOut(nil)
+    }
+
     // MARK: - NSWindowDelegate: Zoom-Toggle (grüner Button)
 
     nonisolated func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame: NSRect) -> NSRect {
         let narrow = TransactionsPanel.narrowWidth
         let wide   = TransactionsPanel.wideWidth
-        let height = TransactionsPanel.panelHeight
+        let height = window.frame.height  // preserve actual frame height (includes title bar)
         let isNarrow = window.frame.width < (narrow + wide) / 2
         let targetWidth: CGFloat = isNarrow ? wide : narrow
         let x = window.frame.midX - targetWidth / 2
@@ -1509,16 +2000,24 @@ final class AccountNavModel: ObservableObject {
         return NSRect(x: clampedX, y: y, width: targetWidth, height: height)
     }
 
+    nonisolated func windowDidDeminiaturize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        DispatchQueue.main.async {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
     nonisolated func windowDidResize(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         let narrow = TransactionsPanel.narrowWidth
         let wide   = TransactionsPanel.wideWidth
-        let height = TransactionsPanel.panelHeight
         let snap: CGFloat = window.frame.width > (narrow + wide) / 2 ? wide : narrow
+        let frameHeight = window.frame.height  // preserve actual frame height (includes title bar)
         // Lock to snapped size to prevent free drag-resizing
         DispatchQueue.main.async {
-            window.minSize = NSSize(width: snap, height: height)
-            window.maxSize = NSSize(width: snap, height: height)
+            window.minSize = NSSize(width: snap, height: frameHeight)
+            window.maxSize = NSSize(width: snap, height: frameHeight)
         }
     }
 
@@ -1583,6 +2082,10 @@ final class AccountNavModel: ObservableObject {
         vm.$connectedBankIBAN
             .sink { [weak self] _ in self?.updateTitlebarContent() }
             .store(in: &cancellables)
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateTitlebarContent() }
+            .store(in: &cancellables)
         BankLogoStore.shared.$images
             .sink { [weak self] _ in self?.updateTitlebarContent() }
             .store(in: &cancellables)
@@ -1593,6 +2096,17 @@ final class AccountNavModel: ObservableObject {
         isUpdatingTitlebar = true
         defer { isUpdatingTitlebar = false }
 
+        // Unified mode: neutral "Alle Konten" label + columns icon
+        if vm.isUnifiedMode {
+            let label = L10n.t("Alle Konten", "All Accounts")
+            titleLabel.stringValue = label
+            panel.title = label
+            titleIconView.image = NSImage(systemSymbolName: "building.columns.fill", accessibilityDescription: nil)
+            titleIconView.contentTintColor = .secondaryLabelColor
+            return
+        }
+
+        // Single-account mode
         let brand = BankLogoAssets.resolve(
             displayName: vm.connectedBankDisplayName,
             logoID: vm.connectedBankLogoID,
@@ -1749,5 +2263,19 @@ private struct FilterMenuButton: NSViewRepresentable {
             guard let filter = TxFilter(rawValue: sender.tag) else { return }
             onSelect(filter)
         }
+    }
+}
+
+// MARK: - Color from hex
+
+extension Color {
+    /// Initialize from a 6-digit hex string (without #), e.g. "ee0000".
+    init?(hex: String) {
+        let h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        guard h.count == 6, let value = UInt64(h, radix: 16) else { return nil }
+        let r = Double((value >> 16) & 0xFF) / 255
+        let g = Double((value >> 8) & 0xFF) / 255
+        let b = Double(value & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
     }
 }
