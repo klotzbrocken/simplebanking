@@ -13,6 +13,30 @@ enum FakeData {
         "Tankstelle"
     ]
 
+    // Profile 1: daily spending (coffee, food, fashion, delivery)
+    private static let merchantsProfile1 = [
+        "Starbucks Coffee",
+        "Lieferando.de",
+        "About You GmbH",
+        "Zalando SE",
+        "McDonald's",
+        "Subway",
+        "dm-drogerie markt",
+        "Rewe To Go"
+    ]
+
+    // Profile 2: home & services (pharmacy, hardware, home)
+    private static let merchantsProfile2 = [
+        "Apotheke am Markt",
+        "Bauhaus AG",
+        "OBI Bau- und Heimwerkermarkt",
+        "IKEA Deutschland",
+        "MediaMarkt",
+        "Rossmann",
+        "Hornbach",
+        "Saturn Electro"
+    ]
+
     static let remittances = [
         "Kartenzahlung",
         "SEPA Lastschrift",
@@ -22,9 +46,9 @@ enum FakeData {
         "Rechnung",
         "Danke für Ihren Einkauf"
     ]
-    
+
     // MARK: - Recurring Payments (for Fixkosten)
-    
+
     struct RecurringTemplate {
         let merchant: String
         let remittance: String
@@ -33,39 +57,38 @@ enum FakeData {
         let dayOfMonth: Int         // Typical day of month (1-28)
         let category: String        // For grouping
     }
-    
+
+    // Profile 0: main account — salary, rent, streaming, phone
     static let recurringPayments: [RecurringTemplate] = [
-        // Streaming
+        RecurringTemplate(merchant: "Klotzbrocken AG", remittance: "GEHALT", amount: -3450.00, variance: 0.02, dayOfMonth: 1, category: "income"),
+        RecurringTemplate(merchant: "Wohnungsbaugesellschaft Siegen", remittance: "MIETE INKL. NK", amount: 850.00, variance: 0, dayOfMonth: 1, category: "housing"),
+        RecurringTemplate(merchant: "ING-DiBa AG", remittance: "KREDITKARTENABRECHNUNG", amount: 380.00, variance: 0.12, dayOfMonth: 3, category: "payment"),
         RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . NETFLIX, Ihr Einkauf bei NETFLIX", amount: 17.99, variance: 0, dayOfMonth: 15, category: "streaming"),
         RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . SPOTIFY AB, Ihr Einkauf bei SPOTIFY", amount: 10.99, variance: 0, dayOfMonth: 1, category: "streaming"),
-        RecurringTemplate(merchant: "AMAZON EU S.A R.L.", remittance: "AMAZON PRIME MEMBERSHIP", amount: 8.99, variance: 0, dayOfMonth: 5, category: "streaming"),
-        
-        // Telecom
         RecurringTemplate(merchant: "Telekom Deutschland GmbH", remittance: "MOBILFUNK RECHNUNG", amount: 49.99, variance: 0.05, dayOfMonth: 20, category: "telecom"),
-        
-        // Insurance
-        RecurringTemplate(merchant: "HUK-COBURG Versicherung", remittance: "KFZ-HAFTPFLICHT", amount: 38.50, variance: 0, dayOfMonth: 1, category: "insurance"),
-        RecurringTemplate(merchant: "Debeka Krankenversicherung", remittance: "ZUSATZVERSICHERUNG", amount: 25.90, variance: 0, dayOfMonth: 1, category: "insurance"),
-        
-        // Utilities
-        RecurringTemplate(merchant: "Stadtwerke Siegen", remittance: "STROM ABSCHLAG", amount: 85.00, variance: 0, dayOfMonth: 28, category: "utilities"),
-        RecurringTemplate(merchant: "Stadtwerke Siegen", remittance: "GAS ABSCHLAG", amount: 65.00, variance: 0, dayOfMonth: 28, category: "utilities"),
-        
-        // Software/Subscriptions
+        RecurringTemplate(merchant: "McFit GmbH", remittance: "MITGLIEDSBEITRAG", amount: 24.90, variance: 0, dayOfMonth: 15, category: "membership"),
+    ]
+
+    // Profile 1: daily/lifestyle account — subscriptions, online shopping, no salary
+    private static let recurringPaymentsProfile1: [RecurringTemplate] = [
+        RecurringTemplate(merchant: "AMAZON EU S.A R.L.", remittance: "AMAZON PRIME MEMBERSHIP", amount: 8.99, variance: 0, dayOfMonth: 5, category: "streaming"),
+        RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . DISNEY PLUS, Ihr Einkauf bei DISNEY", amount: 11.99, variance: 0, dayOfMonth: 3, category: "streaming"),
+        RecurringTemplate(merchant: "APPLE.COM/BILL", remittance: "APPLE ONE SUBSCRIPTION", amount: 19.95, variance: 0, dayOfMonth: 12, category: "streaming"),
+        RecurringTemplate(merchant: "O2 Online GmbH", remittance: "VERTRAGSRECHNUNG MOBILFUNK", amount: 34.99, variance: 0.03, dayOfMonth: 22, category: "telecom"),
+        RecurringTemplate(merchant: "Urban Sports Club", remittance: "MITGLIEDSBEITRAG M-PAKET", amount: 59.90, variance: 0, dayOfMonth: 1, category: "membership"),
+        RecurringTemplate(merchant: "Payment & Banking GmbH", remittance: "GEHALT", amount: -4200.00, variance: 0.02, dayOfMonth: 15, category: "income"),
+    ]
+
+    // Profile 2: bills/shared account — utilities, insurance, transport, software
+    private static let recurringPaymentsProfile2: [RecurringTemplate] = [
+        RecurringTemplate(merchant: "Stadtwerke München GmbH", remittance: "STROM ABSCHLAG", amount: 92.00, variance: 0, dayOfMonth: 28, category: "utilities"),
+        RecurringTemplate(merchant: "Stadtwerke München GmbH", remittance: "GAS ABSCHLAG", amount: 71.00, variance: 0, dayOfMonth: 28, category: "utilities"),
+        RecurringTemplate(merchant: "HUK-COBURG Versicherung", remittance: "KFZ-HAFTPFLICHT UND KASKO", amount: 52.30, variance: 0, dayOfMonth: 1, category: "insurance"),
+        RecurringTemplate(merchant: "Debeka Krankenversicherung", remittance: "KRANKENZUSATZVERSICHERUNG", amount: 31.40, variance: 0, dayOfMonth: 1, category: "insurance"),
+        RecurringTemplate(merchant: "DB Vertrieb GmbH", remittance: "DEUTSCHLANDTICKET", amount: 49.00, variance: 0, dayOfMonth: 1, category: "transport"),
         RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . OPENAI, Ihr Einkauf bei OPENAI", amount: 20.00, variance: 0, dayOfMonth: 10, category: "software"),
         RecurringTemplate(merchant: "APPLE.COM/BILL", remittance: "APPLE ICLOUD+ 200GB", amount: 2.99, variance: 0, dayOfMonth: 8, category: "software"),
-        
-        // Membership
-        RecurringTemplate(merchant: "McFit GmbH", remittance: "MITGLIEDSBEITRAG", amount: 24.90, variance: 0, dayOfMonth: 15, category: "membership"),
-        
-        // Transport
-        RecurringTemplate(merchant: "DB Vertrieb GmbH", remittance: "DEUTSCHLANDTICKET", amount: 49.00, variance: 0, dayOfMonth: 1, category: "transport"),
-        
-        // Rent (large recurring)
-        RecurringTemplate(merchant: "Wohnungsbaugesellschaft Siegen", remittance: "MIETE INKL. NK", amount: 850.00, variance: 0, dayOfMonth: 1, category: "housing"),
-        
-        // Salary (income)
-        RecurringTemplate(merchant: "DSGV Sparkassenverband", remittance: "GEHALT", amount: -3450.00, variance: 0.02, dayOfMonth: 27, category: "income"),
+        RecurringTemplate(merchant: "Fliegenfranz GmbH", remittance: "GEHALT", amount: -2800.00, variance: 0.02, dayOfMonth: 1, category: "income"),
     ]
 
     private static let dateFormatter: DateFormatter = {
@@ -77,8 +100,27 @@ enum FakeData {
     }()
     
     // MARK: - Demo Transaction Generation (90 days with recurring)
-    
+
     static func generateDemoTransactions(seed: inout UInt64, days: Int = 90) -> [TransactionsResponse.Transaction] {
+        generateDemoTransactions(seed: &seed, days: days, slotProfile: 0)
+    }
+
+    // slotProfile: 0 = main account, 1 = daily/lifestyle, 2 = bills/shared
+    static func generateDemoTransactions(seed: inout UInt64, days: Int = 90, slotProfile: Int) -> [TransactionsResponse.Transaction] {
+        let templates: [RecurringTemplate]
+        let varMerchants: [String]
+        switch slotProfile {
+        case 1:
+            templates = recurringPaymentsProfile1
+            varMerchants = merchantsProfile1
+        case 2:
+            templates = recurringPaymentsProfile2
+            varMerchants = merchantsProfile2
+        default:
+            templates = recurringPayments
+            varMerchants = merchants
+        }
+
         var transactions: [TransactionsResponse.Transaction] = []
         let cal = Calendar(identifier: .gregorian)
         let today = Date()
@@ -90,27 +132,22 @@ enum FakeData {
 
         // Generate each recurring template exactly once per month in the time range.
         for monthStart in monthsInRange(from: startDate, to: today, calendar: cal) {
-            for template in recurringPayments {
+            for template in templates {
                 var comps = cal.dateComponents([.year, .month], from: monthStart)
                 comps.day = min(template.dayOfMonth, daysInMonth(monthStart))
                 guard let recurringDate = cal.date(from: comps) else { continue }
                 guard recurringDate >= startDate && recurringDate <= today else { continue }
 
-                // Apply variance
+                // Always consume one seed step so per-slot amounts differ
                 var amount = template.amount
-                if template.variance > 0 {
-                    let varianceFactor = 1.0 + (nextDouble(&seed) * 2 - 1) * template.variance
-                    amount *= varianceFactor
-                }
+                let effectiveVariance = template.variance > 0 ? template.variance : 0.03
+                let varianceFactor = 1.0 + (nextDouble(&seed) * 2 - 1) * effectiveVariance
+                amount *= varianceFactor
 
-                // Income = negative template amount (e.g. -3450 for salary)
-                // Expenses = positive template amount → negate for transaction
                 let isIncome = amount < 0
-                let txAmount = isIncome ? abs(amount) : -amount  // Expenses are negative
+                let txAmount = isIncome ? abs(amount) : -amount
                 let amountStr = String(format: "%.2f", txAmount)
                 let dateStr = formatDate(recurringDate)
-
-                // Use consistent IBAN for recurring payments (same merchant = same IBAN)
                 let merchantIBAN = consistentIBAN(for: template.merchant + template.remittance)
 
                 let tx = TransactionsResponse.Transaction(
@@ -129,23 +166,20 @@ enum FakeData {
             }
         }
 
-        // Add random variable transactions (1-3 per day, reduced)
+        // Add random variable transactions
+        // Profile 1 (daily spending) gets more frequent random transactions
+        let chancePerDay: Double = slotProfile == 1 ? 0.7 : (slotProfile == 0 ? 0.55 : 0.4)
         for daysAgo in 0..<boundedDays {
             guard let date = cal.date(byAdding: .day, value: -daysAgo, to: today) else { continue }
             let dateStr = formatDate(date)
-
             let numRandom = 1 + Int(nextDouble(&seed) * 2)
             for _ in 0..<numRandom {
-                // Skip most days randomly (only 40% chance)
-                if nextDouble(&seed) > 0.4 { continue }
-
-                let sign = nextDouble(&seed) < 0.90 ? -1.0 : 1.0  // 90% expenses
-                let value = randomEUR(seed: &seed, min: 3.50, max: 65.0)  // Reduced max
+                if nextDouble(&seed) > chancePerDay { continue }
+                let sign = nextDouble(&seed) < 0.90 ? -1.0 : 1.0
+                let value = randomEUR(seed: &seed, min: 3.50, max: 65.0)
                 let amountStr = String(format: "%.2f", sign * value)
-
-                let merchant = pick(merchants, seed: &seed)
+                let merchant = pick(varMerchants, seed: &seed)
                 let rem = pick(remittances, seed: &seed)
-
                 let tx = TransactionsResponse.Transaction(
                     bookingDate: dateStr,
                     valueDate: dateStr,
@@ -161,10 +195,8 @@ enum FakeData {
                 transactions.append(tx)
             }
         }
-        
-        // Sort by date (newest first)
+
         transactions.sort { ($0.bookingDate ?? "") > ($1.bookingDate ?? "") }
-        
         return transactions
     }
     
@@ -243,6 +275,35 @@ enum FakeData {
     
     // Demo balance based on seed
     static func demoBalance(seed: inout UInt64) -> Double {
-        return randomEUR(seed: &seed, min: 1200.0, max: 4500.0)
+        return randomEUR(seed: &seed, min: 500.0, max: 3500.0)
+    }
+
+    /// Like generateDemoTransactions but tags every transaction with slotId and uses a profile.
+    static func generateDemoTransactions(seed: inout UInt64, days: Int = 90, slotId: String, slotProfile: Int = 0) -> [TransactionsResponse.Transaction] {
+        var txs = generateDemoTransactions(seed: &seed, days: days, slotProfile: slotProfile)
+        for i in txs.indices { txs[i].slotId = slotId }
+        return txs
+    }
+
+    // Demo balance — profile-aware amount ranges
+    static func demoBalance(seed: inout UInt64, slotProfile: Int) -> Double {
+        switch slotProfile {
+        case 1: return randomEUR(seed: &seed, min: 150.0, max: 900.0)    // daily spending
+        case 2: return randomEUR(seed: &seed, min: -400.0, max: -50.0)   // in Dispo
+        default: return randomEUR(seed: &seed, min: 1200.0, max: 4500.0) // main account
+        }
+    }
+
+    /// Canonical salary day per demo profile — matches the recurring salary template.
+    static func demoSalaryDay(slotProfile: Int) -> Int {
+        switch slotProfile {
+        case 1: return 15   // middle of month
+        default: return 1   // beginning of month (profiles 0 and 2)
+        }
+    }
+
+    /// Dispo limit for demo profiles — non-zero for profile 2 so the ring fills meaningfully.
+    static func demoDispoLimit(slotProfile: Int) -> Int {
+        slotProfile == 2 ? 500 : 0
     }
 }

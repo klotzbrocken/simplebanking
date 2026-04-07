@@ -58,6 +58,7 @@ struct TransactionsResponse: Codable, Sendable {
         let additionalInformation: String?  // Buchungstext (z.B. "DAUERAUFTRAG")
         let purposeCode: String?            // Kategorie (z.B. "RINP")
         var category: String? = nil         // Local category label (e.g. "Essen & Alltag")
+        var slotId: String? = nil           // Unified inbox: which bank slot this transaction belongs to
     }
 
     let ok: Bool?

@@ -11,6 +11,9 @@ struct TransactionDetailView: View {
 
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var logoService = MerchantLogoService.shared
+    @State private var customLogo: NSImage? = nil
+    @State private var isLogoDropTargeted: Bool = false
     @State private var isSavingsBookmarked: Bool = false
     @State private var displayedMerchantInput: String = ""
     @State private var rulePatternInput: String = ""
@@ -86,6 +89,93 @@ struct TransactionDetailView: View {
         TransactionRecord.fingerprint(for: transaction)
     }
 
+    private var empfaengerText: String {
+        [transaction.creditor?.name, transaction.debtor?.name]
+            .compactMap { $0 }.joined(separator: " ")
+    }
+
+    private var verwendungszweckText: String {
+        ((transaction.remittanceInformation ?? []) + [transaction.additionalInformation])
+            .compactMap { $0 }.joined(separator: " ")
+    }
+
+    private var normalizedMerchant: String {
+        MerchantResolver.resolve(transaction: transaction).normalizedMerchant
+    }
+
+    private var logoKey: String {
+        logoService.effectiveLogoKey(
+            normalizedMerchant: normalizedMerchant,
+            empfaenger: empfaengerText,
+            verwendungszweck: verwendungszweckText
+        )
+    }
+
+    private var merchantLogo: NSImage? {
+        logoService.image(for: logoKey)
+    }
+
+    /// Anzeige-Logo: Custom (Händler-weit) > Service-Cache > nil (→ Kategorie-Icon)
+    private var displayLogo: NSImage? { merchantLogo }
+
+    private var hasCustomLogo: Bool { logoService.hasCustomLogo(forKey: logoKey) }
+
+    private func loadCustomLogo() {
+        // Merchant custom logos are loaded into MerchantLogoService at startup.
+        // Per-txId legacy entries are kept for backward compat but no longer primary.
+        let txId = txFingerprint
+        Task.detached {
+            guard let data = TransactionsDatabase.loadCustomLogo(txId: txId) else { return }
+            // Migrate old per-txId logo to merchant-wide storage if not yet done
+            let key = await MainActor.run { self.logoKey }
+            if !TransactionsDatabase.loadAllMerchantCustomLogos().keys.contains(key) {
+                await MainActor.run {
+                    MerchantLogoService.shared.setCustomLogo(data: data, forKey: key)
+                }
+            }
+        }
+    }
+
+    private func applyLogoURL(_ url: URL) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        // Save merchant-wide (all transactions of this merchant get the logo)
+        MerchantLogoService.shared.setCustomLogo(data: data, forKey: logoKey)
+        // Keep per-txId entry for backward compat
+        let txId = txFingerprint
+        Task.detached { TransactionsDatabase.saveCustomLogo(txId: txId, data: data) }
+    }
+
+    private func deleteCustomLogo() {
+        MerchantLogoService.shared.removeCustomLogo(forKey: logoKey)
+        let txId = txFingerprint
+        Task.detached { TransactionsDatabase.deleteCustomLogo(txId: txId) }
+    }
+
+    private func openLogoPicker() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.png, .jpeg, .gif, .svg, .image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Logo für diesen Händler auswählen (gilt für alle Buchungen)"
+        if panel.runModal() == .OK, let url = panel.url {
+            applyLogoURL(url)
+        }
+    }
+
+    private func handleLogoDrop(_ providers: [NSItemProvider]) -> Bool {
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier("public.file-url") {
+                provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+                    guard let data = item as? Data,
+                          let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                    Task { @MainActor in applyLogoURL(url) }
+                }
+                return true
+            }
+        }
+        return false
+    }
+
     private func initializeCategorySelectionIfNeeded() {
         guard !categorySelectionReady else { return }
         selectedCategory = TransactionCategorizer.category(for: transaction)
@@ -107,7 +197,8 @@ struct TransactionDetailView: View {
             }
 
             do {
-                try TransactionsDatabase.refreshTransactionCategories()
+                // Update only this transaction's category row instead of rebuilding all.
+                try TransactionsDatabase.updateKategorie(txID: txID, kategorie: newCategory.displayName)
                 await MainActor.run {
                     NotificationCenter.default.post(name: Notification.Name("TransactionCategoriesChanged"), object: nil)
                     hasCategoryOverride = TransactionCategorizer.hasOverride(txID: txID)
@@ -332,8 +423,58 @@ struct TransactionDetailView: View {
             
             ScrollView {
                 VStack(spacing: 16) {
-                    // Betrag groß
-                    VStack(spacing: 4) {
+                    // Betrag-Kachel mit Logo / Kategorie-Icon
+                    HStack(spacing: 16) {
+                        // Logo-Bereich: Klick = Dateiauswahl, Drag & Drop = eigenes Logo
+                        ZStack {
+                            if let logo = displayLogo {
+                                Image(nsImage: logo)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 48, height: 48)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
+                            } else {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.secondary.opacity(0.12))
+                                    .frame(width: 48, height: 48)
+                                    .overlay(
+                                        Image(systemName: selectedCategory.icon)
+                                            .font(.system(size: 22))
+                                            .foregroundColor(.secondary)
+                                    )
+                            }
+                            // Drop-Highlight
+                            if isLogoDropTargeted {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                                    .frame(width: 48, height: 48)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color.accentColor.opacity(0.15))
+                                    )
+                            }
+                        }
+                        .frame(width: 48, height: 48)
+                        .help("Klick oder Drag & Drop für eigenes Logo")
+                        .onTapGesture { openLogoPicker() }
+                        .onDrop(of: ["public.file-url"], isTargeted: $isLogoDropTargeted) { providers in
+                            handleLogoDrop(providers)
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            if hasCustomLogo {
+                                Button(action: { deleteCustomLogo() }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.white)
+                                        .background(Circle().fill(Color.red).padding(2))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .offset(x: 6, y: -6)
+                                .help("Benutzerdefiniertes Logo löschen")
+                            }
+                        }
+
                         Text(formatAmount())
                             .font(.system(size: 36, weight: .bold))
                             .foregroundColor(amountColor)
@@ -344,6 +485,10 @@ struct TransactionDetailView: View {
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.cardBackground)
                     )
+                    .onAppear {
+                        MerchantLogoService.shared.preload(normalizedMerchant: logoKey)
+                        loadCustomLogo()
+                    }
                     
                     // Details Card
                     VStack(alignment: .leading, spacing: 16) {

@@ -981,6 +981,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func randomizeDemo() {
         demoSeed = Int.random(in: 1...Int.max)
+        let seed = demoSeed
+        Task.detached { TransactionsDatabase.writeDemoDB(seed: seed) }
     }
 
     @objc private func setDemoOn() {
@@ -2700,7 +2702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 id: storedConnectionId,
                 displayName: fallbackName.isEmpty ? "Bank" : fallbackName,
                 logoId: nil,
-                credentials: YaxiService.loadStoredCredentials(),
+                credentials: YaxiService.loadStoredCredentials(slotId: "legacy"),
                 userIdLabel: nil,
                 advice: nil
             )

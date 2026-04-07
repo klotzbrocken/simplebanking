@@ -136,10 +136,7 @@ struct SubscriptionsView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(subscriptions) { subscription in
-                            SubscriptionRow(
-                                subscription: subscription,
-                                logoImage: logoStore.image(for: subscription.displayName)
-                            )
+                            SubscriptionRow(subscription: subscription)
                         }
                     }
                     .padding(.horizontal, 20)
@@ -165,12 +162,11 @@ struct SubscriptionsView: View {
 
     private struct SubscriptionRow: View {
         let subscription: SubscriptionMatch
-        let logoImage: NSImage?
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 10) {
-                    SubscriptionLogo(image: logoImage)
+                    SubscriptionLogo(displayName: subscription.displayName)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(subscription.displayName)
@@ -204,25 +200,32 @@ struct SubscriptionsView: View {
     }
 
     private struct SubscriptionLogo: View {
-        let image: NSImage?
+        let displayName: String
+        @ObservedObject private var logoService = MerchantLogoService.shared
 
         var body: some View {
+            let key = logoService.effectiveLogoKey(
+                normalizedMerchant: displayName.lowercased(),
+                empfaenger: displayName,
+                verwendungszweck: ""
+            )
             ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.black.opacity(0.04))
-
-                if let image {
-                    Image(nsImage: image)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.1))
+                if let img = logoService.image(for: key) {
+                    Image(nsImage: img)
                         .resizable()
-                        .scaledToFit()
-                        .padding(4)
+                        .scaledToFill()
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {
-                    Image(systemName: "building.2.crop.circle")
-                        .font(.system(size: 14))
+                    Image(systemName: "play.rectangle")
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundColor(.secondary)
                 }
             }
             .frame(width: 34, height: 34)
+            .shadow(color: .black.opacity(0.08), radius: 2, x: 0, y: 1)
+            .onAppear { logoService.preload(normalizedMerchant: key) }
         }
     }
 }

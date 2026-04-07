@@ -17,7 +17,12 @@ enum TransactionsDatabase {
 
     // MARK: - Active slot ID (set by BalanceBar when switching accounts)
 
-    nonisolated(unsafe) static var activeSlotId: String = "legacy"
+    private static let _slotLock = NSLock()
+    nonisolated(unsafe) private static var _activeSlotId: String = "legacy"
+    static var activeSlotId: String {
+        get { _slotLock.lock(); defer { _slotLock.unlock() }; return _activeSlotId }
+        set { _slotLock.lock(); defer { _slotLock.unlock() }; _activeSlotId = newValue }
+    }
     private static let isoDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -98,12 +103,122 @@ enum TransactionsDatabase {
             // All single-account installs should have slot_id = 'legacy'.
             try db.execute(sql: "UPDATE transactions SET slot_id = 'legacy' WHERE slot_id != 'legacy'")
         }
+        migrator.registerMigration("v8_status") { db in
+            // Store transaction status so we can distinguish pending from booked rows
+            // and purge stale pending entries after each refresh.
+            try addColumnIfMissing(db, table: "transactions", column: "status", definition: "TEXT NOT NULL DEFAULT 'booked'")
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status)")
+        }
+        migrator.registerMigration("v9_dedup_fingerprint") { db in
+            // Cleanup: a previous version temporarily removed bookingDate from the
+            // fingerprint, causing every transaction to get a second DB row on the
+            // next refresh.  Keep the row with the latest updated_at per slot and
+            // de-duplicate on (slot_id, betrag, datum, buchungsdatum, empfaenger,
+            // absender, verwendungszweck) — enough to identify the same real-world tx.
+            try db.execute(sql: """
+                DELETE FROM transactions
+                WHERE rowid NOT IN (
+                    SELECT MAX(rowid)
+                    FROM transactions
+                    GROUP BY slot_id, betrag, datum, buchungsdatum,
+                             COALESCE(empfaenger, ''), COALESCE(absender, ''),
+                             COALESCE(verwendungszweck, '')
+                )
+                """)
+        }
+        migrator.registerMigration("v10_reset_fingerprint") { db in
+            // v9 kept the wrong-fingerprint rows (inserted after bookingDate was removed).
+            // The reverted fingerprint now generates different tx_ids → doubles again on
+            // every refresh.  Simplest fix: wipe all rows; next refresh re-populates
+            // with the correct fingerprint.  User notes are lost but categories are
+            // re-applied automatically by TransactionCategorizer.
+            try db.execute(sql: "DELETE FROM transactions")
+        }
+        migrator.registerMigration("v11_recompute_merchant_aliases") { db in
+            // Re-resolve all stored merchant names with the extended alias list.
+            try backfillMerchantColumns(db: db)
+        }
+        migrator.registerMigration("v12_merchant_logos") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS merchant_logos (
+                    key TEXT PRIMARY KEY NOT NULL,
+                    data BLOB NOT NULL,
+                    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
+        }
+        migrator.registerMigration("v13_transaction_logos") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS transaction_logos (
+                    tx_id TEXT PRIMARY KEY NOT NULL,
+                    data BLOB NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
+        }
+        migrator.registerMigration("v14_merchant_custom_logos") { db in
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS merchant_custom_logos (
+                    merchant_key TEXT PRIMARY KEY NOT NULL,
+                    data BLOB NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+            """)
+        }
         return migrator
     }
 
     static func migrate(bankId: String = "primary") throws {
         let queue = try makeQueue(bankId: bankId)
         try migrator.migrate(queue)
+    }
+
+    // MARK: - Demo DB
+
+    /// Generates fake transactions for all 3 demo slots and writes them to transactions-demo.db.
+    /// Called whenever demo mode is activated or the seed is changed.
+    static func writeDemoDB(seed: Int) {
+        guard let queue = try? makeQueue(bankId: "demo") else { return }
+        guard (try? migrator.migrate(queue)) != nil else { return }
+
+        let slotConfigs: [(id: String, profile: Int)] = [
+            ("demo-main",  0),
+            ("demo-daily", 1),
+            ("demo-bills", 2)
+        ]
+        let now = currentTimestamp()
+
+        for (slotId, profile) in slotConfigs {
+            var s = UInt64(bitPattern: Int64(truncatingIfNeeded: seed)) &+ UInt64(profile)
+            let txs = FakeData.generateDemoTransactions(seed: &s, days: 90, slotId: slotId, slotProfile: profile)
+
+            try? queue.write { db in
+                try db.execute(sql: "DELETE FROM transactions WHERE slot_id = ?", arguments: [slotId])
+                for tx in txs {
+                    let record = try TransactionRecord(transaction: tx, updatedAt: now)
+                    try db.execute(
+                        sql: """
+                            INSERT INTO transactions (
+                                tx_id, end_to_end_id, datum, buchungsdatum, betrag, waehrung,
+                                empfaenger, absender, iban, verwendungszweck, kategorie,
+                                additional_information, effective_merchant, normalized_merchant,
+                                merchant_source, merchant_confidence, search_text, raw_json,
+                                updated_at, slot_id, status
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                        arguments: [
+                            record.txID, record.endToEndID, record.datum, record.buchungsdatum,
+                            record.betrag, record.waehrung, record.empfaenger, record.absender,
+                            record.iban, record.verwendungszweck, record.kategorie,
+                            record.additionalInformation, record.effectiveMerchant,
+                            record.normalizedMerchant, record.merchantSource, record.merchantConfidence,
+                            record.searchText, record.rawJSON, record.updatedAt,
+                            slotId, record.status
+                        ]
+                    )
+                }
+            }
+        }
     }
 
     static func upsert(transactions: [TransactionsResponse.Transaction], bankId: String = "primary") throws {
@@ -124,8 +239,8 @@ enum TransactionsDatabase {
                             empfaenger, absender, iban, verwendungszweck, kategorie,
                             additional_information, effective_merchant, normalized_merchant,
                             merchant_source, merchant_confidence, search_text, raw_json, updated_at,
-                            slot_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            slot_id, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(tx_id) DO UPDATE SET
                             end_to_end_id = excluded.end_to_end_id,
                             datum = excluded.datum,
@@ -145,6 +260,7 @@ enum TransactionsDatabase {
                             search_text = excluded.search_text,
                             raw_json = excluded.raw_json,
                             updated_at = excluded.updated_at,
+                            status = excluded.status,
                             user_note = user_note,
                             attachment_count = attachment_count
                         """,
@@ -169,9 +285,23 @@ enum TransactionsDatabase {
                         record.rawJSON,
                         record.updatedAt,
                         slotId,
+                        record.status,
                     ]
                 )
             }
+
+            // Purge pending transactions that were NOT returned in this refresh batch.
+            // After a card payment is booked the bank stops returning the pending entry;
+            // without cleanup it would linger in the DB forever.
+            // We only remove rows that are still pending AND whose updated_at was NOT
+            // touched by this batch (i.e., YAXI no longer includes them).
+            try db.execute(
+                sql: """
+                    DELETE FROM transactions
+                    WHERE slot_id = ? AND status = 'pending' AND updated_at < ?
+                    """,
+                arguments: [slotId, now]
+            )
         }
     }
 
@@ -194,6 +324,45 @@ enum TransactionsDatabase {
                     """,
                 arguments: [slotId, cutoff, cutoff]
             )
+            return records.compactMap { $0.toTransaction() }
+        }
+    }
+
+    /// Load transactions from one or more slots (unified inbox).
+    /// - `slots: nil` — all slots (no filter)
+    /// - `slots: []` — guard: returns [] immediately to avoid `WHERE slot_id IN ()` SQLite error
+    /// - `slots: [String]` — exactly those slot IDs
+    /// Bound: last `days` days. Cap: 999 slot IDs max (realistic users have 2-5).
+    static func loadUnifiedTransactions(slots: [String]?, days: Int, bankId: String = "primary") throws -> [TransactionsResponse.Transaction] {
+        if let slots, slots.isEmpty { return [] }
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        let normalizedDays = max(1, days)
+        let cutoffDate = Calendar(identifier: .gregorian).date(byAdding: .day, value: -(normalizedDays - 1), to: Date()) ?? Date()
+        let cutoff = isoDateFormatter.string(from: cutoffDate)
+
+        return try queue.read { db in
+            let records: [TransactionRecord]
+            if let slots {
+                // Bind at most 999 slot IDs (SQLite limit; realistic users have 2-5)
+                let safeSlots = Array(slots.prefix(999))
+                let placeholders = safeSlots.map { _ in "?" }.joined(separator: ", ")
+                var args: [DatabaseValueConvertible] = safeSlots.map { $0 as DatabaseValueConvertible }
+                args.append(cutoff)
+                args.append(cutoff)
+                records = try TransactionRecord.fetchAll(db, sql: """
+                    SELECT * FROM transactions
+                    WHERE slot_id IN (\(placeholders))
+                      AND (datum >= ? OR buchungsdatum >= ?)
+                    ORDER BY buchungsdatum DESC, datum DESC, updated_at DESC
+                    """, arguments: StatementArguments(args))
+            } else {
+                records = try TransactionRecord.fetchAll(db, sql: """
+                    SELECT * FROM transactions
+                    WHERE (datum >= ? OR buchungsdatum >= ?)
+                    ORDER BY buchungsdatum DESC, datum DESC, updated_at DESC
+                    """, arguments: [cutoff, cutoff])
+            }
             return records.compactMap { $0.toTransaction() }
         }
     }
@@ -426,8 +595,26 @@ enum TransactionsDatabase {
     static func deleteTransactions(forSlotId slotId: String, bankId: String = "primary") throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        var txIds: [String] = []
         try queue.write { db in
+            // Collect tx_ids before deleting so we can clean up attachments
+            txIds = try String.fetchAll(db, sql:
+                "SELECT tx_id FROM transactions WHERE slot_id = ?", arguments: [slotId])
+            // Delete attachment metadata for all transactions in this slot
+            if !txIds.isEmpty {
+                let placeholders = txIds.map { _ in "?" }.joined(separator: ",")
+                try db.execute(
+                    sql: "DELETE FROM transaction_attachments WHERE tx_id IN (\(placeholders))",
+                    arguments: StatementArguments(txIds))
+            }
             try db.execute(sql: "DELETE FROM transactions WHERE slot_id = ?", arguments: [slotId])
+        }
+        // Delete attachment files on disk
+        for txId in txIds {
+            if let dir = try? attachmentsDirectory(txID: txId, bankId: bankId),
+               FileManager.default.fileExists(atPath: dir.path) {
+                try? FileManager.default.removeItem(at: dir)
+            }
         }
     }
 
@@ -531,24 +718,13 @@ enum TransactionsDatabase {
                 verwendungszweck: verwendungszweck,
                 additionalInformation: additionalInformation
             )
-            let searchText = MerchantResolver.buildSearchText(
-                effectiveMerchant: resolution.effectiveMerchant,
-                normalizedMerchant: resolution.normalizedMerchant,
-                empfaenger: empfaenger,
-                absender: absender,
-                verwendungszweck: verwendungszweck,
-                additionalInformation: additionalInformation,
-                iban: iban
-            )
-
             try db.execute(
                 sql: """
                     UPDATE transactions
                     SET effective_merchant = ?,
                         normalized_merchant = ?,
                         merchant_source = ?,
-                        merchant_confidence = ?,
-                        search_text = ?
+                        merchant_confidence = ?
                     WHERE tx_id = ?
                     """,
                 arguments: [
@@ -556,7 +732,6 @@ enum TransactionsDatabase {
                     resolution.normalizedMerchant,
                     resolution.source,
                     resolution.confidence,
-                    searchText,
                     txID,
                 ]
             )
@@ -564,14 +739,16 @@ enum TransactionsDatabase {
     }
 
     /// Load transactions without a category (or with the fallback "Sonstiges") for AI categorization.
-    static func loadRecordsForCategorization() throws -> [TransactionRecord] {
+    /// Scoped to a single slot to prevent cross-account data leakage to AI providers.
+    static func loadRecordsForCategorization(slotId: String) throws -> [TransactionRecord] {
         let queue = try makeQueue()
         return try queue.read { db in
             try TransactionRecord.fetchAll(db, sql: """
                 SELECT * FROM transactions
-                WHERE (kategorie IS NULL OR kategorie = '' OR kategorie = 'Sonstiges')
+                WHERE slot_id = ?
+                  AND (kategorie IS NULL OR kategorie = '' OR kategorie = 'Sonstiges')
                 ORDER BY buchungsdatum DESC LIMIT 200
-                """)
+                """, arguments: [slotId])
         }
     }
 
@@ -621,6 +798,102 @@ enum TransactionsDatabase {
                     """,
                 arguments: [category.displayName, txID]
             )
+        }
+    }
+
+    // MARK: - Logo Cache
+
+    static func loadCachedLogoData() throws -> [String: Data] {
+        try migrate()
+        let queue = try makeQueue()
+        return try queue.read { db in
+            var result: [String: Data] = [:]
+            let rows = try Row.fetchAll(db, sql: "SELECT key, data FROM merchant_logos")
+            for row in rows {
+                if let key = row["key"] as String?,
+                   let data = row["data"] as Data? {
+                    result[key] = data
+                }
+            }
+            return result
+        }
+    }
+
+    static func saveLogo(key: String, data: Data) {
+        guard let queue = try? makeQueue() else { return }
+        try? queue.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO merchant_logos (key, data, fetched_at) VALUES (?, ?, datetime('now'))",
+                arguments: [key, data]
+            )
+        }
+    }
+
+    static func clearLogoCache() {
+        guard let queue = try? makeQueue() else { return }
+        try? queue.write { db in
+            try db.execute(sql: "DELETE FROM merchant_logos")
+        }
+    }
+
+    // MARK: - Merchant Custom Logos (per normalizedMerchant key, affects all matching transactions)
+
+    static func loadAllMerchantCustomLogos() -> [String: Data] {
+        guard let queue = try? makeQueue() else { return [:] }
+        return (try? queue.read { db in
+            var result: [String: Data] = [:]
+            let rows = try Row.fetchAll(db, sql: "SELECT merchant_key, data FROM merchant_custom_logos")
+            for row in rows {
+                if let key = row["merchant_key"] as String?,
+                   let data = row["data"] as Data? {
+                    result[key] = data
+                }
+            }
+            return result
+        }) ?? [:]
+    }
+
+    static func saveMerchantCustomLogo(merchantKey: String, data: Data) {
+        guard let queue = try? makeQueue() else { return }
+        try? queue.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO merchant_custom_logos (merchant_key, data, created_at) VALUES (?, ?, datetime('now'))",
+                arguments: [merchantKey, data]
+            )
+        }
+    }
+
+    static func deleteMerchantCustomLogo(merchantKey: String) {
+        guard let queue = try? makeQueue() else { return }
+        try? queue.write { db in
+            try db.execute(sql: "DELETE FROM merchant_custom_logos WHERE merchant_key = ?", arguments: [merchantKey])
+        }
+    }
+
+    // MARK: - Custom Transaction Logos
+
+    static func loadCustomLogo(txId: String) -> Data? {
+        guard let queue = try? makeQueue() else { return nil }
+        return try? queue.read { db in
+            let row = try Row.fetchOne(db, sql: "SELECT data FROM transaction_logos WHERE tx_id = ?", arguments: [txId])
+            return row?["data"] as Data?
+        }
+    }
+
+    static func saveCustomLogo(txId: String, data: Data) {
+        guard let queue = try? makeQueue() else { return }
+        try? queue.write { db in
+            try db.execute(
+                sql: "INSERT OR REPLACE INTO transaction_logos (tx_id, data, created_at) VALUES (?, ?, datetime('now'))",
+                arguments: [txId, data]
+            )
+        }
+    }
+
+    static func deleteCustomLogo(txId: String) {
+        guard let queue = try? makeQueue() else { return }
+        try? queue.write { db in
+            try db.execute(sql: "DELETE FROM transaction_logos WHERE tx_id = ?", arguments: [txId])
         }
     }
 }

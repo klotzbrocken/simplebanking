@@ -90,14 +90,22 @@ enum BiometricStore {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 var result: CFTypeRef?
-                let query: [CFString: Any] = [
+                // First try with the evaluated LAContext
+                var query: [CFString: Any] = [
                     kSecClass: kSecClassGenericPassword,
                     kSecAttrService: service,
                     kSecAttrAccount: account,
                     kSecReturnData: true,
                     kSecUseAuthenticationContext: ctx
                 ]
-                let status = SecItemCopyMatching(query as CFDictionary, &result)
+                var status = SecItemCopyMatching(query as CFDictionary, &result)
+                // Items stored without kSecAttrAccessControl don't strictly need the
+                // LAContext for reading — fall back if the context-bound read fails.
+                if status != errSecSuccess {
+                    query.removeValue(forKey: kSecUseAuthenticationContext)
+                    result = nil
+                    status = SecItemCopyMatching(query as CFDictionary, &result)
+                }
                 if status == errSecSuccess,
                    let data = result as? Data,
                    let password = String(data: data, encoding: .utf8) {
@@ -121,6 +129,85 @@ enum BiometricStore {
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account
+        ] as CFDictionary)
+    }
+
+    // MARK: - Password Verification (kein biometrischer Prompt)
+
+    /// Verifies a candidate password against the stored master password without
+    /// showing a biometric prompt. Used in demo mode where CredentialsStore has no
+    /// credentials file to decrypt.
+    static func verifyPasswordDirectly(_ candidate: String) -> Bool {
+        var result: CFTypeRef?
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnData: true
+        ]
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let stored = String(data: data, encoding: .utf8) else { return false }
+        return stored == candidate
+    }
+
+    // MARK: - Auto-Unlock (kein biometrischer Prompt beim Lesen)
+
+    private static let autoUnlockAccount = "master-password-auto"
+
+    /// Prüft ob ein Auto-Unlock-Passwort gespeichert ist (kein Prompt).
+    static var hasAutoUnlockPassword: Bool {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: autoUnlockAccount,
+            kSecReturnData: false
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    /// Speichert das Passwort für Auto-Unlock (lesbar ohne biometrischen Prompt).
+    static func saveForAutoUnlock(password: String) throws {
+        guard let data = password.data(using: .utf8) else { return }
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: autoUnlockAccount
+        ] as CFDictionary)
+        let addQuery: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: autoUnlockAccount,
+            kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecValueData: data
+        ]
+        let status = SecItemAdd(addQuery as CFDictionary, nil)
+        guard status == errSecSuccess else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+    }
+
+    /// Lädt das Auto-Unlock-Passwort ohne Nutzer-Prompt.
+    static func loadAutoUnlockPassword() -> String? {
+        var result: CFTypeRef?
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: autoUnlockAccount,
+            kSecReturnData: true
+        ]
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Entfernt das Auto-Unlock-Passwort.
+    static func clearAutoUnlock() {
+        SecItemDelete([
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: autoUnlockAccount
         ] as CFDictionary)
     }
 }

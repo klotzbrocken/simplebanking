@@ -18,19 +18,26 @@ fi
 # Generiere GeneratedBankColors.swift aus SVG-Metadaten
 bash "$ROOT/scripts/generate-bank-colors.sh"
 
-# arm64-only: routex-client-swift XCFramework setzt macOS 14.0 voraus,
-# was ausschließlich auf Apple-Silicon-Macs läuft. Intel-Support entfällt.
+# Universal binary: separat bauen, dann mit lipo zusammenführen
 swift build -c release --arch arm64
+swift build -c release --arch x86_64
 
-BIN="$ROOT/.build/arm64-apple-macosx/release/simplebanking"
+BIN_ARM64="$ROOT/.build/arm64-apple-macosx/release/simplebanking"
+BIN_X86="$ROOT/.build/x86_64-apple-macosx/release/simplebanking"
+BIN="$ROOT/.build/universal/simplebanking"
+
+mkdir -p "$ROOT/.build/universal"
+lipo -create -output "$BIN" "$BIN_ARM64" "$BIN_X86"
+echo "Universal binary created: $(lipo -archs "$BIN")"
+
 if [[ ! -x "$BIN" ]]; then
-    echo "Error: built binary not found at $BIN"
+    echo "Error: universal binary not found at $BIN"
     exit 1
 fi
 OUTDIR="$ROOT/SimpleBankingBuild"
 APP="$OUTDIR/simplebanking.app"
 ICON_SRC="${ICON_SRC:-$ROOT/Resources/icon_full_black.png}"
-VERSION_BASE="${VERSION_BASE:-1.3.1}"
+VERSION_BASE="${VERSION_BASE:-1.3.4}"
 
 mkdir -p "$OUTDIR"
 rm -rf "$APP"
@@ -165,10 +172,20 @@ PLIST
 
 cp "$BIN" "$APP/Contents/MacOS/simplebanking"
 
+# Build simplebanking-mcp (MCP server — no AppKit, no GRDB)
+swift build -c release --arch arm64 --product simplebanking-mcp
+swift build -c release --arch x86_64 --product simplebanking-mcp
+MCP_ARM64="$ROOT/.build/arm64-apple-macosx/release/simplebanking-mcp"
+MCP_X86="$ROOT/.build/x86_64-apple-macosx/release/simplebanking-mcp"
+MCP_UNIVERSAL="$ROOT/.build/universal/simplebanking-mcp"
+lipo -create -output "$MCP_UNIVERSAL" "$MCP_ARM64" "$MCP_X86"
+cp "$MCP_UNIVERSAL" "$APP/Contents/MacOS/simplebanking-mcp"
+echo "MCP server bundled: $(lipo -archs "$MCP_UNIVERSAL")"
+
 # Embed Sparkle.framework (built by SPM)
-SPARKLE_FW_SRC="$(find "$ROOT/.build/apple/Products/Release" -name "Sparkle.framework" -maxdepth 4 2>/dev/null | head -1)"
+SPARKLE_FW_SRC="$(find "$ROOT/.build/apple/Products/Release" -name "Sparkle.framework" -maxdepth 4 2>/dev/null | head -1 || true)"
 if [[ -z "$SPARKLE_FW_SRC" ]]; then
-    SPARKLE_FW_SRC="$(find "$ROOT/.build" -name "Sparkle.framework" -maxdepth 8 2>/dev/null | grep -v 'checkouts' | grep -v 'artifacts' | head -1)"
+    SPARKLE_FW_SRC="$(find "$ROOT/.build" -name "Sparkle.framework" -maxdepth 8 2>/dev/null | { grep -v 'checkouts' || true; } | { grep -v 'artifacts' || true; } | head -1 || true)"
 fi
 if [[ -n "$SPARKLE_FW_SRC" && -d "$SPARKLE_FW_SRC" ]]; then
     rm -rf "$APP/Contents/Frameworks/Sparkle.framework"

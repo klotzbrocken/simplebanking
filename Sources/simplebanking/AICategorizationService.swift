@@ -17,7 +17,8 @@ enum AICategorizationService {
 
         let records: [TransactionRecord]
         do {
-            records = try TransactionsDatabase.loadRecordsForCategorization()
+            let slotId = await MainActor.run { MultibankingStore.shared.activeSlot?.id ?? "legacy" }
+            records = try TransactionsDatabase.loadRecordsForCategorization(slotId: slotId)
         } catch { return }
         guard !records.isEmpty else { return }
 

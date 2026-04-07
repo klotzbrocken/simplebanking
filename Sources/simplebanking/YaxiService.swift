@@ -11,8 +11,14 @@ import UserNotifications
 enum YaxiService {
 
     // MARK: - Active slot ID (set by BalanceBar when switching accounts)
+    // Thread-safe via lock. Async code should snapshot early to avoid mid-flight changes.
 
-    nonisolated(unsafe) static var activeSlotId: String = "legacy"
+    private static let _slotLock = NSLock()
+    nonisolated(unsafe) private static var _activeSlotId: String = "legacy"
+    static var activeSlotId: String {
+        get { _slotLock.lock(); defer { _slotLock.unlock() }; return _activeSlotId }
+        set { _slotLock.lock(); defer { _slotLock.unlock() }; _activeSlotId = newValue }
+    }
 
     /// Called on MainActor when a SCA/TAN confirmation is waiting (true) or done (false).
     nonisolated(unsafe) static var onTanStateChanged: (@MainActor (Bool) -> Void)?
@@ -20,12 +26,18 @@ enum YaxiService {
     // MARK: - UserDefaults keys (per-slot)
     // "legacy" slot uses the original key names for backward compatibility.
 
-    private static func slotSuffix() -> String { activeSlotId == "legacy" ? "" : ".\(activeSlotId)" }
-    static var ibanKey: String { "simplebanking.iban\(slotSuffix())" }
-    static var connectionIdKey: String { "simplebanking.yaxi.connectionId\(slotSuffix())" }
-    static var credModelFullKey: String { "simplebanking.yaxi.credModel.full\(slotSuffix())" }
-    static var credModelUserIdKey: String { "simplebanking.yaxi.credModel.userId\(slotSuffix())" }
-    static var credModelNoneKey: String { "simplebanking.yaxi.credModel.none\(slotSuffix())" }
+    private static func slotSuffix(for slotId: String) -> String { slotId == "legacy" ? "" : ".\(slotId)" }
+    private static func slotSuffix() -> String { slotSuffix(for: activeSlotId) }
+    static func ibanKey(for slotId: String) -> String { "simplebanking.iban\(slotSuffix(for: slotId))" }
+    static func connectionIdKey(for slotId: String) -> String { "simplebanking.yaxi.connectionId\(slotSuffix(for: slotId))" }
+    static func credModelFullKey(for slotId: String) -> String { "simplebanking.yaxi.credModel.full\(slotSuffix(for: slotId))" }
+    static func credModelUserIdKey(for slotId: String) -> String { "simplebanking.yaxi.credModel.userId\(slotSuffix(for: slotId))" }
+    static func credModelNoneKey(for slotId: String) -> String { "simplebanking.yaxi.credModel.none\(slotSuffix(for: slotId))" }
+    static var ibanKey: String { ibanKey(for: activeSlotId) }
+    static var connectionIdKey: String { connectionIdKey(for: activeSlotId) }
+    static var credModelFullKey: String { credModelFullKey(for: activeSlotId) }
+    static var credModelUserIdKey: String { credModelUserIdKey(for: activeSlotId) }
+    static var credModelNoneKey: String { credModelNoneKey(for: activeSlotId) }
 
     // MARK: - Session Store
 
@@ -450,13 +462,13 @@ enum YaxiService {
     /// Calls accounts() API with SCA and returns discovered accounts.
     static func fetchAccounts(userId: String, password: String) async throws -> [Routex.Account] {
         let slotSnapshot = activeSlotId
+        let connIdKey = connectionIdKey(for: slotSnapshot)
+        let model = loadCredentialsModel(slotId: slotSnapshot)
         let d = UserDefaults.standard
-        guard let connectionId = d.string(forKey: connectionIdKey), !connectionId.isEmpty else {
+        guard let connectionId = d.string(forKey: connIdKey), !connectionId.isEmpty else {
             throw NSError(domain: "YaxiService", code: -1,
                           userInfo: [NSLocalizedDescriptionKey: "no connectionId for accounts()"])
         }
-
-        let model = loadCredentialsModel()
         let storedCD = await sessionStore.connectionData()
         var storedSession = await sessionStore.session(for: .balances)
         let creds = buildCredentials(
@@ -469,7 +481,7 @@ enum YaxiService {
         // ticket's server-side state is undefined and reusing it risks another failure.
         var ticket = YaxiTicketMaker.issueTicket(service: "Accounts")
 
-        AppLogger.log("fetchAccounts: slot=\(activeSlotId.prefix(8)) connId=\(connectionId.prefix(8)) session=\(storedSession == nil ? "nil" : "present")", category: "YaxiService")
+        AppLogger.log("fetchAccounts: slot=\(slotSnapshot.prefix(8)) connId=\(connectionId.prefix(8)) session=\(storedSession == nil ? "nil" : "present")", category: "YaxiService")
 
         let resp: Routex.AccountsResponse
         do {
@@ -534,13 +546,16 @@ enum YaxiService {
     static func fetchBalances(userId: String, password: String) async throws -> BalancesResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
+        let connIdKey = connectionIdKey(for: slotSnapshot)
+        let ibanKeySnap = ibanKey(for: slotSnapshot)
+        let model = loadCredentialsModel(slotId: slotSnapshot)
         let d = UserDefaults.standard
-        guard let connectionId = d.string(forKey: connectionIdKey), !connectionId.isEmpty else {
+        guard let connectionId = d.string(forKey: connIdKey), !connectionId.isEmpty else {
             return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
                                    connectionData: nil, error: "no connectionId yet",
                                    userMessage: nil, scaRequired: nil)
         }
-        let iban = d.string(forKey: ibanKey) ?? ""
+        let iban = d.string(forKey: ibanKeySnap) ?? ""
         // If no IBAN stored yet (first setup), request all accounts (empty list) so YAXI
         // returns balances for all accounts. We then extract and store the IBAN from the
         // first result. This avoids the accounts() SCA which doesn't complete on many banks.
@@ -548,7 +563,6 @@ enum YaxiService {
             ? []
             : [AccountReference(id: .iban(iban), currency: "EUR")]
 
-        let model = loadCredentialsModel()
         let storedCD = await sessionStore.connectionData()
         let storedSession = await sessionStore.session(for: .balances)
         let creds = buildCredentials(
@@ -559,7 +573,7 @@ enum YaxiService {
         let client = RoutexClient()
         let ticket = YaxiTicketMaker.issueTicket(service: "Balances")
 
-        AppLogger.log("fetchBalances: slot=\(activeSlotId.prefix(8)) connId=\(connectionId.prefix(8)) iban=\(iban.isEmpty ? "(auto)" : String(iban.prefix(8))) cd=\(storedCD == nil ? "nil" : "\(storedCD!.count)b")", category: "YaxiService")
+        AppLogger.log("fetchBalances: slot=\(slotSnapshot.prefix(8)) connId=\(connectionId.prefix(8)) iban=\(iban.isEmpty ? "(auto)" : String(iban.prefix(8))) cd=\(storedCD == nil ? "nil" : "\(storedCD!.count)b")", category: "YaxiService")
 
         do {
             var resp: Routex.BalancesResponse
@@ -657,20 +671,21 @@ enum YaxiService {
     static func fetchTransactions(userId: String, password: String, from: String) async throws -> TransactionsResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
+        let connIdKey = connectionIdKey(for: slotSnapshot)
+        let ibanKeySnap = ibanKey(for: slotSnapshot)
+        let model = loadCredentialsModel(slotId: slotSnapshot)
         let d = UserDefaults.standard
-        guard let connectionId = d.string(forKey: connectionIdKey), !connectionId.isEmpty else {
+        guard let connectionId = d.string(forKey: connIdKey), !connectionId.isEmpty else {
             return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                        connectionData: nil, error: "no connectionId yet",
                                        userMessage: nil, scaRequired: nil)
         }
-        let iban = d.string(forKey: ibanKey) ?? ""
+        let iban = d.string(forKey: ibanKeySnap) ?? ""
         guard !iban.isEmpty else {
             return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                        connectionData: nil, error: "missing iban",
                                        userMessage: nil, scaRequired: nil)
         }
-
-        let model = loadCredentialsModel()
         let storedCD = await sessionStore.connectionData()
         AppLogger.log("fetchTransactions: storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
         let storedSession = await sessionStore.session(for: .transactions)
@@ -856,21 +871,22 @@ enum YaxiService {
         }
     }
 
-    private static func loadCredentialsModel() -> CredentialsModel {
+    private static func loadCredentialsModel(slotId: String) -> CredentialsModel {
         let d = UserDefaults.standard
-        guard d.object(forKey: credModelFullKey) != nil else {
+        let fullKey = credModelFullKey(for: slotId)
+        guard d.object(forKey: fullKey) != nil else {
             return CredentialsModel(full: true, userId: true, none: false)
         }
         return CredentialsModel(
-            full: d.bool(forKey: credModelFullKey),
-            userId: d.bool(forKey: credModelUserIdKey),
-            none: d.bool(forKey: credModelNoneKey)
+            full: d.bool(forKey: fullKey),
+            userId: d.bool(forKey: credModelUserIdKey(for: slotId)),
+            none: d.bool(forKey: credModelNoneKey(for: slotId))
         )
     }
 
     /// Returns the stored credentials model as DiscoveredBankCredentials (for accounts() flow).
-    static func loadStoredCredentials() -> DiscoveredBankCredentials {
-        let m = loadCredentialsModel()
+    static func loadStoredCredentials(slotId: String) -> DiscoveredBankCredentials {
+        let m = loadCredentialsModel(slotId: slotId)
         return DiscoveredBankCredentials(full: m.full, userId: m.userId, none: m.none)
     }
 
@@ -1352,8 +1368,9 @@ enum YaxiService {
     /// Always creates a file — even when no traceId is available — so that
     /// the call site can be confirmed and the triggering error is recorded.
     static func writeTrace(client: RoutexClient, label: String, ticket: Ticket, error: Error? = nil) async {
-        // Always write trace files regardless of AppLogger.isEnabled —
-        // trace files are diagnostic artifacts separate from the user-visible log.
+        // Trace files are gated on the same logging setting as the rest of the app.
+        // Disable logging in Settings to prevent sensitive banking data from landing on disk.
+        guard AppLogger.isEnabled else { return }
         let logsDir = AppLogger.logDirectoryURL.appendingPathComponent("trace")
         do {
             try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)

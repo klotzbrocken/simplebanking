@@ -83,6 +83,15 @@ fi
 
 ENTITLEMENTS="$ROOT/Sources/simplebanking/simplebanking.entitlements"
 
+# MCP helper binary — sign before the main bundle
+MCP_BIN="$APP/Contents/MacOS/simplebanking-mcp"
+if [[ -f "$MCP_BIN" ]]; then
+    codesign --force --timestamp --options runtime \
+        --sign "$SIGN_IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        "$MCP_BIN"
+fi
+
 # Main Swift binary — with sandbox entitlements
 codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" \

@@ -28,7 +28,12 @@ enum CredentialsStore {
 
     // MARK: - Active slot ID (set by BalanceBar when switching accounts)
 
-    nonisolated(unsafe) static var activeSlotId: String = "legacy"
+    private static let _slotLock = NSLock()
+    nonisolated(unsafe) private static var _activeSlotId: String = "legacy"
+    static var activeSlotId: String {
+        get { _slotLock.lock(); defer { _slotLock.unlock() }; return _activeSlotId }
+        set { _slotLock.lock(); defer { _slotLock.unlock() }; _activeSlotId = newValue }
+    }
     struct Envelope: Codable {
         var v: Int
         var saltB64: String

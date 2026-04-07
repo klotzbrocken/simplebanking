@@ -36,6 +36,9 @@ struct FinancialHealthScoreView: View {
     let dispoLimit: Int
     let targetBuffer: Int
     let targetSavingsRate: Int
+    var stabilityOutlierMultiplier: Double = 3.0
+    var coverageRatioWeight: Double = 0.6
+    var fixedCostWarningRatio: Double = 0.70
     
     @Environment(\.dismiss) private var dismiss
     @State private var animProgress: Double = 0
@@ -224,7 +227,10 @@ struct FinancialHealthScoreView: View {
                 salaryDay: salaryDay,
                 dispoLimit: dispoLimit,
                 targetBuffer: targetBuffer,
-                targetSavingsRate: targetSavingsRate
+                targetSavingsRate: targetSavingsRate,
+                stabilityOutlierMultiplier: stabilityOutlierMultiplier,
+                coverageRatioWeight: coverageRatioWeight,
+                fixedCostWarningRatio: fixedCostWarningRatio
             )
             // Starte Animation nach kurzer Verzögerung
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
