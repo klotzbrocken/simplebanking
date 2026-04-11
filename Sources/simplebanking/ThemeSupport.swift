@@ -26,17 +26,17 @@ struct AppTheme: Identifiable, Equatable {
         name: "Default",
         bodyFontName: "System",
         headingFontName: "System",
-        accentHex: "#0A84FF",
-        positiveHex: "#34C759",
-        negativeHex: "#E00103",
+        accentHex: "#4E79A7",       // Blue Strong (Color Harmony Palette)
+        positiveHex: "#4F8A6A",     // Green Strong (light)
+        negativeHex: "#C65A5A",     // Red Strong (light)
         cardLightHex: "#FFFFFF",
-        cardDarkHex: "#333333",
-        panelLightHex: "#EBEBEB",
-        panelDarkHex: "#1F1F1F",
-        positiveLightHex: nil,
-        positiveDarkHex: nil,
-        negativeLightHex: nil,
-        negativeDarkHex: nil
+        cardDarkHex: "#1F1F1F",
+        panelLightHex: "#F9F9F9",
+        panelDarkHex: "#171717",
+        positiveLightHex: "#4F8A6A", // Green Strong light
+        positiveDarkHex: "#67B487",  // Green Strong dark
+        negativeLightHex: "#C65A5A", // Red Strong light
+        negativeDarkHex: "#D77979"   // Red Strong dark
     )
 
     var accentColor: NSColor { Self.color(from: accentHex, fallback: .controlAccentColor) }
@@ -51,7 +51,7 @@ struct AppTheme: Identifiable, Equatable {
     var panelLightColor: NSColor { Self.color(from: panelLightHex, fallback: NSColor(white: 0.92, alpha: 1.0)) }
     var panelDarkColor: NSColor { Self.color(from: panelDarkHex, fallback: NSColor(white: 0.12, alpha: 1.0)) }
 
-    private static func color(from hex: String, fallback: NSColor) -> NSColor {
+    static func color(from hex: String, fallback: NSColor) -> NSColor {
         var cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if cleaned.hasPrefix("#") {
             cleaned.removeFirst()
@@ -214,18 +214,22 @@ final class ThemeManager: @unchecked Sendable {
 
     private static let builtInThemes: [String: String] = [
         "default.cfg": """
-        # simplebanking Theme
+        # simplebanking Theme — Color Harmony Palette
         id=default
         name=Default
         bodyFont=System
         headingFont=System
-        accent=#0A84FF
-        positive=#34C759
-        negative=#E00103
+        accent=#4E79A7
+        positive=#4F8A6A
+        negative=#C65A5A
+        positiveLight=#4F8A6A
+        positiveDark=#67B487
+        negativeLight=#C65A5A
+        negativeDark=#D77979
         cardLight=#FFFFFF
-        cardDark=#333333
-        panelLight=#EBEBEB
-        panelDark=#1F1F1F
+        cardDark=#1F1F1F
+        panelLight=#F9F9F9
+        panelDark=#171717
         """,
         "sunrise.cfg": """
         # simplebanking Theme
@@ -349,7 +353,64 @@ extension Color {
         })
     }
 
+    /// Cooler panel background used in Freeze mode — Blue Soft aus der Color Harmony Palette.
+    static var freezePanelBackground: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            return AppTheme.color(from: isDark ? "#1F3144" : "#EAF1F8", fallback: .controlBackgroundColor)
+        })
+    }
+
     static var themeAccent: Color {
         Color(nsColor: ThemeManager.shared.currentTheme.accentColor)
     }
+
+    // MARK: - Semantic Color Tokens (Color Harmony Palette)
+    //
+    // Quelle: simplebanking-color-harmony-lovable-brief.md
+    // Konsequente Anwendung: KEINE feature-eigenen Akzentfarben mehr.
+    // - Blue   = info / active / report / analyse / neutral emphasis
+    // - Green  = stable / healthy / good / enough buffer
+    // - Orange = observe / warning / medium risk
+    // - Red    = critical / overdraft / negative / urgent
+    //
+    // Variants:
+    // - Strong = Icon, Ring, Number, active state
+    // - Mid    = hover, selected chip, secondary emphasis
+    // - Soft   = background fill, badge fill, subtle surfaces
+
+    private static func dynamicHex(light lightHex: String, dark darkHex: String) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            return AppTheme.color(from: isDark ? darkHex : lightHex, fallback: .gray)
+        })
+    }
+
+    // Neutrals
+    static var sbBackground: Color    { dynamicHex(light: "#F9F9F9", dark: "#171717") }
+    static var sbSurface: Color       { dynamicHex(light: "#FFFFFF", dark: "#1F1F1F") }
+    static var sbSurfaceSoft: Color   { dynamicHex(light: "#F2F2F2", dark: "#262626") }
+    static var sbBorder: Color        { dynamicHex(light: "#E5E5E5", dark: "#343434") }
+    static var sbTextPrimary: Color   { dynamicHex(light: "#1C1C1C", dark: "#F3F3F3") }
+    static var sbTextSecondary: Color { dynamicHex(light: "#6B6B6B", dark: "#B3B3B3") }
+
+    // Blue — info / active / report / analyse / neutral emphasis
+    static var sbBlueStrong: Color { dynamicHex(light: "#4E79A7", dark: "#6FA3D9") }
+    static var sbBlueMid: Color    { dynamicHex(light: "#7FA6CE", dark: "#8DB7E3") }
+    static var sbBlueSoft: Color   { dynamicHex(light: "#EAF1F8", dark: "#1F3144") }
+
+    // Green — stable / healthy / good
+    static var sbGreenStrong: Color { dynamicHex(light: "#4F8A6A", dark: "#67B487") }
+    static var sbGreenMid: Color    { dynamicHex(light: "#7FAE94", dark: "#89C7A1") }
+    static var sbGreenSoft: Color   { dynamicHex(light: "#E8F2EC", dark: "#1E3428") }
+
+    // Orange — observe / warning / medium
+    static var sbOrangeStrong: Color { dynamicHex(light: "#C98A3D", dark: "#D9A354") }
+    static var sbOrangeMid: Color    { dynamicHex(light: "#E0B36B", dark: "#E4BA78") }
+    static var sbOrangeSoft: Color   { dynamicHex(light: "#F8EFD9", dark: "#3C2E1B") }
+
+    // Red — critical / overdraft / urgent
+    static var sbRedStrong: Color { dynamicHex(light: "#C65A5A", dark: "#D77979") }
+    static var sbRedMid: Color    { dynamicHex(light: "#D98A8A", dark: "#E39A9A") }
+    static var sbRedSoft: Color   { dynamicHex(light: "#F8E9E9", dark: "#402222") }
 }

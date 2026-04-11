@@ -26,11 +26,13 @@ struct BalanceSignalStyle {
 }
 
 enum BalanceSignal {
-    private static let red = Color(red: 239 / 255, green: 68 / 255, blue: 68 / 255)      // #EF4444
-    private static let orange = Color(red: 249 / 255, green: 115 / 255, blue: 22 / 255)   // #F97316
-    private static let yellow = Color(red: 202 / 255, green: 138 / 255, blue: 4 / 255)    // #CA8A04
-    private static let green = Color(red: 22 / 255, green: 163 / 255, blue: 74 / 255)     // #16A34A
-    private static let neutral = Color(NSColor.secondaryLabelColor)
+    // Color Harmony Palette — semantische Tokens, kein Hardcoded-Hex mehr.
+    // Yellow gibt es in der neuen Palette nicht — "medium" verwendet Orange Mid.
+    private static var red:    Color { .sbRedStrong }
+    private static var orange: Color { .sbOrangeStrong }
+    private static var yellow: Color { .sbOrangeMid }
+    private static var green:  Color { .sbGreenStrong }
+    private static var neutral: Color { .sbTextSecondary }
 
     static func normalizedThresholds(low: Int, medium: Int) -> BalanceSignalThresholds {
         let normalizedLow = max(0, low)

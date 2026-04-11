@@ -182,6 +182,11 @@ struct SettingsView: View {
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
     
+    // Greenring + MMI
+    @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
+    @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
+    @AppStorage("mmiIncludeSavings") private var mmiIncludeSavings: Bool = true
+
     // Finanz-Einstellungen
     @AppStorage("salaryDay") private var salaryDay: Int = 1
     @AppStorage("dispoLimit") private var dispoLimit: Int = 0
@@ -198,12 +203,6 @@ struct SettingsView: View {
 
     // Sicherheit
     @AppStorage("passwordRequired") private var passwordRequired: Bool = true
-
-    // Score Fine-Tuning
-    @AppStorage("scoreStabilityMultiplier") private var scoreStabilityMultiplier: Double = 3.0
-    @AppStorage("scoreCoverageWeight") private var scoreCoverageWeight: Double = 0.6
-    @AppStorage("scoreFixedCostWarningRatio") private var scoreFixedCostWarningRatio: Double = 0.70
-    @AppStorage("scoreSalaryToleranceDays") private var scoreSalaryToleranceDays: Int = 5
 
     @State private var selectedTab: Int = 0
     @State private var showResetConfirmation: Bool = false
@@ -640,10 +639,10 @@ struct SettingsView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 16)
-            
+            .padding(.top, 12)
+
             Divider()
-                .padding(.top, 12)
+                .padding(.top, 8)
             
             // Content
             ScrollView {
@@ -672,7 +671,7 @@ struct SettingsView: View {
             
             Spacer()
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 520, height: 520)
         .background(Color.panelBackground)
         .tint(Color.themeAccent)
         .onAppear {
@@ -757,6 +756,7 @@ struct SettingsView: View {
     
     private var generalSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
             SettingsToggleRow(
                 title: t("Starte bei der Anmeldung", "Launch at login"),
                 subtitle: t("simplebanking automatisch beim Mac-Start öffnen", "Start simplebanking automatically when macOS logs in"),
@@ -773,7 +773,7 @@ struct SettingsView: View {
                     if !notificationStatus.isEmpty {
                         Text("\(t("Status", "Status")): \(notificationStatus)")
                             .font(ThemeFonts.body(size: 10))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.sbOrangeStrong)
                     }
                 }
                 Spacer()
@@ -808,7 +808,9 @@ struct SettingsView: View {
                     .labelsHidden()
                     .onChange(of: globalHotkeyEnabled) { _ in postHotkeyChanged() }
             }
-
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
         }
     }
 
@@ -818,8 +820,7 @@ struct SettingsView: View {
 
     private var aiAssistantSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(t("AI-Assistent (experimentell)", "AI assistant (experimental)"))
-                .font(ThemeFonts.heading(size: 13))
+            SettingsSectionHeader(title: t("AI-Assistent (experimentell)", "AI assistant (experimental)"), icon: "cpu")
 
             Text(t(
                 "Mit einem API‑Key kannst du die AI‑Transaktions‑Kategorisierung aktivieren. Dabei werden Transaktionsdaten (Empfänger, Verwendungszweck, Betrag) zur Kategorisierung an den gewählten KI‑Anbieter übertragen (USA/EU). Der API‑Key wird verschlüsselt lokal gespeichert.",
@@ -842,7 +843,7 @@ struct SettingsView: View {
 
             HStack(spacing: 8) {
                 Circle()
-                    .fill(activeProviderHasKey ? Color.green : Color.orange)
+                    .fill(activeProviderHasKey ? Color.sbGreenStrong : Color.sbOrangeStrong)
                     .frame(width: 8, height: 8)
                 Text(activeProviderHasKey ? t("API-Key gesetzt", "API key set") : t("Kein API-Key gesetzt", "No API key set"))
                     .font(ThemeFonts.body(size: 12))
@@ -882,8 +883,7 @@ struct SettingsView: View {
 
             // --- Verbundene Konten ---
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Verbundene Konten", "Connected Accounts"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Verbundene Konten", "Connected Accounts"), icon: "building.columns")
 
                 if multibankingStore.slots.isEmpty {
                     Text(t("Kein Konto verbunden.", "No account connected."))
@@ -1000,7 +1000,7 @@ struct SettingsView: View {
                                     showSlotDeleteConfirmation = true
                                 }) {
                                     Text(t("Entfernen", "Remove"))
-                                        .foregroundColor(.red).font(ThemeFonts.body(size: 12))
+                                        .foregroundColor(.sbRedStrong).font(ThemeFonts.body(size: 12))
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 .disabled(multibankingStore.slots.count == 1)
@@ -1016,6 +1016,8 @@ struct SettingsView: View {
                     }
                     }
                     .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
                     .scrollDisabled(true)
                     .frame(height: CGFloat(multibankingStore.slots.count) * 54)
                 }
@@ -1038,6 +1040,8 @@ struct SettingsView: View {
                     "The account \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" and all its data will be permanently deleted."
                 ))
             }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
 
             Divider()
 
@@ -1063,8 +1067,7 @@ struct SettingsView: View {
             // --- Per-Konto-Einstellungen ---
             if !multibankingStore.slots.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(t("Konto-Einstellungen", "Account Settings"))
-                        .font(ThemeFonts.heading(size: 13))
+                    SettingsSectionHeader(title: t("Konto-Einstellungen", "Account Settings"), icon: "slider.horizontal.3")
                     Text(t("Jede Einstellung gilt individuell für das ausgewählte Konto.", "Each setting applies individually to the selected account."))
                         .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
 
@@ -1350,10 +1353,8 @@ struct SettingsView: View {
                                 }
                             }
                         }
-                        .padding(.top, 12)
-                        .padding(.bottom, 12)
-                        .padding(.leading, 12)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.cardBackground))
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
                     }
                 }
             }
@@ -1369,171 +1370,115 @@ struct SettingsView: View {
     private var financeSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
 
-            // Info-Box: Wie wird der Score berechnet?
-            VStack(alignment: .leading, spacing: 8) {
+            // ── Kontoring ───────────────────────────────────────
+            SettingsSectionHeader(title: t("Kontoring", "Account Ring"), icon: "circle.dotted")
+
+            SettingsToggleRow(
+                title: t("Kontoring anzeigen", "Show Account Ring"),
+                subtitle: t(
+                    "Zeigt einen Ring im Flyout und in der Umsatzliste, der deinen Kontostand ins Verhältnis zu deinem Gehalt setzt und zeigt, ob du bis zum nächsten Gehalt im grünen Bereich bist.",
+                    "Shows a ring in the flyout and transaction list that compares your balance to your salary and indicates whether you're in the green until next payday."
+                ),
+                isOn: $monthRingEnabled
+            )
+
+            SettingsToggleRow(
+                title: t("Weitere Einnahmen berücksichtigen", "Include other income"),
+                subtitle: t(
+                    "Berücksichtigt zusätzliche positive Einnahmen im laufenden Zeitraum. Aus ist konservativer und orientiert sich nur am Gehalt.",
+                    "Includes additional positive income in the current period. Off is more conservative and only considers salary."
+                ),
+                isOn: $greenZoneIncludeOtherIncome
+            )
+
+            SettingsToggleRow(
+                title: t("Dispo im Ring anzeigen", "Show overdraft in ring"),
+                subtitle: t(
+                    "Zeigt verfügbaren Dispo zusätzlich im Ring. Dispo gilt dabei nicht als echtes Guthaben, sondern nur als verfügbarer Kreditrahmen.",
+                    "Shows available overdraft in the ring. Overdraft is not treated as real balance, only as available credit."
+                ),
+                isOn: $greenZoneShowDispo
+            )
+
+            // Info-Box: Kontoring
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle")
-                        .foregroundColor(.blue)
-                    Text(t("Wie wird der Financial Health Score berechnet?", "How is the Financial Health Score calculated?"))
+                        .foregroundColor(.sbBlueStrong)
+                    Text(t("Wie wird der Kontoring berechnet?", "How is the Account Ring calculated?"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
                 }
+                Text(t(
+                    "Der Kontoring zeigt, wie dein aktueller Kontostand im Verhältnis zu deinem monatlichen Referenzwert steht. Ein voller Ring bedeutet: Du hast genug Puffer bis zum nächsten Eingang. Bei negativem Kontostand wechselt der Ring in den Dispo-Modus.",
+                    "The Account Ring shows your current balance relative to your monthly reference value. A full ring means you have enough buffer until the next income. When your balance is negative, the ring switches to overdraft mode."
+                ))
+                .font(ThemeFonts.body(size: 12))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Circle().fill(Color.green).frame(width: 10, height: 10)
-                        Text(t("Einnahmendeckung: Verhältnis Einnahmen / Ausgaben + absoluter Puffer", "Income coverage: income/expense ratio + absolute buffer margin"))
-                            .font(ThemeFonts.body(size: 11))
+            Divider()
+
+            // ── Money Mass Index (MMI) ────────────────────────────
+            SettingsSectionHeader(title: "Money Mass Index (MMI)", icon: "chart.pie")
+
+            SettingsToggleRow(
+                title: t("Sparbewegungen einbeziehen", "Include savings"),
+                subtitle: t(
+                    "Zählt erkannte Spar- und Vorsorgebewegungen positiv in die Sparrate ein, zum Beispiel ETF, Depot oder Sparplan.",
+                    "Counts detected savings and investment outflows positively in the savings rate, e.g. ETF, depot, or savings plans."
+                ),
+                isOn: $mmiIncludeSavings
+            )
+
+            // Info-Box: MMI
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.sbBlueStrong)
+                    Text(t("Wie wird der MMI berechnet?", "How is the MMI calculated?"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                }
+                Text(t(
+                    "Der MMI ist ein normierter Wert zwischen 0 und 1. Er verbindet zwei Fragen: Sparst du im betrachteten Zeitraum Geld, und wie groß ist dein aktueller Puffer gemessen an deinen Ausgaben?",
+                    "The MMI is a normalized value between 0 and 1. It combines two questions: Are you saving money in the selected period, and how large is your buffer relative to your expenses?"
+                ))
+                .font(ThemeFonts.body(size: 12))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("SR")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.cyan)
+                            .frame(width: 28, alignment: .leading)
+                        Text(t(
+                            "Sparrate: (Einkommen − Ausgaben + Sparbewegungen) / Einkommen. Aktives Sparen kann positiv mitgezählt werden.",
+                            "Savings rate: (income − expenses + savings) / income. Active savings can count positively."
+                        ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
-                    HStack(spacing: 8) {
-                        Circle().fill(Color.cyan).frame(width: 10, height: 10)
-                        Text(t("Sparrate: Effektiver Cashflow-Überschuss vs. Ziel-Sparrate", "Savings rate: effective cashflow surplus vs. target rate"))
-                            .font(ThemeFonts.body(size: 11))
-                    }
-                    HStack(spacing: 8) {
-                        Circle().fill(Color.red).frame(width: 10, height: 10)
-                        Text(t("Stabilität: Anteil ungewöhnlich hoher variabler Ausgaben", "Stability: share of unusually high variable expenses"))
-                            .font(ThemeFonts.body(size: 11))
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("BF")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(MMIColors.liquid)
+                            .frame(width: 28, alignment: .leading)
+                        Text(t(
+                            "Puffer-Faktor: Kontostand im Verhältnis zu den durchschnittlichen Monatsausgaben. Ein voller Monats-Puffer entspricht 1,0.",
+                            "Buffer factor: balance relative to average monthly expenses. One full month of expenses as buffer = 1.0."
+                        ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.cardBackground))
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
             }
-
-            Divider()
-
-            // Stabilitäts-Multiplikator
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(t("Stabilitäts-Schwelle", "Stability threshold"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Text(t(
-                            "Eine Ausgabe gilt als Ausreißer, wenn sie mehr als X-mal so hoch ist wie der Durchschnitt. Kleiner Wert = strenger.",
-                            "A transaction counts as an outlier if it is more than X times the average. Lower = stricter."
-                        ))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Text(String(format: "%.1f×", scoreStabilityMultiplier))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                        .frame(width: 40, alignment: .trailing)
-                }
-                Slider(value: $scoreStabilityMultiplier, in: 1.0...5.0, step: 0.5)
-                    .frame(maxWidth: .infinity)
-                HStack {
-                    Text(t("1× (streng)", "1× (strict)"))
-                        .font(ThemeFonts.body(size: 10))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(t("5× (locker)", "5× (lenient)"))
-                        .font(ThemeFonts.body(size: 10))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Divider()
-
-            // Einnahmendeckung: Verhältnis vs. Puffer-Gewichtung
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(t("Einnahmendeckung: Gewichtung", "Income coverage: weighting"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Text(t(
-                            "Anteil des Verhältnis-Scores (vs. Puffer-Score) an der Einnahmendeckung.",
-                            "Share of the ratio score (vs. buffer score) in income coverage."
-                        ))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Text(t("\(Int(scoreCoverageWeight * 100))% Verhältnis / \(Int((1 - scoreCoverageWeight) * 100))% Puffer",
-                           "\(Int(scoreCoverageWeight * 100))% ratio / \(Int((1 - scoreCoverageWeight) * 100))% buffer"))
-                        .font(ThemeFonts.body(size: 11, weight: .medium))
-                        .foregroundColor(.secondary)
-                        .frame(width: 130, alignment: .trailing)
-                }
-                Slider(value: $scoreCoverageWeight, in: 0.1...0.9, step: 0.1)
-                    .frame(maxWidth: .infinity)
-                HStack {
-                    Text(t("Puffer-betont", "Buffer-heavy"))
-                        .font(ThemeFonts.body(size: 10))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(t("Verhältnis-betont", "Ratio-heavy"))
-                        .font(ThemeFonts.body(size: 10))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Divider()
-
-            // Fixkosten-Warnschwelle
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(t("Fixkosten-Warnschwelle", "Fixed cost warning ratio"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Text(t(
-                            "Ab welchem Anteil am Einkommen gelten Fixkosten als kritisch? Empfehlung: 70%.",
-                            "Above which share of income are fixed costs considered critical? Recommended: 70%."
-                        ))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Text("\(Int(scoreFixedCostWarningRatio * 100))%")
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                        .frame(width: 40, alignment: .trailing)
-                }
-                Slider(value: $scoreFixedCostWarningRatio, in: 0.5...1.0, step: 0.05)
-                    .frame(maxWidth: .infinity)
-                HStack {
-                    Text("50%")
-                        .font(ThemeFonts.body(size: 10))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text("100%")
-                        .font(ThemeFonts.body(size: 10))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Divider()
-
-            // Gehaltstoleranz
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Gehaltstoleranz (Tage)", "Salary tolerance (days)"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t(
-                        "Wie viele Tage vor/nach dem Gehaltsdatum gilt ein Eingang noch als Gehalt?",
-                        "How many days before/after salary day is an income still counted as salary?"
-                    ))
-                    .font(ThemeFonts.body(size: 11))
-                    .foregroundColor(.secondary)
-                }
-                Spacer()
-                Stepper("\(scoreSalaryToleranceDays) \(t("Tage", "days"))", value: $scoreSalaryToleranceDays, in: 1...14)
-                    .font(ThemeFonts.body(size: 13))
-            }
-
-            Divider()
-
-            // Reset-Button
-            Button(action: {
-                scoreStabilityMultiplier = 3.0
-                scoreCoverageWeight = 0.6
-                scoreFixedCostWarningRatio = 0.70
-                scoreSalaryToleranceDays = 5
-            }) {
-                Text(t("Auf Standard zurücksetzen", "Reset to defaults"))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(PlainButtonStyle())
         }
     }
     
@@ -1542,8 +1487,7 @@ struct SettingsView: View {
     private var behaviorSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Mausklick-Verhalten", "Mouse click behavior"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Mausklick-Verhalten", "Mouse click behavior"), icon: "cursorarrow.click")
                 Text(t("Bestimmt, welche Aktion bei Klick bzw. Doppelklick ausgeführt wird", "Defines which action runs on click or double-click"))
                     .font(ThemeFonts.body(size: 12))
                     .foregroundColor(.secondary)
@@ -1575,7 +1519,7 @@ struct SettingsView: View {
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.cardBackground)
+                    .fill(Color.settingsCard)
             )
             
             SettingsToggleRow(
@@ -1594,8 +1538,7 @@ struct SettingsView: View {
             )
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Kontostand anzeigen", "Show balance"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Kontostand anzeigen", "Show balance"), icon: "eye")
                 Text(t(
                     "Wähle, wie der Kontostand angezeigt wird: Flyout-Karte, Mausklick oder Mouse-Over.",
                     "Choose how the balance is shown: flyout card, mouse click, or mouse over."
@@ -1609,19 +1552,18 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(SegmentedPickerStyle())
-                .frame(maxWidth: 360)
+                .frame(maxWidth: .infinity)
             }
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.cardBackground)
+                    .fill(Color.settingsCard)
             )
 
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(t("Intermediär-Auflösung", "Intermediary resolution"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Intermediär-Auflösung", "Intermediary resolution"), icon: "arrow.triangle.branch")
                 Text(t(
                     "Löst PayPal/Klarna/Landesbank auf den wahrscheinlichen Händler auf (effective merchant).",
                     "Resolves PayPal/Klarna/Landesbank to the likely real merchant (effective merchant)."
@@ -1721,8 +1663,7 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 12) {
-                Text(t("Effekte", "Effects"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Effekte", "Effects"), icon: "sparkles")
 
                 HStack(spacing: 8) {
                     Text(t("Effekte bei Einnahme ab", "Effects from income of"))
@@ -1781,8 +1722,7 @@ struct SettingsView: View {
     private var securitySettings: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Touch ID", "Touch ID"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Touch ID", "Touch ID"), icon: "touchid")
                 if touchIDAvailable {
                     if touchIDEnabled {
                         Text(t("Touch ID ist aktiviert. Du kannst die App mit Touch ID entsperren.", "Touch ID is enabled. You can unlock the app with Touch ID."))
@@ -1827,8 +1767,7 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Zurücksetzen nach falscher Kennworteingabe", "Reset after wrong password attempts"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Zurücksetzen nach falscher Kennworteingabe", "Reset after wrong password attempts"), icon: "arrow.counterclockwise.circle")
                 Text(t("Alle Daten löschen, wenn das Passwort mehrfach falsch eingegeben wird", "Delete all data when password is entered incorrectly multiple times"))
                     .font(ThemeFonts.body(size: 12))
                     .foregroundColor(.secondary)
@@ -1846,8 +1785,7 @@ struct SettingsView: View {
 
             // MARK: App-Passwort deaktivieren
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("App-Passwort", "App password"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("App-Passwort", "App password"), icon: "lock")
 
                 if passwordRequired {
                     Text(t(
@@ -1873,7 +1811,7 @@ struct SettingsView: View {
                 } else {
                     HStack(spacing: 8) {
                         Image(systemName: "lock.open.fill")
-                            .foregroundColor(.orange)
+                            .foregroundColor(.sbOrangeStrong)
                         Text(t(
                             "App-Passwort ist deaktiviert. Die App startet ohne Passwort-Abfrage.",
                             "App password is disabled. The app starts without a password prompt."
@@ -1899,8 +1837,7 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("simplebanking zurücksetzen", "Reset simplebanking"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("simplebanking zurücksetzen", "Reset simplebanking"), icon: "trash")
                 Text(t("Alle Zugangsdaten und Einstellungen löschen", "Delete all credentials and settings"))
                     .font(ThemeFonts.body(size: 12))
                     .foregroundColor(.secondary)
@@ -1932,7 +1869,7 @@ struct SettingsView: View {
             VStack(spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 40))
-                    .foregroundColor(.orange)
+                    .foregroundColor(.sbOrangeStrong)
                 Text(t("App-Passwort deaktivieren", "Disable app password"))
                     .font(ThemeFonts.heading(size: 18, weight: .bold))
                 Text(t(
@@ -1952,7 +1889,7 @@ struct SettingsView: View {
                     systemImage: "shield.slash.fill"
                 )
                 .font(ThemeFonts.body(size: 13, weight: .medium))
-                .foregroundColor(.orange)
+                .foregroundColor(.sbOrangeStrong)
 
                 Text(t(
                     "Dein Passwort wird im Schlüsselbund gespeichert, damit die App automatisch entsperren kann. Die Verschlüsselung bleibt erhalten — aber der Schutz vor unbefugtem Zugriff entfällt.",
@@ -1963,8 +1900,8 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.sbOrangeSoft))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.sbOrangeMid, lineWidth: 1))
 
             // Bestätigungs-Checkbox
             HStack(alignment: .top, spacing: 10) {
@@ -1984,7 +1921,7 @@ struct SettingsView: View {
             if !disablePasswordError.isEmpty {
                 Text(disablePasswordError)
                     .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.red)
+                    .foregroundColor(.sbRedStrong)
             }
 
             // Buttons
@@ -2007,7 +1944,7 @@ struct SettingsView: View {
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
-                                .fill(disablePasswordConfirmed ? Color.orange : Color(NSColor.disabledControlTextColor).opacity(0.3))
+                                .fill(disablePasswordConfirmed ? Color.sbOrangeStrong : Color(NSColor.disabledControlTextColor).opacity(0.3))
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -2093,8 +2030,7 @@ struct SettingsView: View {
             Divider()
             
             VStack(alignment: .leading, spacing: 8) {
-                Text(t("Technologie", "Technology"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Technologie", "Technology"), icon: "cpu")
                 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("• Swift 5.9 / SwiftUI")
@@ -2116,7 +2052,7 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: "link.circle.fill")
                     .font(.system(size: 20))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.sbBlueStrong)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(t("Powered by YAXI", "Powered by YAXI"))
                         .font(ThemeFonts.body(size: 12, weight: .medium))
@@ -2128,7 +2064,7 @@ struct SettingsView: View {
             .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.blue.opacity(0.1))
+                    .fill(Color.sbBlueSoft)
             )
 
             // Clippy Open-Source & Lizenzen
@@ -2157,8 +2093,7 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(t("Protokollierung", "Logging"))
-                    .font(ThemeFonts.heading(size: 13))
+                SettingsSectionHeader(title: t("Protokollierung", "Logging"), icon: "doc.text")
 
                 Text(t("Diagnose-Logs in eine lokale Datei schreiben.", "Write diagnostic logs to a local file."))
                     .font(ThemeFonts.body(size: 12))
@@ -2208,18 +2143,6 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             // AI Assistant
             aiAssistantSettings
-
-            Divider()
-
-            // Gehaltsring
-            SettingsToggleRow(
-                title: t("Gehaltsring anzeigen", "Show Salary Ring"),
-                subtitle: t(
-                    "Zeigt einen Ring im Flyout und in der Umsatzliste, der angibt wie viel vom Gehalt noch übrig ist. Wird im Mehrkonto-Ansicht automatisch ausgeblendet.",
-                    "Shows a ring in the flyout and transaction list indicating how much of the salary remains. Hidden automatically in multi-account view."
-                ),
-                isOn: $monthRingEnabled
-            )
 
             Divider()
 
@@ -2356,12 +2279,11 @@ struct SettingsView: View {
 
     private var mcpSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(t("Claude / MCP", "Claude / MCP"))
-                .font(ThemeFonts.heading(size: 13))
+            SettingsSectionHeader(title: t("Claude / MCP", "Claude / MCP"), icon: "server.rack")
 
             Text(t(
-                "Der integrierte MCP-Server ermöglicht Claude Desktop direkten Lesezugriff auf deine lokalen Transaktionsdaten — ohne laufende App, ohne Internet.",
-                "The built-in MCP server lets Claude Desktop read your local transaction data directly — no running app, no internet required."
+                "Der integrierte MCP-Server ermöglicht Claude Desktop direkten Lesezugriff auf deine lokalen Transaktionsdaten — ohne laufende App. Lokaler MCP-Zugriff; Claude kann Inhalte je nach Nutzung weiterverarbeiten.",
+                "The built-in MCP server lets Claude Desktop read your local transaction data directly — no running app required. Local MCP access; Claude may process content depending on usage."
             ))
             .font(ThemeFonts.body(size: 12))
             .foregroundColor(.secondary)
@@ -2406,12 +2328,12 @@ struct SettingsView: View {
                         Label(t("Automatisch einrichten", "Set up automatically"), systemImage: "sparkles")
                     case .success:
                         Label(t("Eingerichtet! Claude neu starten.", "Done! Restart Claude."), systemImage: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundColor(.sbGreenStrong)
                     case .alreadySet:
                         Label(t("Bereits eingerichtet", "Already configured"), systemImage: "checkmark")
                     case .error(let msg):
                         Label(msg, systemImage: "xmark.circle")
-                            .foregroundColor(.red)
+                            .foregroundColor(.sbRedStrong)
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -2446,29 +2368,60 @@ struct SettingsView: View {
     }
 }
 
+// Subtle gray for settings section cards — lighter than panelBackground (0.92),
+// not pure white. Matches macOS grouped-form card feel.
+private extension Color {
+    static let settingsCard = Color(NSColor(name: nil) { app in
+        app.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            ? NSColor(white: 0.22, alpha: 1)
+            : NSColor(white: 0.96, alpha: 1)
+    })
+}
+
 private struct TabButton: View {
     let title: String
     let icon: String
     let isSelected: Bool
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
                 Text(title)
-                    .font(ThemeFonts.body(size: 11))
+                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
             .foregroundColor(isSelected ? .accentColor : .secondary)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
-            )
+            .overlay(alignment: .bottom) {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.accentColor)
+                        .frame(height: 2)
+                        .padding(.horizontal, 8)
+                }
+            }
         }
         .buttonStyle(PlainButtonStyle())
+    }
+}
+
+private struct SettingsSectionHeader: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        Label {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+        } icon: {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.accentColor)
+        }
+        .padding(.bottom, 2)
     }
 }
 
@@ -2538,7 +2491,7 @@ final class SettingsPanel {
         let window = NSWindow(contentViewController: hostingController)
         window.title = localizedTitle()
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 480, height: 520))
+        window.setContentSize(NSSize(width: 520, height: 520))
         window.center()
         window.isReleasedWhenClosed = false
         window.level = .floating

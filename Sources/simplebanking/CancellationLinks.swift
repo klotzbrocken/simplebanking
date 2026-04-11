@@ -64,7 +64,7 @@ enum CancellationLinks {
                url: URL(string: "https://www.wowtv.de/account")!,
                note: "Bei Sky-Paketen: sky.de/mein-sky")),
 
-        (["youtube premium", "youtube music", "google youtube"],
+        (["youtube premium", "youtube music", "google youtube", "youtube"],
          Entry(displayName: "YouTube Premium",
                url: URL(string: "https://myaccount.google.com/subscriptions")!,
                note: nil)),
@@ -91,9 +91,19 @@ enum CancellationLinks {
                url: URL(string: "https://support.apple.com/de-de/118428")!,
                note: "Über Einstellungen → Apple-ID → Abonnements")),
 
-        (["google storage", "google one"],
-         Entry(displayName: "Google One",
+        (["google storage", "google one", "google ireland", "google llc", "google payment", "google workspace"],
+         Entry(displayName: "Google",
                url: URL(string: "https://myaccount.google.com/subscriptions")!,
+               note: nil)),
+
+        (["lovable", "lovable.dev"],
+         Entry(displayName: "Lovable",
+               url: URL(string: "https://lovable.dev/settings/billing")!,
+               note: nil)),
+
+        (["gamma.app", "gamma presentation", "gamma ai"],
+         Entry(displayName: "Gamma",
+               url: URL(string: "https://gamma.app/settings/billing")!,
                note: nil)),
 
         (["microsoft 365", "office 365", "microsoft*"],
@@ -167,6 +177,20 @@ enum CancellationLinks {
          Entry(displayName: "Audible",
                url: URL(string: "https://www.audible.de/account/overview")!,
                note: nil)),
+
+        // ── KI / Kreativ ───────────────────────────────────────────
+
+        (["dreamina", "capcut", "bytedance"],
+         Entry(displayName: "Dreamina / CapCut",
+               url: URL(string: "https://dreamina.capcut.com/account/subscription")!,
+               note: nil)),
+
+        // ── Newsletter / Plattformen ───────────────────────────────
+
+        (["substack"],
+         Entry(displayName: "Substack",
+               url: URL(string: "https://substack.com/account/settings")!,
+               note: "Bezahlte Abos unter 'Subscriptions' kündigen")),
 
         // ── Presse / News ──────────────────────────────────────────
 

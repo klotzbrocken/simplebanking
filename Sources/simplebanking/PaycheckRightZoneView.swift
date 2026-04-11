@@ -10,8 +10,12 @@ struct GreenZoneRing: View {
     var date: Date = Date()
     var balance: Double? = nil    // current account balance for dispo detection
     var dispoLimit: Int = 0       // overdraft limit in € for dispo-mode display
+    var showDispo: Bool = true    // false = hide dispo-mode rendering
 
-    private var isDispoMode: Bool { (balance ?? 0) < 0 }
+    @State private var displayedFraction: Double = 0
+    @ObservedObject private var freezeState = FreezeState.shared
+
+    private var isDispoMode: Bool { showDispo && (balance ?? 0) < 0 }
 
     private var effectiveFraction: Double {
         guard isDispoMode else { return fraction }
@@ -19,11 +23,16 @@ struct GreenZoneRing: View {
         return max(0, min(1, abs(balance) / Double(dispoLimit)))
     }
 
-    private var ringColor: Color {
-        guard !isDispoMode else { return .red }
-        // Continuous hue: 0 = red (0°), 0.5 = yellow (60°), 1 = green (120°)
-        let hue = fraction * (120.0 / 360.0)
-        return Color(hue: hue, saturation: 0.72, brightness: 0.88)
+    private func ringColor(for f: Double) -> Color {
+        // Color Harmony Palette — diskrete semantische Bands statt Continuous Hue.
+        // Freeze nutzt Blue (info/analyse), Dispo nutzt Red (urgent), sonst Red→Orange→Green nach Threshold.
+        if freezeState.isActive {
+            return .sbBlueStrong
+        }
+        guard !isDispoMode else { return .sbRedStrong }
+        if f < 0.34 { return .sbRedStrong }
+        if f < 0.67 { return .sbOrangeStrong }
+        return .sbGreenStrong
     }
 
     private var day: Int { Calendar.current.component(.day, from: date) }
@@ -35,24 +44,35 @@ struct GreenZoneRing: View {
     }
 
     var body: some View {
+        let color = ringColor(for: displayedFraction)
         ZStack {
             Circle()
-                .stroke(ringColor.opacity(0.12), lineWidth: 7)
+                .stroke(color.opacity(0.12), lineWidth: 7)
             Circle()
-                .trim(from: 0, to: effectiveFraction)
-                .stroke(ringColor, style: StrokeStyle(lineWidth: 7, lineCap: .round))
+                .trim(from: 0, to: displayedFraction)
+                .stroke(color, style: StrokeStyle(lineWidth: 7, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 1.0), value: displayedFraction)
             VStack(spacing: 1) {
                 Text(String(format: "%02d", day))
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundColor(ringColor)
+                    .foregroundColor(color)
                 Text(monthAbbrev.uppercased())
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(ringColor.opacity(0.70))
+                    .foregroundColor(color.opacity(0.70))
             }
         }
         .frame(width: 72, height: 72)
+        .onAppear {
+            displayedFraction = 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                displayedFraction = effectiveFraction
+            }
+        }
+        .onChange(of: effectiveFraction) { newValue in
+            displayedFraction = newValue
+        }
     }
 }
 
@@ -140,6 +160,8 @@ struct SalaryProgressCalculator {
         //          in the period (never a sum, to avoid aggregating invoice payments etc.)
         var currentExplicit = 0.0, prevExplicit = 0.0
         var currentLargest  = 0.0, prevLargest  = 0.0
+        // Use max (not sum) for explicit salary too — avoids double-counting when
+        // two salary periods overlap (e.g. March salary on Mar 10, April on Apr 10).
         for tx in transactions {
             guard let d = txDate(tx) else { continue }
             let raw = tx.parsedAmount
@@ -159,10 +181,10 @@ struct SalaryProgressCalculator {
                 || rem.contains("REFUND") || rem.contains("RÜCKZAHLUNG")
                 || add.contains("ERSTATTUNG") || add.contains("RETOURE")
             if d >= currentStart {
-                if isExplicitSalary { currentExplicit += raw }
+                if isExplicitSalary { currentExplicit = max(currentExplicit, raw) }
                 else if raw >= 1000 && !isRefund { currentLargest = max(currentLargest, raw) }
             } else if d >= prevStart {
-                if isExplicitSalary { prevExplicit += raw }
+                if isExplicitSalary { prevExplicit = max(prevExplicit, raw) }
                 else if raw >= 1000 && !isRefund { prevLargest = max(prevLargest, raw) }
             }
         }
@@ -277,6 +299,16 @@ struct SalaryProgressCalculator {
     }
 }
 
+// MARK: - DotsGridWidthKey
+// Misst die intrinsische Breite des PaycheckDotsGrid und propagiert sie nach oben,
+// damit die IBAN-Zeile exakt auf die Kalenderbreite constrained werden kann.
+private struct DotsGridWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 // MARK: - PaycheckDotsGrid
 
 private enum DotState { case past, today, future }
@@ -313,6 +345,12 @@ private struct PaycheckDotsGrid: View {
                         dotView(state)
                     }
                 }
+                // Erste Zeile = breiteste → publiziert ihre Breite nach oben
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: DotsGridWidthKey.self, value: geo.size.width)
+                    }
+                )
             }
         }
     }
@@ -343,6 +381,8 @@ struct PaycheckRightZoneView: View {
     var dispoLimit: Int = 0
     var showRing: Bool = true
 
+    @State private var dotsGridWidth: CGFloat = 0
+
     private var progress: SalaryProgressCalculator.Progress {
         SalaryProgressCalculator.progress(salaryDay: salaryDay, tolerance: salaryDayTolerance)
     }
@@ -366,10 +406,12 @@ struct PaycheckRightZoneView: View {
 
                 if let iban {
                     IBANLabel(iban: iban)
+                        .frame(width: dotsGridWidth > 0 ? dotsGridWidth : nil, alignment: .leading)
                         .padding(.top, 20)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onPreferenceChange(DotsGridWidthKey.self) { dotsGridWidth = $0 }
 
             if showRing {
                 GreenZoneRing(fraction: ringFraction, balance: balance, dispoLimit: dispoLimit)
@@ -390,22 +432,29 @@ struct IBANLabel: View {
     let iban: String
     @State private var copied = false
 
-    private func masked(_ raw: String) -> String {
-        guard raw.count >= 8 else { return raw }
-        return raw.prefix(4) + "••••••••" + raw.suffix(4)
+    /// Maskiert die letzten 3 Stellen, Rest bleibt sichtbar.
+    /// Beispiel: "DE83460500010001808123" → "IBAN DE83460500010001808XXX"
+    private func displayString(_ raw: String) -> String {
+        let cleaned = raw.replacingOccurrences(of: " ", with: "")
+        guard cleaned.count > 3 else { return "IBAN " + cleaned }
+        return "IBAN " + cleaned.prefix(cleaned.count - 3) + "XXX"
     }
 
     var body: some View {
         HStack(spacing: 4) {
             if copied {
                 Text(L10n.t("IBAN kopiert", "IBAN copied"))
-                    .font(.system(size: 12))
-                    .foregroundColor(.green)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.sbGreenStrong)
+                Spacer(minLength: 0)
             } else {
-                Text(masked(iban))
-                    .font(.system(size: 12, design: .monospaced))
+                Text(displayString(iban))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(iban, forType: .string)
@@ -419,5 +468,6 @@ struct IBANLabel: View {
                 .buttonStyle(.plain)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -1,6 +1,31 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Savings Bookmarks
+
+enum SavingsBookmarks {
+    private static let key = "savingsBookmarkedTransactions"
+
+    static func isBookmarked(_ transactionId: String) -> Bool {
+        let bookmarks = UserDefaults.standard.stringArray(forKey: key) ?? []
+        return bookmarks.contains(transactionId)
+    }
+
+    static func toggle(_ transactionId: String) {
+        var bookmarks = UserDefaults.standard.stringArray(forKey: key) ?? []
+        if let index = bookmarks.firstIndex(of: transactionId) {
+            bookmarks.remove(at: index)
+        } else {
+            bookmarks.append(transactionId)
+        }
+        UserDefaults.standard.set(bookmarks, forKey: key)
+    }
+
+    static func allBookmarked() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+}
+
 // MARK: - Transaction Detail View
 
 struct TransactionDetailView: View {
@@ -467,7 +492,7 @@ struct TransactionDetailView: View {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.system(size: 14))
                                         .foregroundColor(.white)
-                                        .background(Circle().fill(Color.red).padding(2))
+                                        .background(Circle().fill(Color.sbRedStrong).padding(2))
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 .offset(x: 6, y: -6)
@@ -809,7 +834,7 @@ struct TransactionDetailView: View {
                                     Text(isSavingsBookmarked ? "Als Sparrate markiert" : "Als Sparrate markieren")
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(.primary)
-                                    Text("Zählt im Financial Health Score als Sparen, nicht als Ausgabe")
+                                    Text("Zählt im MMI als Sparen, nicht als Ausgabe")
                                         .font(.system(size: 11))
                                         .foregroundColor(.secondary)
                                 }
