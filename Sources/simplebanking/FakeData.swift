@@ -2,39 +2,46 @@ import Foundation
 
 enum FakeData {
     // MARK: - Standard Merchants (variable transactions)
+    // Profile 0: Supermarkt, Tankstelle, Apotheke, Post
     static let merchants = [
-        "Bäckerei Morgenstern",
-        "Supermarkt Nord",
-        "Coffee Roasters",
-        "Apotheke City",
-        "OnlineShop",
-        "Drogerie",
-        "Restaurant",
-        "Tankstelle"
+        "REWE Markt GmbH",
+        "EDEKA",
+        "Lidl",
+        "Aldi Süd",
+        "Penny Markt",
+        "Apotheke am Markt",
+        "Aral Tankstelle",
+        "Shell Tankstelle",
+        "Deutsche Post AG",
+        "Bäckerei Stadtbäcker"
     ]
 
-    // Profile 1: daily spending (coffee, food, fashion, delivery)
+    // Profile 1: City-Lifestyle, Delivery, Fashion
     private static let merchantsProfile1 = [
         "Starbucks Coffee",
-        "Lieferando.de",
-        "About You GmbH",
+        "Lieferando.de GmbH",
+        "ABOUT YOU GmbH",
         "Zalando SE",
-        "McDonald's",
+        "McDonald's Deutschland",
         "Subway",
         "dm-drogerie markt",
-        "Rewe To Go"
+        "Rossmann GmbH",
+        "Rewe City",
+        "HelloFresh SE"
     ]
 
-    // Profile 2: home & services (pharmacy, hardware, home)
+    // Profile 2: Heimwerken, Gesundheit, Fachhandel
     private static let merchantsProfile2 = [
-        "Apotheke am Markt",
         "Bauhaus AG",
-        "OBI Bau- und Heimwerkermarkt",
-        "IKEA Deutschland",
-        "MediaMarkt",
-        "Rossmann",
+        "OBI GmbH & Co. KG",
         "Hornbach",
-        "Saturn Electro"
+        "MediaMarkt",
+        "Saturn Electro",
+        "IKEA Deutschland GmbH",
+        "Fielmann AG",
+        "DocMorris",
+        "Vitalsana Apotheke",
+        "Hagebaumarkt"
     ]
 
     static let remittances = [
@@ -60,35 +67,56 @@ enum FakeData {
 
     // Profile 0: main account — salary, rent, streaming, phone
     static let recurringPayments: [RecurringTemplate] = [
-        RecurringTemplate(merchant: "Klotzbrocken AG", remittance: "GEHALT", amount: -3450.00, variance: 0.02, dayOfMonth: 1, category: "income"),
-        RecurringTemplate(merchant: "Wohnungsbaugesellschaft Siegen", remittance: "MIETE INKL. NK", amount: 850.00, variance: 0, dayOfMonth: 1, category: "housing"),
-        RecurringTemplate(merchant: "ING-DiBa AG", remittance: "KREDITKARTENABRECHNUNG", amount: 380.00, variance: 0.12, dayOfMonth: 3, category: "payment"),
-        RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . NETFLIX, Ihr Einkauf bei NETFLIX", amount: 17.99, variance: 0, dayOfMonth: 15, category: "streaming"),
-        RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . SPOTIFY AB, Ihr Einkauf bei SPOTIFY", amount: 10.99, variance: 0, dayOfMonth: 1, category: "streaming"),
-        RecurringTemplate(merchant: "Telekom Deutschland GmbH", remittance: "MOBILFUNK RECHNUNG", amount: 49.99, variance: 0.05, dayOfMonth: 20, category: "telecom"),
-        RecurringTemplate(merchant: "McFit GmbH", remittance: "MITGLIEDSBEITRAG", amount: 24.90, variance: 0, dayOfMonth: 15, category: "membership"),
+        // Einnahmen
+        RecurringTemplate(merchant: "Klotzbrocken AG",               remittance: "GEHALT",                       amount: -3450.00, variance: 0.01, dayOfMonth: 1,  category: "income"),
+        // Wohnen & Dauerzahlungen
+        RecurringTemplate(merchant: "Wohnungsbaugesellschaft Siegen", remittance: "MIETE INKL. NK",              amount: 850.00,   variance: 0,    dayOfMonth: 1,  category: "housing"),
+        RecurringTemplate(merchant: "Privat Überweisung",            remittance: "UNTERHALT",                    amount: 970.00,   variance: 0,    dayOfMonth: 1,  category: "other"),
+        RecurringTemplate(merchant: "Privat Überweisung",            remittance: "HAUSHALTSGELD",                amount: 1200.00,  variance: 0,    dayOfMonth: 1,  category: "other"),
+        // Kreditkarte (variable Abrechnung)
+        RecurringTemplate(merchant: "Landesbank Hessen-Thüringen",   remittance: "KREDITKARTENABRECHNUNG",       amount: 480.00,   variance: 0.18, dayOfMonth: 3,  category: "payment"),
+        // Streaming/Abo — direkte Creditor-Namen (kein PayPal-Routing, bessere Fixkosten-Erkennung)
+        RecurringTemplate(merchant: "Netflix International B.V.",    remittance: "NETFLIX.COM",                  amount: 19.99,    variance: 0,    dayOfMonth: 15, category: "streaming"),
+        RecurringTemplate(merchant: "Spotify AB",                    remittance: "SPOTIFY PREMIUM",              amount: 11.99,    variance: 0,    dayOfMonth: 1,  category: "streaming"),
+        // Telecom
+        RecurringTemplate(merchant: "Vodafone GmbH",                 remittance: "VERTRAGSRECHNUNG MOBILFUNK",  amount: 29.99,    variance: 0,    dayOfMonth: 20, category: "telecom"),
+        RecurringTemplate(merchant: "freenet AG",                    remittance: "MOBILFUNK RECHNUNG",           amount: 20.98,    variance: 0,    dayOfMonth: 22, category: "telecom"),
+        // Fitness
+        RecurringTemplate(merchant: "McFit GmbH",                    remittance: "MITGLIEDSBEITRAG",             amount: 24.90,    variance: 0,    dayOfMonth: 15, category: "membership"),
     ]
 
-    // Profile 1: daily/lifestyle account — subscriptions, online shopping, no salary
+    // Profile 1: daily/lifestyle account — subscriptions, online shopping
     private static let recurringPaymentsProfile1: [RecurringTemplate] = [
-        RecurringTemplate(merchant: "AMAZON EU S.A R.L.", remittance: "AMAZON PRIME MEMBERSHIP", amount: 8.99, variance: 0, dayOfMonth: 5, category: "streaming"),
-        RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . DISNEY PLUS, Ihr Einkauf bei DISNEY", amount: 11.99, variance: 0, dayOfMonth: 3, category: "streaming"),
-        RecurringTemplate(merchant: "APPLE.COM/BILL", remittance: "APPLE ONE SUBSCRIPTION", amount: 19.95, variance: 0, dayOfMonth: 12, category: "streaming"),
-        RecurringTemplate(merchant: "O2 Online GmbH", remittance: "VERTRAGSRECHNUNG MOBILFUNK", amount: 34.99, variance: 0.03, dayOfMonth: 22, category: "telecom"),
-        RecurringTemplate(merchant: "Urban Sports Club", remittance: "MITGLIEDSBEITRAG M-PAKET", amount: 59.90, variance: 0, dayOfMonth: 1, category: "membership"),
-        RecurringTemplate(merchant: "Payment & Banking GmbH", remittance: "GEHALT", amount: -4200.00, variance: 0.02, dayOfMonth: 15, category: "income"),
+        RecurringTemplate(merchant: "Payment & Banking GmbH",        remittance: "GEHALT",                       amount: -4200.00, variance: 0.01, dayOfMonth: 15, category: "income"),
+        RecurringTemplate(merchant: "Amazon EU S.a.r.l.",            remittance: "AMAZON PRIME MEMBERSHIP",      amount: 8.99,     variance: 0,    dayOfMonth: 5,  category: "streaming"),
+        RecurringTemplate(merchant: "Disney+ (The Walt Disney Co.)", remittance: "DISNEY PLUS ABONNEMENT",       amount: 13.99,    variance: 0,    dayOfMonth: 3,  category: "streaming"),
+        RecurringTemplate(merchant: "Apple Services",                remittance: "APPLE ONE SUBSCRIPTION",       amount: 19.95,    variance: 0,    dayOfMonth: 12, category: "streaming"),
+        RecurringTemplate(merchant: "YouTube Premium",               remittance: "YOUTUBE PREMIUM ABONNEMENT",   amount: 23.99,    variance: 0,    dayOfMonth: 8,  category: "streaming"),
+        RecurringTemplate(merchant: "O2 Online GmbH",               remittance: "VERTRAGSRECHNUNG MOBILFUNK",   amount: 34.99,    variance: 0,    dayOfMonth: 22, category: "telecom"),
+        RecurringTemplate(merchant: "Urban Sports Club",             remittance: "MITGLIEDSBEITRAG M-PAKET",     amount: 59.90,    variance: 0,    dayOfMonth: 1,  category: "membership"),
+        RecurringTemplate(merchant: "Claude.ai (Anthropic)",         remittance: "ANTHROPIC SUBSCRIPTION",       amount: 20.00,    variance: 0,    dayOfMonth: 7,  category: "software"),
     ]
 
-    // Profile 2: bills/shared account — utilities, insurance, transport, software
+    // Profile 2: bills/shared account — utilities, insurance, credit, software
     private static let recurringPaymentsProfile2: [RecurringTemplate] = [
-        RecurringTemplate(merchant: "Stadtwerke München GmbH", remittance: "STROM ABSCHLAG", amount: 92.00, variance: 0, dayOfMonth: 28, category: "utilities"),
-        RecurringTemplate(merchant: "Stadtwerke München GmbH", remittance: "GAS ABSCHLAG", amount: 71.00, variance: 0, dayOfMonth: 28, category: "utilities"),
-        RecurringTemplate(merchant: "HUK-COBURG Versicherung", remittance: "KFZ-HAFTPFLICHT UND KASKO", amount: 52.30, variance: 0, dayOfMonth: 1, category: "insurance"),
-        RecurringTemplate(merchant: "Debeka Krankenversicherung", remittance: "KRANKENZUSATZVERSICHERUNG", amount: 31.40, variance: 0, dayOfMonth: 1, category: "insurance"),
-        RecurringTemplate(merchant: "DB Vertrieb GmbH", remittance: "DEUTSCHLANDTICKET", amount: 49.00, variance: 0, dayOfMonth: 1, category: "transport"),
-        RecurringTemplate(merchant: "PayPal Europe S.a.r.l.", remittance: "PP . OPENAI, Ihr Einkauf bei OPENAI", amount: 20.00, variance: 0, dayOfMonth: 10, category: "software"),
-        RecurringTemplate(merchant: "APPLE.COM/BILL", remittance: "APPLE ICLOUD+ 200GB", amount: 2.99, variance: 0, dayOfMonth: 8, category: "software"),
-        RecurringTemplate(merchant: "Fliegenfranz GmbH", remittance: "GEHALT", amount: -2800.00, variance: 0.02, dayOfMonth: 1, category: "income"),
+        RecurringTemplate(merchant: "Fliegenfranz GmbH",                  remittance: "GEHALT",                      amount: -2800.00, variance: 0.01, dayOfMonth: 1,  category: "income"),
+        // Versicherungen — enthalten "Versicherung" im Namen → knownServices-Pattern "versicherung"
+        RecurringTemplate(merchant: "Hannoversche Versicherung",          remittance: "UNFALLVERSICHERUNG BEITRAG",  amount: 19.73,    variance: 0,    dayOfMonth: 1,  category: "insurance"),
+        RecurringTemplate(merchant: "Gothaer Versicherung AG",            remittance: "HAUSRATVERSICHERUNG",         amount: 34.81,    variance: 0,    dayOfMonth: 1,  category: "insurance"),
+        RecurringTemplate(merchant: "HUK-COBURG Versicherung",           remittance: "KFZ-HAFTPFLICHT UND KASKO",   amount: 52.30,    variance: 0,    dayOfMonth: 1,  category: "insurance"),
+        RecurringTemplate(merchant: "DKV Deutsche Krankenversicherung",   remittance: "KV-ZUSATZVERSICHERUNG",       amount: 31.47,    variance: 0,    dayOfMonth: 1,  category: "insurance"),
+        RecurringTemplate(merchant: "BARMENIA Versicherungen",            remittance: "ZAHNZUSATZVERSICHERUNG",      amount: 5.99,     variance: 0,    dayOfMonth: 1,  category: "insurance"),
+        // Kredit
+        RecurringTemplate(merchant: "C24 Bank GmbH",                     remittance: "KREDITRATE",                  amount: 568.34,   variance: 0,    dayOfMonth: 15, category: "finance"),
+        // Versorger
+        RecurringTemplate(merchant: "Stadtwerke Siegen GmbH",            remittance: "STROM ABSCHLAG",              amount: 89.00,    variance: 0,    dayOfMonth: 28, category: "utilities"),
+        RecurringTemplate(merchant: "Stadtwerke Siegen GmbH",            remittance: "GAS ABSCHLAG",                amount: 67.00,    variance: 0,    dayOfMonth: 28, category: "utilities"),
+        // Transport
+        RecurringTemplate(merchant: "DB Vertrieb GmbH",                  remittance: "DEUTSCHLANDTICKET",           amount: 49.00,    variance: 0,    dayOfMonth: 1,  category: "transport"),
+        // Software/Medien
+        RecurringTemplate(merchant: "Apple Services",                     remittance: "APPLE ICLOUD+ 200GB",         amount: 2.99,     variance: 0,    dayOfMonth: 8,  category: "software"),
+        RecurringTemplate(merchant: "HD Plus GmbH",                       remittance: "HD PLUS ABONNEMENT",          amount: 6.99,     variance: 0,    dayOfMonth: 10, category: "streaming"),
+        RecurringTemplate(merchant: "IONOS SE",                           remittance: "WEBHOSTING RECHNUNG",         amount: 22.62,    variance: 0,    dayOfMonth: 14, category: "software"),
     ]
 
     private static let dateFormatter: DateFormatter = {
@@ -101,7 +129,7 @@ enum FakeData {
     
     // MARK: - Demo Transaction Generation (90 days with recurring)
 
-    static func generateDemoTransactions(seed: inout UInt64, days: Int = 90) -> [TransactionsResponse.Transaction] {
+    static func generateDemoTransactions(seed: inout UInt64, days: Int = 365) -> [TransactionsResponse.Transaction] {
         generateDemoTransactions(seed: &seed, days: days, slotProfile: 0)
     }
 
@@ -140,8 +168,9 @@ enum FakeData {
 
                 // Always consume one seed step so per-slot amounts differ
                 var amount = template.amount
-                let effectiveVariance = template.variance > 0 ? template.variance : 0.03
-                let varianceFactor = 1.0 + (nextDouble(&seed) * 2 - 1) * effectiveVariance
+                let varianceFactor = template.variance > 0
+                    ? 1.0 + (nextDouble(&seed) * 2 - 1) * template.variance
+                    : { let _ = nextDouble(&seed); return 1.0 }()
                 amount *= varianceFactor
 
                 let isIncome = amount < 0
@@ -196,10 +225,72 @@ enum FakeData {
             }
         }
 
+        // Inject demo anomalies for Attention Inbox testing (only main account)
+        if slotProfile == 0 {
+            transactions += demoAnomalyTransactions()
+        }
+
         transactions.sort { ($0.bookingDate ?? "") > ($1.bookingDate ?? "") }
         return transactions
     }
-    
+
+    // MARK: - Demo Anomalies (Attention Inbox test data)
+
+    /// Injects realistic anomalies so the Attention Inbox has something to show in demo mode.
+    /// - Abo teurer:          Netflix at €25.99 (was €19.99 all year)
+    /// - Neuer Händler:       Decathlon, first time ever
+    /// - Doppelte Abbuchung:  Aral Tankstelle, identical €78.50 twice within 4 days
+    private static func demoAnomalyTransactions() -> [TransactionsResponse.Transaction] {
+        let cal  = Calendar.current
+        let now  = Date()
+        func daysAgo(_ n: Int) -> String {
+            formatDate(cal.date(byAdding: .day, value: -n, to: now) ?? now)
+        }
+        func expenseTx(merchant: String, iban: String, remittance: String, amount: Double, date: String, addInfo: String = "LASTSCHRIFT") -> TransactionsResponse.Transaction {
+            TransactionsResponse.Transaction(
+                bookingDate: date, valueDate: date, status: "Booked",
+                endToEndId: UUID().uuidString,
+                amount: TransactionsResponse.Amount(currency: "EUR", amount: String(format: "-%.2f", amount)),
+                creditor: TransactionsResponse.Party(name: merchant, iban: iban, bic: "COBADEFFXXX"),
+                debtor: nil,
+                remittanceInformation: [remittance],
+                additionalInformation: addInfo,
+                purposeCode: "RINP"
+            )
+        }
+
+        return [
+            // 1. Abo teurer: Netflix hat Preis erhöht (war €19.99, jetzt €25.99)
+            expenseTx(merchant: "Netflix International B.V.",
+                      iban: "DE89200400600000099901",
+                      remittance: "NETFLIX.COM",
+                      amount: 25.99,
+                      date: daysAgo(3)),
+
+            // 2. Neuer Händler: Decathlon — bisher nie aufgetaucht
+            expenseTx(merchant: "Decathlon GmbH",
+                      iban: "DE89370400440000123456",
+                      remittance: "Kartenzahlung DECATHLON",
+                      amount: 89.95,
+                      date: daysAgo(2),
+                      addInfo: "KARTENZAHLUNG"),
+
+            // 3. Doppelte Abbuchung: Aral, gleicher Betrag, 4 Tage auseinander
+            expenseTx(merchant: "Aral Tankstelle",
+                      iban: "DE89500400600000044401",
+                      remittance: "Kartenzahlung ARAL",
+                      amount: 78.50,
+                      date: daysAgo(5),
+                      addInfo: "KARTENZAHLUNG"),
+            expenseTx(merchant: "Aral Tankstelle",
+                      iban: "DE89500400600000044401",
+                      remittance: "Kartenzahlung ARAL",
+                      amount: 78.50,
+                      date: daysAgo(2),
+                      addInfo: "KARTENZAHLUNG"),
+        ]
+    }
+
     // MARK: - Helper Functions
     
     static func randomEUR(seed: inout UInt64, min: Double, max: Double) -> Double {

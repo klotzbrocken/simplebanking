@@ -1,6 +1,15 @@
 import Foundation
 import GRDB
 
+// MARK: - Transaction Enrichment
+
+struct TxEnrichment {
+    var note: String?
+    var attachmentCount: Int
+    var isUnread: Bool
+    var isFlagged: Bool
+}
+
 // MARK: - Attachment Info
 
 struct AttachmentInfo: Identifiable {
@@ -165,6 +174,10 @@ enum TransactionsDatabase {
                 )
             """)
         }
+        migrator.registerMigration("v15_swipe_flags") { db in
+            try addColumnIfMissing(db, table: "transactions", column: "is_unread", definition: "INTEGER NOT NULL DEFAULT 0")
+            try addColumnIfMissing(db, table: "transactions", column: "is_flagged", definition: "INTEGER NOT NULL DEFAULT 0")
+        }
         return migrator
     }
 
@@ -190,7 +203,7 @@ enum TransactionsDatabase {
 
         for (slotId, profile) in slotConfigs {
             var s = UInt64(bitPattern: Int64(truncatingIfNeeded: seed)) &+ UInt64(profile)
-            let txs = FakeData.generateDemoTransactions(seed: &s, days: 90, slotId: slotId, slotProfile: profile)
+            let txs = FakeData.generateDemoTransactions(seed: &s, days: 365, slotId: slotId, slotProfile: profile)
 
             try? queue.write { db in
                 try db.execute(sql: "DELETE FROM transactions WHERE slot_id = ?", arguments: [slotId])
@@ -203,8 +216,8 @@ enum TransactionsDatabase {
                                 empfaenger, absender, iban, verwendungszweck, kategorie,
                                 additional_information, effective_merchant, normalized_merchant,
                                 merchant_source, merchant_confidence, search_text, raw_json,
-                                updated_at, slot_id, status
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                updated_at, slot_id, status, is_unread
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                             """,
                         arguments: [
                             record.txID, record.endToEndID, record.datum, record.buchungsdatum,
@@ -239,8 +252,8 @@ enum TransactionsDatabase {
                             empfaenger, absender, iban, verwendungszweck, kategorie,
                             additional_information, effective_merchant, normalized_merchant,
                             merchant_source, merchant_confidence, search_text, raw_json, updated_at,
-                            slot_id, status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            slot_id, status, is_unread
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                         ON CONFLICT(tx_id) DO UPDATE SET
                             end_to_end_id = excluded.end_to_end_id,
                             datum = excluded.datum,
@@ -262,7 +275,9 @@ enum TransactionsDatabase {
                             updated_at = excluded.updated_at,
                             status = excluded.status,
                             user_note = user_note,
-                            attachment_count = attachment_count
+                            attachment_count = attachment_count,
+                            is_unread = is_unread,
+                            is_flagged = is_flagged
                         """,
                     arguments: [
                         record.txID,
@@ -445,22 +460,51 @@ enum TransactionsDatabase {
         }
     }
 
-    static func loadEnrichmentData(bankId: String = "primary") throws -> [String: (note: String?, attachmentCount: Int)] {
+    static func loadEnrichmentData(bankId: String = "primary") throws -> [String: TxEnrichment] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
-        let slotId = activeSlotId
         return try queue.read { db in
-            let rows = try Row.fetchAll(db, sql: "SELECT tx_id, user_note, attachment_count FROM transactions WHERE slot_id = ?", arguments: [slotId])
-            var result: [String: (note: String?, attachmentCount: Int)] = [:]
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT tx_id, user_note, attachment_count, is_unread, is_flagged
+                FROM transactions
+                WHERE is_unread = 1 OR is_flagged = 1 OR user_note IS NOT NULL OR attachment_count > 0
+                """)
+            var result: [String: TxEnrichment] = [:]
             for row in rows {
                 let txID: String = row["tx_id"]
                 let note: String? = row["user_note"]
                 let count: Int = row["attachment_count"] ?? 0
-                if note != nil || count > 0 {
-                    result[txID] = (note: note, attachmentCount: count)
+                let unread: Bool = (row["is_unread"] as Int?) == 1
+                let flagged: Bool = (row["is_flagged"] as Int?) == 1
+                if note != nil || count > 0 || unread || flagged {
+                    result[txID] = TxEnrichment(note: note, attachmentCount: count, isUnread: unread, isFlagged: flagged)
                 }
             }
             return result
+        }
+    }
+
+    // MARK: - Swipe Flags
+
+    static func setUnread(txID: String, bankId: String = "primary", value: Bool) throws {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE transactions SET is_unread = ? WHERE tx_id = ?",
+                arguments: [value ? 1 : 0, txID]
+            )
+        }
+    }
+
+    static func setFlagged(txID: String, bankId: String = "primary", value: Bool) throws {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE transactions SET is_flagged = ? WHERE tx_id = ?",
+                arguments: [value ? 1 : 0, txID]
+            )
         }
     }
 

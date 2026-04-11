@@ -37,7 +37,7 @@ fi
 OUTDIR="$ROOT/SimpleBankingBuild"
 APP="$OUTDIR/simplebanking.app"
 ICON_SRC="${ICON_SRC:-$ROOT/Resources/icon_full_black.png}"
-VERSION_BASE="${VERSION_BASE:-1.3.4}"
+VERSION_BASE="${VERSION_BASE:-1.3.7}"
 
 mkdir -p "$OUTDIR"
 rm -rf "$APP"

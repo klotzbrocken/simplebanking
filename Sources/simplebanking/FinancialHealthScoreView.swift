@@ -1,252 +1,278 @@
 import SwiftUI
 
-private struct Ring: View {
-    var progress: Double
-    var color: Color
-    var lineWidth: CGFloat
-    var shadow: Bool = false
-
-    var body: some View {
-        ZStack {
-            // Background track
-            Circle()
-                .stroke(color.opacity(0.15), lineWidth: lineWidth)
-            
-            // Active ring
-            Circle()
-                .trim(from: 0, to: max(0.001, progress))
-                .stroke(
-                    AngularGradient(
-                        gradient: Gradient(colors: [color.opacity(0.8), color]),
-                        center: .center,
-                        startAngle: .degrees(0),
-                        endAngle: .degrees(360 * progress)
-                    ),
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                .shadow(color: shadow ? color.opacity(0.3) : .clear, radius: 5, x: 0, y: 0)
-        }
-    }
-}
+// MARK: - Financial Health Score View (MMI)
+// Ersetzt den alten Financial Health Score — gleiche "Activity"-Optik, neue MMI-Logik.
 
 struct FinancialHealthScoreView: View {
     let transactions: [TransactionsResponse.Transaction]
-    let salaryDay: Int
-    let dispoLimit: Int
-    let targetBuffer: Int
-    let targetSavingsRate: Int
-    var stabilityOutlierMultiplier: Double = 3.0
-    var coverageRatioWeight: Double = 0.6
-    var fixedCostWarningRatio: Double = 0.70
-    
+    let balance: Double
+
     @Environment(\.dismiss) private var dismiss
+    @StateObject private var vm = MMIViewModel()
     @State private var animProgress: Double = 0
-    @State private var calculatedScore: FinancialHealthScore?
-    
-    private var score: FinancialHealthScore {
-        calculatedScore ?? FinancialHealthScore(
-            overall: 0, incomeCoverage: 0, savingsRate: 0, stability: 0,
-            daysInDispo: 0, avgDispoUsage: 0, maxDispoUsage: 0, dispoUtilization: 0,
-            savingsTransferAmount: 0,
-            fixedCostRatio: 0, variableExpenseRatio: 0, actualSavingsRatio: 0
-        )
+
+    private static let expenseColor = MMIColors.expense
+    private static let savingsColor = MMIColors.savings
+    private static let liquidColor  = MMIColors.liquid
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // MARK: Header (pinned outside ScrollView)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Financial Health")
+                        .font(.system(size: 24, weight: .bold))
+                    Text("Money Mass Index (MMI)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal)
+            .padding(.top, 24)
+            .padding(.bottom, 12)
+
+        ScrollView {
+            VStack(spacing: 24) {
+
+                // MARK: Period Picker
+                Picker("Zeitraum", selection: $vm.period) {
+                    ForEach(MMIPeriod.allCases) { p in Text(p.label).tag(p) }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .onChange(of: vm.period) { _ in
+                    vm.load(transactions: transactions, balance: balance)
+                    resetAnimation()
+                }
+
+                // MARK: Ring
+                MMIRingView(
+                    components: vm.displayed,
+                    size: 220,
+                    lineWidth: 22,
+                    animProgress: animProgress
+                )
+                .padding(.vertical, 6)
+
+                // MARK: Legende / Info-Rows
+                VStack(alignment: .leading, spacing: 16) {
+                    MMIInfoRow(
+                        color: Self.expenseColor,
+                        title: "Ausgegeben",
+                        text: "Summe aller Ausgaben im Zeitraum.",
+                        value: formatCurrency(vm.displayed.expenses)
+                    )
+                    MMIInfoRow(
+                        color: Self.savingsColor,
+                        title: "Geparkt",
+                        text: "Erkannte Abflüsse zu Spar- und Vorsorgekonten.",
+                        value: formatCurrency(vm.displayed.savings)
+                    )
+                    MMIInfoRow(
+                        color: Self.liquidColor,
+                        title: "Liquide",
+                        text: String(format: "Kontostand — entspricht %.1f Monaten Ausgaben.", vm.displayed.bufferMonths),
+                        value: formatCurrency(vm.displayed.balance)
+                    )
+                }
+                .padding(.horizontal)
+
+                // MARK: Score-Kacheln
+                Divider()
+                    .background(Color.secondary.opacity(0.3))
+                    .padding(.horizontal)
+
+                HStack(spacing: 12) {
+                    MMIStatBox(
+                        title: "Score",
+                        value: String(format: "%.2f", vm.displayed.score * animProgress),
+                        color: vm.displayed.rating.color
+                    )
+                    MMIStatBox(
+                        title: "Sparrate",
+                        value: String(format: "%+.0f%%", vm.displayed.savingsRate * 100 * animProgress),
+                        color: vm.displayed.savingsRate >= 0 ? .sbBlueStrong : .sbRedStrong
+                    )
+                    MMIStatBox(
+                        title: "Puffer",
+                        value: String(format: "%.1f Mon.", vm.displayed.bufferMonths),
+                        color: Self.liquidColor
+                    )
+                }
+                .padding(.horizontal)
+
+                // MARK: Plan-Modus
+                Divider()
+                    .background(Color.secondary.opacity(0.3))
+                    .padding(.horizontal)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Image(systemName: "slider.horizontal.3")
+                            .foregroundColor(.sbBlueStrong)
+                        Text("Plan-Modus")
+                            .font(.system(size: 18, weight: .bold))
+                        Spacer()
+                        Toggle("", isOn: $vm.planMode)
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                    }
+
+                    if vm.planMode {
+                        VStack(spacing: 14) {
+                            MMIDarkSlider(
+                                label: "Einkommen",
+                                color: Self.liquidColor,
+                                value: $vm.planIncome,
+                                range: 0...max(5000, vm.real.income * 2),
+                                diff: vm.displayed.income - vm.real.income
+                            )
+                            MMIDarkSlider(
+                                label: "Ausgaben",
+                                color: Self.expenseColor,
+                                value: $vm.planExpenses,
+                                range: 0...max(2000, vm.real.expenses * 2),
+                                diff: vm.displayed.expenses - vm.real.expenses
+                            )
+                            MMIDarkSlider(
+                                label: "Geparkt",
+                                color: Self.savingsColor,
+                                value: $vm.planSavings,
+                                range: 0...max(1000, max(vm.real.income, vm.real.savings) * 1.5),
+                                diff: vm.displayed.savings - vm.real.savings
+                            )
+                            MMIDarkSlider(
+                                label: "Liquide",
+                                color: Self.liquidColor,
+                                value: $vm.planBalance,
+                                range: min(vm.real.balance, 0)...max(5000, max(vm.real.balance, 0) * 3),
+                                diff: vm.displayed.balance - vm.real.balance
+                            )
+
+                            // Score-Diff
+                            HStack(spacing: 16) {
+                                diffKpi(label: "Score",   diff: vm.scoreDiff,
+                                        format: { String(format: "%+.2f", $0) })
+                                diffKpi(label: "Sparrate", diff: vm.savingsRateDiff,
+                                        format: { String(format: "%+.0f%%", $0 * 100) })
+                            }
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .padding(.horizontal)
+                .animation(.easeInOut(duration: 0.22), value: vm.planMode)
+
+                // MARK: Disclaimer
+                Text("Zeitraum: \(vm.period.label) · Sparbewegungen = erkannte Abflüsse zu Spar-/Vorsorgekonten · Kontostand ≠ Notfallreserve")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                Spacer(minLength: 20)
+            }
+            .padding(.top, 12)
+        }
+        }
+        .frame(width: 420, height: 680)
+        .background(Color.sbBackground.edgesIgnoringSafeArea(.all))
+        .onAppear {
+            vm.load(transactions: transactions, balance: balance)
+            resetAnimation()
+        }
     }
-    
+
+    // MARK: - Helpers
+
+    private func resetAnimation() {
+        animProgress = 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.spring(response: 1.5, dampingFraction: 0.7, blendDuration: 0)) {
+                animProgress = 1.0
+            }
+        }
+    }
+
     private static let currencyFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "de_DE")
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "EUR"
-        formatter.maximumFractionDigits = 0
-        return formatter
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .currency
+        f.currencyCode = "EUR"
+        f.maximumFractionDigits = 0
+        return f
     }()
 
     private func formatCurrency(_ value: Double) -> String {
         Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value)) €"
     }
 
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Aktivität")
-                            .font(.system(size: 24, weight: .bold))
-                        Text("Finanzielle Gesundheit")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-                .padding(.horizontal)
-
-                // The Rings
-                ZStack {
-                    Ring(progress: score.incomeCoverage * animProgress, color: .green, lineWidth: 28, shadow: true)
-                        .frame(width: 240, height: 240)
-                    Ring(progress: score.savingsRate * animProgress, color: .cyan, lineWidth: 28, shadow: true)
-                        .frame(width: 182, height: 182)
-                    Ring(progress: score.stability * animProgress, color: .expenseRed, lineWidth: 28, shadow: true)
-                        .frame(width: 124, height: 124)
-                }
-                .padding(.vertical, 10)
-
-                // Legend / Info
-                VStack(alignment: .leading, spacing: 16) {
-                    InfoRow(color: .green, title: "Einnahmen", text: "Deckung deiner monatlichen Kosten (Puffer: \(targetBuffer)€).", value: "\(Int(score.incomeCoverage * 100))%")
-                    InfoRow(color: .cyan, title: "Sparrate", text: "Effizienz deines Cashflows (Ziel: \(targetSavingsRate)% Überschuss).", value: "\(Int(score.savingsRate * 100))%")
-                    InfoRow(color: .expenseRed, title: "Stabilität", text: "Nur variable Ausgaben, keine Fixkosten.", value: "\(Int(score.stability * 100))%")
-                }
-                .padding(.horizontal)
-                
-                // 50/30/20 Budgetregel
-                Divider()
-                    .background(Color.secondary.opacity(0.3))
-                    .padding(.horizontal)
-                
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack {
-                        Image(systemName: "chart.pie.fill")
-                            .foregroundColor(.purple)
-                        Text("Budgetverteilung")
-                            .font(.system(size: 18, weight: .bold))
-                    }
-                    
-                    // 50/30/20 Balken
-                    VStack(spacing: 12) {
-                        BudgetBarRow(
-                            title: "Fixkosten",
-                            actual: score.fixedCostRatio,
-                            target: 0.50,
-                            color: .orange
-                        )
-                        BudgetBarRow(
-                            title: "Variable Ausgaben",
-                            actual: score.variableExpenseRatio,
-                            target: 0.30,
-                            color: .blue
-                        )
-                        BudgetBarRow(
-                            title: "Sparen",
-                            actual: score.actualSavingsRatio,
-                            target: Double(targetSavingsRate) / 100.0,
-                            color: .green
-                        )
-                    }
-                    
-                    // Info-Text
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 12))
-                        Text("Faustregel: 50% Fixkosten, 30% Freizeit, 20% Sparen")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.horizontal)
-                
-                // Dispo-Statistik (nur wenn konfiguriert oder Dispo genutzt)
-                if dispoLimit > 0 || score.daysInDispo > 0 {
-                    Divider()
-                        .background(Color.secondary.opacity(0.3))
-                        .padding(.horizontal)
-                    
-                    VStack(alignment: .leading, spacing: 16) {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.orange)
-                            Text("Dispositionskredit")
-                                .font(.system(size: 18, weight: .bold))
-                        }
-                        
-                        HStack(spacing: 20) {
-                            DispoStatBox(
-                                title: "Tage im Minus",
-                                value: "\(score.daysInDispo)",
-                                color: score.daysInDispo > 10 ? .red : (score.daysInDispo > 5 ? .orange : .green)
-                            )
-                            DispoStatBox(
-                                title: "Ø Nutzung",
-                                value: formatCurrency(score.avgDispoUsage),
-                                color: .orange
-                            )
-                            DispoStatBox(
-                                title: "Maximum",
-                                value: formatCurrency(score.maxDispoUsage),
-                                color: .red
-                            )
-                        }
-                        
-                        if dispoLimit > 0 {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text("Dispo-Auslastung")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(.secondary)
-                                    Spacer()
-                                    Text("\(Int(score.dispoUtilization * 100))% von \(dispoLimit) €")
-                                        .font(.system(size: 13, weight: .medium))
-                                }
-                                
-                                GeometryReader { geo in
-                                    ZStack(alignment: .leading) {
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(Color.secondary.opacity(0.2))
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(score.dispoUtilization > 0.8 ? Color.red : (score.dispoUtilization > 0.5 ? Color.orange : Color.green))
-                                            .frame(width: geo.size.width * CGFloat(score.dispoUtilization * animProgress))
-                                    }
-                                }
-                                .frame(height: 8)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                
-                Spacer(minLength: 20)
+    @ViewBuilder
+    private func diffKpi(label: String, diff: Double, format: (Double) -> String) -> some View {
+        HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            if abs(diff) > 0.005 {
+                Text(format(diff))
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(diff > 0 ? Color.sbGreenSoft : Color.sbRedSoft)
+                    )
+                    .foregroundColor(diff > 0 ? .sbGreenStrong : .sbRedStrong)
             }
-            .padding(.top, 24)
         }
-        .frame(width: 420, height: 680)
-        .background(Color(white: 0.05).edgesIgnoringSafeArea(.all)) // Black background for "Activity" look
-        .preferredColorScheme(.dark)
-        .onAppear {
-            // Berechne Score einmal beim Erscheinen
-            calculatedScore = FinancialHealthScorer.score(
-                transactions: transactions,
-                salaryDay: salaryDay,
-                dispoLimit: dispoLimit,
-                targetBuffer: targetBuffer,
-                targetSavingsRate: targetSavingsRate,
-                stabilityOutlierMultiplier: stabilityOutlierMultiplier,
-                coverageRatioWeight: coverageRatioWeight,
-                fixedCostWarningRatio: fixedCostWarningRatio
-            )
-            // Starte Animation nach kurzer Verzögerung
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 1.5, dampingFraction: 0.7, blendDuration: 0)) {
-                    animProgress = 1.0
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Subviews (dark-mode styled)
+
+private struct MMIInfoRow: View {
+    let color: Color
+    let title: String
+    let text: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Circle()
+                .fill(color)
+                .frame(width: 12, height: 12)
+                .padding(.top, 4)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(color)
+                    Spacer()
+                    Text(value)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(color)
                 }
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 }
 
-private struct DispoStatBox: View {
+private struct MMIStatBox: View {
     let title: String
     let value: String
     let color: Color
-    
+
     var body: some View {
         VStack(spacing: 4) {
             Text(value)
@@ -260,98 +286,42 @@ private struct DispoStatBox: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.white.opacity(0.05))
+                .fill(Color.sbSurface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.sbBorder, lineWidth: 1)
         )
     }
 }
 
-private struct InfoRow: View {
+private struct MMIDarkSlider: View {
+    let label: String
     let color: Color
-    let title: String
-    let text: String
-    var value: String? = nil
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let diff: Double
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(color)
-                .frame(width: 12, height: 12)
-                .padding(.top, 4)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(title)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(color)
-                    Spacer()
-                    if let value = value {
-                        Text(value)
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(color)
-                    }
-                }
-                Text(text)
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-}
-
-private struct BudgetBarRow: View {
-    let title: String
-    let actual: Double
-    let target: Double
-    let color: Color
-    
-    private var status: (text: String, color: Color) {
-        let diff = actual - target
-        if abs(diff) < 0.05 {
-            return ("✓", .green)
-        } else if actual > target {
-            return ("↑", actual > target * 1.5 ? .red : .orange)
-        } else {
-            return ("↓", .green)
-        }
-    }
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 4) {
             HStack {
-                Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                Spacer()
-                Text("\(Int(actual * 100))%")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(color)
-                Text("(Ziel: \(Int(target * 100))%)")
-                    .font(.system(size: 11))
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text(label)
+                    .font(.caption)
                     .foregroundColor(.secondary)
-                Text(status.text)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(status.color)
-            }
-            
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    // Background
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.secondary.opacity(0.2))
-                    
-                    // Target marker
-                    Rectangle()
-                        .fill(Color.white.opacity(0.5))
-                        .frame(width: 2)
-                        .offset(x: geo.size.width * CGFloat(min(target, 1.0)) - 1)
-                    
-                    // Actual bar
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(color)
-                        .frame(width: geo.size.width * CGFloat(min(actual, 1.0)))
+                Spacer()
+                Text(String(format: "%.0f €", value))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .monospacedDigit()
+                if abs(diff) > 0.5 {
+                    Text(String(format: "%+.0f €", diff))
+                        .font(.system(size: 10))
+                        .foregroundColor(diff > 0 ? .sbGreenStrong : .sbOrangeStrong)
                 }
             }
-            .frame(height: 8)
+            Slider(value: $value, in: range)
+                .tint(color)
         }
     }
 }

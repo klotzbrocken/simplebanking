@@ -40,9 +40,11 @@ final class TransactionsViewModel: ObservableObject {
     @Published var transactions: [TransactionsResponse.Transaction] = [] {
         didSet {
             rebuildSearchIndex()
+            rebuildSubscriptionIndex()
             applyCurrentFilter(resetPage: true)
         }
     }
+    private var subscriptionTxIDs: Set<String> = []
     @Published var page: Int = 0
     @Published var query: String = "" {
         didSet {
@@ -64,7 +66,7 @@ final class TransactionsViewModel: ObservableObject {
     @Published var confettiTrigger: Int = 0
     @Published var rippleTrigger: Int = 0
     @Published var isTanPending: Bool = false
-    @Published var enrichmentData: [String: (note: String?, attachmentCount: Int)] = [:]
+    @Published var enrichmentData: [String: TxEnrichment] = [:]
     @AppStorage("unifiedModeEnabled") var unifiedModeEnabled: Bool = false
     @Published var slotMap: [String: BankSlot] = [:]
     @Published var internalTransferIDs: Set<String> = []
@@ -153,6 +155,20 @@ final class TransactionsViewModel: ObservableObject {
         fixedMerchants = FixedCostsAnalyzer.getFixedCostMerchants(transactions: transactions)
     }
 
+    /// Erkennt Abos identisch zur Abos-&-Verträge-Ansicht (SubscriptionDetector)
+    /// und cached die zugehörigen Transaction-Fingerprints. Filter und Detail-View
+    /// zeigen damit dieselbe Wahrheit. Confidence ≥7 = bestätigt + möglich.
+    private func rebuildSubscriptionIndex() {
+        let candidates = SubscriptionDetector.detect(in: transactions)
+        var ids: Set<String> = []
+        for c in candidates {
+            for tx in c.matchedTransactions {
+                ids.insert(TransactionRecord.fingerprint(for: tx))
+            }
+        }
+        subscriptionTxIDs = ids
+    }
+
     private func rebuildUniqueDateCache() {
         guard !isSearchActive else {
             uniqueDateCache = []
@@ -164,25 +180,18 @@ final class TransactionsViewModel: ObservableObject {
     }
 
     private func applyCurrentFilter(resetPage: Bool) {
-        let variants = queryVariants()
-
-        // Step 1: search filter
+        // Step 1: Search v2 — semantic search with structured query
         var base: [TransactionsResponse.Transaction]
         if !isSearchActive {
             base = transactions
         } else {
-            base = []
-            base.reserveCapacity(transactions.count)
-            for (index, transaction) in transactions.enumerated() {
-                let haystack = index < searchIndex.count ? searchIndex[index] : buildSearchIndexText(for: transaction)
-                if haystack.contains(variants.raw) || haystack.contains(variants.dot) {
-                    base.append(transaction)
-                    continue
-                }
-                if !variants.compact.isEmpty, haystack.contains(variants.compact) {
-                    base.append(transaction)
-                }
-            }
+            let parsed = TransactionSearchEngine.parse(normalizedQuery)
+            base = TransactionSearchEngine.execute(
+                query: parsed,
+                transactions: transactions,
+                searchIndex: searchIndex,
+                subscriptionIDs: subscriptionTxIDs
+            )
         }
 
         // Step 2: active filter
@@ -196,11 +205,7 @@ final class TransactionsViewModel: ObservableObject {
         case .subscriptions:
             base = base.filter { tx in
                 guard tx.parsedAmount < 0 else { return false }
-                let merchant = MerchantResolver.resolve(transaction: tx).effectiveMerchant
-                let raw = tx.creditor?.name ?? tx.debtor?.name ?? ""
-                let remittance = (tx.remittanceInformation ?? []).joined(separator: " ")
-                return CancellationLinks.find(merchant: merchant, remittance: remittance) != nil
-                    || CancellationLinks.find(merchant: raw, remittance: remittance) != nil
+                return subscriptionTxIDs.contains(TransactionRecord.fingerprint(for: tx))
             }
         case .fixedCosts:
             base = base.filter { FixedCostsAnalyzer.isFixedCost($0, fixedMerchants: fixedMerchants) }

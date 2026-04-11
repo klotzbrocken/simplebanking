@@ -83,15 +83,15 @@ enum PaymentCategory: String, CaseIterable {
     
     var color: Color {
         switch self {
-        case .streaming: return .purple
-        case .software: return .blue
-        case .telecom: return .orange
-        case .insurance: return .green
-        case .utilities: return .yellow
-        case .membership: return .pink
-        case .finance: return .mint
-        case .transport: return .cyan
-        case .other: return .gray
+        case .streaming:   return .sbRedMid
+        case .software:    return .sbBlueMid
+        case .telecom:     return .sbOrangeMid
+        case .insurance:   return .sbGreenMid
+        case .utilities:   return .sbOrangeStrong
+        case .membership:  return .sbRedStrong
+        case .finance:     return .sbBlueStrong
+        case .transport:   return .sbGreenStrong
+        case .other:       return Color(NSColor.secondaryLabelColor)
         }
     }
 }
@@ -444,7 +444,7 @@ enum FixedCostsAnalyzer {
         return nil
     }
     
-    private static func categoryForMerchant(_ merchant: String) -> PaymentCategory {
+    static func categoryForMerchant(_ merchant: String) -> PaymentCategory {
         let lower = merchant.lowercased()
         for (pattern, _, category) in knownServices {
             if lower.contains(pattern) {
@@ -510,11 +510,14 @@ enum FixedCostsAnalyzer {
     // MARK: - Recurrence Analysis
     
     private static func analyzeRecurrence(merchant: String, groupKey: String, transactions: [TransactionsResponse.Transaction]) -> RecurringPayment? {
-        // Known services (Netflix, Spotify, Telekom, etc.) need less evidence
+        // Known services (Netflix, Spotify, Telekom, etc.) dürfen nur die
+        // Amplitudenschwelle lockern — die Recurrence-Evidenz (2 Buchungen in
+        // 2 distinct months) gilt für alle, sonst landen Einmalkäufe bei
+        // bekannten Marken fälschlich als Fixkosten in der Ansicht.
         let isKnownMerchant = categoryForMerchant(merchant) != .other
 
-        // Require 2+ transactions; known services can surface with just 1 occurrence
-        guard transactions.count >= 2 || (transactions.count >= 1 && isKnownMerchant) else { return nil }
+        // Require 2+ transactions
+        guard transactions.count >= 2 else { return nil }
 
         let cal = Calendar(identifier: .gregorian)
 
@@ -527,10 +530,11 @@ enum FixedCostsAnalyzer {
         // Calculate average amount
         let avgAmount = amounts.reduce(0, +) / Double(amounts.count)
 
-        // Check amount consistency. Raised from 0.25 → 0.35 to catch variable bills
-        // (electricity, gas, water) which can swing 20-30% seasonally.
+        // Check amount consistency. Bekannte Marken dürfen bis 0.50 schwanken
+        // (Preiserhöhungen bei Streaming), unbekannte nur bis 0.35.
         let amountVariance = amounts.map { abs($0 - avgAmount) / avgAmount }.max() ?? 1.0
-        guard amountVariance < 0.35 else { return nil }
+        let varianceLimit = isKnownMerchant ? 0.50 : 0.35
+        guard amountVariance < varianceLimit else { return nil }
 
         // Count distinct months and years
         let monthSet = Set(dates.map { cal.dateComponents([.year, .month], from: $0) })
@@ -538,8 +542,8 @@ enum FixedCostsAnalyzer {
         let yearSet = Set(dates.map { cal.component(.year, from: $0) })
         let distinctYears = yearSet.count
 
-        // Require 2 distinct months; known services accepted with 1 month
-        guard distinctMonths >= 2 || isKnownMerchant else { return nil }
+        // Require 2 distinct months — gilt für alle Händler
+        guard distinctMonths >= 2 else { return nil }
 
         // Determine frequency
         var frequency = determineFrequency(dates: dates, cal: cal)
@@ -712,7 +716,10 @@ struct FixedCostsView: View {
         FixedCostsFormatters.currencyEURNoFractionFormatter.string(from: NSNumber(value: v)) ?? "\(Int(v)) €"
     }
 
-    private let merchantColors: [Color] = [.orange, .cyan, .green, .pink, .purple]
+    // Color Harmony Palette — kategoriale Variation aus den 4 Hue-Familien (kein Cyan/Pink/Purple mehr).
+    private let merchantColors: [Color] = [
+        .sbBlueStrong, .sbGreenStrong, .sbOrangeStrong, .sbRedStrong, .sbBlueMid
+    ]
 
     // MARK: Body
 
@@ -739,10 +746,10 @@ struct FixedCostsView: View {
                 }
                 .padding(.horizontal)
 
-                // Summary Boxes
+                // Summary Boxes — Blue für die analytischen Zahlen, Orange für die größere Jahres-Summe.
                 HStack(spacing: 16) {
-                    FixedCostsSummaryBox(title: "Monatlich", value: fmt(totalMonthly), color: .orange, icon: "calendar")
-                    FixedCostsSummaryBox(title: "Jährlich",  value: fmt(totalYearly),  color: .red,    icon: "calendar.badge.clock")
+                    FixedCostsSummaryBox(title: "Monatlich", value: fmt(totalMonthly), color: .sbBlueStrong,   icon: "calendar")
+                    FixedCostsSummaryBox(title: "Jährlich",  value: fmt(totalYearly),  color: .sbOrangeStrong, icon: "calendar.badge.clock")
                 }
                 .padding(.horizontal)
 
@@ -789,7 +796,7 @@ struct FixedCostsView: View {
                                     category: .other,
                                     total: totalMonthly,
                                     progress: animProgress,
-                                    color: .gray,
+                                    color: .sbTextSecondary,
                                     subtitle: "\(otherMerchants.count) weitere Empfänger",
                                     disclosure: sonstigeExpanded
                                 )
@@ -804,7 +811,7 @@ struct FixedCostsView: View {
                                         category: item.category,
                                         total: totalMonthly,
                                         progress: animProgress,
-                                        color: .gray,
+                                        color: .sbTextSecondary,
                                         isSubRow: true
                                     )
                                     .contextMenu {
@@ -851,7 +858,7 @@ struct FixedCostsView: View {
                                     Button("Alle einschließen") { resetExcluded() }
                                         .font(.system(size: 12))
                                         .buttonStyle(PlainButtonStyle())
-                                        .foregroundColor(.accentColor)
+                                        .foregroundColor(.sbBlueStrong)
                                 }
                                 .padding(.horizontal, 12)
                                 ForEach(excludedSet.sorted(), id: \.self) { key in
@@ -865,7 +872,7 @@ struct FixedCostsView: View {
                                         Button("Einschließen") { include(key) }
                                             .font(.system(size: 11))
                                             .buttonStyle(PlainButtonStyle())
-                                            .foregroundColor(.accentColor.opacity(0.8))
+                                            .foregroundColor(.sbBlueMid)
                                     }
                                     .padding(.horizontal, 12)
                                 }
@@ -874,7 +881,7 @@ struct FixedCostsView: View {
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                     }
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.04)))
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.sbSurfaceSoft))
                     .padding(.horizontal)
                 }
 
@@ -883,8 +890,7 @@ struct FixedCostsView: View {
             .padding(.top, 24)
         }
         .frame(width: 420, height: 680)
-        .background(Color(white: 0.05).edgesIgnoringSafeArea(.all))
-        .preferredColorScheme(.dark)
+        .background(Color.sbBackground.edgesIgnoringSafeArea(.all))
         .onAppear {
             withAnimation(.spring(response: 1.2, dampingFraction: 0.8, blendDuration: 0)) {
                 animProgress = 1.0
@@ -907,7 +913,7 @@ private struct FixedCostsSummaryBox: View {
                     .foregroundColor(color)
                 Text(title)
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.sbTextSecondary)
             }
             Text(value)
                 .font(.system(size: 24, weight: .bold))
@@ -915,7 +921,9 @@ private struct FixedCostsSummaryBox: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 12).fill(color.opacity(0.15)))
+        // Soft-Variante als Karten-Fill — bleibt im Palette-System statt color.opacity().
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.sbSurface))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.sbBorder, lineWidth: 1))
     }
 }
 
@@ -963,7 +971,7 @@ private struct FixedCostsMerchantRow: View {
                 if !isSubRow {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.1))
+                            RoundedRectangle(cornerRadius: 2).fill(Color.sbBorder)
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(color)
                                 .frame(width: geo.size.width * CGFloat((amount / max(total, 1)) * progress))

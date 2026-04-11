@@ -291,6 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Incremented on every slot switch. Async tasks capture this at start and bail if it changed.
     private var slotEpoch: Int = 0
+    /// Cancellable task for the current slot switch — ensures only the last click wins.
+    private var switchTask: Task<Void, Never>?
     private var isHBCICallInFlight: Bool = false    // guard against concurrent HBCI calls (balance + transactions)
     private var isTanPending: Bool = false
 
@@ -502,9 +504,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 transactions: txVM.transactions)
             reference = detected > 0 ? Int(detected.rounded()) : s.balanceSignalMediumUpperBound
         }
+        var effectiveRef = reference
+        if UserDefaults.standard.bool(forKey: "greenZoneIncludeOtherIncome") {
+            let other = SalaryProgressCalculator.detectedOtherIncome(
+                salaryDay: s.effectiveSalaryDay, transactions: txVM.transactions)
+            effectiveRef += Int(other.rounded())
+        }
         return SalaryProgressCalculator.greenZoneFraction(
             balance: lastBalance,
-            mediumThreshold: reference)
+            mediumThreshold: effectiveRef)
     }
 
     /// Computes the unified total balance for the flyout card (formatted with cents).
@@ -2095,6 +2103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             rootView.currency = MultibankingStore.shared.activeSlot?.currency
             rootView.nickname = MultibankingStore.shared.activeSlot?.nickname
+            rootView.bankName = txVM.connectedBankDisplayName
             rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
         }
         // Ripple if unread new transactions, or always-on Ripple mode
@@ -2141,6 +2150,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         applyFlyoutDots(to: &rootView)
         let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
         let host = NSHostingController(rootView: rootView)
+        host.view.wantsLayer = true
+        // Freeze-Mode: Blue Soft aus der Color Harmony Palette (theme-aware via dynamic NSColor).
+        host.view.layer?.backgroundColor = FreezeState.shared.isActive
+            ? NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+                return AppTheme.color(from: isDark ? "#1F3144" : "#EAF1F8", fallback: .controlBackgroundColor)
+            }.cgColor
+            : NSColor.windowBackgroundColor.cgColor
         popover.contentSize = NSSize(width: 348, height: hasDots ? 192 : 170)
         popover.contentViewController = host
         balancePopover = popover
@@ -2219,6 +2236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rootView.bankLogoBrandId = refreshBrand?.id
             rootView.currency = MultibankingStore.shared.activeSlot?.currency
             rootView.nickname = MultibankingStore.shared.activeSlot?.nickname
+            rootView.bankName = txVM.connectedBankDisplayName
             rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
         }
         rootView.rippleTrigger = flyoutRippleTrigger
@@ -2939,6 +2957,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Task 1: Slot switching
 
     private func switchToSlot(index: Int) async {
+        // Cancel any in-flight switch so only the last click wins
+        switchTask?.cancel()
+        let task = Task { [weak self] in
+            await self?.doSwitchToSlot(index: index) ?? ()
+        }
+        switchTask = task
+        await task.value
+    }
+
+    private func doSwitchToSlot(index: Int) async {
         let store = MultibankingStore.shared
         guard store.slots.indices.contains(index) else {
             return
@@ -2979,14 +3007,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             txVM.resetPaging()
         }
 
+        guard !Task.isCancelled else { return }
+
         // Wait for any in-flight HBCI call to finish before refreshing for the new slot.
         // The old call was epoch-invalidated above and will return soon.
         while isHBCICallInFlight {
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            guard !Task.isCancelled else { return }
         }
+
+        guard !Task.isCancelled else { return }
 
         // Fetch live balance
         await refreshAsync()
+
+        guard !Task.isCancelled else { return }
 
         // Update flyout card in-place with new balance + nav arrows (without closing)
         refreshFlyoutIfVisible()
@@ -3646,7 +3681,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if enabled {
             GlobalHotkeyManager.shared.register(keyCode: keyCode, carbonModifiers: modifiers)
             GlobalHotkeyManager.shared.onTriggered = { @Sendable [weak self] in
-                MainActor.assumeIsolated { self?.performBalancePrimaryAction() }
+                // Hotkey always opens the flyout regardless of the configured click mode
+                // (mouseOver-mode would otherwise be a no-op for the hotkey).
+                MainActor.assumeIsolated { self?.showBalanceFlyout() }
             }
         } else {
             GlobalHotkeyManager.shared.unregister()
@@ -3703,12 +3740,15 @@ private struct StatusBalanceFlyoutCardView: View {
     var onHoverChanged: ((Bool) -> Void)? = nil
     var currency: String? = nil
     var nickname: String? = nil
+    var bankName: String? = nil
     var rippleTrigger: Int = 0
     var unifiedSlots: [FlyoutSlotItem]? = nil
     var unifiedTotalBalance: Double? = nil
     var greenZoneFraction: Double = 0     // 0...1, balance / referenceIncome ("Bin ich im grünen Bereich?")
     var dispoLimit: Int = 0               // overdraft limit in € for dispo-mode ring
     @AppStorage("greenZoneRingEnabled") private var greenZoneRingEnabled: Bool = true
+    @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
+    @ObservedObject private var freezeState = FreezeState.shared
     // Dot indicators — all slots regardless of mode
     var allSlots: [FlyoutSlotItem]? = nil
     var activeSlotIndex: Int = 0
@@ -3723,6 +3763,19 @@ private struct StatusBalanceFlyoutCardView: View {
     }
 
     private var hasDots: Bool { (allSlots?.count ?? 0) > 1 }
+
+    private static let freezeFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .currency
+        f.currencyCode = "EUR"
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    private func freezeBalanceText(_ value: Double) -> String {
+        Self.freezeFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value)) €"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3767,7 +3820,7 @@ private struct StatusBalanceFlyoutCardView: View {
                         onActivateUnified?()
                     } label: {
                         Capsule()
-                            .fill(unifiedActive ? Color.accentColor : Color(NSColor.tertiaryLabelColor))
+                            .fill(unifiedActive ? Color(NSColor.secondaryLabelColor) : Color(NSColor.tertiaryLabelColor))
                             .frame(width: unifiedActive ? 24 : 8, height: 8)
                             .animation(.easeInOut(duration: 0.3), value: unifiedActive)
                             .frame(height: 24)
@@ -3780,25 +3833,28 @@ private struct StatusBalanceFlyoutCardView: View {
             }
         }
         .frame(width: 348, height: hasDots ? 192 : 170)
-        .background(FlyoutVibrancyBackground())
+        .background(freezeState.isActive ? Color.freezePanelBackground : Color.panelBackground)
         .preferredColorScheme(forcedColorScheme)
         .onHover { hovering in onHoverChanged?(hovering) }
     }
 
-    private func formatBalanceTimestamp(_ date: Date?) -> String {
-        guard let date else { return L10n.t("Kontostand", "Balance") }
-        let cal = Calendar.current
-        let hour = cal.component(.hour, from: date)
-        let dayLabel: String
-        if cal.isDateInToday(date) { dayLabel = L10n.t("Heute", "Today") }
-        else if cal.isDateInYesterday(date) { dayLabel = L10n.t("Gestern", "Yesterday") }
-        else if let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: Date()),
-                cal.isDate(date, inSameDayAs: twoDaysAgo) { dayLabel = L10n.t("Vorgestern", "2 days ago") }
-        else {
-            let df = DateFormatter(); df.dateFormat = "dd.MM.yyyy"
-            dayLabel = df.string(from: date)
-        }
-        return L10n.t("Kontostand \(dayLabel), \(hour) Uhr", "Balance \(dayLabel), \(hour):00")
+    /// Renders the header line in the flyout, replacing the old "Kontostand …" timestamp.
+    /// Format: "{displayName} · {hour} Uhr" (DE) / "{displayName} · {hour}:00" (EN).
+    /// - `displayName` = nickname if set, otherwise `bankName`.
+    /// - If no fetch timestamp is available, only the name is shown.
+    private func formatBankHeader(date: Date?) -> String {
+        let name: String = {
+            if let nick = nickname?.trimmingCharacters(in: .whitespacesAndNewlines), !nick.isEmpty {
+                return nick
+            }
+            if let bn = bankName?.trimmingCharacters(in: .whitespacesAndNewlines), !bn.isEmpty {
+                return bn
+            }
+            return L10n.t("Kontostand", "Balance")
+        }()
+        guard let date else { return name }
+        let hour = Calendar.current.component(.hour, from: date)
+        return L10n.t("\(name) · \(hour) Uhr", "\(name) · \(hour):00")
     }
 
     private var unifiedCard: some View {
@@ -3806,11 +3862,8 @@ private struct StatusBalanceFlyoutCardView: View {
         let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
         let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
 
-        // BalanceSignal color — consistent with main panel's unifiedBalanceCard
-        let totalSignalColor: Color = {
-            let level = BalanceSignal.classify(balance: unifiedTotalBalance, thresholds: thresholds)
-            return BalanceSignal.style(for: level).amountColor
-        }()
+        // Aggregated view uses neutral grey — no signal coloring for combined balance
+        let totalSignalColor: Color = .primary
 
         return VStack(alignment: .leading, spacing: 8) {
             // Pills row — same structure as unifiedBalanceCard in TransactionsPanelView
@@ -3847,40 +3900,41 @@ private struct StatusBalanceFlyoutCardView: View {
                             .foregroundColor(item.isNegative ? Color(hex: "C4614D") : Color(NSColor.secondaryLabelColor))
                             .lineLimit(1)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
                     .background(Capsule().fill(item.barColor.opacity(0.10)))
                     .overlay(Capsule().stroke(item.barColor.opacity(0.30), lineWidth: 0.5))
                 }
                 Spacer()
             }
 
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     // Total balance — 30pt bold, matches defaultThemeCard
-                    Text(balanceText)
-                        .font(.system(size: 30, weight: .bold, design: .default))
-                        .monospacedDigit()
-                        .foregroundColor(totalSignalColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    // Context label — 13pt semibold (matches main panel)
-                    Text(L10n.t("Aggregierter Kontostand", "Aggregated Balance"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    HStack(spacing: 5) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(totalSignalColor)
+                        Text(balanceText)
+                            .font(.system(size: 30, weight: .bold, design: .default))
+                            .monospacedDigit()
+                            .foregroundColor(totalSignalColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
                 }
                 Spacer()
-                // Ring hidden in unified/multi-bank view — no single salary reference
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 90, alignment: .leading)
         .padding(16)
         .background(
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(LinearGradient(
-                        colors: [Color.accentColor.opacity(0.06), .clear],
+                        colors: [Color.primary.opacity(0.10), .clear],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ))
@@ -3920,14 +3974,13 @@ private struct StatusBalanceFlyoutCardView: View {
                         .font(.system(size: 16))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text(formatBalanceTimestamp(balanceFetchedAt))
-                    .font(.system(size: 14))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
-                if let nick = nickname {
-                    Text(nick)
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Capsule().fill(Color(NSColor.quaternaryLabelColor)))
+                if freezeState.isActive {
+                    Text(L10n.t("fiktiver Kontostand", "fictional balance"))
+                        .font(.system(size: 14))
+                        .foregroundColor(.cyan.opacity(0.8))
+                } else {
+                    Text(formatBankHeader(date: balanceFetchedAt))
+                        .font(.system(size: 14))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
                 Spacer()
@@ -3935,17 +3988,36 @@ private struct StatusBalanceFlyoutCardView: View {
 
             HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(displayBalance)
-                        .font(.system(size: 30, weight: .bold, design: .default))
-                        .foregroundColor(style.amountColor)
+                    if freezeState.isActive && freezeState.monthlyAmount > 0 {
+                        let freezeBalance = (balanceValue ?? 0) + freezeState.monthlyAmount
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text("~")
+                                .font(.system(size: 22, weight: .medium, design: .default))
+                                .foregroundColor(.cyan.opacity(0.7))
+                            Text(freezeBalanceText(freezeBalance))
+                                .font(.system(size: 30, weight: .bold, design: .default))
+                                .foregroundColor(.cyan)
+                        }
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
-                    Text(style.localizedStatusText)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(style.statusColor)
+                    } else {
+                        Text(displayBalance)
+                            .font(.system(size: 30, weight: .bold, design: .default))
+                            .foregroundColor(freezeState.isActive ? .cyan : style.amountColor)
+                            .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                    }
                 }
                 Spacer()
                 if greenZoneRingEnabled {
-                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit)
+                    let adjBalance = freezeState.isActive
+                        ? (balanceValue.map { $0 + freezeState.monthlyAmount })
+                        : balanceValue
+                    let adjFraction: Double = {
+                        guard freezeState.isActive, greenZoneFraction > 0, let b = balanceValue, b > 0 else {
+                            return greenZoneFraction
+                        }
+                        return min(1.0, greenZoneFraction * ((b + freezeState.monthlyAmount) / b))
+                    }()
+                    GreenZoneRing(fraction: adjFraction, balance: adjBalance, dispoLimit: dispoLimit, showDispo: greenZoneShowDispo)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
                 }
             }
@@ -3959,7 +4031,9 @@ private struct StatusBalanceFlyoutCardView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [style.gradientBaseColor.opacity(0.10), .clear],
+                            colors: [freezeState.isActive
+                                ? Color.cyan.opacity(0.12)
+                                : style.gradientBaseColor.opacity(0.10), .clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -3980,7 +4054,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 Image(systemName: "creditcard")
                     .font(.system(size: 16))
                     .foregroundColor(.secondary)
-                Text(L10n.t("Aktueller Kontostand", "Current balance"))
+                Text(formatBankHeader(date: balanceFetchedAt))
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
             }
@@ -3991,7 +4065,7 @@ private struct StatusBalanceFlyoutCardView: View {
                     .foregroundColor(balColor)
                 Spacer()
                 if greenZoneRingEnabled {
-                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit)
+                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit, showDispo: greenZoneShowDispo)
                 }
             }
         }
@@ -4003,3 +4077,4 @@ private struct StatusBalanceFlyoutCardView: View {
         )
     }
 }
+

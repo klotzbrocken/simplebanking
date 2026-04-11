@@ -9,17 +9,17 @@ struct MonthlyReportBuilder {
         previousMonth: [TransactionsResponse.Transaction],
         allTransactions: [TransactionsResponse.Transaction]
     ) -> MonthlyReport {
-        let summary  = buildSummary(txs: transactions)
-        let prevSum  = buildSummary(txs: previousMonth)
-        let cats     = buildCategories(txs: transactions, prevTxs: previousMonth)
         let dedupedPrev = deduplicateBoundaryTxs(current: transactions, previous: previousMonth)
+        let summary  = buildSummary(txs: transactions)
+        let prevSum  = buildSummary(txs: dedupedPrev)
+        let cats     = buildCategories(txs: transactions, prevTxs: dedupedPrev)
 
         return MonthlyReport(
             header:          buildHeader(slot: slot, month: month),
             summary:         summary,
             narrative:       buildNarrative(summary: summary, categories: cats, prevSummary: prevSum),
             cashflow:        buildCashflow(summary: summary),
-            insights:        buildInsights(txs: transactions, prevTxs: previousMonth, summary: summary, categories: cats),
+            insights:        buildInsights(txs: transactions, prevTxs: dedupedPrev, summary: summary, categories: cats),
             categories:      cats,
             recurring:       buildRecurring(current: transactions, allHistory: allTransactions),
             highlights:      buildHighlights(txs: transactions),
@@ -323,20 +323,22 @@ struct MonthlyReportBuilder {
         expenses.dropFirst(3).forEach { if selected.count < 12 { add($0) } }
 
         let fmt = currencyFormatter()
-        return selected.map { tx in
-            let val = amount(tx)
-            let absVal = abs(val)
-            let dir: TransactionDirection = val >= 0 ? .income : .expense
-            let dateStr = formatHighlightDate(tx.bookingDate ?? tx.valueDate ?? "")
-            let sub = subtitleFor(tx)
-            return TransactionHighlight(
-                date:      dateStr,
-                title:     partyName(tx),
-                subtitle:  sub,
-                amount:    absVal,
-                direction: dir
-            )
-        }.sorted { dateSort($0.date, $1.date) }
+        return selected
+            .sorted { ($0.bookingDate ?? $0.valueDate ?? "") < ($1.bookingDate ?? $1.valueDate ?? "") }
+            .map { tx in
+                let val = amount(tx)
+                let absVal = abs(val)
+                let dir: TransactionDirection = val >= 0 ? .income : .expense
+                let dateStr = formatHighlightDate(tx.bookingDate ?? tx.valueDate ?? "")
+                let sub = subtitleFor(tx)
+                return TransactionHighlight(
+                    date:      dateStr,
+                    title:     partyName(tx),
+                    subtitle:  sub,
+                    amount:    absVal,
+                    direction: dir
+                )
+            }
     }
 
     // MARK: - Helpers
@@ -372,8 +374,6 @@ struct MonthlyReportBuilder {
         let mon = m < months.count ? months[m] : "\(m)"
         return String(format: "%02d. %@", d, mon)
     }
-
-    private func dateSort(_ a: String, _ b: String) -> Bool { a < b }
 
     private func currencyFormatter() -> NumberFormatter {
         let f = NumberFormatter()
