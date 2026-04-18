@@ -4,7 +4,7 @@ import SwiftUI
 // MARK: - Transaction Filter
 
 enum TxFilter: Int, CaseIterable {
-    case all, income, expense, subscriptions, fixedCosts, uncategorized, pending
+    case all, income, expense, subscriptions, fixedCosts, uncategorized, pending, reminders
 
     var label: String {
         switch self {
@@ -15,6 +15,7 @@ enum TxFilter: Int, CaseIterable {
         case .fixedCosts:     return L10n.t("Fixkosten", "Fixed costs")
         case .uncategorized:  return L10n.t("Unkategorisiert", "Uncategorized")
         case .pending:        return L10n.t("Vorgemerkt", "Pending")
+        case .reminders:      return L10n.t("Erinnerungen", "Reminders")
         }
     }
 
@@ -27,6 +28,7 @@ enum TxFilter: Int, CaseIterable {
         case .fixedCosts:     return "calendar.badge.clock"
         case .uncategorized:  return "questionmark.circle"
         case .pending:        return "clock.badge.questionmark"
+        case .reminders:      return "bell.fill"
         }
     }
 }
@@ -37,6 +39,7 @@ enum TxFilter: Int, CaseIterable {
 final class TransactionsViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var error: String? = nil
+    @Published var errorNeedsReconnect: Bool = false
     @Published var transactions: [TransactionsResponse.Transaction] = [] {
         didSet {
             rebuildSearchIndex()
@@ -66,7 +69,17 @@ final class TransactionsViewModel: ObservableObject {
     @Published var confettiTrigger: Int = 0
     @Published var rippleTrigger: Int = 0
     @Published var isTanPending: Bool = false
-    @Published var enrichmentData: [String: TxEnrichment] = [:]
+    /// Sum of recurring payments still expected in the current cycle (nil = not computed yet).
+    @Published var leftToPayAmount: Double? = nil
+    @Published var enrichmentData: [String: TxEnrichment] = [:] {
+        didSet {
+            // Re-apply filter when reminders filter is active — enrichment changes
+            // (set/remove reminder) must update the filtered list immediately.
+            if activeFilter == .reminders {
+                applyCurrentFilter(resetPage: false)
+            }
+        }
+    }
     @AppStorage("unifiedModeEnabled") var unifiedModeEnabled: Bool = false
     @Published var slotMap: [String: BankSlot] = [:]
     @Published var internalTransferIDs: Set<String> = []
@@ -213,6 +226,8 @@ final class TransactionsViewModel: ObservableObject {
             base = base.filter { TransactionCategorizer.category(for: $0) == .sonstiges }
         case .pending:
             base = base.filter { $0.status == "pending" }
+        case .reminders:
+            base = base.filter { enrichmentData[TransactionRecord.fingerprint(for: $0)]?.reminderId != nil }
         }
 
         filteredTransactions = base

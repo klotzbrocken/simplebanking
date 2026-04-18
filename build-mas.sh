@@ -153,6 +153,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSApplicationCategoryType</key><string>public.app-category.finance</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
+  <key>NSRemindersUsageDescription</key><string>simplebanking erstellt Erinnerungen für Buchungen in der Reminders-App.</string>
   ${ICON_KEY}
 </dict>
 </plist>

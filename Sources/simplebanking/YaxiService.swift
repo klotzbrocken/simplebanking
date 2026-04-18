@@ -328,7 +328,7 @@ enum YaxiService {
                 ticket: ticket,
                 filters: terms.map { .term(term: $0) },
                 ibanDetection: false,
-                limit: 20
+                limit: 50
             )
         } catch {
             AppLogger.log("searchBanks('\(query)') failed: \(error.localizedDescription)", category: "YaxiService", level: "WARN")
@@ -611,6 +611,32 @@ enum YaxiService {
                         ticket: ticket,
                         accounts: accountRefs
                     )
+                } else if isConnectionResetError(error), storedCD != nil {
+                    // Consent abgelaufen (Unauthorized / ConsentExpired):
+                    // YAXI-Empfehlung: gleiche Anfrage ohne connectionData wiederholen —
+                    // die Bank erneuert den Consent und liefert neue connectionData zurück.
+                    AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                    let credsNoCD = buildCredentials(
+                        connectionId: connectionId, model: model,
+                        connectionData: nil, userId: userId, password: password
+                    )
+                    resp = try await client.balances(
+                        credentials: credsNoCD,
+                        session: storedSession,
+                        recurringConsents: true,
+                        ticket: ticket,
+                        accounts: accountRefs
+                    )
+                } else if isRequestError(error) {
+                    // Netzwerkfehler: einmal automatisch wiederholen (YAXI-Empfehlung).
+                    AppLogger.log("fetchBalances: network error, retrying once: \(error)", category: "YaxiService", level: "WARN")
+                    resp = try await client.balances(
+                        credentials: creds,
+                        session: storedSession,
+                        recurringConsents: true,
+                        ticket: ticket,
+                        accounts: accountRefs
+                    )
                 } else {
                     throw error
                 }
@@ -726,6 +752,29 @@ enum YaxiService {
                     resp = try await client.transactions(
                         credentials: creds,
                         session: nil,
+                        recurringConsents: true,
+                        ticket: ticket
+                    )
+                } else if isConnectionResetError(error), storedCD != nil {
+                    // Consent abgelaufen (Unauthorized / ConsentExpired):
+                    // YAXI-Empfehlung: gleiche Anfrage ohne connectionData wiederholen.
+                    AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                    let credsNoCD = buildCredentials(
+                        connectionId: connectionId, model: model,
+                        connectionData: nil, userId: userId, password: password
+                    )
+                    resp = try await client.transactions(
+                        credentials: credsNoCD,
+                        session: storedSession,
+                        recurringConsents: true,
+                        ticket: ticket
+                    )
+                } else if isRequestError(error) {
+                    // Netzwerkfehler: einmal automatisch wiederholen (YAXI-Empfehlung).
+                    AppLogger.log("fetchTransactions: network error, retrying once: \(error)", category: "YaxiService", level: "WARN")
+                    resp = try await client.transactions(
+                        credentials: creds,
+                        session: storedSession,
                         recurringConsents: true,
                         ticket: ticket
                     )
@@ -950,6 +999,12 @@ enum YaxiService {
             msg.contains("dialog cancelled")
     }
 
+    private static func isRequestError(_ error: Error) -> Bool {
+        guard let re = error as? RoutexClientError else { return false }
+        if case .RequestError = re { return true }
+        return false
+    }
+
     private static func shouldRetryWithoutUserId(error: Error, model: CredentialsModel, userId: String?) -> Bool {
         guard model.full, !model.userId, userId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty != nil else {
             return false
@@ -1054,7 +1109,9 @@ enum YaxiService {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        // Local timezone: the SDK parses bank dates as midnight in local time.
+        // Formatting with UTC would shift yesterday's bookings to the day before.
+        f.timeZone = TimeZone.current
         return f
     }()
 

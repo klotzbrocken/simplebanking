@@ -8,6 +8,15 @@ struct TxEnrichment {
     var attachmentCount: Int
     var isUnread: Bool
     var isFlagged: Bool
+    var reminderId: String?
+
+    init(note: String? = nil, attachmentCount: Int = 0, isUnread: Bool = false, isFlagged: Bool = false, reminderId: String? = nil) {
+        self.note = note
+        self.attachmentCount = attachmentCount
+        self.isUnread = isUnread
+        self.isFlagged = isFlagged
+        self.reminderId = reminderId
+    }
 }
 
 // MARK: - Attachment Info
@@ -177,6 +186,26 @@ enum TransactionsDatabase {
         migrator.registerMigration("v15_swipe_flags") { db in
             try addColumnIfMissing(db, table: "transactions", column: "is_unread", definition: "INTEGER NOT NULL DEFAULT 0")
             try addColumnIfMissing(db, table: "transactions", column: "is_flagged", definition: "INTEGER NOT NULL DEFAULT 0")
+        }
+        migrator.registerMigration("v16_reminder_ek_id") { db in
+            try addColumnIfMissing(db, table: "transactions", column: "reminder_ek_id", definition: "TEXT")
+        }
+        migrator.registerMigration("v17_date_fix_wipe") { db in
+            // The 1.3.8 timezone fix changed how bookingDate strings are generated.
+            // Since tx_id (fingerprint) includes bookingDate, every existing row
+            // now has the wrong tx_id and new fetches create duplicates. Wipe all
+            // transactions so the next refresh re-populates cleanly. Enrichment
+            // on the transactions table (flagged, notes, reminders) is lost — but
+            // users of 1.3.7 are mostly on a fresh setup, so the tradeoff is fine.
+            try db.execute(sql: "DELETE FROM transactions")
+        }
+        migrator.registerMigration("v18_flagged_heal") { db in
+            // is_flagged is no longer read or written by the app — reminder_ek_id
+            // is the single source of truth for "has a reminder". One-time cleanup
+            // so any ghost flag (reminder removed, but flag stayed true due to the
+            // old asymmetric remove path) is cleared. The column itself stays for
+            // schema stability; it can be dropped in a later version if needed.
+            try db.execute(sql: "UPDATE transactions SET is_flagged = 0 WHERE reminder_ek_id IS NULL")
         }
         return migrator
     }
@@ -465,9 +494,9 @@ enum TransactionsDatabase {
         let queue = try makeQueue(bankId: bankId)
         return try queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT tx_id, user_note, attachment_count, is_unread, is_flagged
+                SELECT tx_id, user_note, attachment_count, is_unread, is_flagged, reminder_ek_id
                 FROM transactions
-                WHERE is_unread = 1 OR is_flagged = 1 OR user_note IS NOT NULL OR attachment_count > 0
+                WHERE is_unread = 1 OR is_flagged = 1 OR user_note IS NOT NULL OR attachment_count > 0 OR reminder_ek_id IS NOT NULL
                 """)
             var result: [String: TxEnrichment] = [:]
             for row in rows {
@@ -476,8 +505,9 @@ enum TransactionsDatabase {
                 let count: Int = row["attachment_count"] ?? 0
                 let unread: Bool = (row["is_unread"] as Int?) == 1
                 let flagged: Bool = (row["is_flagged"] as Int?) == 1
-                if note != nil || count > 0 || unread || flagged {
-                    result[txID] = TxEnrichment(note: note, attachmentCount: count, isUnread: unread, isFlagged: flagged)
+                let reminderId: String? = row["reminder_ek_id"]
+                if note != nil || count > 0 || unread || flagged || reminderId != nil {
+                    result[txID] = TxEnrichment(note: note, attachmentCount: count, isUnread: unread, isFlagged: flagged, reminderId: reminderId)
                 }
             }
             return result
@@ -497,6 +527,15 @@ enum TransactionsDatabase {
         }
     }
 
+    /// Marks every transaction in the given bank as read (is_unread = 0).
+    static func markAllRead(bankId: String = "primary") throws {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        try queue.write { db in
+            try db.execute(sql: "UPDATE transactions SET is_unread = 0 WHERE is_unread = 1")
+        }
+    }
+
     static func setFlagged(txID: String, bankId: String = "primary", value: Bool) throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
@@ -506,6 +545,36 @@ enum TransactionsDatabase {
                 arguments: [value ? 1 : 0, txID]
             )
         }
+    }
+
+    static func setReminderId(txID: String, bankId: String = "primary", reminderId: String?) throws {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        try queue.write { db in
+            try db.execute(
+                sql: "UPDATE transactions SET reminder_ek_id = ? WHERE tx_id = ?",
+                arguments: [reminderId, txID]
+            )
+        }
+    }
+
+    /// Returns all (txID, bankId, reminderId) tuples where reminder_ek_id IS NOT NULL.
+    /// Pass all known bankIds (from MultibankingStore.shared.slots) to scan across accounts.
+    static func allReminders(bankIds: [String]) -> [(txID: String, bankId: String, reminderId: String)] {
+        var result: [(String, String, String)] = []
+        for bankId in bankIds {
+            guard (try? migrate(bankId: bankId)) != nil,
+                  let queue = try? makeQueue(bankId: bankId) else { continue }
+            let rows = (try? queue.read { db in
+                try Row.fetchAll(db, sql: "SELECT tx_id, reminder_ek_id FROM transactions WHERE reminder_ek_id IS NOT NULL")
+            }) ?? []
+            for row in rows {
+                let txID: String = row["tx_id"]
+                let remId: String = row["reminder_ek_id"]
+                result.append((txID, bankId, remId))
+            }
+        }
+        return result
     }
 
     // MARK: - Attachments

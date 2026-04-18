@@ -43,7 +43,7 @@ struct AttentionCard: Identifiable {
     let title: String
     let body: String
     let detail: String           // Betrag oder Datum als Anzeigetext
-    let relatedTxId: String?     // endToEndId für "Ansehen"-Aktion
+    let relatedTxId: String?     // fingerprint für "Ansehen"-Aktion
     let snoozeKey: String        // stabiler Key für Snooze-Persistenz (nicht der Titel)
 }
 
@@ -174,7 +174,7 @@ enum AttentionInboxDetector {
                 title: "Möglicherweise doppelt: \(name)",
                 body: "Zwei Abbuchungen mit gleichem Betrag innerhalb von 7 Tagen.",
                 detail: formatAmount(amount) + " × \(group.count)",
-                relatedTxId: tx.endToEndId,
+                relatedTxId: TransactionRecord.fingerprint(for: tx),
                 snoozeKey: "duplicate:\(name):\(String(format: "%.2f", amount))"
             ))
         }
@@ -206,7 +206,7 @@ enum AttentionInboxDetector {
                 title: "\(payment.merchant) kostet mehr als üblich",
                 body: "Die Abbuchung liegt \(formatAmount(diff)) über deinem üblichen Betrag.",
                 detail: "\(formatAmount(avg)) → \(formatAmount(latestAmount))",
-                relatedTxId: latestTx.endToEndId,
+                relatedTxId: TransactionRecord.fingerprint(for: latestTx),
                 snoozeKey: "sub-increase:\(payment.merchant)"
             ))
         }
@@ -242,7 +242,7 @@ enum AttentionInboxDetector {
                 title: "Ungewöhnlich hohe Ausgabe bei \(name)",
                 body: "Diese Abbuchung ist deutlich höher als dein üblicher Betrag dort.",
                 detail: formatAmount(amount) + " (normal ~\(formatAmount(median)))",
-                relatedTxId: tx.endToEndId,
+                relatedTxId: TransactionRecord.fingerprint(for: tx),
                 snoozeKey: "unusual-expense:\(name)"
             ))
         }
@@ -279,7 +279,7 @@ enum AttentionInboxDetector {
                 title: "Neue Lastschrift: \(name)",
                 body: "Diese IBAN hat bisher noch keine Lastschrift eingezogen.",
                 detail: formatAmount(amount) + " · \(tx.bookingDate ?? "")",
-                relatedTxId: tx.endToEndId,
+                relatedTxId: TransactionRecord.fingerprint(for: tx),
                 snoozeKey: "new-debit:\(iban)"
             ))
         }
@@ -305,7 +305,7 @@ enum AttentionInboxDetector {
                 title: "Erster Einkauf bei \(name)",
                 body: "Dieser Händler ist in deiner bisherigen Transaktionshistorie neu.",
                 detail: formatAmount(amount) + " · \(tx.bookingDate ?? "")",
-                relatedTxId: tx.endToEndId,
+                relatedTxId: TransactionRecord.fingerprint(for: tx),
                 snoozeKey: "new-merchant:\(name)"
             ))
         }

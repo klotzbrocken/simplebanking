@@ -91,7 +91,7 @@ enum PaymentCategory: String, CaseIterable {
         case .membership:  return .sbRedStrong
         case .finance:     return .sbBlueStrong
         case .transport:   return .sbGreenStrong
-        case .other:       return Color(NSColor.secondaryLabelColor)
+        case .other:       return .sbNeutralMid
         }
     }
 }

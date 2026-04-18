@@ -16,8 +16,21 @@ private let _settingsGehaltsPickerWidth: CGFloat = {
 /// NSPopUpButton-Subklasse, die intrinsicContentSize auf eine feste Breite zwingt.
 /// Nötig, weil SwiftUI frame(width:) bei NSViewRepresentable ignoriert wird wenn
 /// intrinsicContentSize > proposed width ist.
+/// Sets controlSize = .regular explicitly so the natural height matches the
+/// SwiftUI RoundedBorderTextField / segmented Picker it sits next to.
 private class _FixedWidthPopUpButton: NSPopUpButton {
     var targetWidth: CGFloat = 160
+
+    override init(frame: NSRect, pullsDown flag: Bool) {
+        super.init(frame: frame, pullsDown: flag)
+        self.controlSize = .regular
+        self.font = .systemFont(ofSize: NSFont.systemFontSize)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
     override var intrinsicContentSize: NSSize {
         NSSize(width: targetWidth, height: super.intrinsicContentSize.height)
     }
@@ -30,7 +43,7 @@ private struct AccountMenuPicker<T: Hashable>: NSViewRepresentable {
     var width: CGFloat
 
     func makeNSView(context: Context) -> _FixedWidthPopUpButton {
-        let btn = _FixedWidthPopUpButton()
+        let btn = _FixedWidthPopUpButton(frame: .zero, pullsDown: false)
         btn.targetWidth = width
         btn.target = context.coordinator
         btn.action = #selector(Coordinator.changed(_:))
@@ -1094,17 +1107,18 @@ struct SettingsView: View {
                     }
 
                     if selectedSettingsSlotId != nil {
-                        VStack(alignment: .leading, spacing: 12) {
+                        // ─── Card 1: Stammdaten ────────────────────────────
+                        VStack(alignment: .leading, spacing: 14) {
+                            SettingsSectionHeader(
+                                title: t("Stammdaten", "Basics"),
+                                icon: "slider.horizontal.3"
+                            )
 
-                            // Abruf-Zeitraum
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t("Abruf-Zeitraum", "Fetch range"))
-                                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                                    Text(t("Wie viele Tage an Transaktionen sollen abgerufen werden?", "How many days of transactions to fetch?"))
-                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
-                                }
-                                Spacer()
+                            SettingsRow(
+                                title: t("Abruf-Zeitraum", "Fetch range"),
+                                subtitle: t("Wie viele Tage an Transaktionen sollen abgerufen werden?",
+                                            "How many days of transactions to fetch?")
+                            ) {
                                 AccountMenuPicker(
                                     items: [
                                         (title: t("30 Tage", "30 days"), value: 30),
@@ -1119,12 +1133,9 @@ struct SettingsView: View {
                                     ),
                                     width: _settingsGehaltsPickerWidth
                                 )
-                                .padding(.trailing, 14)
                             }
 
-                            Divider()
-
-                            // Gehaltseingang
+                            // Gehaltseingang — mehrzeilig (chip buttons + optional day picker)
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(t("Gehaltseingang", "Salary incoming day"))
                                     .font(ThemeFonts.body(size: 13, weight: .medium))
@@ -1180,18 +1191,22 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
 
-                            Divider()
+                        // ─── Card 2: Finanz-Ziele ──────────────────────────
+                        VStack(alignment: .leading, spacing: 14) {
+                            SettingsSectionHeader(
+                                title: t("Finanz-Ziele", "Financial targets"),
+                                icon: "target"
+                            )
 
-                            // Ziel-Puffer
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t("Monatlicher Ziel-Puffer", "Monthly target buffer"))
-                                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                                    Text(t("Wie viel soll nach allen Ausgaben übrig bleiben?", "How much should remain after all expenses?"))
-                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
-                                }
-                                Spacer()
+                            SettingsRow(
+                                title: t("Monatlicher Ziel-Puffer", "Monthly target buffer"),
+                                subtitle: t("Wie viel soll nach allen Ausgaben übrig bleiben?",
+                                            "How much should remain after all expenses?")
+                            ) {
                                 HStack(spacing: 6) {
                                     TextField("500", value: Binding(
                                         get: { currentSlotSettings.targetBuffer },
@@ -1204,17 +1219,11 @@ struct SettingsView: View {
                                 .frame(width: 185)
                             }
 
-                            Divider()
-
-                            // Ziel-Sparrate
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t("Ziel-Sparrate", "Target savings rate"))
-                                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                                    Text(t("Ziel-Sparquote (50/30/20 Regel: 20 %)", "Target savings ratio (50/30/20 rule: 20%)"))
-                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
-                                }
-                                Spacer()
+                            SettingsRow(
+                                title: t("Ziel-Sparrate", "Target savings rate"),
+                                subtitle: t("Ziel-Sparquote (50/30/20 Regel: 20 %)",
+                                            "Target savings ratio (50/30/20 rule: 20%)")
+                            ) {
                                 HStack(spacing: 6) {
                                     TextField("20", value: Binding(
                                         get: { currentSlotSettings.targetSavingsRate },
@@ -1227,17 +1236,11 @@ struct SettingsView: View {
                                 .frame(width: 185)
                             }
 
-                            Divider()
-
-                            // Dispositionskredit
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(t("Dispositionskredit", "Overdraft limit"))
-                                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                                    Text(t("Dispo-Limit für die Score-Statistik. 0 = kein Dispo.", "Overdraft limit for score stats. 0 = none."))
-                                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
-                                }
-                                Spacer()
+                            SettingsRow(
+                                title: t("Dispositionskredit", "Overdraft limit"),
+                                subtitle: t("Dispo-Limit für die Score-Statistik. 0 = kein Dispo.",
+                                            "Overdraft limit for score stats. 0 = none.")
+                            ) {
                                 HStack(spacing: 6) {
                                     TextField("0", value: Binding(
                                         get: { currentSlotSettings.dispoLimit },
@@ -1249,106 +1252,116 @@ struct SettingsView: View {
                                 }
                                 .frame(width: 185)
                             }
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
 
-                            Divider()
+                        // ─── Card 3: Kontostand-Schwellen (was "Money Mood") ─
+                        VStack(alignment: .leading, spacing: 10) {
+                            SettingsSectionHeader(
+                                title: t("Kontostand-Schwellen", "Balance thresholds"),
+                                icon: "chart.bar.fill"
+                            )
+                            Text(t("Bei welchem Kontostand wechselt die Stimmung des Symbols?",
+                                   "At what balance does the indicator change mood?"))
+                                .font(ThemeFonts.body(size: 11))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
 
-                            // Money Mood
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(t("Money Mood", "Money Mood"))
-                                    .font(ThemeFonts.body(size: 13, weight: .medium))
-                                HStack(spacing: 8) {
-                                    HStack(spacing: 6) {
-                                        TextField("500", value: Binding(
-                                            get: { currentSlotSettings.balanceSignalLowUpperBound },
-                                            set: { v in
-                                                currentSlotSettings.balanceSignalLowUpperBound = max(0, v)
-                                                if currentSlotSettings.balanceSignalMediumUpperBound <= currentSlotSettings.balanceSignalLowUpperBound {
-                                                    currentSlotSettings.balanceSignalMediumUpperBound = currentSlotSettings.balanceSignalLowUpperBound + 1
-                                                }
-                                                saveCurrentSlotSettings()
+                            // Kritisch ab
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    TextField("500", value: Binding(
+                                        get: { currentSlotSettings.balanceSignalLowUpperBound },
+                                        set: { v in
+                                            currentSlotSettings.balanceSignalLowUpperBound = max(0, v)
+                                            if currentSlotSettings.balanceSignalMediumUpperBound <= currentSlotSettings.balanceSignalLowUpperBound {
+                                                currentSlotSettings.balanceSignalMediumUpperBound = currentSlotSettings.balanceSignalLowUpperBound + 1
                                             }
-                                        ), format: .number)
-                                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                                        Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
-                                            .frame(width: 16, alignment: .leading)
-                                    }
-                                    .frame(width: 185)
-                                    Text(t("Kritische Schwelle", "Critical threshold"))
+                                            saveCurrentSlotSettings()
+                                        }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                                Text(t("Kritisch ab", "Critical below"))
+                                    .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+                            }
+
+                            // Komfortzone ab
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    let refSalary = currentSlotSettings.salaryAmount > 0
+                                        ? currentSlotSettings.salaryAmount
+                                        : detectedSalary
+                                    let placeholder = refSalary > 0
+                                        ? "\(suggestedComfortZone(salary: refSalary, low: currentSlotSettings.balanceSignalLowUpperBound))"
+                                        : "1500"
+                                    TextField(placeholder, value: Binding(
+                                        get: { currentSlotSettings.balanceSignalMediumUpperBound },
+                                        set: { v in
+                                            let clamped = max(currentSlotSettings.balanceSignalLowUpperBound + 1, v)
+                                            currentSlotSettings.balanceSignalMediumUpperBound = clamped
+                                            saveCurrentSlotSettings()
+                                        }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t("Komfortzone ab", "Comfort zone from"))
                                         .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
-                                }
-                                HStack(spacing: 8) {
-                                    HStack(spacing: 6) {
-                                        let refSalary = currentSlotSettings.salaryAmount > 0
-                                            ? currentSlotSettings.salaryAmount
-                                            : detectedSalary
-                                        let placeholder = refSalary > 0
-                                            ? "\(suggestedComfortZone(salary: refSalary, low: currentSlotSettings.balanceSignalLowUpperBound))"
-                                            : "1500"
-                                        TextField(placeholder, value: Binding(
-                                            get: { currentSlotSettings.balanceSignalMediumUpperBound },
-                                            set: { v in
-                                                let clamped = max(currentSlotSettings.balanceSignalLowUpperBound + 1, v)
-                                                currentSlotSettings.balanceSignalMediumUpperBound = clamped
-                                                saveCurrentSlotSettings()
-                                            }
-                                        ), format: .number)
-                                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                                        Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
-                                            .frame(width: 16, alignment: .leading)
-                                    }
-                                    .frame(width: 185)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(t("Komfortzone bis", "Comfort zone up to"))
-                                            .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
-                                        let refSalary = currentSlotSettings.salaryAmount > 0
-                                            ? currentSlotSettings.salaryAmount
-                                            : detectedSalary
-                                        if refSalary > 0 {
-                                            let quarter = refSalary / 4
-                                            Text(t("Vorschlag: \(quarter) € (¼ Gehalt)", "Suggested: \(quarter) € (¼ salary)"))
-                                                .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary.opacity(0.7))
-                                        }
+                                    let refSalary = currentSlotSettings.salaryAmount > 0
+                                        ? currentSlotSettings.salaryAmount
+                                        : detectedSalary
+                                    if refSalary > 0 {
+                                        let quarter = refSalary / 4
+                                        Text(t("Vorschlag: \(quarter) € (¼ Gehalt)", "Suggested: \(quarter) € (¼ salary)"))
+                                            .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary.opacity(0.7))
                                     }
                                 }
-                                // Nettogehalt — setzt gleichzeitig die MoneyMood-Grün-Schwelle
-                                HStack(spacing: 8) {
-                                    HStack(spacing: 6) {
-                                        let placeholder = detectedSalary > 0
-                                            ? "\(detectedSalary)"
-                                            : "0"
-                                        TextField(placeholder, value: Binding(
-                                            get: { currentSlotSettings.salaryAmount },
-                                            set: { v in
-                                                let clamped = max(0, v)
-                                                currentSlotSettings.salaryAmount = clamped
-                                                if clamped > 0 {
-                                                    // Update comfort zone to salary/4 (suggested value)
-                                                    currentSlotSettings.balanceSignalMediumUpperBound = suggestedComfortZone(
-                                                        salary: clamped,
-                                                        low: currentSlotSettings.balanceSignalLowUpperBound)
-                                                    // Low threshold must stay below comfort zone
-                                                    if currentSlotSettings.balanceSignalLowUpperBound >= currentSlotSettings.balanceSignalMediumUpperBound {
-                                                        currentSlotSettings.balanceSignalLowUpperBound = max(0, currentSlotSettings.balanceSignalMediumUpperBound - 1)
-                                                    }
+                            }
+
+                            // Nettogehalt / Monat — setzt gleichzeitig die Grün-Schwelle
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    let placeholder = detectedSalary > 0
+                                        ? "\(detectedSalary)"
+                                        : "0"
+                                    TextField(placeholder, value: Binding(
+                                        get: { currentSlotSettings.salaryAmount },
+                                        set: { v in
+                                            let clamped = max(0, v)
+                                            currentSlotSettings.salaryAmount = clamped
+                                            if clamped > 0 {
+                                                currentSlotSettings.balanceSignalMediumUpperBound = suggestedComfortZone(
+                                                    salary: clamped,
+                                                    low: currentSlotSettings.balanceSignalLowUpperBound)
+                                                if currentSlotSettings.balanceSignalLowUpperBound >= currentSlotSettings.balanceSignalMediumUpperBound {
+                                                    currentSlotSettings.balanceSignalLowUpperBound = max(0, currentSlotSettings.balanceSignalMediumUpperBound - 1)
                                                 }
-                                                saveCurrentSlotSettings()
                                             }
-                                        ), format: .number)
-                                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                                        Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
-                                            .frame(width: 16, alignment: .leading)
-                                    }
-                                    .frame(width: 185)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(t("Nettogehalt / Monat", "Monthly net salary"))
-                                            .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
-                                        if currentSlotSettings.salaryAmount == 0 {
-                                            let hint = detectedSalary > 0
-                                                ? t("Erkannt: \(detectedSalary) €", "Detected: \(detectedSalary) €")
-                                                : t("Setzt MoneyMood-Grün-Schwelle + Ring", "Sets MoneyMood green threshold + ring")
-                                            Text(hint)
-                                                .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary.opacity(0.7))
+                                            saveCurrentSlotSettings()
                                         }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(t("Nettogehalt / Monat", "Monthly net salary"))
+                                        .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+                                    if currentSlotSettings.salaryAmount == 0 {
+                                        let hint = detectedSalary > 0
+                                            ? t("Erkannt: \(detectedSalary) €", "Detected: \(detectedSalary) €")
+                                            : t("Setzt Grün-Schwelle + Ring", "Sets green threshold + ring")
+                                        Text(hint)
+                                            .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary.opacity(0.7))
                                     }
                                 }
                             }
@@ -2429,7 +2442,7 @@ private struct SettingsToggleRow: View {
     let title: String
     let subtitle: String
     @Binding var isOn: Bool
-    
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
@@ -2443,6 +2456,33 @@ private struct SettingsToggleRow: View {
             Toggle("", isOn: $isOn)
                 .toggleStyle(SwitchToggleStyle())
                 .labelsHidden()
+        }
+    }
+}
+
+/// Standard label + control row for the Settings panel.
+/// Uses firstTextBaseline alignment so controls (dropdowns, text fields,
+/// chip buttons) sit on the same optical line as the label — not floating
+/// at the top of a multi-line label block.
+private struct SettingsRow<Trailing: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(ThemeFonts.body(size: 13, weight: .medium))
+                if let subtitle {
+                    Text(subtitle)
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 16)
+            trailing()
         }
     }
 }
