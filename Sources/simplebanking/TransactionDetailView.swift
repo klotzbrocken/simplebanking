@@ -32,7 +32,21 @@ struct TransactionDetailView: View {
     let transaction: TransactionsResponse.Transaction
     var bankId: String = "primary"
     var initialUserNote: String? = nil
+    var isUnread: Bool = false
+    var hasReminder: Bool = false
+    var reminderId: String? = nil
     var onEnrichmentChanged: (() -> Void)? = nil
+
+    // Local mutable state mirroring enrichment props — updated optimistically on user action
+    @State private var localIsUnread: Bool = false
+    @State private var localHasReminder: Bool = false
+    @State private var localReminderId: String? = nil
+    @State private var showReminderPicker: Bool = false
+    @State private var reminderPickerDate: Date = {
+        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        c.day = (c.day ?? 1) + 1; c.hour = 9; c.minute = 0
+        return Calendar.current.date(from: c) ?? Date()
+    }()
 
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     @Environment(\.dismiss) private var dismiss
@@ -435,6 +449,28 @@ struct TransactionDetailView: View {
                 Text("Buchungsdetails")
                     .font(.system(size: 20, weight: .bold))
                 Spacer()
+                // Unread indicator — always visible, toggleable
+                Button(action: { toggleUnread() }) {
+                    Image(systemName: localIsUnread ? "circle.fill" : "circle")
+                        .font(.system(size: 14))
+                        .foregroundColor(localIsUnread ? .accentColor : .secondary.opacity(0.5))
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(localIsUnread ? "Als gelesen markieren" : "Als ungelesen markieren")
+                // Reminder indicator
+                Button(action: {
+                    if localHasReminder {
+                        removeDetailReminder()
+                    } else {
+                        showReminderPicker = true
+                    }
+                }) {
+                    Image(systemName: localHasReminder ? "bell.fill" : "bell")
+                        .font(.system(size: 16))
+                        .foregroundColor(localHasReminder ? .orange : .secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(localHasReminder ? "Erinnerung entfernen" : "Erinnerung setzen")
                 Button(action: { dismiss() }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 22))
@@ -866,6 +902,10 @@ struct TransactionDetailView: View {
         .frame(width: 420, height: 560)
         .background(Color.panelBackground)
         .onAppear {
+            // Sync local enrichment state from passed props
+            localIsUnread = isUnread
+            localHasReminder = hasReminder
+            localReminderId = reminderId
             isSavingsBookmarked = SavingsBookmarks.isBookmarked(transaction.stableIdentifier)
             displayedMerchantInput = counterpartyName
             rulePatternInput = MerchantResolver.suggestedRulePattern(for: transaction)
@@ -876,6 +916,60 @@ struct TransactionDetailView: View {
         .onChange(of: selectedCategory) { newCategory in
             guard categorySelectionReady else { return }
             applyCategorySelection(newCategory)
+        }
+        .sheet(isPresented: $showReminderPicker) {
+            ReminderPickerSheet(
+                date: $reminderPickerDate,
+                onConfirm: { date in
+                    showReminderPicker = false
+                    createDetailReminder(dueDate: date)
+                },
+                onCancel: { showReminderPicker = false }
+            )
+        }
+    }
+
+    // MARK: - Enrichment actions (executed locally in detail view)
+
+    private func toggleUnread() {
+        localIsUnread.toggle()
+        let txID = txFingerprint
+        try? TransactionsDatabase.setUnread(txID: txID, bankId: bankId, value: localIsUnread)
+        onEnrichmentChanged?()
+    }
+
+    private func createDetailReminder(dueDate: Date) {
+        let txID = txFingerprint
+        let resolution = MerchantResolver.resolve(transaction: transaction)
+        let merchant = resolution.effectiveMerchant
+        let amountStr = formatAmount()
+        let title = "\(merchant) \(amountStr)".trimmingCharacters(in: .whitespaces)
+        Task {
+            do {
+                let id = try await ReminderService.shared.createReminder(title: title, dueDate: dueDate)
+                try TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: id)
+                await MainActor.run {
+                    localReminderId = id
+                    localHasReminder = true
+                    onEnrichmentChanged?()
+                }
+            } catch {
+                // Permission denied or EventKit error
+            }
+        }
+    }
+
+    private func removeDetailReminder() {
+        let txID = txFingerprint
+        let capturedId = localReminderId
+        localReminderId = nil
+        localHasReminder = false
+        Task {
+            if let id = capturedId {
+                await ReminderService.shared.deleteReminder(id: id)
+            }
+            try? TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: nil)
+            await MainActor.run { onEnrichmentChanged?() }
         }
     }
 }

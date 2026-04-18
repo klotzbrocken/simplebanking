@@ -38,6 +38,14 @@ private struct TransactionsPanelView: View {
     @State private var showCalendar = false
     @State private var selectedTxID: String? = nil
     @State private var activeSwipedTxID: String? = nil
+    @State private var reminderPickerTxID: String? = nil
+    @State private var reminderPickerBankId: String = "primary"
+    @State private var reminderPickerDate: Date = {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.day = (comps.day ?? 1) + 1
+        comps.hour = 9; comps.minute = 0
+        return Calendar.current.date(from: comps) ?? Date()
+    }()
     @State private var panelIsWide: Bool = false
     @State private var greenZoneFractionCached: Double = 0
     @State private var chatDraft = ""
@@ -53,6 +61,15 @@ private struct TransactionsPanelView: View {
     @State private var lastLLMRowsPreview = ""
 
     // Scroll-wheel gesture monitor (trackpad two-finger swipe)
+    // Equatable wrapper with a nonce so onChange fires even when the same target
+    // is selected twice in a row (e.g. duplicate cards for the same transaction).
+    private struct ScrollTarget: Equatable {
+        let id: String
+        let nonce: UUID
+    }
+    @State private var scrollTarget: ScrollTarget?
+    @State private var highlightedTxStableId: String? // briefly highlight after scroll
+
     @State private var scrollWheelMonitor: Any?
     @State private var overscrollAccum: CGFloat = 0
     @State private var overscrollActive = false     // true only when gesture STARTED at list top
@@ -73,7 +90,9 @@ private struct TransactionsPanelView: View {
     private static let inputDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        // Parse as local midnight so Calendar.current.isDateInToday / isDateInYesterday
+        // classify correctly. UTC-midnight would misclassify on negative UTC offsets.
+        formatter.timeZone = TimeZone.current
         return formatter
     }()
 
@@ -110,7 +129,41 @@ private struct TransactionsPanelView: View {
         formatter.dateFormat = "LLLL yyyy"
         return formatter
     }()
-    
+
+    private static let leftToPayFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .currency
+        f.currencyCode = "EUR"
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    @ViewBuilder
+    private var leftToPaySubtitle: some View {
+        if let amount = vm.leftToPayAmount {
+            let text: String = {
+                if amount > 0.5 {
+                    let formatted = Self.leftToPayFormatter.string(from: NSNumber(value: amount))
+                        ?? "\(Int(amount)) €"
+                    return L10n.t("Noch offen: \(formatted)", "Still to pay: \(formatted)")
+                } else {
+                    return L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
+                }
+            }()
+            Text(text)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .lineLimit(1)
+        } else {
+            // Reserve space so the balance block doesn't shift vertically
+            // while the value is still being computed.
+            Text(" ")
+                .font(.system(size: 11, weight: .regular))
+                .hidden()
+        }
+    }
+
     private var colorScheme: ColorScheme? {
         switch appearanceMode {
         case 1: return .light
@@ -216,26 +269,22 @@ private struct TransactionsPanelView: View {
 
     // MARK: - Attention Inbox snooze (persists until midnight next day)
 
-    private static let snoozeKeysKey  = "attentionInbox.snoozedKeys"
-    private static let snoozeUntilKey = "attentionInbox.snoozedUntil"
+    private static let snoozeKeysKey = "attentionInbox.snoozedKeys"
 
     private func saveSnoozedCards(_ cards: [AttentionCard]) {
-        let keys = cards.map(\.snoozeKey)
-        // Expire at the start of the next calendar day
-        let tomorrow = Calendar.current.startOfDay(
-            for: Calendar.current.date(byAdding: .day, value: 1, to: Date())!)
-        UserDefaults.standard.set(keys, forKey: Self.snoozeKeysKey)
-        UserDefaults.standard.set(tomorrow.timeIntervalSince1970, forKey: Self.snoozeUntilKey)
+        // Additive + permanent: merge new keys with whatever was already stored.
+        // Cards stay dismissed until the underlying detection key changes (e.g.
+        // amount/count in duplicate → new snoozeKey → new card).
+        let newKeys = cards.map(\.snoozeKey)
+        let existing = UserDefaults.standard.stringArray(forKey: Self.snoozeKeysKey) ?? []
+        let merged = Array(Set(existing).union(newKeys))
+        UserDefaults.standard.set(merged, forKey: Self.snoozeKeysKey)
     }
 
     private func filterSnoozed(_ cards: [AttentionCard]) -> [AttentionCard] {
-        guard
-            let until = UserDefaults.standard.object(forKey: Self.snoozeUntilKey) as? Double,
-            Date() < Date(timeIntervalSince1970: until),
-            let keys = UserDefaults.standard.stringArray(forKey: Self.snoozeKeysKey)
-        else { return cards }
-        let keySet = Set(keys)
-        return cards.filter { !keySet.contains($0.snoozeKey) }
+        let keys = Set(UserDefaults.standard.stringArray(forKey: Self.snoozeKeysKey) ?? [])
+        guard !keys.isEmpty else { return cards }
+        return cards.filter { !keys.contains($0.snoozeKey) }
     }
 
     private func recomputeAttentionInbox() {
@@ -268,12 +317,12 @@ private struct TransactionsPanelView: View {
                     recent: recent, history: history,
                     salaryDay: cfg.effectiveSalaryDay, salaryTolerance: cfg.salaryDayTolerance
                 )
-                // Flagged transactions → Reminder cards in attention inbox
+                // Transactions with an active EventKit reminder → Reminder cards in attention inbox
                 let enrichment = (try? TransactionsDatabase.loadEnrichmentData(bankId: enrichBankId)) ?? [:]
-                let flaggedTxIDs = enrichment.filter { $0.value.isFlagged }.map { $0.key }
-                if !flaggedTxIDs.isEmpty {
+                let reminderTxIDs = enrichment.filter { $0.value.reminderId != nil }.map { $0.key }
+                if !reminderTxIDs.isEmpty {
                     let allTx = recent + history
-                    for txID in flaggedTxIDs {
+                    for txID in reminderTxIDs {
                         guard let tx = allTx.first(where: { TransactionRecord.fingerprint(for: $0) == txID }) else { continue }
                         let merchant = MerchantResolver.resolve(transaction: tx).effectiveMerchant
                         let amt = tx.parsedAmount
@@ -287,7 +336,7 @@ private struct TransactionsPanelView: View {
                                 "You flagged this transaction (\(fmtAmt))."
                             ),
                             detail: fmtAmt,
-                            relatedTxId: tx.endToEndId,
+                            relatedTxId: TransactionRecord.fingerprint(for: tx),
                             snoozeKey: "reminder-\(txID)"
                         ))
                     }
@@ -427,7 +476,7 @@ private struct TransactionsPanelView: View {
                 .padding(.trailing, 0)
             }
 
-            // Row 3 entfernt — gleiche Höhe wie Standard-Konto (kein Extra-Label)
+            leftToPaySubtitle
         }
         .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
 
@@ -448,8 +497,11 @@ private struct TransactionsPanelView: View {
                 HStack(alignment: .center, spacing: 0) {
                     leftContent
                     if ringVisible {
-                        GreenZoneRing(fraction: freezeAdjustedGreenZoneFraction,
-                                      balance: freezeAdjustedBalance,
+                        // GreenRing reflects the real balance — freeze projection is
+                        // side-information, not a new truth.
+                        let parsed = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
+                        GreenZoneRing(fraction: greenZoneFraction,
+                                      balance: parsed,
                                       dispoLimit: activeSlotSettings.dispoLimit,
                                       showDispo: greenZoneShowDispo)
                             .padding(.leading, 12)
@@ -519,19 +571,23 @@ private struct TransactionsPanelView: View {
                 Spacer()
             }
 
-            if freezeActive {
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text("~")
-                        .font(.system(size: 22, weight: .medium, design: .default))
-                        .foregroundColor(.cyan.opacity(0.7))
-                    Text(formatBalance((parsedBalance ?? 0) + freezeState.monthlyAmount, currency: "EUR"))
-                        .font(.system(size: 32, weight: .bold, design: .default))
-                        .foregroundColor(.cyan)
-                }
+            // Real balance is always the primary 32pt number. Freeze projection
+            // moves to a subtitle below — a what-if should not look like the truth.
+            Text(displayBalance)
+                .font(.system(size: 32, weight: .bold, design: .default))
+                .foregroundColor(style.amountColor)
+
+            if freezeActive && freezeState.monthlyAmount > 0 {
+                let freezeBalanceStr = formatBalance((parsedBalance ?? 0) + freezeState.monthlyAmount, currency: "EUR")
+                Text(L10n.t(
+                    "~\(freezeBalanceStr) wenn nichts abgeht",
+                    "~\(freezeBalanceStr) if nothing is charged"
+                ))
+                .font(.system(size: 14))
+                .foregroundColor(.cyan.opacity(0.9))
+                .lineLimit(1)
             } else {
-                Text(displayBalance)
-                    .font(.system(size: 32, weight: .bold, design: .default))
-                    .foregroundColor(style.amountColor)
+                leftToPaySubtitle
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -552,8 +608,10 @@ private struct TransactionsPanelView: View {
                 )
                 .transition(.opacity)
             } else if ringVisible {
-                GreenZoneRing(fraction: freezeAdjustedGreenZoneFraction,
-                              balance: freezeAdjustedBalance,
+                // GreenRing reflects the real balance — freeze projection is
+                // side-information, not a new truth.
+                GreenZoneRing(fraction: greenZoneFraction,
+                              balance: parsedBalance,
                               dispoLimit: activeSlotSettings.dispoLimit)
                     .padding(.leading, 12)
                     .transition(.opacity)
@@ -1028,12 +1086,20 @@ private struct TransactionsPanelView: View {
                     Button {
                         Task { await onRefresh() }
                     } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.expenseRed)
+                        if vm.errorNeedsReconnect {
+                            Text(L10n.t("Erneut verbinden", "Reconnect"))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.expenseRed)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.expenseRed)
+                        }
                     }
                     .buttonStyle(.plain)
-                    .help(L10n.t("Aktualisieren", "Refresh"))
+                    .help(vm.errorNeedsReconnect
+                          ? L10n.t("Erneut verbinden und Freigabe bestätigen", "Reconnect and confirm authorization")
+                          : L10n.t("Aktualisieren", "Refresh"))
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
@@ -1090,6 +1156,7 @@ private struct TransactionsPanelView: View {
 
             // Transactions List (grouped by date) with pull-to-refresh indicator
             ZStack(alignment: .top) {
+                ScrollViewReader { scrollProxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         Color.clear
@@ -1142,7 +1209,8 @@ private struct TransactionsPanelView: View {
                                 let isFrozen = freezeActive && FreezeAnalyzer.isFrozen(
                                     transaction: t, items: freezeItems, excludedCategories: freezeExcluded)
                                 let txIsUnread = enrichment?.isUnread ?? false
-                                let txIsFlagged = enrichment?.isFlagged ?? false
+                                let txHasReminder = enrichment?.reminderId != nil
+                                let txReminderId = enrichment?.reminderId
                                 HStack(spacing: 0) {
                                     // Left gutter — unread dot
                                     ZStack {
@@ -1158,10 +1226,17 @@ private struct TransactionsPanelView: View {
                                     SwipeableTransactionRow(
                                         txID: txID,
                                         isUnread: txIsUnread,
-                                        isFlagged: txIsFlagged,
+                                        hasReminder: txHasReminder,
                                         activeSwipedID: $activeSwipedTxID,
                                         onToggleUnread: { toggleUnread(txID: txID, bankId: activeBankId) },
-                                        onToggleFlagged: { toggleFlagged(txID: txID, bankId: activeBankId) }
+                                        onReminderAction: {
+                                            if txHasReminder {
+                                                removeReminder(txID: txID, reminderId: txReminderId, bankId: activeBankId)
+                                            } else {
+                                                reminderPickerTxID = txID
+                                                reminderPickerBankId = activeBankId
+                                            }
+                                        }
                                     ) {
                                         TransactionRowNew(
                                             transaction: t,
@@ -1182,8 +1257,14 @@ private struct TransactionsPanelView: View {
                                             isFrozen: isFrozen,
                                             freezeModeActive: freezeActive,
                                             isUnread: txIsUnread,
-                                            isFlagged: txIsFlagged,
+                                            hasReminder: txHasReminder,
+                                            reminderId: txReminderId,
                                             isSelected: selectedTxID == txID,
+                                            onReminderAction: {
+                                                reminderPickerTxID = txID
+                                                reminderPickerBankId = activeBankId
+                                            },
+                                            onEnrichmentChangedWithRemover: { vm.loadEnrichmentData(bankId: activeBankId) },
                                             onSelect: {
                                                 if activeSwipedTxID != nil {
                                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
@@ -1196,9 +1277,9 @@ private struct TransactionsPanelView: View {
                                         )
                                     }
 
-                                    // Right gutter — flagged bell
+                                    // Right gutter — reminder bell
                                     ZStack {
-                                        if txIsFlagged {
+                                        if txHasReminder {
                                             Image(systemName: "bell.fill")
                                                 .font(.system(size: 10))
                                                 .foregroundColor(.orange)
@@ -1207,6 +1288,11 @@ private struct TransactionsPanelView: View {
                                     .frame(width: 16)
                                 }
                                 .opacity(t.status == "pending" ? 0.65 : 1.0)
+                                .background(
+                                    highlightedTxStableId == t.stableIdentifier
+                                        ? Color.accentColor.opacity(0.10) : Color.clear
+                                )
+                                .animation(.easeOut(duration: 0.5), value: highlightedTxStableId)
                                 .contextMenu {
                                     if isFrozen {
                                         Button(L10n.t("Kategorie ausschließen", "Exclude category")) {
@@ -1254,6 +1340,15 @@ private struct TransactionsPanelView: View {
                 .offset(y: pullListOffset)
                 .onPreferenceChange(TransactionsTopOffsetPreferenceKey.self) { topSentinelOffset = $0 }
                 .simultaneousGesture(pullToRefreshGesture)
+                .onChange(of: scrollTarget) { target in
+                    guard let target else { return }
+                    withAnimation { scrollProxy.scrollTo(target.id, anchor: .center) }
+                    highlightedTxStableId = target.id
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                        highlightedTxStableId = nil
+                    }
+                }
+                } // end ScrollViewReader
 
                 pullRefreshIndicator
             }
@@ -1326,6 +1421,11 @@ private struct TransactionsPanelView: View {
                         Button(action: { showFixedCosts = true }) {
                             Label(L10n.t("Fixkosten", "Fixed costs"), systemImage: "repeat.circle")
                         }
+
+                        Button(action: { markAllTransactionsRead() }) {
+                            Label(L10n.t("Alle als gelesen markieren", "Mark all as read"), systemImage: "checkmark.circle")
+                        }
+                        .disabled(!hasAnyUnreadTransaction)
 
                         Menu {
                             Button(L10n.t("Als CSV exportieren", "Export as CSV")) {
@@ -1478,8 +1578,12 @@ private struct TransactionsPanelView: View {
             if isShown { recomputeFixedCosts() }
         }
         .sheet(isPresented: $showAttentionInbox) {
-            AttentionInboxView(cards: attentionCards, onViewTransaction: { txId in
-                vm.query = txId
+            AttentionInboxView(cards: attentionCards, onViewTransaction: { fingerprint in
+                showAttentionInbox = false
+                // Find transaction by fingerprint, scroll to it via stableIdentifier
+                if let tx = vm.transactions.first(where: { TransactionRecord.fingerprint(for: $0) == fingerprint }) {
+                    scrollTarget = ScrollTarget(id: tx.stableIdentifier, nonce: UUID())
+                }
             }, onMarkAllRead: {
                 saveSnoozedCards(attentionCards)
                 attentionCards = []
@@ -1516,10 +1620,29 @@ private struct TransactionsPanelView: View {
                 }
             )
         }
+        .sheet(isPresented: Binding(
+            get: { reminderPickerTxID != nil },
+            set: { if !$0 { reminderPickerTxID = nil } }
+        )) {
+            ReminderPickerSheet(
+                date: $reminderPickerDate,
+                onConfirm: { date in
+                    guard let txID = reminderPickerTxID else { return }
+                    let bankId = reminderPickerBankId
+                    let tx = vm.transactions.first { TransactionRecord.fingerprint(for: $0) == txID }
+                    let merchant = tx.map { MerchantResolver.resolve(transaction: $0).effectiveMerchant } ?? txID
+                    let amount = tx.map { amountText($0) } ?? ""
+                    let title = "\(merchant) \(amount)".trimmingCharacters(in: .whitespaces)
+                    reminderPickerTxID = nil
+                    setReminder(txID: txID, bankId: bankId, dueDate: date, title: title)
+                },
+                onCancel: { reminderPickerTxID = nil }
+            )
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(activePanelBg)
     }
-    
+
     private func triggerPullRefresh() async {
         guard !isPullRefreshing else { return }
         withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
@@ -1739,6 +1862,26 @@ private struct TransactionsPanelView: View {
 
     // MARK: - Swipe Flag Helpers
 
+    private var hasAnyUnreadTransaction: Bool {
+        vm.enrichmentData.values.contains { $0.isUnread }
+    }
+
+    private func markAllTransactionsRead() {
+        let bankId = activeBankId
+        if demoMode {
+            for (key, value) in vm.enrichmentData where value.isUnread {
+                var e = value
+                e.isUnread = false
+                vm.enrichmentData[key] = e
+            }
+            return
+        }
+        Task {
+            try? TransactionsDatabase.markAllRead(bankId: bankId)
+            await MainActor.run { vm.loadEnrichmentData(bankId: bankId) }
+        }
+    }
+
     private func toggleUnread(txID: String, bankId: String) {
         let current = vm.enrichmentData[txID]?.isUnread ?? false
         let newValue = !current
@@ -1753,17 +1896,27 @@ private struct TransactionsPanelView: View {
         }
     }
 
-    private func toggleFlagged(txID: String, bankId: String) {
-        let current = vm.enrichmentData[txID]?.isFlagged ?? false
-        let newValue = !current
-        if demoMode {
-            // Demo: in-memory only, no DB
-            var e = vm.enrichmentData[txID] ?? TxEnrichment(note: nil, attachmentCount: 0, isUnread: false, isFlagged: false)
-            e.isFlagged = newValue
-            vm.enrichmentData[txID] = e
-        } else {
-            try? TransactionsDatabase.setFlagged(txID: txID, bankId: bankId, value: newValue)
-            vm.loadEnrichmentData(bankId: bankId)
+    private func setReminder(txID: String, bankId: String, dueDate: Date, title: String) {
+        guard !demoMode else { return }
+        Task {
+            do {
+                let id = try await ReminderService.shared.createReminder(title: title, dueDate: dueDate)
+                try TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: id)
+                await MainActor.run { vm.loadEnrichmentData(bankId: bankId) }
+            } catch {
+                // Permission denied or EventKit error — user will see Reminders.app permission dialog
+            }
+        }
+    }
+
+    private func removeReminder(txID: String, reminderId: String?, bankId: String) {
+        guard !demoMode else { return }
+        Task {
+            if let id = reminderId {
+                await ReminderService.shared.deleteReminder(id: id)
+            }
+            try? TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: nil)
+            await MainActor.run { vm.loadEnrichmentData(bankId: bankId) }
         }
     }
 
@@ -2072,8 +2225,11 @@ private struct TransactionRowNew: View {
     var isFrozen: Bool = false
     var freezeModeActive: Bool = false
     var isUnread: Bool = false
-    var isFlagged: Bool = false
+    var hasReminder: Bool = false
+    var reminderId: String? = nil
     var isSelected: Bool = false
+    var onReminderAction: (() -> Void)? = nil
+    var onEnrichmentChangedWithRemover: (() -> Void)? = nil
     var onSelect: (() -> Void)? = nil
 
     private var isPending: Bool { transaction.status == "pending" }
@@ -2252,7 +2408,13 @@ private struct TransactionRowNew: View {
                 transaction: transaction,
                 bankId: bankId,
                 initialUserNote: userNote,
-                onEnrichmentChanged: onEnrichmentChanged
+                isUnread: isUnread,
+                hasReminder: hasReminder,
+                reminderId: reminderId,
+                onEnrichmentChanged: {
+                    onEnrichmentChanged()
+                    onEnrichmentChangedWithRemover?()
+                }
             )
         }
         .onAppear {
@@ -2434,10 +2596,10 @@ private struct TrackpadSwipeOverlay: NSViewRepresentable {
 private struct SwipeableTransactionRow<Content: View>: View {
     let txID: String
     let isUnread: Bool
-    let isFlagged: Bool
+    let hasReminder: Bool
     @Binding var activeSwipedID: String?
     let onToggleUnread: () -> Void
-    let onToggleFlagged: () -> Void
+    let onReminderAction: () -> Void
     @ViewBuilder let content: () -> Content
 
     @State private var offset: CGFloat = 0
@@ -2478,11 +2640,11 @@ private struct SwipeableTransactionRow<Content: View>: View {
             }
             .opacity(offset > 0 ? 1 : 0)
 
-            // Right action (swipe left reveals) — Flagged / Reminder
+            // Right action (swipe left reveals) — Reminder
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Button {
-                    onToggleFlagged()
+                    onReminderAction()
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                         offset = 0
                         activeSwipedID = nil
@@ -2491,9 +2653,9 @@ private struct SwipeableTransactionRow<Content: View>: View {
                     ZStack {
                         Color.orange
                         VStack(spacing: 3) {
-                            Image(systemName: isFlagged ? "bell.slash.fill" : "bell.fill")
+                            Image(systemName: hasReminder ? "bell.slash.fill" : "bell.fill")
                                 .font(.system(size: 16, weight: .semibold))
-                            Text(isFlagged ? "Entfernen" : "Erinnern")
+                            Text(hasReminder ? "Entfernen" : "Erinnern")
                                 .font(.system(size: 9, weight: .medium))
                         }
                         .foregroundColor(.white)
@@ -2919,6 +3081,27 @@ final class AccountNavModel: ObservableObject {
     private let clippyAutonomousRequiredClicks: Int = 8
     private let onSettings: (() -> Void)?
 
+    // MARK: - Stay on Top
+
+    private static let stayOnTopKey = "transactionsPanel.stayOnTop"
+
+    private var isPinned: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.stayOnTopKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.stayOnTopKey)
+            applyWindowLevel()
+        }
+    }
+
+    private func applyWindowLevel() {
+        panel.level = isPinned ? .floating : .normal
+    }
+
+    fileprivate func togglePin() {
+        isPinned.toggle()
+        toolbarDelegate?.refreshPinButton()
+    }
+
     init(vm: TransactionsViewModel, onRefresh: @escaping () async -> Void = {}, onSettings: (() -> Void)? = nil) {
         self.vm = vm
         self.onSettings = onSettings
@@ -2957,6 +3140,7 @@ final class AccountNavModel: ObservableObject {
         super.init()
 
         panel.delegate = self
+        applyWindowLevel()   // restore persisted stay-on-top state
         configureTitlebar()
         _ = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
@@ -3045,7 +3229,11 @@ final class AccountNavModel: ObservableObject {
         let toolbar = NSToolbar(identifier: NSToolbar.Identifier("simplebanking.transactions.toolbar"))
         toolbar.showsBaselineSeparator = false
         toolbar.displayMode = .iconOnly
-        let delegate = TransactionsPanelToolbarDelegate(onSettings: onSettings)
+        let delegate = TransactionsPanelToolbarDelegate(
+            onSettings: onSettings,
+            onTogglePin: { [weak self] in self?.togglePin() },
+            isPinnedProvider: { [weak self] in self?.isPinned ?? false }
+        )
         toolbar.delegate = delegate
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
@@ -3080,19 +3268,29 @@ final class AccountNavModel: ObservableObject {
 
 private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegate {
     private let settingsIdentifier = NSToolbarItem.Identifier("simplebanking.transactions.settings")
+    private let pinIdentifier      = NSToolbarItem.Identifier("simplebanking.transactions.pin")
     private let onSettings: (() -> Void)?
+    private let onTogglePin: (() -> Void)?
+    private let isPinnedProvider: () -> Bool
+    private weak var pinButton: NSButton?
 
-    init(onSettings: (() -> Void)?) {
+    init(
+        onSettings: (() -> Void)?,
+        onTogglePin: (() -> Void)? = nil,
+        isPinnedProvider: @escaping () -> Bool = { false }
+    ) {
         self.onSettings = onSettings
+        self.onTogglePin = onTogglePin
+        self.isPinnedProvider = isPinnedProvider
         super.init()
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, settingsIdentifier]
+        [.flexibleSpace, pinIdentifier, settingsIdentifier]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, settingsIdentifier]
+        [.flexibleSpace, pinIdentifier, settingsIdentifier]
     }
 
     func toolbar(
@@ -3114,11 +3312,80 @@ private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegat
             item.paletteLabel = "Einstellungen"
             return item
         }
+        if itemIdentifier == pinIdentifier {
+            let item = NSToolbarItem(itemIdentifier: pinIdentifier)
+            let button = NSButton()
+            button.bezelStyle = .texturedRounded
+            button.isBordered = false
+            button.target = self
+            button.action = #selector(pinTapped)
+            item.view = button
+            item.label = ""
+            item.paletteLabel = "Oben halten"
+            self.pinButton = button
+            applyPinState(to: button)
+            return item
+        }
         return nil
+    }
+
+    /// Updates the existing pin button's icon + tooltip to reflect the current state.
+    func refreshPinButton() {
+        guard let button = pinButton else { return }
+        applyPinState(to: button)
+    }
+
+    private func applyPinState(to button: NSButton) {
+        let pinned = isPinnedProvider()
+        button.image = NSImage(
+            systemSymbolName: pinned ? "pin.fill" : "pin",
+            accessibilityDescription: "Oben halten"
+        )
+        button.contentTintColor = pinned ? NSColor.controlAccentColor : nil
+        button.toolTip = pinned
+            ? "Oben fixiert — klicken zum Lösen"
+            : "Oben halten"
     }
 
     @objc private func settingsTapped() {
         onSettings?()
+    }
+
+    @objc private func pinTapped() {
+        onTogglePin?()
+    }
+}
+
+// MARK: - Reminder Picker Sheet
+
+struct ReminderPickerSheet: View {
+    @Binding var date: Date
+    let onConfirm: (Date) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 20) {
+            HStack {
+                Text("Erinnerung setzen")
+                    .font(.system(size: 18, weight: .bold))
+                Spacer()
+            }
+
+            DatePicker("Datum & Uhrzeit", selection: $date, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+
+            HStack(spacing: 12) {
+                Button("Abbrechen") { onCancel() }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("Erinnerung erstellen") { onConfirm(date) }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 360)
     }
 }
 

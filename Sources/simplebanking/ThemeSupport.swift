@@ -413,4 +413,11 @@ extension Color {
     static var sbRedStrong: Color { dynamicHex(light: "#C65A5A", dark: "#D77979") }
     static var sbRedMid: Color    { dynamicHex(light: "#D98A8A", dark: "#E39A9A") }
     static var sbRedSoft: Color   { dynamicHex(light: "#F8E9E9", dark: "#402222") }
+
+    // Neutral — warm taupe for "other" / rest categories.
+    // Not system gray — deliberately part of the palette so "other" reads as
+    // a real category, not leftover space.
+    static var sbNeutralStrong: Color { dynamicHex(light: "#8A7F70", dark: "#A89D8D") }
+    static var sbNeutralMid: Color    { dynamicHex(light: "#B0A699", dark: "#BAB0A3") }
+    static var sbNeutralSoft: Color   { dynamicHex(light: "#EEEAE3", dark: "#2E2A24") }
 }

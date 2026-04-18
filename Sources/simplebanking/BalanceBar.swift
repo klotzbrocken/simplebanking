@@ -220,7 +220,7 @@ final class CredentialsPanel {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var timer: Timer?
 
@@ -242,7 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage("menubarStyle") private var menubarStyle: Int = 1  // 0=lang (fixed), 1=kurz (dynamic)
-    @AppStorage("refreshInterval") private var refreshInterval: Int = 60
+    @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
@@ -264,6 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var flyoutRippleTrigger: Int = 0
     private var logoObserver: AnyCancellable?
     private var txObserver: AnyCancellable?
+    private var leftToPayObserver: AnyCancellable?
 
     // MARK: - Per-slot lastSeenTxSig helpers
 
@@ -299,6 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isHiddenBalance: Bool = false
     private var hideTimer: Timer?
     private var pendingLeftClick: DispatchWorkItem?
+    private var flyoutClosedByClickAt: Date?
     private var lastShownTitle: String = "—"
     
     private var settingsPanel: SettingsPanel?
@@ -533,7 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // If no logo: "€" is prepended to the title text instead.
         if txVM.isUnifiedMode && (!demoMode || isMultiDemo) {
             let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-            if let unifiedIcon = NSImage(systemSymbolName: "building.columns.fill", accessibilityDescription: nil)?
+            if let unifiedIcon = NSImage(systemSymbolName: "square.stack.3d.up.fill", accessibilityDescription: nil)?
                 .withSymbolConfiguration(config) {
                 unifiedIcon.isTemplate = true
                 button.image = unifiedIcon
@@ -884,10 +886,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .dropFirst()
             .sink { [weak self] _ in self?.refreshFlyoutIfVisible() }
 
-        // When per-slot settings change (e.g. Kritische Schwelle), refresh the flyout so
-        // MoneyMood and thresholds update immediately without reopening.
+        // "Noch offen" changes (recompute finished) → re-render flyout so the
+        // subtitle appears/updates without waiting for the next open.
+        leftToPayObserver = txVM.$leftToPayAmount
+            .receive(on: DispatchQueue.main)
+            .dropFirst()
+            .sink { [weak self] _ in self?.refreshFlyoutIfVisible() }
+
+        // When per-slot settings change (e.g. Kritische Schwelle, Gehaltstag),
+        // refresh the flyout and recompute "Noch offen" so cycle-dependent
+        // values update immediately without waiting for the next balance fetch.
         NotificationCenter.default.addObserver(forName: .slotSettingsChanged, object: nil, queue: .main) { [weak self] _ in
             self?.refreshFlyoutIfVisible()
+            self?.recomputeLeftToPay()
         }
 
         // Register UserDefaults defaults (only apply when key has no stored value).
@@ -916,6 +927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             locked = false
             if demoStyle == 1 { activateMultiDemo() }
             Task { await refreshAsync() }
+            recomputeLeftToPay()
         }
 
         ThemeManager.shared.ensureThemeFiles()
@@ -1274,6 +1286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         txVM.connectedBankDisplayName = "Demo-Bank"
         txVM.connectedBankLogoID = nil
         txVM.connectedBankIBAN = nil
+        txVM.leftToPayAmount = nil   // drop stale live value
         var seed = UInt64(truncatingIfNeeded: demoSeed)
         let fake = FakeData.demoBalance(seed: &seed)
         lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
@@ -1284,6 +1297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateMenuBarButton()
         statusItem.button?.toolTip = "🎭 Demo-Modus: Single-Banking"
         rebuildMenuTitleForDemoMode()
+        recomputeLeftToPay()
     }
 
     @objc private func setDemoMulti() {
@@ -1292,8 +1306,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         demoStyle = 1
         demoMode = true
         demoSeed = Int.random(in: 1...Int.max)
+        txVM.leftToPayAmount = nil   // drop stale live value
         activateMultiDemo()
         rebuildMenuTitleForDemoMode()
+        recomputeLeftToPay()
     }
 
     @objc private func setDemoOff() {
@@ -1302,12 +1318,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         demoMode = false
         demoStyle = 0
         txVM.transactions = []
+        txVM.leftToPayAmount = nil   // drop stale demo value
         txVM.resetPaging()
         rebuildMenuTitleForDemoMode()
         // Apply the live slot BEFORE checking credentials — CredentialsStore context
         // (slot ID) must be set correctly, otherwise exists() returns false and the
         // menu shows "Verbinden" even though credentials are stored on disk.
+        //
+        // tearDownMultiDemo restores MultibankingStore.slots, but the static
+        // activeSlotIds (YaxiService/CredentialsStore/TransactionsDatabase) still
+        // point at a non-existent "demo-slot-N" if the user navigated between
+        // demo accounts. Restore them from the active live slot so the credential
+        // lookup below hits the right keys.
         if let slot = MultibankingStore.shared.activeSlot {
+            YaxiService.activeSlotId        = slot.id
+            CredentialsStore.activeSlotId   = slot.id
+            TransactionsDatabase.activeSlotId = slot.id
             applySlotToViewModel(slot)
         }
         updateTxPanelAccountNav()
@@ -1996,6 +2022,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
             
+            // Szenario A: Flyout ist noch sichtbar (statusItemClicked kommt vor .transient-Dismiss).
+            // Bei Doppelklick: Flyout schließen + Umsatzliste öffnen.
+            // Bei Einfachklick: nur Flyout schließen (kein Re-open via Debounce).
+            // popoverWillClose-Delegate setzt flyoutClosedByClickAt synchron.
+            if balancePopover?.isShown == true {
+                pendingLeftClick?.cancel()
+                pendingLeftClick = nil
+                if ev.clickCount >= 2 {
+                    balancePopover?.performClose(nil)
+                    if swapClickBehavior {
+                        performBalancePrimaryAction()
+                    } else {
+                        Task { await openTransactionsPanel() }
+                    }
+                } else {
+                    balancePopover?.performClose(nil)
+                    // flyoutClosedByClickAt wird von popoverWillClose synchron gesetzt.
+                    // Kein Debounce-Re-open — nächster Click < doubleClickInterval → Umsatzliste.
+                }
+                return
+            }
+
+            // Szenario B: .transient hat den ersten Click konsumiert und Flyout bereits geschlossen.
+            // popoverWillClose hat flyoutClosedByClickAt synchron gesetzt.
+            // Falls zweiter Click (Doppelklick-Intent) innerhalb des System-Doppelklick-Intervalls kommt:
+            // → Umsatzliste öffnen.
+            let doubleClickInterval = NSEvent.doubleClickInterval
+            if let closedAt = flyoutClosedByClickAt,
+               Date().timeIntervalSince(closedAt) < doubleClickInterval {
+                flyoutClosedByClickAt = nil
+                pendingLeftClick?.cancel()
+                pendingLeftClick = nil
+                if swapClickBehavior {
+                    performBalancePrimaryAction()
+                } else {
+                    Task { await openTransactionsPanel() }
+                }
+                return
+            }
+            flyoutClosedByClickAt = nil
+
             if ev.clickCount >= 2 {
                 pendingLeftClick?.cancel()
                 pendingLeftClick = nil
@@ -2037,11 +2104,146 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
     
+    // MARK: - YAXI error helpers
+
+    /// Extracts the bank-provided userMessage from a RoutexClientError, if present.
+    private static func yaxiUserMessage(_ error: Error) -> String? {
+        guard let re = error as? RoutexClientError else { return nil }
+        switch re {
+        case .UnexpectedError(let msg): return msg
+        case .InvalidCredentials(let msg): return msg
+        case .ServiceBlocked(let msg, _): return msg
+        case .Unauthorized(let msg): return msg
+        case .ConsentExpired(let msg): return msg
+        case .ProviderError(_, let msg): return msg
+        default: return nil
+        }
+    }
+
+    private static func isCanceledError(_ error: Error) -> Bool {
+        guard let re = error as? RoutexClientError else { return false }
+        if case .Canceled = re { return true }
+        return false
+    }
+
+    /// Human-readable refresh interval: "Manuell", "60 Min.", "4 Stunden".
+    /// Mirrors the RefreshInterval enum labels in SettingsPanel so tooltip and
+    /// settings stay in sync.
+    private func formatRefreshInterval(_ minutes: Int) -> String {
+        if minutes <= 0 {
+            return L10n.t("Manuell", "Manual")
+        }
+        if minutes >= 60 && minutes % 60 == 0 {
+            let hours = minutes / 60
+            return hours == 1
+                ? L10n.t("1 Stunde", "1 hour")
+                : L10n.t("\(hours) Stunden", "\(hours) hours")
+        }
+        return L10n.t("\(minutes) Min.", "\(minutes) min")
+    }
+
+    /// Recompute "Noch offen" (sum of recurring payments still expected this cycle)
+    /// off-thread from 90 days of history. Safe to call after every successful
+    /// balance refresh — cheap enough (<100ms on typical history).
+    ///
+    /// Unified mode: compute per-slot with that slot's own salaryDay, then sum.
+    /// Each account's recurring payments are evaluated against that account's
+    /// own cycle — otherwise a combined total would be judged against a single
+    /// slot's salary rhythm, which is fachlich wrong.
+    ///
+    /// Demo mode: transactions are never persisted to SQLite, so generate
+    /// 90 days of fake history via FakeData with the current demoSeed.
+    private func recomputeLeftToPay() {
+        let activeSlot = YaxiService.activeSlotId
+        let isDemo = demoMode
+        let isMulti = isMultiDemo
+        let seedSnapshot = demoSeed
+        let isUnified = txVM.isUnifiedMode
+        let allSlots = MultibankingStore.shared.slots.map { $0.id }
+        let activeIdx = MultibankingStore.shared.activeIndex
+
+        Task.detached(priority: .utility) {
+            var total: Double = 0
+            var sawAny = false
+
+            if isDemo {
+                // Generate fake history per slot profile (matches what the panel shows).
+                // Use the active demo seed so left-to-pay is consistent with visible tx list.
+                if isMulti {
+                    // Compute per profile first, then aggregate based on unified vs per-slot.
+                    var seed = UInt64(truncatingIfNeeded: seedSnapshot)
+                    var perProfile: [Double] = []
+                    for (i, _) in allSlots.enumerated() {
+                        let history = FakeData.generateDemoTransactions(
+                            seed: &seed, days: 90, slotProfile: i
+                        )
+                        guard !history.isEmpty else { perProfile.append(0); continue }
+                        let payments = FixedCostsAnalyzer.analyze(transactions: history)
+                        let salaryDay = FakeData.demoSalaryDay(slotProfile: i)
+                        perProfile.append(LeftToPayCalculator.compute(
+                            payments: payments,
+                            salaryDay: salaryDay
+                        ))
+                    }
+                    if isUnified {
+                        total = perProfile.reduce(0, +)
+                        sawAny = perProfile.contains { $0 > 0 }
+                    } else if perProfile.indices.contains(activeIdx) {
+                        total = perProfile[activeIdx]
+                        sawAny = total > 0
+                    }
+                } else {
+                    var seed = UInt64(truncatingIfNeeded: seedSnapshot)
+                    let history = FakeData.generateDemoTransactions(seed: &seed, days: 90, slotProfile: 0)
+                    if !history.isEmpty {
+                        let payments = FixedCostsAnalyzer.analyze(transactions: history)
+                        total = LeftToPayCalculator.compute(
+                            payments: payments,
+                            salaryDay: FakeData.demoSalaryDay(slotProfile: 0)
+                        )
+                        sawAny = total > 0
+                    }
+                }
+            } else {
+                let slotIds = isUnified ? allSlots : [activeSlot]
+                for slot in slotIds {
+                    let history = (try? TransactionsDatabase.loadUnifiedTransactions(
+                        slots: [slot], days: 90, bankId: "primary")) ?? []
+                    guard !history.isEmpty else { continue }
+                    sawAny = true
+                    let payments = FixedCostsAnalyzer.analyze(transactions: history)
+                    let cfg = BankSlotSettingsStore.load(slotId: slot)
+                    total += LeftToPayCalculator.compute(
+                        payments: payments,
+                        salaryDay: cfg.effectiveSalaryDay,
+                        tolerance: cfg.salaryDayTolerance
+                    )
+                }
+            }
+
+            AppLogger.log(
+                "leftToPay: demo=\(isDemo) multi=\(isMulti) unified=\(isUnified) activeIdx=\(activeIdx) sawAny=\(sawAny) total=\(String(format: "%.2f", total))",
+                category: "LeftToPay"
+            )
+            await MainActor.run { [weak self] in
+                self?.txVM.leftToPayAmount = sawAny ? total : nil
+            }
+        }
+    }
+
     private func toggleBalanceVisibility() {
         if isHiddenBalance {
             unhideNow()
         } else {
             hideBalance()
+        }
+    }
+
+    // NSPopoverDelegate — fired synchronously on main thread before statusItemClicked fires.
+    // MainActor.assumeIsolated is safe here because NSPopoverDelegate always runs on the main thread.
+    nonisolated func popoverWillClose(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            flyoutClosedByClickAt = Date()
         }
     }
 
@@ -2054,8 +2256,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let popover = balancePopover ?? NSPopover()
-        popover.behavior = .transient
+        popover.behavior = .semitransient
         popover.animates = true
+        popover.delegate = self
 
         let isUnified = txVM.isUnifiedMode && (!demoMode || isMultiDemo)
         let balanceText = isUnified
@@ -2078,6 +2281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isDefaultTheme: themeId == ThemeManager.defaultThemeID,
             forcedColorScheme: configuredColorScheme()
         )
+        rootView.leftToPayAmount = txVM.leftToPayAmount
         rootView.onDoubleTap = { [weak self] in
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
@@ -2217,6 +2421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isDefaultTheme: themeId == ThemeManager.defaultThemeID,
             forcedColorScheme: configuredColorScheme()
         )
+        rootView.leftToPayAmount = txVM.leftToPayAmount
         rootView.onDoubleTap = { [weak self] in
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
@@ -2320,6 +2525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 applyBalanceDisplayModeConstraints()
                 updateStatusBalanceTitle()
                 applyHideTimer()
+                recomputeLeftToPay()
                 return
             }
             var seed = UInt64(truncatingIfNeeded: demoSeed)
@@ -2330,6 +2536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updateStatusBalanceTitle()
             statusItem.button?.toolTip = "🎭 Demo-Modus: Simulierter Kontostand"
             applyHideTimer()
+            recomputeLeftToPay()
             return
         }
         
@@ -2400,7 +2607,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 applyBalanceDisplayModeConstraints()
                 updateStatusBalanceTitle()
-                statusItem.button?.toolTip = "Kontostand (Auto-Refresh: \(refreshInterval) Min.)"
+                statusItem.button?.toolTip = t(
+                    "Kontostand (Auto-Refresh: \(formatRefreshInterval(refreshInterval)))",
+                    "Balance (auto-refresh: \(formatRefreshInterval(refreshInterval)))"
+                )
 
                 applyHideTimer()
 
@@ -2408,6 +2618,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if loadTransactionsOnStart {
                     Task { await checkNewBookings(userId: userId, password: password) }
                 }
+
+                recomputeLeftToPay()
             } else if resp.scaRequired == true {
                 // SCA redirect timed out or was missed. State has been cleared (server + Swift).
                 // Pause auto-refresh for 1 hour so we don't burn through the bank's daily
@@ -2579,6 +2791,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         txVM.isLoading = true
         txVM.error = nil
+        txVM.errorNeedsReconnect = false
 
         let fetchDaysSetting = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
         let daysToFetch = fetchDaysSetting > 0 ? fetchDaysSetting : 60
@@ -2622,6 +2835,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     try TransactionsDatabase.upsert(transactions: sortedNetwork)
                     let persistedTransactions = try TransactionsDatabase.loadTransactions(days: daysToFetch)
                     txVM.transactions = sortTransactionsNewestFirst(persistedTransactions)
+                    // Reload enrichment so newly inserted rows (is_unread=1) show
+                    // the blue unread dot immediately, not after the next onAppear.
+                    txVM.loadEnrichmentData(bankId: demoMode ? "demo" : "primary")
                 } catch {
                     print("[DB] Upsert/load failed, using network data: \(error.localizedDescription)")
                     txVM.transactions = sortedNetwork
@@ -2631,7 +2847,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 if cachedTransactions.isEmpty {
                     txVM.transactions = []
-                    txVM.error = resp.error ?? t("Keine Umsatzdaten verfügbar.", "No transaction data available.")
+                    txVM.error = resp.userMessage ?? resp.error ?? t("Keine Umsatzdaten verfügbar.", "No transaction data available.")
                     confettiTransactions = []
                 } else {
                     txVM.error = t("Offline, zeige gespeicherte Umsätze", "Offline, showing cached transactions")
@@ -2645,7 +2861,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             if cachedTransactions.isEmpty {
                 txVM.transactions = []
-                txVM.error = "Fetch failed: \(error.localizedDescription)"
+                let msg = Self.yaxiUserMessage(error) ?? "Fetch failed: \(error.localizedDescription)"
+                txVM.error = msg
+                txVM.errorNeedsReconnect = Self.isCanceledError(error)
                 confettiTransactions = []
             } else {
                 txVM.error = t("Offline, zeige gespeicherte Umsätze", "Offline, showing cached transactions")
@@ -3755,6 +3973,7 @@ private struct StatusBalanceFlyoutCardView: View {
     var isUnifiedMode: Bool = false
     var onSwitchToIndex: ((Int) -> Void)? = nil
     var onActivateUnified: (() -> Void)? = nil
+    var leftToPayAmount: Double? = nil
 
     @Environment(\.colorScheme) private var environmentColorScheme
 
@@ -3775,6 +3994,34 @@ private struct StatusBalanceFlyoutCardView: View {
 
     private func freezeBalanceText(_ value: Double) -> String {
         Self.freezeFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value)) €"
+    }
+
+    private static let leftToPayFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .currency
+        f.currencyCode = "EUR"
+        f.maximumFractionDigits = 0
+        return f
+    }()
+
+    private func leftToPayLabel(_ amount: Double) -> String {
+        let formatted = Self.leftToPayFormatter.string(from: NSNumber(value: amount))
+            ?? "\(Int(amount)) €"
+        return L10n.t("Noch offen: \(formatted)", "Still to pay: \(formatted)")
+    }
+
+    @ViewBuilder
+    private var leftToPaySubtitle: some View {
+        if let amount = leftToPayAmount {
+            let text: String = amount > 0.5
+                ? leftToPayLabel(amount)
+                : L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
+            Text(text)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .lineLimit(1)
+        }
     }
 
     var body: some View {
@@ -3862,72 +4109,76 @@ private struct StatusBalanceFlyoutCardView: View {
         let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
         let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
 
-        // Aggregated view uses neutral grey — no signal coloring for combined balance
-        let totalSignalColor: Color = .primary
+        // Determine unified header: "Alle Konten · 8 Uhr" (mirrors bank name + time in defaultThemeCard)
+        let headerText: String = {
+            if let date = balanceFetchedAt {
+                let hour = Calendar.current.component(.hour, from: date)
+                return L10n.t("Alle Konten · \(hour) Uhr", "All Accounts · \(hour):00")
+            }
+            return L10n.t("Alle Konten", "All Accounts")
+        }()
 
         return VStack(alignment: .leading, spacing: 8) {
-            // Pills row — same structure as unifiedBalanceCard in TransactionsPanelView
-            HStack(spacing: 10) {
-                ForEach(Array(slots.enumerated()), id: \.offset) { _, item in
-                    HStack(spacing: 6) {
-                        if let img = item.logo {
-                            let invert = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: item.brandId ?? "")
-                            Group {
-                                if invert {
-                                    Image(nsImage: img).resizable().scaledToFit()
-                                        .frame(width: 16, height: 16)
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                                        .colorInvert()
-                                } else {
-                                    Image(nsImage: img).resizable().scaledToFit()
-                                        .frame(width: 16, height: 16)
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                                }
-                            }
-                        } else {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(item.barColor.opacity(0.30))
-                                .frame(width: 16, height: 16)
-                        }
-                        if let nick = item.nickname {
-                            Text(nick)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                                .lineLimit(1)
-                        }
-                        Text(item.balanceText)
-                            .font(.system(size: 11)).monospacedDigit()
-                            .foregroundColor(item.isNegative ? Color(hex: "C4614D") : Color(NSColor.secondaryLabelColor))
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(item.barColor.opacity(0.10)))
-                    .overlay(Capsule().stroke(item.barColor.opacity(0.30), lineWidth: 0.5))
-                }
+            // Header row — mirrors defaultThemeCard: icon + text + Spacer
+            HStack(spacing: 8) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                Text(headerText)
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
 
+            // Balance row — same HStack structure as defaultThemeCard
+            // Right side: mini account bar stack replaces GreenZoneRing (same 72pt height)
             HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    // Total balance — 30pt bold, matches defaultThemeCard
-                    HStack(spacing: 5) {
-                        Image(systemName: "square.stack.3d.up.fill")
-                            .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(totalSignalColor)
-                        Text(balanceText)
-                            .font(.system(size: 30, weight: .bold, design: .default))
-                            .monospacedDigit()
-                            .foregroundColor(totalSignalColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
-                    .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                    Text(balanceText)
+                        .font(.system(size: 30, weight: .bold, design: .default))
+                        .monospacedDigit()
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                    leftToPaySubtitle
                 }
                 Spacer()
+                // Mini account bars — same 72pt height as GreenZoneRing
+                VStack(alignment: .trailing, spacing: 4) {
+                    ForEach(Array(slots.prefix(4).enumerated()), id: \.offset) { _, item in
+                        HStack(spacing: 5) {
+                            if let img = item.logo {
+                                let invert = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: item.brandId ?? "")
+                                Group {
+                                    if invert {
+                                        Image(nsImage: img).resizable().scaledToFit()
+                                            .frame(width: 14, height: 14)
+                                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                                            .colorInvert()
+                                    } else {
+                                        Image(nsImage: img).resizable().scaledToFit()
+                                            .frame(width: 14, height: 14)
+                                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    }
+                                }
+                            } else {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(item.barColor.opacity(0.40))
+                                    .frame(width: 14, height: 14)
+                            }
+                            Text(item.balanceText)
+                                .font(.system(size: 10)).monospacedDigit()
+                                .foregroundColor(item.isNegative ? Color(hex: "C4614D") : Color(NSColor.secondaryLabelColor))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .frame(width: 72, height: 72, alignment: .center)
+                .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 90, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(
             ZStack {
@@ -3988,36 +4239,31 @@ private struct StatusBalanceFlyoutCardView: View {
 
             HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
+                    // Real balance is always the primary 30pt number. Freeze projection
+                    // moves to a subtitle below — a what-if should not look like the truth.
+                    Text(displayBalance)
+                        .font(.system(size: 30, weight: .bold, design: .default))
+                        .foregroundColor(style.amountColor)
+                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+
                     if freezeState.isActive && freezeState.monthlyAmount > 0 {
                         let freezeBalance = (balanceValue ?? 0) + freezeState.monthlyAmount
-                        HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Text("~")
-                                .font(.system(size: 22, weight: .medium, design: .default))
-                                .foregroundColor(.cyan.opacity(0.7))
-                            Text(freezeBalanceText(freezeBalance))
-                                .font(.system(size: 30, weight: .bold, design: .default))
-                                .foregroundColor(.cyan)
-                        }
-                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                        Text(L10n.t(
+                            "~\(freezeBalanceText(freezeBalance)) wenn nichts abgeht",
+                            "~\(freezeBalanceText(freezeBalance)) if nothing is charged"
+                        ))
+                        .font(.system(size: 14))
+                        .foregroundColor(.cyan.opacity(0.9))
+                        .lineLimit(1)
                     } else {
-                        Text(displayBalance)
-                            .font(.system(size: 30, weight: .bold, design: .default))
-                            .foregroundColor(freezeState.isActive ? .cyan : style.amountColor)
-                            .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                        leftToPaySubtitle
                     }
                 }
                 Spacer()
                 if greenZoneRingEnabled {
-                    let adjBalance = freezeState.isActive
-                        ? (balanceValue.map { $0 + freezeState.monthlyAmount })
-                        : balanceValue
-                    let adjFraction: Double = {
-                        guard freezeState.isActive, greenZoneFraction > 0, let b = balanceValue, b > 0 else {
-                            return greenZoneFraction
-                        }
-                        return min(1.0, greenZoneFraction * ((b + freezeState.monthlyAmount) / b))
-                    }()
-                    GreenZoneRing(fraction: adjFraction, balance: adjBalance, dispoLimit: dispoLimit, showDispo: greenZoneShowDispo)
+                    // GreenRing always reflects the real balance — the freeze projection
+                    // is side-information, not a new truth about your position.
+                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit, showDispo: greenZoneShowDispo)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
                 }
             }

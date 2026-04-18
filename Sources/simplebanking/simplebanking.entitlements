@@ -5,6 +5,9 @@
     <!-- Network: outbound HTTPS (YAXI API, Sparkle, DuckDuckGo favicons) -->
     <key>com.apple.security.network.client</key>
     <true/>
+    <!-- EventKit: read/write Reminders.app (for transaction reminders) -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
 
 </dict>
 </plist>
