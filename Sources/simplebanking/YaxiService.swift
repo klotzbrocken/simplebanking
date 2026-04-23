@@ -1026,6 +1026,10 @@ enum YaxiService {
     ) -> BalancesResponse {
         let allBalances = result.toData().data.balances.first?.balances ?? []
 
+        // Priority: Booked > Available > Expected (matches canonical YAXI-MoneyMoney
+        // reference in `mapping/balance.lua`). `Booked` is the authoritative posted balance.
+        // At some banks `Available` = booked + overdraft line (Dispokredit) — misleading
+        // as "Kontostand". Hence Booked first.
         let booked = allBalances.first(where: { $0.balanceType == .booked })
             ?? allBalances.first(where: { $0.balanceType == .available })
             ?? allBalances.first

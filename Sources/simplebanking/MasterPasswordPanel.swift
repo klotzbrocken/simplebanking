@@ -29,7 +29,7 @@ final class MasterPasswordPanel {
             backing: .buffered,
             defer: false
         )
-        panel.title = isUnlock ? "App entsperren" : "Master-Passwort festlegen"
+        panel.title = isUnlock ? "simplebanking entsperren" : "Master-Passwort festlegen"
         panel.isFloatingPanel = true
         panel.level = .floating
 
@@ -50,8 +50,8 @@ final class MasterPasswordPanel {
         titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
         titleLabel.alignment = .center
         
-        let infoText = isUnlock 
-            ? "Gib dein Master-Passwort ein, um die App zu entsperren."
+        let infoText = isUnlock
+            ? "Gib dein Master-Passwort ein, um simplebanking zu entsperren."
             : "Das Master-Passwort schützt deine Banking-Daten.\nEs wird NICHT gespeichert – merke es dir gut!"
         let info = NSTextField(wrappingLabelWithString: infoText)
         info.textColor = .secondaryLabelColor

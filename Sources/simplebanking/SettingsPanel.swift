@@ -222,6 +222,7 @@ struct SettingsView: View {
     @State private var slotToDelete: BankSlot? = nil
     @State private var showSlotDeleteConfirmation: Bool = false
     @State private var slotBeingRenamed: BankSlot? = nil
+    @State private var slotBeingImported: BankSlot? = nil
     @State private var renameText: String = ""
     @State private var nicknameText: String = ""
     @State private var slotColorSelection: [String: Color] = [:]
@@ -1009,6 +1010,12 @@ struct SettingsView: View {
                                     Image(systemName: "pencil").foregroundColor(.secondary)
                                 }.buttonStyle(PlainButtonStyle())
                                 Button(action: {
+                                    slotBeingImported = slot
+                                }) {
+                                    Image(systemName: "arrow.down.doc").foregroundColor(.secondary)
+                                        .help(t("Umsätze importieren", "Import transactions"))
+                                }.buttonStyle(PlainButtonStyle())
+                                Button(action: {
                                     slotToDelete = slot
                                     showSlotDeleteConfirmation = true
                                 }) {
@@ -1052,6 +1059,14 @@ struct SettingsView: View {
                     "Das Konto \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" und alle zugehörigen Daten werden unwiderruflich gelöscht.",
                     "The account \"\(slot.displayName.isEmpty ? slot.iban : slot.displayName)\" and all its data will be permanently deleted."
                 ))
+            }
+            .sheet(item: $slotBeingImported) { slot in
+                ImportSheet(
+                    slotId: slot.id,
+                    bankDisplayName: slot.displayName.isEmpty ? slot.iban : slot.displayName,
+                    requestMasterPassword: { requestMasterPassword() },
+                    onClose: { slotBeingImported = nil }
+                )
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
@@ -1115,17 +1130,15 @@ struct SettingsView: View {
                             )
 
                             SettingsRow(
-                                title: t("Abruf-Zeitraum", "Fetch range"),
-                                subtitle: t("Wie viele Tage an Transaktionen sollen abgerufen werden?",
-                                            "How many days of transactions to fetch?")
+                                title: t("Auto-Sync-Zeitraum", "Auto-sync range"),
+                                subtitle: t("Automatisch synchronisiert. Älteren Zeitraum einmalig laden: Import.",
+                                            "Automatically synced. Load older history once: Import.")
                             ) {
                                 AccountMenuPicker(
                                     items: [
                                         (title: t("30 Tage", "30 days"), value: 30),
                                         (title: t("60 Tage", "60 days"), value: 60),
                                         (title: t("90 Tage", "90 days"), value: 90),
-                                        (title: t("180 Tage", "180 days"), value: 180),
-                                        (title: t("365 Tage", "365 days"), value: 365),
                                     ],
                                     selection: Binding(
                                         get: { currentSlotSettings.fetchDays },
@@ -1251,6 +1264,20 @@ struct SettingsView: View {
                                         .frame(width: 16, alignment: .leading)
                                 }
                                 .frame(width: 185)
+                            }
+
+                            SettingsRow(
+                                title: t("Dispo ist im Kontostand enthalten",
+                                         "Overdraft included in balance"),
+                                subtitle: t("Aktiviere dies, wenn deine Bank den Kontostand inkl. Dispokredit liefert (z.B. C24). Dispo wird dann abgezogen.",
+                                            "Enable this if your bank reports the balance with the overdraft already included (e.g. C24). The overdraft is then subtracted.")
+                            ) {
+                                Toggle("", isOn: Binding(
+                                    get: { currentSlotSettings.creditLimitIncluded },
+                                    set: { currentSlotSettings.creditLimitIncluded = $0; saveCurrentSlotSettings() }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
                             }
                         }
                         .padding(12)

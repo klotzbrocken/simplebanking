@@ -14,6 +14,9 @@ struct BankSlotSettings: Codable {
     var salaryAmount: Int = 0
     /// 0 = Anfang des Monats (day 1, ±4 d), 1 = Mitte (day 15, ±4 d), 2 = Individuell (exact salaryDay).
     var salaryDayPreset: Int = 2
+    /// `true` = die Bank liefert den Kontostand inklusive Dispokredit (z.B. C24) → Dispo wird
+    /// vom angezeigten Saldo abgezogen. Per-Slot einstellbar in Settings → Konten.
+    var creditLimitIncluded: Bool = false
 
     /// Effective center day for the salary period, derived from preset.
     var effectiveSalaryDay: Int {
@@ -62,6 +65,7 @@ struct BankSlotSettings: Codable {
         balanceSignalMediumUpperBound = (try? c.decodeIfPresent(Int.self, forKey: .balanceSignalMediumUpperBound)) ?? 2000
         salaryAmount                 = (try? c.decodeIfPresent(Int.self, forKey: .salaryAmount)) ?? 0
         salaryDayPreset              = (try? c.decodeIfPresent(Int.self, forKey: .salaryDayPreset)) ?? 2
+        creditLimitIncluded          = (try? c.decodeIfPresent(Bool.self, forKey: .creditLimitIncluded)) ?? false
     }
 }
 
@@ -72,11 +76,20 @@ enum BankSlotSettingsStore {
         "simplebanking.slotSettings.\(slotId)"
     }
 
+    /// Auto-Sync-Zeitraum ist auf 90 Tage begrenzt (ältere Historie via Import).
+    /// Bestandsdaten mit fetchDays > 90 werden beim Laden auf 90 gedeckelt.
+    private static let maxAutoSyncDays = 90
+
     /// Loads settings for a slot. On first access, migrates from global AppStorage defaults.
+    /// Caps `fetchDays` at `maxAutoSyncDays` (silent migration from pre-1.4.0 values 180/365).
     static func load(slotId: String) -> BankSlotSettings {
         let ud = UserDefaults.standard
         if let data = ud.data(forKey: key(for: slotId)),
-           let settings = try? JSONDecoder().decode(BankSlotSettings.self, from: data) {
+           var settings = try? JSONDecoder().decode(BankSlotSettings.self, from: data) {
+            if settings.fetchDays > maxAutoSyncDays {
+                settings.fetchDays = maxAutoSyncDays
+                save(settings, slotId: slotId)
+            }
             return settings
         }
         // Migration: use existing global defaults as starting values for new per-slot storage
@@ -86,12 +99,13 @@ enum BankSlotSettingsStore {
         let migratedSalary  = ud.integer(forKey: "salaryDay")
         let migratedBuffer  = ud.integer(forKey: "targetBuffer")
         let migratedSavings = ud.integer(forKey: "targetSavingsRate")
+        let defaultedFetch  = migratedFetch == 0 ? 60 : migratedFetch
         return BankSlotSettings(
             salaryDay:                  max(1, migratedSalary  == 0 ? 1   : migratedSalary),
             dispoLimit:                 ud.integer(forKey: "dispoLimit"),
             targetBuffer:               max(100, migratedBuffer  == 0 ? 500  : migratedBuffer),
             targetSavingsRate:          max(1, migratedSavings == 0 ? 20  : migratedSavings),
-            fetchDays:                  max(30, migratedFetch   == 0 ? 60  : migratedFetch),
+            fetchDays:                  min(maxAutoSyncDays, max(30, defaultedFetch)),
             balanceSignalLowUpperBound: migratedLow    == 0 ? 500  : migratedLow,
             balanceSignalMediumUpperBound: migratedMedium == 0 ? 2000 : migratedMedium
         )

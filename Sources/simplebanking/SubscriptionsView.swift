@@ -467,7 +467,7 @@ private struct SubscriptionDetailView: View {
     private func fmtDate(_ s: String) -> String {
         let iso = DateFormatter()
         iso.dateFormat = "yyyy-MM-dd"
-        iso.timeZone = TimeZone(secondsFromGMT: 0)
+        iso.timeZone = TimeZone.current
         guard let d = iso.date(from: s) else { return s }
         return Self.dateFormatter.string(from: d)
     }
