@@ -119,6 +119,8 @@ func handleMessage(_ msg: [String: Any]) -> [String: Any]? {
             "content": [["type": "text", "text": text]],
             "isError": isError
         ])
+    case "ping":
+        return response(id: id, result: [String: Any]())
     default:
         return errorResponse(id: id, code: -32601, message: "Method not found: \(method)")
     }
