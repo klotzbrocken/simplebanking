@@ -16,6 +16,7 @@ private struct TransactionsPanelView: View {
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
     @AppStorage("showTransactionCategories") private var showCategories: Bool = false
+    @AppStorage("showFilterPills") private var showFilterPills: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
@@ -69,6 +70,7 @@ private struct TransactionsPanelView: View {
     }
     @State private var scrollTarget: ScrollTarget?
     @State private var highlightedTxStableId: String? // briefly highlight after scroll
+    @State private var highlightBounce: CGFloat = 1.0  // transient scale-bounce for highlighted row
 
     @State private var scrollWheelMonitor: Any?
     @State private var overscrollAccum: CGFloat = 0
@@ -1055,14 +1057,27 @@ private struct TransactionsPanelView: View {
                         .controlSize(.small)
                         .scaleEffect(0.8)
                 }
-                FilterMenuButton(
-                    activeFilter: vm.activeFilter,
-                    showCategories: showCategories,
-                    onSelect: { vm.activeFilter = $0 },
-                    onToggleCategories: { showCategories.toggle() }
-                )
-                .frame(width: 20, height: 20)
-                .help(L10n.t("Filter", "Filter"))
+                Button(action: { showFilterPills.toggle() }) {
+                    Image(systemName: showFilterPills
+                          ? "line.3.horizontal.decrease.circle.fill"
+                          : "line.3.horizontal.decrease")
+                        .font(.system(size: 15))
+                        .foregroundColor(showFilterPills || vm.activeFilter != .all
+                                         ? .accentColor : .secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(showFilterPills
+                      ? L10n.t("Filter ausblenden", "Hide filters")
+                      : L10n.t("Filter einblenden", "Show filters"))
+                Button(action: { showCategories.toggle() }) {
+                    Image(systemName: showCategories ? "tag.fill" : "tag")
+                        .font(.system(size: 14))
+                        .foregroundColor(showCategories ? .accentColor : .secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(showCategories
+                      ? L10n.t("Kategorien ausblenden", "Hide categories")
+                      : L10n.t("Kategorien anzeigen", "Show categories"))
                 if !vm.isUnifiedMode {
                     Button(action: { toggleFreeze() }) {
                         Image(systemName: "thermometer.snowflake")
@@ -1074,8 +1089,24 @@ private struct TransactionsPanelView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-            
+            .padding(.bottom, 8)
+
+            // Filter-Pills — direkte Schnellfilter unter der Suche (toggelbar via Filter-Button)
+            if showFilterPills {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(TxFilter.allCases, id: \.self) { filter in
+                            FilterPill(filter: filter, active: vm.activeFilter == filter) {
+                                vm.activeFilter = (vm.activeFilter == filter && filter != .all) ? .all : filter
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .padding(.bottom, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
             // Error
             if let err = vm.error {
                 HStack(spacing: 6) {
@@ -1288,11 +1319,17 @@ private struct TransactionsPanelView: View {
                                     .frame(width: 16)
                                 }
                                 .opacity(t.status == "pending" ? 0.65 : 1.0)
-                                .background(
-                                    highlightedTxStableId == t.stableIdentifier
-                                        ? Color.accentColor.opacity(0.10) : Color.clear
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(highlightedTxStableId == t.stableIdentifier
+                                                ? Color.accentColor
+                                                : Color.clear,
+                                                lineWidth: 2)
                                 )
-                                .animation(.easeOut(duration: 0.5), value: highlightedTxStableId)
+                                .scaleEffect(highlightedTxStableId == t.stableIdentifier
+                                             ? highlightBounce : 1.0)
+                                .zIndex(highlightedTxStableId == t.stableIdentifier ? 1 : 0)
+                                .animation(.easeOut(duration: 0.3), value: highlightedTxStableId)
                                 .contextMenu {
                                     if isFrozen {
                                         Button(L10n.t("Kategorie ausschließen", "Exclude category")) {
@@ -1344,7 +1381,22 @@ private struct TransactionsPanelView: View {
                     guard let target else { return }
                     withAnimation { scrollProxy.scrollTo(target.id, anchor: .center) }
                     highlightedTxStableId = target.id
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    highlightBounce = 1.0  // reset so the row rendert erst bei 1.0
+
+                    // Phase 1: skaliere hoch (nachdem das Highlight schon rendert)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.5)) {
+                            highlightBounce = 1.10
+                        }
+                    }
+                    // Phase 2: zurück auf 1.0 (Bounce)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                        withAnimation(.spring(response: 0.40, dampingFraction: 0.55)) {
+                            highlightBounce = 1.0
+                        }
+                    }
+                    // Phase 3: Highlight ausblenden
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                         highlightedTxStableId = nil
                     }
                 }
@@ -1580,9 +1632,13 @@ private struct TransactionsPanelView: View {
         .sheet(isPresented: $showAttentionInbox) {
             AttentionInboxView(cards: attentionCards, onViewTransaction: { fingerprint in
                 showAttentionInbox = false
-                // Find transaction by fingerprint, scroll to it via stableIdentifier
-                if let tx = vm.transactions.first(where: { TransactionRecord.fingerprint(for: $0) == fingerprint }) {
-                    scrollTarget = ScrollTarget(id: tx.stableIdentifier, nonce: UUID())
+                // Delay scroll until the sheet dismiss animation settles; otherwise the
+                // ScrollViewProxy change fires while the list is still reloading and the
+                // target row isn't yet rendered on the new page.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    if let stableId = vm.jumpToTransaction(matchingFingerprint: fingerprint) {
+                        scrollTarget = ScrollTarget(id: stableId, nonce: UUID())
+                    }
                 }
             }, onMarkAllRead: {
                 saveSnoozedCards(attentionCards)
@@ -2203,6 +2259,36 @@ private struct TransactionsTopOffsetPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct FilterPill: View {
+    let filter: TxFilter
+    let active: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 4) {
+                Image(systemName: filter.icon)
+                    .font(.system(size: 11, weight: .medium))
+                Text(filter.label)
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(active ? .white : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(active ? Color.accentColor : Color.clear)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(active ? Color.clear : Color.secondary.opacity(0.3), lineWidth: 1)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 

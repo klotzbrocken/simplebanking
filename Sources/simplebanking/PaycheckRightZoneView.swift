@@ -440,6 +440,24 @@ struct IBANLabel: View {
         return "IBAN " + cleaned.prefix(cleaned.count - 3) + "XXX"
     }
 
+    /// Bank-Anzeigename aus dem aktiven Slot (für den Mail-Body).
+    private var bankName: String? {
+        MultibankingStore.shared.activeSlot?.displayName.nilIfEmpty
+    }
+
+    /// Erzeugt eine `mailto:`-URL mit Bankverbindung im Body.
+    private func mailtoURL() -> URL? {
+        let subject = L10n.t("Meine Bankverbindung", "My bank details")
+        var body = L10n.t("Hier ist meine Bankverbindung:\n\n", "Here are my bank details:\n\n")
+        body += "IBAN: \(iban)\n"
+        if let bankName {
+            body += L10n.t("Bank: \(bankName)\n", "Bank: \(bankName)\n")
+        }
+        let enc: (String) -> String = { $0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0 }
+        let urlString = "mailto:?subject=\(enc(subject))&body=\(enc(body))"
+        return URL(string: urlString)
+    }
+
     var body: some View {
         HStack(spacing: 4) {
             if copied {
@@ -466,6 +484,20 @@ struct IBANLabel: View {
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
                 .buttonStyle(.plain)
+                .help(L10n.t("IBAN kopieren", "Copy IBAN"))
+
+                Button {
+                    if let url = mailtoURL() {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Image(systemName: "envelope")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
+                .buttonStyle(.plain)
+                .help(L10n.t("Bankverbindung per E-Mail teilen", "Share bank details via email"))
+                .padding(.leading, 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

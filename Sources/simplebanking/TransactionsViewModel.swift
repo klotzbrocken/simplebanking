@@ -303,6 +303,31 @@ final class TransactionsViewModel: ObservableObject {
         page = max(page - 1, 0)
     }
 
+    /// Make the transaction matching `fingerprint` visible: clears search + filter,
+    /// switches to the page that contains the tx, and returns its `stableIdentifier`
+    /// so the caller can trigger `scrollTo`. Returns `nil` if no match.
+    /// Used by the Attention-Inbox „Ansehen"-Button.
+    func jumpToTransaction(matchingFingerprint fingerprint: String) -> String? {
+        guard let tx = transactions.first(where: { TransactionRecord.fingerprint(for: $0) == fingerprint }) else {
+            return nil
+        }
+        // Clear any search/filter that might hide the target tx
+        if !query.isEmpty { query = "" }
+        if activeFilter != .all { activeFilter = .all }
+        // After filter reset, filteredTransactions + uniqueDateCache are rebuilt synchronously
+        // via the @Published didSet chain. Find the page now.
+        if !isSearchActive,
+           let targetDate = tx.bookingDate ?? tx.valueDate,
+           let pageIndex = uniqueDateCache.firstIndex(of: targetDate) {
+            page = pageIndex
+        } else if let idx = filteredTransactions.firstIndex(where: {
+            TransactionRecord.fingerprint(for: $0) == fingerprint
+        }) {
+            page = idx / pageSize
+        }
+        return tx.stableIdentifier
+    }
+
     /// Detect internal transfers between own accounts.
     /// Scans the last 30 days / 1,000 rows (O(n²) cap) — see TODOS.md for indexed future approach.
     /// Matches: counterparty IBAN is one of our own IBANs + same absolute amount (±€0.01 fee tolerance) + bookingDate within ±1 day.
@@ -346,7 +371,7 @@ final class TransactionsViewModel: ObservableObject {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()

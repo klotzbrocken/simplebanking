@@ -747,7 +747,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        // Local TZ so `isoDateDaysAgo` returns the user-perceived calendar day.
+        // UTC would shift past-midnight locals into the previous day.
+        formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
@@ -1069,6 +1071,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         supportSub.addItem(docItem)
 
         supportSub.addItem(NSMenuItem.separator())
+
+        let reconnectItem = NSMenuItem(title: t("Bank neu verbinden", "Reconnect Bank"), action: #selector(reconnectBank), keyEquivalent: "")
+        reconnectItem.target = self
+        reconnectItem.tag = 505
+        if let img = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil) {
+            img.isTemplate = true
+            reconnectItem.image = img
+        }
+        supportSub.addItem(reconnectItem)
 
         let forgetItem = NSMenuItem(title: t("Zurücksetzen", "Reset"), action: #selector(resetApp), keyEquivalent: "")
         forgetItem.target = self
@@ -2591,8 +2602,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
 
             if resp.ok, let booked = resp.booked {
-                lastShownTitle = formatEURNoDecimals(booked.amount)
-                self.lastBalance = AmountParser.parse(booked.amount)
+                // Wenn die Bank den Kontostand inkl. Dispokredit liefert (z.B. C24),
+                // zieht die per-Slot-Einstellung `creditLimitIncluded` den Dispo ab,
+                // bevor irgendetwas angezeigt / gecacht wird.
+                let slotSettings = BankSlotSettingsStore.load(slotId: YaxiService.activeSlotId)
+                let rawParsed = AmountParser.parse(booked.amount)
+                let adjustedBalance = (slotSettings.creditLimitIncluded && slotSettings.dispoLimit > 0)
+                    ? rawParsed - Double(slotSettings.dispoLimit)
+                    : rawParsed
+                let roundedNoDecimals = adjustedBalance.rounded()
+                lastShownTitle = Self.eurWholeNumberFormatter.string(
+                    from: NSNumber(value: roundedNoDecimals)
+                ) ?? "0"
+                self.lastBalance = adjustedBalance
                 self.txVM.currentBalance = self.formatEURWithCents(self.lastBalance ?? 0)
                 self.txVM.currentBalanceFetchedAt = Date()
                 if !booked.currency.isEmpty {
@@ -3564,7 +3586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: d)
     }
@@ -3876,6 +3898,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         alert.addButton(withTitle: t("Abbrechen", "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn {
             performSecurityReset()
+        }
+    }
+
+    @objc private func reconnectBank() {
+        let alert = NSAlert()
+        alert.messageText = t("Bank neu verbinden?", "Reconnect bank?")
+        alert.informativeText = t(
+            "Die Verbindung zur Bank wird zurückgesetzt. Beim nächsten Abruf musst Du Dich erneut mit TAN/PIN identifizieren. Kontodaten, IBAN und Einstellungen bleiben erhalten.",
+            "The connection to the bank will be reset. You'll need to re-authenticate with TAN/PIN on the next refresh. Account data, IBAN, and settings will be preserved."
+        )
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: t("Neu verbinden", "Reconnect"))
+        alert.addButton(withTitle: t("Abbrechen", "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let slotId = YaxiService.activeSlotId
+        Task { @MainActor [weak self] in
+            await YaxiService.sessionStore.clearAll(slotId: slotId)
+            AppLogger.log("reconnectBank: cleared sessions + connectionData for slot \(slotId.prefix(8))", category: "Support")
+            self?.refresh()
         }
     }
     
