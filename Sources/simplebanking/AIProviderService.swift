@@ -75,12 +75,14 @@ enum AIProviderService {
                 maxTokens: maxTokens, temperature: temperature)
         case .mistral:
             return try await openAICompatibleComplete(
+                providerName: "Mistral",
                 url: URL(string: "https://api.mistral.ai/v1/chat/completions")!,
                 model: "mistral-small-latest",
                 apiKey: apiKey, systemPrompt: systemPrompt, userMessage: userMessage,
                 maxTokens: maxTokens, temperature: temperature)
         case .openai:
             return try await openAICompatibleComplete(
+                providerName: "OpenAI",
                 url: URL(string: "https://api.openai.com/v1/chat/completions")!,
                 model: "gpt-4o-mini",
                 apiKey: apiKey, systemPrompt: systemPrompt, userMessage: userMessage,
@@ -114,9 +116,9 @@ enum AIProviderService {
 
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            throw NSError(domain: "simplebanking.ai", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "Anthropic API Fehler (\(http.statusCode)): \(body)"])
+            // Status-spezifische Fehlermessage statt generischem "API Fehler (N)".
+            // 401/403 → API-Key-Hinweis, 429 → Retry-After, 5xx → später erneut.
+            throw AIHTTPError.from(provider: "Anthropic", response: http)
         }
         struct Content: Decodable { let type: String; let text: String? }
         struct Resp: Decodable { let content: [Content] }
@@ -130,6 +132,7 @@ enum AIProviderService {
     // MARK: - OpenAI-compatible (Mistral + OpenAI share same format)
 
     private static func openAICompatibleComplete(
+        providerName: String,
         url: URL, model: String, apiKey: String,
         systemPrompt: String, userMessage: String,
         maxTokens: Int, temperature: Double
@@ -152,9 +155,7 @@ enum AIProviderService {
 
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
-            throw NSError(domain: "simplebanking.ai", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "AI API Fehler (\(http.statusCode)): \(body)"])
+            throw AIHTTPError.from(provider: providerName, response: http)
         }
         struct Msg2: Decodable { let content: String? }
         struct Choice: Decodable { let message: Msg2 }

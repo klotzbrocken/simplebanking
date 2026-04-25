@@ -61,7 +61,11 @@ enum AppLogger {
 
     private static func appendLine(message: String, category: String, level: String) {
         let timestamp = Self.timestampString()
-        let line = "[\(timestamp)] [\(level)] [\(category)] \(message)\n"
+        // PII-Schutz: alle Messages laufen durch LogSanitizer (IBAN, Credentials,
+        // lange Tokens werden redacted). Wer raw logs braucht (z.B. Setup-Diagnostik
+        // mit eigenem Sanitizer), nutzt SetupDiagnosticsLogger direkt.
+        let safeMessage = LogSanitizer.redact(message)
+        let line = "[\(timestamp)] [\(level)] [\(category)] \(safeMessage)\n"
         queue.async {
             do {
                 try ensureParentDirectory()
