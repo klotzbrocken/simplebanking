@@ -62,6 +62,10 @@ enum Camt053Importer {
         let delegate = Delegate()
         parser.delegate = delegate
         parser.shouldProcessNamespaces = false
+        // XXE-Härtung: keine externen Entity-Definitionen (DTD-Refs, ENTITY-Tricks
+        // wie billion-laughs). User-importierte Dateien sind low-risk, aber zero
+        // ist besser als low — und der Performance-Cost ist null.
+        parser.shouldResolveExternalEntities = false
         if !parser.parse() {
             if let err = parser.parserError {
                 throw ImportError.parseFailed(err.localizedDescription)

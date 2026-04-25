@@ -1289,6 +1289,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if let observer = globalHotkeyObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        // WAL-Sidecars (db-wal, db-shm) zusammenführen → kleinere Backups.
+        TransactionsDatabase.checkpointWAL()
     }
     
     private func applyAppearance() {

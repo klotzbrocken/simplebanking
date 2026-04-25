@@ -56,6 +56,11 @@ final class MultibankingStore: ObservableObject {
         guard let idx = slots.firstIndex(where: { $0.id == id }) else { return }
         // Purge transactions for this slot from local DB.
         try? TransactionsDatabase.deleteTransactions(forSlotId: id)
+        // Per-Slot Daten aufräumen — sonst leakt der entfernte Slot:
+        //  - Bank-Credentials (encrypted, aber dead file auf Platte)
+        //  - YAXI session/connectionData (sensitive)
+        //  - cachedBalance.<id> + lastSeenTxSig.<id> in UserDefaults (Bloat)
+        Self.purgePerSlotData(slotId: id)
         slots.remove(at: idx)
         if activeIndex >= slots.count { activeIndex = max(0, slots.count - 1) }
         save()
@@ -63,6 +68,22 @@ final class MultibankingStore: ObservableObject {
         if slots.count <= 1 {
             UserDefaults.standard.set(false, forKey: "unifiedModeEnabled")
         }
+    }
+
+    /// Räumt alle slot-suffixed Persistenz-Spuren weg. Wird aus removeSlot
+    /// gerufen — extracted als static, damit Tests sie isoliert prüfen können
+    /// und wir bei zukünftigen per-slot-Storage-Locations zentral ergänzen.
+    /// YAXI-Session-Cleanup läuft in einem detached Task (actor-isolated),
+    /// die anderen Cleanups sync.
+    static func purgePerSlotData(slotId: String) {
+        // YAXI session + connectionData (sensitive!) — actor-isolated, fire-and-forget.
+        Task { await YaxiService.sessionStore.clearAll(slotId: slotId) }
+        // Encrypted credentials file
+        CredentialsStore.deleteSlotFile(slotId: slotId)
+        // UserDefaults pro-slot-suffixed keys
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "simplebanking.cachedBalance.\(slotId)")
+        defaults.removeObject(forKey: "simplebanking.lastSeenTxSig.\(slotId)")
     }
 
     func setActive(index: Int) {
