@@ -955,14 +955,24 @@ struct TransactionDetailView: View {
         Task {
             do {
                 let id = try await ReminderService.shared.createReminder(title: title, dueDate: dueDate)
-                try TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: id)
-                await MainActor.run {
-                    localReminderId = id
-                    localHasReminder = true
-                    onEnrichmentChanged?()
+                // DB-write rückwärtskompensieren wenn er fehlschlägt — sonst hätten
+                // wir einen orphaned EventKit-Reminder, den die App nicht kennt
+                // (User sieht ihn in Reminders.app, aber nicht in simplebanking).
+                do {
+                    try TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: id)
+                    await MainActor.run {
+                        localReminderId = id
+                        localHasReminder = true
+                        onEnrichmentChanged?()
+                    }
+                } catch {
+                    AppLogger.log("Reminder DB write failed, rolling back EventKit reminder: \(error.localizedDescription)",
+                                  category: "Reminder", level: "ERROR")
+                    await ReminderService.shared.deleteReminder(id: id)
                 }
             } catch {
-                // Permission denied or EventKit error
+                AppLogger.log("Reminder create failed: \(error.localizedDescription)",
+                              category: "Reminder", level: "WARN")
             }
         }
     }
@@ -977,7 +987,16 @@ struct TransactionDetailView: View {
             if let id = capturedId {
                 await ReminderService.shared.deleteReminder(id: id)
             }
-            try? TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: nil)
+            // DB-clear darf fehlschlagen (z.B. DB locked) — pruneStaleReminders()
+            // beim nächsten App-Start räumt orphaned reminder_ek_id-Werte ohne
+            // existierenden EventKit-Reminder auf. Aber wir loggen den Fehler
+            // statt ihn ganz zu schlucken.
+            do {
+                try TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: nil)
+            } catch {
+                AppLogger.log("Reminder DB clear failed (pruneStale heilt beim nächsten Start): \(error.localizedDescription)",
+                              category: "Reminder", level: "WARN")
+            }
             await MainActor.run { onEnrichmentChanged?() }
         }
     }
