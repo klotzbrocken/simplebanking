@@ -122,8 +122,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>${VERSION_BASE}-universal</string>
   <key>SBBuildDate</key><string>${BUILD_DATE}</string>
   <key>SBBuildTime</key><string>${BUILD_TIME}</string>
-  <key>LSUIElement</key><true/>\
-  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>SUFeedURL</key><string>${SPARKLE_FEED_URL}</string>
   <key>SUPublicEDKey</key><string>${SPARKLE_PUBLIC_KEY}</string>
   <key>NSRemindersUsageDescription</key><string>simplebanking erstellt Erinnerungen für Buchungen in der Reminders-App.</string>

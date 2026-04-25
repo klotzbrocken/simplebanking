@@ -128,6 +128,10 @@ struct TransactionDetailView: View {
         TransactionRecord.fingerprint(for: transaction)
     }
 
+    private var txSlotId: String {
+        transaction.slotId ?? TransactionsDatabase.activeSlotId
+    }
+
     private var empfaengerText: String {
         [transaction.creditor?.name, transaction.debtor?.name]
             .compactMap { $0 }.joined(separator: " ")
@@ -225,6 +229,7 @@ struct TransactionDetailView: View {
     private func applyCategorySelection(_ newCategory: TransactionCategory) {
         let autoCategory = TransactionCategorizer.autoCategory(for: transaction)
         let txID = txFingerprint
+        let capturedSlotId = txSlotId
         isApplyingCategoryChange = true
         categoryEditStatus = "Kategorie wird aktualisiert..."
 
@@ -237,7 +242,7 @@ struct TransactionDetailView: View {
 
             do {
                 // Update only this transaction's category row instead of rebuilding all.
-                try TransactionsDatabase.updateKategorie(txID: txID, kategorie: newCategory.displayName)
+                try TransactionsDatabase.updateKategorie(txID: txID, slotId: capturedSlotId, kategorie: newCategory.displayName)
                 await MainActor.run {
                     NotificationCenter.default.post(name: Notification.Name("TransactionCategoriesChanged"), object: nil)
                     hasCategoryOverride = TransactionCategorizer.hasOverride(txID: txID)
@@ -344,9 +349,10 @@ struct TransactionDetailView: View {
         let trimmed = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
         isSavingNote = true
         let capturedTxID = txFingerprint
+        let capturedSlotId = txSlotId
         let capturedBankId = bankId
         Task.detached {
-            try? TransactionsDatabase.saveNote(txID: capturedTxID, note: trimmed.isEmpty ? nil : trimmed, bankId: capturedBankId)
+            try? TransactionsDatabase.saveNote(txID: capturedTxID, slotId: capturedSlotId, note: trimmed.isEmpty ? nil : trimmed, bankId: capturedBankId)
             await MainActor.run {
                 isSavingNote = false
                 noteStatus = trimmed.isEmpty ? "Notiz gelöscht." : "Notiz gespeichert."
@@ -358,9 +364,10 @@ struct TransactionDetailView: View {
     private func loadAttachments() {
         isLoadingAttachments = true
         let capturedTxID = txFingerprint
+        let capturedSlotId = txSlotId
         let capturedBankId = bankId
         Task.detached {
-            let atts = (try? TransactionsDatabase.loadAttachments(txID: capturedTxID, bankId: capturedBankId)) ?? []
+            let atts = (try? TransactionsDatabase.loadAttachments(txID: capturedTxID, slotId: capturedSlotId, bankId: capturedBankId)) ?? []
             await MainActor.run {
                 attachments = atts
                 isLoadingAttachments = false
@@ -370,9 +377,10 @@ struct TransactionDetailView: View {
 
     private func deleteAttachment(_ att: AttachmentInfo) {
         let capturedTxID = txFingerprint
+        let capturedSlotId = txSlotId
         let capturedBankId = bankId
         Task.detached {
-            try? TransactionsDatabase.deleteAttachment(id: att.id, txID: capturedTxID, bankId: capturedBankId)
+            try? TransactionsDatabase.deleteAttachment(id: att.id, txID: capturedTxID, slotId: capturedSlotId, bankId: capturedBankId)
             await MainActor.run {
                 attachments.removeAll { $0.id == att.id }
                 onEnrichmentChanged?()
@@ -381,13 +389,12 @@ struct TransactionDetailView: View {
     }
 
     private func openAttachment(_ att: AttachmentInfo) {
-        guard let dir = try? TransactionsDatabase.attachmentsDirectory(txID: txFingerprint, bankId: bankId) else { return }
-        let fileURL = dir.appendingPathComponent(att.filename)
+        guard let fileURL = try? TransactionsDatabase.resolveAttachmentURL(txID: txFingerprint, slotId: txSlotId, bankId: bankId, filename: att.filename) else { return }
         NSWorkspace.shared.open(fileURL)
     }
 
     private func openAttachmentFolder() {
-        guard let dir = try? TransactionsDatabase.attachmentsDirectory(txID: txFingerprint, bankId: bankId) else { return }
+        guard let dir = try? TransactionsDatabase.attachmentsDirectory(txID: txFingerprint, slotId: txSlotId, bankId: bankId) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([dir])
     }
 
@@ -404,7 +411,7 @@ struct TransactionDetailView: View {
                           let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
                     Task { @MainActor in
                         do {
-                            let att = try TransactionsDatabase.addAttachment(txID: txFingerprint, bankId: bankId, sourceURL: url)
+                            let att = try TransactionsDatabase.addAttachment(txID: txFingerprint, slotId: txSlotId, bankId: bankId, sourceURL: url)
                             attachments.append(att)
                             attachmentError = ""
                             onEnrichmentChanged?()
@@ -934,12 +941,13 @@ struct TransactionDetailView: View {
     private func toggleUnread() {
         localIsUnread.toggle()
         let txID = txFingerprint
-        try? TransactionsDatabase.setUnread(txID: txID, bankId: bankId, value: localIsUnread)
+        try? TransactionsDatabase.setUnread(txID: txID, slotId: txSlotId, bankId: bankId, value: localIsUnread)
         onEnrichmentChanged?()
     }
 
     private func createDetailReminder(dueDate: Date) {
         let txID = txFingerprint
+        let slotId = txSlotId
         let resolution = MerchantResolver.resolve(transaction: transaction)
         let merchant = resolution.effectiveMerchant
         let amountStr = formatAmount()
@@ -947,7 +955,7 @@ struct TransactionDetailView: View {
         Task {
             do {
                 let id = try await ReminderService.shared.createReminder(title: title, dueDate: dueDate)
-                try TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: id)
+                try TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: id)
                 await MainActor.run {
                     localReminderId = id
                     localHasReminder = true
@@ -961,6 +969,7 @@ struct TransactionDetailView: View {
 
     private func removeDetailReminder() {
         let txID = txFingerprint
+        let slotId = txSlotId
         let capturedId = localReminderId
         localReminderId = nil
         localHasReminder = false
@@ -968,7 +977,7 @@ struct TransactionDetailView: View {
             if let id = capturedId {
                 await ReminderService.shared.deleteReminder(id: id)
             }
-            try? TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: nil)
+            try? TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: nil)
             await MainActor.run { onEnrichmentChanged?() }
         }
     }

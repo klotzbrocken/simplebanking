@@ -7,11 +7,11 @@ import Foundation
 /// no prediction magic. Returns the amount the user should mentally subtract
 /// from their balance to know what's actually free to spend.
 ///
-/// Tolerance window semantics:
-/// - salaryDay is the nominal day of month the cycle resets
-/// - tolerance widens the boundary on BOTH sides of the resolved date
-///   (used for .begin/.mid presets where the exact day varies ±4)
-/// - manual exact day = tolerance 0
+/// Asymmetrische Toleranz:
+/// - `toleranceBefore`: Gehalt kann bis zu N Tage FRÜHER kommen (typ. 4)
+/// - `toleranceAfter`: Gehalt kann bis zu N Tage SPÄTER kommen (typ. 1, nicht 4)
+///   Real-World-Asymmetrie: Gehalt vorgezogen auf Freitag ist häufig,
+///   Gehalt 4 Tage verspätet ist sehr selten.
 enum LeftToPayCalculator {
 
     private static let isoFormatter: DateFormatter = {
@@ -23,19 +23,18 @@ enum LeftToPayCalculator {
     }()
 
     /// Sum of recurring payments expected in the current cycle and not yet charged.
-    /// - Parameters:
-    ///   - payments: RecurringPayment entries from FixedCostsAnalyzer (90d history).
-    ///   - salaryDay: day of month the cycle resets (from BankSlotSettings.effectiveSalaryDay).
-    ///   - tolerance: ±days around the resolved salary day (from BankSlotSettings.salaryDayTolerance).
-    ///   - today: injection point for tests.
     static func compute(
         payments: [RecurringPayment],
         salaryDay: Int,
-        tolerance: Int = 0,
+        toleranceBefore: Int = 0,
+        toleranceAfter: Int = 0,
         today: Date = Date()
     ) -> Double {
-        let cStart = cycleStart(salaryDay: salaryDay, tolerance: tolerance, today: today)
-        let cEnd   = cycleEnd(salaryDay: salaryDay, tolerance: tolerance, today: today)
+        let cStart = cycleStart(salaryDay: salaryDay, toleranceBefore: toleranceBefore, today: today)
+        let cEnd   = cycleEnd(salaryDay: salaryDay,
+                              toleranceBefore: toleranceBefore,
+                              toleranceAfter: toleranceAfter,
+                              today: today)
 
         var sum: Double = 0
         for p in payments {
@@ -63,36 +62,41 @@ enum LeftToPayCalculator {
     // in March but becomes a 30 in April.
 
     /// Start of the current cycle = most recent salary day on or before today,
-    /// shifted earlier by `tolerance` days so payments booked within the
+    /// shifted earlier by `toleranceBefore` days so payments booked within the
     /// pre-arrival window still count as "new cycle".
-    static func cycleStart(salaryDay: Int, tolerance: Int = 0, today: Date) -> Date {
+    static func cycleStart(salaryDay: Int, toleranceBefore: Int = 0, today: Date) -> Date {
         let cal = Calendar.current
-        let anchor = resolvedSalaryDate(salaryDay: salaryDay, anchorMonth: today, tolerance: tolerance, forEnd: false, today: today)
-        let start = cal.date(byAdding: .day, value: -tolerance, to: anchor) ?? anchor
+        let anchor = resolvedSalaryDate(salaryDay: salaryDay, anchorMonth: today,
+                                        toleranceBefore: toleranceBefore, forEnd: false, today: today)
+        let start = cal.date(byAdding: .day, value: -toleranceBefore, to: anchor) ?? anchor
         return cal.startOfDay(for: start)
     }
 
     /// End of the current cycle = next salary day strictly after today,
-    /// shifted later by `tolerance` days so late-arriving payments still
-    /// count as "this cycle".
-    static func cycleEnd(salaryDay: Int, tolerance: Int = 0, today: Date) -> Date {
+    /// shifted later by `toleranceAfter` days. `toleranceBefore` wird nur
+    /// für die „ist Gehalt schon da"-Weiche in `resolvedSalaryDate` gebraucht.
+    static func cycleEnd(salaryDay: Int,
+                         toleranceBefore: Int = 0,
+                         toleranceAfter: Int = 0,
+                         today: Date) -> Date {
         let cal = Calendar.current
-        let anchor = resolvedSalaryDate(salaryDay: salaryDay, anchorMonth: today, tolerance: tolerance, forEnd: true, today: today)
-        let end = cal.date(byAdding: .day, value: tolerance, to: anchor) ?? anchor
-        // Include the full end day (so cycleEnd is the START of the day after +tolerance)
+        let anchor = resolvedSalaryDate(salaryDay: salaryDay, anchorMonth: today,
+                                        toleranceBefore: toleranceBefore, forEnd: true, today: today)
+        let end = cal.date(byAdding: .day, value: toleranceAfter, to: anchor) ?? anchor
         return cal.startOfDay(for: end)
     }
 
     /// Resolves the salary date for the cycle boundary:
-    /// - `forEnd == false`: most recent resolved salary date ≤ today (within tolerance)
-    /// - `forEnd == true`:  next resolved salary date > today (within tolerance)
+    /// - `forEnd == false`: most recent resolved salary date ≤ today (within toleranceBefore)
+    /// - `forEnd == true`:  next resolved salary date > today (within toleranceBefore)
     ///
-    /// Day is clamped to the target month's length each time, so day 31 becomes
-    /// 30 in April, 28/29 in February, etc.
+    /// `toleranceBefore` bestimmt, ab wann wir „Gehalt ist angekommen" annehmen —
+    /// nominaler Tag minus Before-Toleranz. Die After-Toleranz spielt für die
+    /// Boundary-Entscheidung keine Rolle (nur für cycleEnd-Shift).
     private static func resolvedSalaryDate(
         salaryDay: Int,
         anchorMonth: Date,
-        tolerance: Int,
+        toleranceBefore: Int,
         forEnd: Bool,
         today: Date
     ) -> Date {
@@ -103,12 +107,10 @@ enum LeftToPayCalculator {
             in: thisMonthStart, nominalDay: salaryDay
         )
 
-        // Determine if this month's salary is "in the past" relative to today.
-        // Matches SalaryProgressCalculator: tolerance pulls the boundary earlier,
-        // so we consider salary arrived even a few days before the nominal date.
         let todayDay = cal.component(.day, from: today)
         let thisMonthDay = cal.component(.day, from: thisMonthSalary)
-        let salaryInPast = todayDay >= thisMonthDay - tolerance
+        // „Gehalt ist schon angekommen (oder im Pre-Fenster)" sobald heute >= salaryDay - toleranceBefore
+        let salaryInPast = todayDay >= thisMonthDay - toleranceBefore
 
         if forEnd {
             if salaryInPast {

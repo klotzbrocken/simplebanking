@@ -27,8 +27,20 @@ struct BankSlotSettings: Codable {
         }
     }
 
-    /// Tolerance in days around the effective salary day for income detection.
-    var salaryDayTolerance: Int { salaryDayPreset == 2 ? 0 : 4 }
+    /// Legacy: symmetrisches Toleranz-Fenster. Nutze für neue Logik besser die
+    /// asymmetrischen Varianten `salaryDayToleranceBefore` / `-After`.
+    var salaryDayTolerance: Int { salaryDayToleranceBefore }
+
+    /// Wie viele Tage VOR dem nominalen Gehaltstag das Gehalt typischerweise schon
+    /// kommen kann (z.B. wenn der 1. auf einen Sonntag fällt, buchen viele AG am Freitag).
+    /// Für `Anfang`/`Mitte`-Presets: 4 Tage Toleranz nach hinten, für `Individuell`: 0.
+    var salaryDayToleranceBefore: Int { salaryDayPreset == 2 ? 0 : 4 }
+
+    /// Wie viele Tage NACH dem nominalen Gehaltstag das Gehalt spätestens noch
+    /// akzeptiert wird. In der Praxis viel enger als das Before-Fenster: Gehalt
+    /// kommt selten 4 Tage zu spät, aber manchmal 1 Tag durch Clearing-Delay.
+    /// Für `Anfang`/`Mitte`-Presets: 1 Tag, für `Individuell`: 0.
+    var salaryDayToleranceAfter: Int { salaryDayPreset == 2 ? 0 : 1 }
 
     init(
         salaryDay: Int = 1,

@@ -16,8 +16,8 @@ enum AICategorizationService {
               !apiKey.isEmpty else { return }
 
         let records: [TransactionRecord]
+        let slotId = await MainActor.run { MultibankingStore.shared.activeSlot?.id ?? "legacy" }
         do {
-            let slotId = await MainActor.run { MultibankingStore.shared.activeSlot?.id ?? "legacy" }
             records = try TransactionsDatabase.loadRecordsForCategorization(slotId: slotId)
         } catch { return }
         guard !records.isEmpty else { return }
@@ -42,14 +42,14 @@ enum AICategorizationService {
                     systemPrompt: AIProviderService.CATEGORIZATION_SYSTEM_PROMPT,
                     userMessage: jsonText,
                     maxTokens: 600, temperature: 0.0)
-                applyResult(response)
+                applyResult(response, slotId: slotId)
             } catch {
                 // Silent fail — leave existing category unchanged
             }
         }
     }
 
-    private static func applyResult(_ json: String) {
+    private static func applyResult(_ json: String, slotId: String) {
         guard let data = json.data(using: .utf8),
               let array = try? JSONSerialization.jsonObject(with: data) as? [[String: String]]
         else { return }
@@ -60,7 +60,7 @@ enum AICategorizationService {
                   validCategoryKeys.contains(key),
                   let category = TransactionCategory.from(jsonKey: key)
             else { continue }
-            try? TransactionsDatabase.updateKategorie(txID: txID, kategorie: category.displayName)
+            try? TransactionsDatabase.updateKategorie(txID: txID, slotId: slotId, kategorie: category.displayName)
         }
     }
 }

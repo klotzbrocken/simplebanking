@@ -35,12 +35,18 @@ private struct TransactionsPanelView: View {
     @State private var showAttentionInbox = false
     @State private var attentionCards: [AttentionCard] = []
     @State private var inboxGeneration: Int = 0
+    /// Signature der letzten Attention-Inbox-Berechnung. Hash aus den Inputs, die
+    /// das Ergebnis determinieren — wenn identisch, kann die Inbox ohne Neu-Rechnung
+    /// direkt wieder angezeigt werden. Invalidiert sich automatisch bei neuen Tx
+    /// oder Reminder-Änderungen, weil sich der Hash ändert.
+    @State private var attentionCacheSignature: String?
     @State private var showSubscriptions = false
     @State private var showCalendar = false
     @State private var selectedTxID: String? = nil
     @State private var activeSwipedTxID: String? = nil
     @State private var reminderPickerTxID: String? = nil
     @State private var reminderPickerBankId: String = "primary"
+    @State private var reminderPickerSlotId: String = "legacy"
     @State private var reminderPickerDate: Date = {
         var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
         comps.day = (comps.day ?? 1) + 1
@@ -141,29 +147,22 @@ private struct TransactionsPanelView: View {
         return f
     }()
 
+    @AppStorage("balanceSubtitleStyle.panel") private var panelSubtitleStyle: Int = 0
+
     @ViewBuilder
     private var leftToPaySubtitle: some View {
-        if let amount = vm.leftToPayAmount {
-            let text: String = {
-                if amount > 0.5 {
-                    let formatted = Self.leftToPayFormatter.string(from: NSNumber(value: amount))
-                        ?? "\(Int(amount)) €"
-                    return L10n.t("Noch offen: \(formatted)", "Still to pay: \(formatted)")
-                } else {
-                    return L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
-                }
-            }()
-            Text(text)
-                .font(.system(size: 11, weight: .regular))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                .lineLimit(1)
-        } else {
-            // Reserve space so the balance block doesn't shift vertically
-            // while the value is still being computed.
-            Text(" ")
-                .font(.system(size: 11, weight: .regular))
-                .hidden()
-        }
+        // Im Unified-Mode ist leftToPay pro-Slot aggregiert (jeder Slot mit eigenem
+        // Gehaltstag). Sub-Metrics würden diese Summe gegen EINEN Gehaltstag
+        // rechnen → fachlich falsch. Deshalb im Unified-Mode Classic erzwingen.
+        BalanceSubtitleSwitch(
+            balance: AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance),
+            leftToPayAmount: vm.leftToPayAmount,
+            salaryDay: activeSlotSettings.effectiveSalaryDay,
+            salaryToleranceBefore: activeSlotSettings.salaryDayToleranceBefore,
+            salaryToleranceAfter: activeSlotSettings.salaryDayToleranceAfter,
+            style: $panelSubtitleStyle,
+            forceClassic: vm.isUnifiedMode
+        )
     }
 
     private var colorScheme: ColorScheme? {
@@ -289,7 +288,30 @@ private struct TransactionsPanelView: View {
         return cards.filter { !keys.contains($0.snoozeKey) }
     }
 
+    /// Cache-Key für die Attention-Inbox. Nutzt `MAX(updated_at)` aus der DB als
+    /// Input-Hash — jede Tx-Mutation (Upsert, Merchant-Amendment, Reminder-Verknüpfung,
+    /// Flag-Toggle, Note-Edit) geht durch `upsert()`/`set*()`-Methoden, die alle
+    /// `updated_at` bumpen. Damit ändert sich die Signature bei wirklich jedem
+    /// fachlich relevanten Input-Wechsel, nicht nur bei Count/Datum.
+    private func computeAttentionSignature() -> String {
+        let isDemoMode = demoMode
+        let isUnified = vm.isUnifiedMode
+        let slotIds: [String] = isDemoMode
+            ? ["demo-main", "demo-daily", "demo-bills"]
+            : (isUnified ? MultibankingStore.shared.slots.map { $0.id } : [TransactionsDatabase.activeSlotId])
+        let maxUpdated = (try? TransactionsDatabase.maxUpdatedAt(slots: slotIds, bankId: activeBankId)) ?? ""
+        let snoozeHash = (UserDefaults.standard.stringArray(forKey: Self.snoozeKeysKey) ?? []).sorted().joined(separator: "|")
+        return "\(slotIds.sorted().joined(separator: ",")):\(maxUpdated):\(snoozeHash):\(isDemoMode)"
+    }
+
     private func recomputeAttentionInbox() {
+        // Cache-Fast-Path: wenn sich nichts geändert hat, die vorhandenen Cards wiederverwenden.
+        let signature = computeAttentionSignature()
+        if signature == attentionCacheSignature, !attentionCards.isEmpty {
+            return
+        }
+        attentionCacheSignature = signature
+
         // Capture MainActor-bound values before going off-thread
         inboxGeneration &+= 1
         let generation = inboxGeneration
@@ -317,15 +339,28 @@ private struct TransactionsPanelView: View {
                 let cfg = BankSlotSettingsStore.load(slotId: slotId)
                 var cards = AttentionInboxDetector.analyze(
                     recent: recent, history: history,
-                    salaryDay: cfg.effectiveSalaryDay, salaryTolerance: cfg.salaryDayTolerance
+                    salaryDay: cfg.effectiveSalaryDay,
+                    salaryToleranceBefore: cfg.salaryDayToleranceBefore,
+                    salaryToleranceAfter: cfg.salaryDayToleranceAfter
                 )
-                // Transactions with an active EventKit reminder → Reminder cards in attention inbox
+                // Transactions with an active EventKit reminder → Reminder cards in attention inbox.
+                // Enrichment-Keys sind jetzt `slotId|txID` — Buchung matchen wir über den
+                // txID-Suffix und, falls vorhanden, den Slot.
                 let enrichment = (try? TransactionsDatabase.loadEnrichmentData(bankId: enrichBankId)) ?? [:]
-                let reminderTxIDs = enrichment.filter { $0.value.reminderId != nil }.map { $0.key }
-                if !reminderTxIDs.isEmpty {
+                let reminderEntries: [(slotId: String, txID: String)] = enrichment
+                    .filter { $0.value.reminderId != nil }
+                    .compactMap { (k, _) in
+                        let parts = k.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+                        guard parts.count == 2 else { return nil }
+                        return (String(parts[0]), String(parts[1]))
+                    }
+                if !reminderEntries.isEmpty {
                     let allTx = recent + history
-                    for txID in reminderTxIDs {
-                        guard let tx = allTx.first(where: { TransactionRecord.fingerprint(for: $0) == txID }) else { continue }
+                    for entry in reminderEntries {
+                        guard let tx = allTx.first(where: {
+                            TransactionRecord.fingerprint(for: $0) == entry.txID
+                            && ($0.slotId ?? TransactionsDatabase.activeSlotId) == entry.slotId
+                        }) else { continue }
                         let merchant = MerchantResolver.resolve(transaction: tx).effectiveMerchant
                         let amt = tx.parsedAmount
                         let fmtAmt = String(format: "%.2f €", abs(amt))
@@ -339,7 +374,7 @@ private struct TransactionsPanelView: View {
                             ),
                             detail: fmtAmt,
                             relatedTxId: TransactionRecord.fingerprint(for: tx),
-                            snoozeKey: "reminder-\(txID)"
+                            snoozeKey: "reminder-\(entry.slotId)-\(entry.txID)"
                         ))
                     }
                 }
@@ -1233,7 +1268,8 @@ private struct TransactionsPanelView: View {
                             // Transactions for this date
                             ForEach(group.transactions, id: \.stableIdentifier) { t in
                                 let txID = TransactionRecord.fingerprint(for: t)
-                                let enrichment = vm.enrichmentData[txID]
+                                let txSlotId = t.slotId ?? TransactionsDatabase.activeSlotId
+                                let enrichment = vm.enrichmentData[TxEnrichmentKey.make(slotId: txSlotId, txID: txID)]
                                 let resolution = MerchantResolver.resolve(transaction: t)
                                 let rowSlotColor: Color? = vm.isUnifiedMode ? slotColor(for: t) : nil
                                 let isTransfer = vm.isUnifiedMode && vm.internalTransferIDs.contains(txID)
@@ -1259,13 +1295,14 @@ private struct TransactionsPanelView: View {
                                         isUnread: txIsUnread,
                                         hasReminder: txHasReminder,
                                         activeSwipedID: $activeSwipedTxID,
-                                        onToggleUnread: { toggleUnread(txID: txID, bankId: activeBankId) },
+                                        onToggleUnread: { toggleUnread(txID: txID, slotId: txSlotId, bankId: activeBankId) },
                                         onReminderAction: {
                                             if txHasReminder {
-                                                removeReminder(txID: txID, reminderId: txReminderId, bankId: activeBankId)
+                                                removeReminder(txID: txID, slotId: txSlotId, reminderId: txReminderId, bankId: activeBankId)
                                             } else {
                                                 reminderPickerTxID = txID
                                                 reminderPickerBankId = activeBankId
+                                                reminderPickerSlotId = txSlotId
                                             }
                                         }
                                     ) {
@@ -1294,6 +1331,7 @@ private struct TransactionsPanelView: View {
                                             onReminderAction: {
                                                 reminderPickerTxID = txID
                                                 reminderPickerBankId = activeBankId
+                                                reminderPickerSlotId = txSlotId
                                             },
                                             onEnrichmentChangedWithRemover: { vm.loadEnrichmentData(bankId: activeBankId) },
                                             onSelect: {
@@ -1459,19 +1497,50 @@ private struct TransactionsPanelView: View {
                     .buttonStyle(PlainButtonStyle())
                     .help(L10n.t("Attention Inbox", "Attention Inbox"))
 
-                    // Mehr ▾
-                    Menu {
+                    // Wenn Fenster maximiert: Financial Health, Kalender, Fixkosten als
+                    // eigenständige Icon-Buttons. Sonst bleiben sie im „Mehr ▾"-Menü unten.
+                    if panelIsWide {
                         Button(action: { if !freezeActive { showScoreSheet = true } }) {
-                            Label(L10n.t("Financial Health", "Financial Health"), systemImage: "square.grid.2x2")
+                            Image(systemName: "square.grid.2x2")
+                                .font(.system(size: 14))
+                                .foregroundColor(freezeActive ? .secondary.opacity(0.4) : .secondary)
                         }
+                        .buttonStyle(PlainButtonStyle())
                         .disabled(freezeActive)
+                        .help(L10n.t("Financial Health", "Financial Health"))
 
                         Button(action: { showCalendar.toggle() }) {
-                            Label(L10n.t("Kalender", "Calendar"), systemImage: "calendar.badge.clock")
+                            Image(systemName: "calendar.badge.clock")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
                         }
+                        .buttonStyle(PlainButtonStyle())
+                        .help(L10n.t("Kalender", "Calendar"))
 
                         Button(action: { showFixedCosts = true }) {
-                            Label(L10n.t("Fixkosten", "Fixed costs"), systemImage: "repeat.circle")
+                            Image(systemName: "repeat.circle")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help(L10n.t("Fixkosten", "Fixed costs"))
+                    }
+
+                    // Mehr ▾
+                    Menu {
+                        if !panelIsWide {
+                            Button(action: { if !freezeActive { showScoreSheet = true } }) {
+                                Label(L10n.t("Financial Health", "Financial Health"), systemImage: "square.grid.2x2")
+                            }
+                            .disabled(freezeActive)
+
+                            Button(action: { showCalendar.toggle() }) {
+                                Label(L10n.t("Kalender", "Calendar"), systemImage: "calendar.badge.clock")
+                            }
+
+                            Button(action: { showFixedCosts = true }) {
+                                Label(L10n.t("Fixkosten", "Fixed costs"), systemImage: "repeat.circle")
+                            }
                         }
 
                         Button(action: { markAllTransactionsRead() }) {
@@ -1575,7 +1644,9 @@ private struct TransactionsPanelView: View {
                 var enrichment: [String: TxEnrichment] = [:]
                 for t in vm.transactions {
                     let txID = TransactionRecord.fingerprint(for: t)
-                    enrichment[txID] = TxEnrichment(note: nil, attachmentCount: 0, isUnread: true, isFlagged: false)
+                    let slotId = t.slotId ?? TransactionsDatabase.activeSlotId
+                    let key = TxEnrichmentKey.make(slotId: slotId, txID: txID)
+                    enrichment[key] = TxEnrichment(note: nil, attachmentCount: 0, isUnread: true, isFlagged: false)
                 }
                 vm.enrichmentData = enrichment
             } else {
@@ -1685,12 +1756,13 @@ private struct TransactionsPanelView: View {
                 onConfirm: { date in
                     guard let txID = reminderPickerTxID else { return }
                     let bankId = reminderPickerBankId
+                    let slotId = reminderPickerSlotId
                     let tx = vm.transactions.first { TransactionRecord.fingerprint(for: $0) == txID }
                     let merchant = tx.map { MerchantResolver.resolve(transaction: $0).effectiveMerchant } ?? txID
                     let amount = tx.map { amountText($0) } ?? ""
                     let title = "\(merchant) \(amount)".trimmingCharacters(in: .whitespaces)
                     reminderPickerTxID = nil
-                    setReminder(txID: txID, bankId: bankId, dueDate: date, title: title)
+                    setReminder(txID: txID, slotId: slotId, bankId: bankId, dueDate: date, title: title)
                 },
                 onCancel: { reminderPickerTxID = nil }
             )
@@ -1924,6 +1996,15 @@ private struct TransactionsPanelView: View {
 
     private func markAllTransactionsRead() {
         let bankId = activeBankId
+        // Scope: in der Single-Account-Ansicht nur den aktiven Slot; in Unified alle Slots.
+        // Ohne Scope würden Buchungen aus Konten, die gerade nicht sichtbar sind,
+        // stumm als gelesen markiert.
+        let scopedSlots: [String]?
+        if vm.isUnifiedMode {
+            scopedSlots = nil                               // Unified → alle Slots
+        } else {
+            scopedSlots = [TransactionsDatabase.activeSlotId]
+        }
         if demoMode {
             for (key, value) in vm.enrichmentData where value.isUnread {
                 var e = value
@@ -1933,31 +2014,32 @@ private struct TransactionsPanelView: View {
             return
         }
         Task {
-            try? TransactionsDatabase.markAllRead(bankId: bankId)
+            try? TransactionsDatabase.markAllRead(bankId: bankId, slotIds: scopedSlots)
             await MainActor.run { vm.loadEnrichmentData(bankId: bankId) }
         }
     }
 
-    private func toggleUnread(txID: String, bankId: String) {
-        let current = vm.enrichmentData[txID]?.isUnread ?? false
+    private func toggleUnread(txID: String, slotId: String, bankId: String) {
+        let key = TxEnrichmentKey.make(slotId: slotId, txID: txID)
+        let current = vm.enrichmentData[key]?.isUnread ?? false
         let newValue = !current
         if demoMode {
             // Demo: in-memory only, no DB
-            var e = vm.enrichmentData[txID] ?? TxEnrichment(note: nil, attachmentCount: 0, isUnread: false, isFlagged: false)
+            var e = vm.enrichmentData[key] ?? TxEnrichment(note: nil, attachmentCount: 0, isUnread: false, isFlagged: false)
             e.isUnread = newValue
-            vm.enrichmentData[txID] = e
+            vm.enrichmentData[key] = e
         } else {
-            try? TransactionsDatabase.setUnread(txID: txID, bankId: bankId, value: newValue)
+            try? TransactionsDatabase.setUnread(txID: txID, slotId: slotId, bankId: bankId, value: newValue)
             vm.loadEnrichmentData(bankId: bankId)
         }
     }
 
-    private func setReminder(txID: String, bankId: String, dueDate: Date, title: String) {
+    private func setReminder(txID: String, slotId: String, bankId: String, dueDate: Date, title: String) {
         guard !demoMode else { return }
         Task {
             do {
                 let id = try await ReminderService.shared.createReminder(title: title, dueDate: dueDate)
-                try TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: id)
+                try TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: id)
                 await MainActor.run { vm.loadEnrichmentData(bankId: bankId) }
             } catch {
                 // Permission denied or EventKit error — user will see Reminders.app permission dialog
@@ -1965,13 +2047,13 @@ private struct TransactionsPanelView: View {
         }
     }
 
-    private func removeReminder(txID: String, reminderId: String?, bankId: String) {
+    private func removeReminder(txID: String, slotId: String, reminderId: String?, bankId: String) {
         guard !demoMode else { return }
         Task {
             if let id = reminderId {
                 await ReminderService.shared.deleteReminder(id: id)
             }
-            try? TransactionsDatabase.setReminderId(txID: txID, bankId: bankId, reminderId: nil)
+            try? TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: nil)
             await MainActor.run { vm.loadEnrichmentData(bankId: bankId) }
         }
     }
@@ -2475,13 +2557,14 @@ private struct TransactionRowNew: View {
         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
             guard attachmentCount < 3 else { return false }
             let txID = TransactionRecord.fingerprint(for: transaction)
+            let slotId = transaction.slotId ?? TransactionsDatabase.activeSlotId
             for provider in providers {
                 if provider.hasItemConformingToTypeIdentifier("public.file-url") {
                     provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
                         guard let data = item as? Data,
                               let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
                         Task { @MainActor in
-                            _ = try? TransactionsDatabase.addAttachment(txID: txID, bankId: bankId, sourceURL: url)
+                            _ = try? TransactionsDatabase.addAttachment(txID: txID, slotId: slotId, bankId: bankId, sourceURL: url)
                             onEnrichmentChanged()
                         }
                     }

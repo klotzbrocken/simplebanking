@@ -25,26 +25,26 @@ final class AttentionInboxDetectorTests: XCTestCase {
     func test_salaryMissing_overdueByMoreThanTwoTolerance_fires() {
         let today = makeDate(year: 2026, month: 4, day: 8)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 1, tolerance: 2, now: today
+            recent: [], salaryDay: 1, toleranceBefore: 0, toleranceAfter: 2, now: today
         )
         XCTAssertEqual(cards.count, 1)
         XCTAssertEqual(cards.first?.type, .salaryMissing)
     }
 
-    /// today exactly at deadline (tolerance+2 days after) → not strictly past → no card
+    /// today exactly at deadline (toleranceAfter+2 days after) → not strictly past → no card
     func test_salaryMissing_exactlyAtDeadline_doesNotFire() {
         let today = makeDate(year: 2026, month: 4, day: 5)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 1, tolerance: 2, now: today
+            recent: [], salaryDay: 1, toleranceBefore: 0, toleranceAfter: 2, now: today
         )
         XCTAssertTrue(cards.isEmpty)
     }
 
-    /// salary within grace period (same month, tolerance not yet expired) → no card
+    /// salary within grace period (same month, toleranceAfter not yet expired) → no card
     func test_salaryMissing_withinGracePeriod_doesNotFire() {
         let today = makeDate(year: 2026, month: 4, day: 2)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 1, tolerance: 1, now: today
+            recent: [], salaryDay: 1, toleranceBefore: 0, toleranceAfter: 1, now: today
         )
         XCTAssertTrue(cards.isEmpty)
     }
@@ -53,7 +53,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
     func test_salaryMissing_previousMonthOverdue_fires() {
         let today = makeDate(year: 2026, month: 4, day: 10)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 25, tolerance: 3, now: today
+            recent: [], salaryDay: 25, toleranceBefore: 0, toleranceAfter: 3, now: today
         )
         XCTAssertEqual(cards.count, 1,
             "April 10 is past March 30 deadline for March 25 salary")
@@ -63,7 +63,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
     func test_salaryMissing_salaryDayZero_doesNotFire() {
         let today = makeDate(year: 2026, month: 4, day: 20)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 0, tolerance: 0, now: today
+            recent: [], salaryDay: 0, toleranceBefore: 0, toleranceAfter: 0, now: today
         )
         XCTAssertTrue(cards.isEmpty)
     }
@@ -72,7 +72,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
     func test_salaryMissing_crossMonthBoundary_fires() {
         let today = makeDate(year: 2026, month: 5, day: 3)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 30, tolerance: 0, now: today
+            recent: [], salaryDay: 30, toleranceBefore: 0, toleranceAfter: 0, now: today
         )
         XCTAssertEqual(cards.count, 1,
             "Cross-month: April salary missed, today May 3 should fire")
@@ -82,7 +82,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
     func test_salaryMissing_crossMonthBoundary_exactlyAtDeadline_doesNotFire() {
         let today = makeDate(year: 2026, month: 5, day: 2)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 30, tolerance: 0, now: today
+            recent: [], salaryDay: 30, toleranceBefore: 0, toleranceAfter: 0, now: today
         )
         XCTAssertTrue(cards.isEmpty)
     }
@@ -92,9 +92,70 @@ final class AttentionInboxDetectorTests: XCTestCase {
     func test_salaryMissing_salaryDayClampsToMonthEnd() {
         let today = makeDate(year: 2026, month: 5, day: 1)
         let cards = AttentionInboxDetector.detectSalaryMissing(
-            recent: [], salaryDay: 31, tolerance: 1, now: today
+            recent: [], salaryDay: 31, toleranceBefore: 0, toleranceAfter: 1, now: today
         )
         XCTAssertTrue(cards.isEmpty)
+    }
+
+    /// Asymmetrische Toleranzen: Gehaltstag 1., Gehalt kam bereits am 28. (4 d vor).
+    /// toleranceBefore=4, toleranceAfter=1. Heute ist der 5. → Grace-Period abgelaufen
+    /// (1 + 2 = 3 Tage), aber detectedIncome mit before=4 muss den 28. noch im Fenster
+    /// sehen → Karte darf NICHT feuern. Regressionstest gegen den Fall, wo ein einzelner
+    /// Toleranzwert genutzt wird.
+    func test_salaryMissing_earlySalaryWithinBeforeWindow_doesNotFire() {
+        let today = makeDate(year: 2026, month: 4, day: 5)
+        // Gehalt am 28. März (4 Tage vor dem 1. April)
+        let earlySalary = makeTx(
+            bookingDate: "2026-03-28", merchant: "Arbeitgeber",
+            amount: 2500.0, endToEndId: "sal-28"
+        )
+        let cards = AttentionInboxDetector.detectSalaryMissing(
+            recent: [earlySalary], salaryDay: 1,
+            toleranceBefore: 4, toleranceAfter: 1, now: today
+        )
+        XCTAssertTrue(cards.isEmpty,
+            "Gehalt kam 4 Tage früh (28.3.), toleranceBefore=4 muss das erkennen")
+    }
+
+    /// Regression: derselbe User-Case (salaryDay=1, vor=4, nach=1, Gehalt am 28. Vormonat)
+    /// über mehrere Monats-Anker — insbesondere auch über Jahresgrenze hinweg. Stellt
+    /// sicher, dass der Fix nicht an ein bestimmtes Kalendermonat gebunden ist und
+    /// `detectedIncome` `now` korrekt durchreicht (früherer Bug: intern `Date()`).
+    func test_regression_salaryMissing_earlyPayment28_noCard_acrossMonths() {
+        let cases: [(today: Date, salaryBooking: String, label: String)] = [
+            (makeDate(year: 2026, month: 4, day: 5),  "2026-03-28", "Apr über März"),
+            (makeDate(year: 2026, month: 9, day: 5),  "2026-08-28", "Sep über Aug"),
+            (makeDate(year: 2026, month: 1, day: 5),  "2025-12-28", "Jan über Dez (Jahresgrenze)")
+        ]
+        for c in cases {
+            let salary = makeTx(
+                bookingDate: c.salaryBooking, merchant: "Arbeitgeber",
+                amount: 2500.0, endToEndId: "sal-\(c.salaryBooking)"
+            )
+            let cards = AttentionInboxDetector.detectSalaryMissing(
+                recent: [salary], salaryDay: 1,
+                toleranceBefore: 4, toleranceAfter: 1, now: c.today
+            )
+            XCTAssertTrue(cards.isEmpty,
+                "\(c.label): Gehalt am \(c.salaryBooking) liegt innerhalb toleranceBefore=4, Karte darf nicht feuern")
+        }
+    }
+
+    /// Regression: isolated Test der darunterliegenden `detectedIncome`-Funktion.
+    /// Diese wird auch außerhalb des Detectors verwendet (BalanceBar, SettingsPanel,
+    /// TransactionsPanelView) — wenn sie den Bugcase nicht erkennt, fallen andere
+    /// UI-Indikatoren ebenfalls auf „kein Gehalt" zurück.
+    func test_regression_detectedIncome_earlyPayment28_countedAsCurrent() {
+        let today = makeDate(year: 2026, month: 4, day: 5)
+        let salary = makeTx(
+            bookingDate: "2026-03-28", merchant: "Arbeitgeber",
+            amount: 2500.0, endToEndId: "sal-28"
+        )
+        let detected = SalaryProgressCalculator.detectedIncome(
+            salaryDay: 1, tolerance: 4, transactions: [salary], now: today
+        )
+        XCTAssertEqual(detected, 2500.0,
+            "Gehalt am 28.3. mit salaryDay=1 und tolerance=4 muss als aktuelle Periode erkannt werden")
     }
 
     // MARK: - duplicates (real API via AttentionInboxDetector.analyze)
@@ -107,7 +168,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
         let aral2 = makeTx(bookingDate: isoDay(-1), merchant: "Aral", amount: -78.50, endToEndId: "aral-2")
 
         let cards = AttentionInboxDetector.analyze(
-            recent: [aral1, aral2], history: [], salaryDay: 0, salaryTolerance: 0
+            recent: [aral1, aral2], history: [], salaryDay: 0, salaryToleranceBefore: 0, salaryToleranceAfter: 0
         )
         XCTAssertTrue(
             cards.contains { $0.type == .possibleDuplicate },
@@ -120,7 +181,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
         let rewe2 = makeTx(bookingDate: isoDay(-1), merchant: "REWE", amount: -62.10, endToEndId: "rewe-2")
 
         let cards = AttentionInboxDetector.analyze(
-            recent: [rewe1, rewe2], history: [], salaryDay: 0, salaryTolerance: 0
+            recent: [rewe1, rewe2], history: [], salaryDay: 0, salaryToleranceBefore: 0, salaryToleranceAfter: 0
         )
         XCTAssertFalse(cards.contains { $0.type == .possibleDuplicate })
     }
@@ -130,7 +191,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
         let edeka = makeTx(bookingDate: isoDay(-1), merchant: "Edeka", amount: -45.30, endToEndId: "edeka")
 
         let cards = AttentionInboxDetector.analyze(
-            recent: [rewe, edeka], history: [], salaryDay: 0, salaryTolerance: 0
+            recent: [rewe, edeka], history: [], salaryDay: 0, salaryToleranceBefore: 0, salaryToleranceAfter: 0
         )
         XCTAssertFalse(cards.contains { $0.type == .possibleDuplicate })
     }
@@ -146,7 +207,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
         let nf3 = makeTx(bookingDate: isoDay(-2), merchant: "Netflix", amount: -19.99, endToEndId: "nf-3")
 
         let cards = AttentionInboxDetector.analyze(
-            recent: [nf1, nf2, nf3], history: [], salaryDay: 0, salaryTolerance: 0
+            recent: [nf1, nf2, nf3], history: [], salaryDay: 0, salaryToleranceBefore: 0, salaryToleranceAfter: 0
         )
         XCTAssertFalse(
             cards.contains { $0.type == .possibleDuplicate },
@@ -171,7 +232,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
             purposeCode: "DBIT"
         )
         let cards = AttentionInboxDetector.analyze(
-            recent: [newDebit], history: [], salaryDay: 0, salaryTolerance: 0
+            recent: [newDebit], history: [], salaryDay: 0, salaryToleranceBefore: 0, salaryToleranceAfter: 0
         )
         XCTAssertTrue(
             cards.contains { $0.type == .newDirectDebit },
@@ -196,7 +257,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
             purposeCode: "DBIT"
         )
         let cards = AttentionInboxDetector.analyze(
-            recent: [newDebit], history: [oldDebit], salaryDay: 0, salaryTolerance: 0
+            recent: [newDebit], history: [oldDebit], salaryDay: 0, salaryToleranceBefore: 0, salaryToleranceAfter: 0
         )
         XCTAssertFalse(
             cards.contains { $0.type == .newDirectDebit },
@@ -214,7 +275,7 @@ final class AttentionInboxDetectorTests: XCTestCase {
             purposeCode: "DBIT"
         )
         let cards = AttentionInboxDetector.analyze(
-            recent: [noIban], history: [], salaryDay: 0, salaryTolerance: 0
+            recent: [noIban], history: [], salaryDay: 0, salaryToleranceBefore: 0, salaryToleranceAfter: 0
         )
         XCTAssertFalse(cards.contains { $0.type == .newDirectDebit })
     }

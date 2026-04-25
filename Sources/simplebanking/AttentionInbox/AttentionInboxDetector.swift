@@ -59,7 +59,8 @@ enum AttentionInboxDetector {
         recent: [TransactionsResponse.Transaction],
         history: [TransactionsResponse.Transaction],
         salaryDay: Int,
-        salaryTolerance: Int
+        salaryToleranceBefore: Int,
+        salaryToleranceAfter: Int
     ) -> [AttentionCard] {
         var cards: [AttentionCard] = []
 
@@ -77,7 +78,9 @@ enum AttentionInboxDetector {
             history.filter { txDate($0) < cutoff14 }.map { canonicalMerchant($0) }
         )
 
-        cards += detectSalaryMissing(recent: recent, salaryDay: salaryDay, tolerance: salaryTolerance)
+        cards += detectSalaryMissing(recent: recent, salaryDay: salaryDay,
+                                     toleranceBefore: salaryToleranceBefore,
+                                     toleranceAfter: salaryToleranceAfter)
         cards += detectDuplicates(recent: recentExpenses7)
         cards += detectSubscriptionIncrease(recent: recentExpenses14, history: historyExpenses)
         cards += detectUnusualExpense(recent: recentExpenses7, history: historyExpenses)
@@ -93,10 +96,16 @@ enum AttentionInboxDetector {
 
     /// D: Gehalt fehlt / verspätet
     /// - Parameter now: Current date — defaults to `Date()` in production, injectable for tests.
+    ///
+    /// Asymmetrische Toleranzen: `toleranceBefore` bestimmt wie früh das Gehalt akzeptiert
+    /// wird (z.B. 28. bei nominalem 1., wenn 1. auf Sonntag fällt); `toleranceAfter` bestimmt
+    /// die Grace-Period vor dem "Gehalt fehlt"-Alarm. Nur ein gemeinsamer Wert würde entweder
+    /// früh gebuchtes Gehalt übersehen oder die Warnung zu spät feuern.
     internal static func detectSalaryMissing(
         recent: [TransactionsResponse.Transaction],
         salaryDay: Int,
-        tolerance: Int,
+        toleranceBefore: Int,
+        toleranceAfter: Int,
         now: Date = Date()
     ) -> [AttentionCard] {
         guard salaryDay > 0 else { return [] }
@@ -127,12 +136,19 @@ enum AttentionInboxDetector {
             expectedDate = prev
         }
 
-        // Only fire if today is strictly past the tolerance + 2 day grace period
-        guard today > (cal.date(byAdding: .day, value: tolerance + 2, to: expectedDate) ?? expectedDate)
+        // Only fire if today is strictly past the after-tolerance + 2 day grace period.
+        guard today > (cal.date(byAdding: .day, value: toleranceAfter + 2, to: expectedDate) ?? expectedDate)
         else { return [] }
 
-        // Check if salary arrived since expectedDate (detectedIncome handles the period window)
-        let detected = SalaryProgressCalculator.detectedIncome(salaryDay: salaryDay, tolerance: tolerance, transactions: recent)
+        // Detection window nutzt die *Before*-Toleranz, damit früh gebuchtes Gehalt (z.B. 28.
+        // bei nominalem 1.) erkannt wird. Mit nur `toleranceAfter` würden solche Zahlungen
+        // aus dem Fenster fallen und die Karte fälschlich feuern.
+        // `now` wird durchgereicht, damit Tests deterministisch sind — sonst würde
+        // `detectedIncome` intern `Date()` verwenden und ein für April geschriebener
+        // Test im Mai einen anderen Monats-Anker liefern.
+        let detected = SalaryProgressCalculator.detectedIncome(
+            salaryDay: salaryDay, tolerance: toleranceBefore, transactions: recent, now: now
+        )
         guard detected <= 0 else { return [] }
 
         let fmt = DateFormatter()
