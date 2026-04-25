@@ -186,35 +186,75 @@ enum TransactionCategorizer {
         )
     }
 
-    static func saveOverride(txID: String, category: TransactionCategory) {
-        let key = txID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Override-Storage seit Migration v19 mit Composite-Key `slotId|txID` —
+    /// derselbe Fingerprint kann in mehreren Slots existieren (z.B. interne
+    /// Transfers zwischen eigenen Konten), und ein Override in einem Slot darf
+    /// nicht den anderen Slot überschreiben. Legacy-Einträge (nur txID-Key)
+    /// werden im Read-Path noch unterstützt, neue Writes nur composite.
+    ///
+    /// `slotId` Default = `TransactionsDatabase.activeSlotId` für Convenience —
+    /// entspricht dem Pattern in restlichem DB-Code. UI-callsites sollten
+    /// explizit `slotId` durchreichen wenn der Kontext bekannt ist.
+    static func saveOverride(txID: String, slotId: String = TransactionsDatabase.activeSlotId,
+                             category: TransactionCategory) {
+        let key = compositeOverrideKey(slotId: slotId, txID: txID)
         guard !key.isEmpty else { return }
 
         var overrides = transactionOverrides()
         overrides[key] = category.rawValue
+        // Beim Schreiben den alten legacy-Key (nur txID) aufräumen, falls er
+        // existierte — vermeidet Drift zwischen alter und neuer Speicherform.
+        let legacy = legacyOverrideKey(txID: txID)
+        if !legacy.isEmpty { overrides.removeValue(forKey: legacy) }
         persistOverrides(overrides)
     }
 
     @discardableResult
-    static func removeOverride(txID: String) -> Bool {
-        let key = txID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return false }
+    static func removeOverride(txID: String,
+                               slotId: String = TransactionsDatabase.activeSlotId) -> Bool {
+        let composite = compositeOverrideKey(slotId: slotId, txID: txID)
+        let legacy = legacyOverrideKey(txID: txID)
+        guard !composite.isEmpty || !legacy.isEmpty else { return false }
 
         var overrides = transactionOverrides()
-        let removed = overrides.removeValue(forKey: key) != nil
+        var removed = false
+        if !composite.isEmpty, overrides.removeValue(forKey: composite) != nil { removed = true }
+        if !legacy.isEmpty, overrides.removeValue(forKey: legacy) != nil { removed = true }
         persistOverrides(overrides)
         return removed
     }
 
-    static func hasOverride(txID: String) -> Bool {
-        overrideCategory(txID: txID) != nil
+    static func hasOverride(txID: String,
+                            slotId: String = TransactionsDatabase.activeSlotId) -> Bool {
+        overrideCategory(txID: txID, slotId: slotId) != nil
     }
 
-    static func overrideCategory(txID: String) -> TransactionCategory? {
-        let key = txID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return nil }
-        guard let rawValue = transactionOverrides()[key] else { return nil }
-        return TransactionCategory.from(displayName: rawValue)
+    static func overrideCategory(txID: String,
+                                 slotId: String = TransactionsDatabase.activeSlotId) -> TransactionCategory? {
+        let overrides = transactionOverrides()
+        // Bevorzugt: composite-Key (slot-scoped, korrekt seit v19)
+        let composite = compositeOverrideKey(slotId: slotId, txID: txID)
+        if !composite.isEmpty, let rawValue = overrides[composite] {
+            return TransactionCategory.from(displayName: rawValue)
+        }
+        // Legacy-Fallback: alter Key war nur txID. Wird beim nächsten saveOverride
+        // automatisch zur composite-Form migriert.
+        let legacy = legacyOverrideKey(txID: txID)
+        if !legacy.isEmpty, let rawValue = overrides[legacy] {
+            return TransactionCategory.from(displayName: rawValue)
+        }
+        return nil
+    }
+
+    private static func compositeOverrideKey(slotId: String, txID: String) -> String {
+        let sid = slotId.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let tid = txID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sid.isEmpty, !tid.isEmpty else { return "" }
+        return "\(sid)|\(tid)"
+    }
+
+    private static func legacyOverrideKey(txID: String) -> String {
+        txID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func classify(

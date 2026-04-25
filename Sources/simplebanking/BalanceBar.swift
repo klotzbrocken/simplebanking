@@ -3158,6 +3158,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func checkNewBookings(userId: String, password: String) async {
+        // HBCI-Guard: parallel zu einem laufenden Bank-Dialog würde
+        // YaxiService.fetchTransactions "Fehlender Dialogkontext" bei
+        // Sparkasse/Volksbank auslösen. Beispiel-Trigger: `sb refresh` startet
+        // refreshAsync (das wegen busy früh-returnt + retry queued) und ruft
+        // dann uns hier — ohne diesen Guard würden wir den parallelen Call
+        // trotzdem feuern. CLI bekommt outcome=failed, ehrlich.
+        guard !isHBCICallInFlight else {
+            AppLogger.log("checkNewBookings: HBCI call already in flight, skipping",
+                          category: "Network", level: "WARN")
+            recordCLIRefreshError("Refresh läuft bereits")
+            return
+        }
+        isHBCICallInFlight = true
+        defer { isHBCICallInFlight = false }
+
         // Avoid noisy UI if locked/hidden; still compute indicator.
         let from = isoDateDaysAgo(7)
         let slotId = TransactionsDatabase.activeSlotId

@@ -1858,8 +1858,8 @@ struct SettingsView: View {
 
                 if passwordRequired {
                     Text(t(
-                        "Das App-Passwort schützt deine Bankdaten vor unbefugtem Zugriff.",
-                        "The app password protects your banking data from unauthorized access."
+                        "Das App-Passwort schützt deine Bank-Zugangsdaten (Login) im Keychain. Lokal gespeicherte Umsätze (Cache) bleiben für CLI-Tools und MCP-Clients lesbar.",
+                        "The app password protects your bank login credentials in the Keychain. Locally cached transactions remain readable by CLI tools and MCP clients."
                     ))
                     .font(ThemeFonts.body(size: 12))
                     .foregroundColor(.secondary)
