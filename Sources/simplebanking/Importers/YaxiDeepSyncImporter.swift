@@ -19,17 +19,10 @@ enum YaxiDeepSyncImporter {
         masterPassword: String
     ) async throws -> ImportResult {
         // Switch active slot so credentials/session/database all target the right bank.
-        let prevYaxiSlot = YaxiService.activeSlotId
-        let prevCredsSlot = CredentialsStore.activeSlotId
-        let prevDbSlot = TransactionsDatabase.activeSlotId
-        YaxiService.activeSlotId = slotId
-        CredentialsStore.activeSlotId = slotId
-        TransactionsDatabase.activeSlotId = slotId
-        defer {
-            YaxiService.activeSlotId = prevYaxiSlot
-            CredentialsStore.activeSlotId = prevCredsSlot
-            TransactionsDatabase.activeSlotId = prevDbSlot
-        }
+        // Snapshot/restore pattern via SlotContext — sicher gegen vergessenen Layer.
+        let snapshot = SlotContext.snapshot()
+        SlotContext.activate(slotId: slotId)
+        defer { SlotContext.restore(snapshot) }
 
         let creds: StoredCredentials
         do {

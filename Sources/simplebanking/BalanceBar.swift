@@ -794,9 +794,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Task 4: Set active slot IDs in all data layers at startup
         let store = MultibankingStore.shared
         if let slot = store.activeSlot {
-            YaxiService.activeSlotId = slot.id
-            CredentialsStore.activeSlotId = slot.id
-            TransactionsDatabase.activeSlotId = slot.id
+            SlotContext.activate(slotId: slot.id)
             applySlotToViewModel(slot)
             // SessionStore.init() always loads the legacy (no-suffix) keys regardless of which
             // slot was last active. For non-legacy slots this means the wrong session is in memory.
@@ -3384,9 +3382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         slotEpoch += 1
 
         // Switch active slot in all data layers
-        YaxiService.activeSlotId = slot.id
-        CredentialsStore.activeSlotId = slot.id
-        TransactionsDatabase.activeSlotId = slot.id
+        SlotContext.activate(slotId: slot.id)
         await YaxiService.sessionStore.reloadForActiveSlot()
         store.setActive(index: index)
 
@@ -3514,9 +3510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Neue Slot-ID VOR dem Wizard erstellen und aktivieren,
         // damit performSetupConnection alle Daten in den richtigen Slot schreibt.
         let newSlot = BankSlot.makeNew(iban: "", displayName: "", logoId: nil)
-        YaxiService.activeSlotId = newSlot.id
-        CredentialsStore.activeSlotId = newSlot.id
-        TransactionsDatabase.activeSlotId = newSlot.id
+        SlotContext.activate(slotId: newSlot.id)
 
         final class AdditionalAccountsBox: @unchecked Sendable { var value: [Routex.Account] = [] }
         let additionalAccountsBox = AdditionalAccountsBox()
@@ -3582,9 +3576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 MultibankingStore.shared.addSlot(extraBankSlot)
             }
             // Restore to primary slot
-            CredentialsStore.activeSlotId = newSlot.id
-            YaxiService.activeSlotId = newSlot.id
-            TransactionsDatabase.activeSlotId = newSlot.id
+            SlotContext.activate(slotId: newSlot.id)
 
             updateTxPanelAccountNav()
             applySlotToViewModel(finalSlot)   // uses name-first brand resolution (logo + name)
@@ -3594,9 +3586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         case .demoMode, .cancelled:
             // Vorherigen Slot wiederherstellen
             let restoreId = previousSlot?.id ?? "legacy"
-            YaxiService.activeSlotId = restoreId
-            CredentialsStore.activeSlotId = restoreId
-            TransactionsDatabase.activeSlotId = restoreId
+            SlotContext.activate(slotId: restoreId)
             if let prev = previousSlot {
                 MultibankingStore.shared.setActive(index: MultibankingStore.shared.slots.firstIndex(where: { $0.id == prev.id }) ?? 0)
                 applySlotToViewModel(prev)
@@ -3614,9 +3604,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Ensure legacy slot is active for first-time setup.
         // If the app was reset while a non-legacy slot was active, activeSlotId would still
         // hold the old slot ID — causing all setup data to be written under the wrong keys.
-        YaxiService.activeSlotId = "legacy"
-        CredentialsStore.activeSlotId = "legacy"
-        TransactionsDatabase.activeSlotId = "legacy"
+        SlotContext.activate(slotId: "legacy")
 
         final class AdditionalAccountsBox2: @unchecked Sendable { var value: [Routex.Account] = [] }
         let additionalAccountsBox2 = AdditionalAccountsBox2()
