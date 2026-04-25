@@ -130,9 +130,13 @@ struct SalaryProgressCalculator {
 
     /// Detects the most recent income amount from transactions (same multi-signal logic as ringFraction).
     /// Returns the current period income, or the previous period's if salary hasn't arrived yet.
-    static func detectedIncome(salaryDay: Int, tolerance: Int = 0, transactions: [TransactionsResponse.Transaction]) -> Double {
+    /// `now` is injectable for tests — without it, callers drift relative to `Date()` and
+    /// calendar-month tests become brittle.
+    static func detectedIncome(salaryDay: Int, tolerance: Int = 0,
+                               transactions: [TransactionsResponse.Transaction],
+                               now: Date = Date()) -> Double {
         let cal = Calendar.current
-        let p = Self.progress(salaryDay: salaryDay, tolerance: tolerance)
+        let p = Self.progress(salaryDay: salaryDay, tolerance: tolerance, from: now)
         // Expand window back by tolerance days so pre-arrival income is included
         let currentStart = cal.startOfDay(for:
             cal.date(byAdding: .day, value: -tolerance, to: p.lastSalaryDate) ?? p.lastSalaryDate)

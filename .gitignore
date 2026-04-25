@@ -23,3 +23,9 @@ Sources/simplebanking/Secrets.swift
 # Backups und temporäre Worktrees
 /backups/
 /.claude/worktrees/
+
+# Lokale Checkpoints (Arbeits-Snapshots, keine Release-Artefakte)
+/.checkpoints/
+
+# Lokale Research-Notizen (nicht als Doku committen — bei Bedarf hier austragen)
+/routex-lua-api-findings.md

@@ -257,6 +257,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     @AppStorage("confettiInitialShown") private var confettiInitialShown: Bool = false
     @AppStorage("connectedBankDisplayName") private var connectedBankDisplayName: String = ""
     @AppStorage("connectedBankLogoID") private var connectedBankLogoID: String = ""
+    /// Optional: App zusätzlich im Dock + Cmd-Tab zeigen. Default: off (Agent-App-Verhalten).
+    @AppStorage("dockModeEnabled") private var dockModeEnabled: Bool = false
+    /// Referenz auf das App-Menu-Close-Item, damit Cmd-Q-Verhalten live umschaltbar ist.
+    private var appMenuCloseItem: NSMenuItem?
 
     @AppStorage("confettiLastIncomeTxSig") private var confettiLastIncomeTxSig: String = ""
     /// Per-slot dict: latest tx sig observed from YAXI (not yet "seen" by opening the panel).
@@ -835,6 +839,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         migrateLastSeenTxSigIfNeeded()
 
         installEditMenu()
+        applyDockMode()
+        // Settings-Toggle → Live-Umschalten
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.dockModeChanged"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.applyDockMode()
+        }
+        // CLI-IPC: `sb refresh` → DistributedNotification → Haupt-App-Refresh.
+        // CLI hat keine Routex-Dependency, triggert stattdessen den bestehenden
+        // Refresh-Pfad der App. WICHTIG: Der reguläre `refresh()` holt nur den Saldo
+        // (Cache in UserDefaults). Transaktionen werden nur fetched wenn
+        // `loadTransactionsOnStart=true`. Für die CLI ist der Transactions-Fetch aber
+        // essentiell — ohne ihn bumpt `MAX(updated_at)` nicht und das CLI-Polling
+        // läuft in den Timeout. Wir rufen daher den Full-Refresh-Pfad direkt.
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("tech.yaxi.simplebanking.cli.refreshRequested"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            AppLogger.log("CLI-Refresh angefordert", category: "CLI")
+            self?.refreshFromCLI()
+        }
         do {
             try TransactionsDatabase.migrate()
         } catch {
@@ -1282,6 +1310,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         Task { await refreshAsync() }
     }
 
+    // MARK: - CLI refresh outcome
+
+    /// True solange ein CLI-Refresh läuft. Erlaubt den internen catch-Blöcken
+    /// in `refreshAsync` / `checkNewBookings`, ihre Fehlertexte an den Outcome
+    /// zu hängen, ohne die Funktions-Signaturen zu brechen. Wird sync auf
+    /// MainActor gesetzt — verhindert dass parallele `sb refresh`-Calls
+    /// gegenseitig den Outcome überschreiben.
+    private var cliRefreshInFlight: Bool = false
+    private var cliRefreshErrorDetail: String?
+
+    /// Wird aus catch-Blöcken gerufen. No-op außerhalb eines CLI-Refresh.
+    /// First-wins: der erste Fehler gewinnt, damit Folgefehler den root cause
+    /// nicht überschreiben.
+    private func recordCLIRefreshError(_ detail: String) {
+        guard cliRefreshInFlight, cliRefreshErrorDetail == nil else { return }
+        cliRefreshErrorDetail = detail
+    }
+
+    /// Schreibt den Outcome als JSON nach `simplebanking.cli.lastRefreshOutcome`.
+    /// Setzt zusätzlich den alten `lastRefreshCompletedAt`-Marker, damit ältere
+    /// `sb`-Binaries nicht brechen (rückwärtskompat). Wire-Format steckt in
+    /// `CLIRefreshOutcomeMarshaller` — dort liegen auch die Tests.
+    private func writeCLIRefreshOutcome(_ status: CLIRefreshOutcomeStatus, detail: String? = nil) {
+        guard let encoded = CLIRefreshOutcomeMarshaller.encode(status: status, detail: detail) else {
+            AppLogger.log("CLI-Refresh outcome encode failed (\(status.rawValue))", category: "CLI", level: "ERROR")
+            return
+        }
+        UserDefaults.standard.set(encoded.json, forKey: CLIRefreshOutcomeKeys.outcome)
+        UserDefaults.standard.set(encoded.timestamp, forKey: CLIRefreshOutcomeKeys.legacy)
+        AppLogger.log("CLI-Refresh \(status.rawValue)\(detail.map { " — \($0)" } ?? "")", category: "CLI")
+    }
+
+    /// Vom CLI-Observer getriggert. Holt Saldo *und* Transaktionen in jedem Fall
+    /// (unabhängig von `loadTransactionsOnStart`), damit das CLI-Polling einen
+    /// DB-Bump sieht. Schreibt nach Abschluss einen Outcome-Marker (success /
+    /// locked / failed), damit die CLI unterscheiden kann, ob tatsächlich ein
+    /// Bankabruf gelungen ist oder nur „irgendwas passiert" ist.
+    @objc private func refreshFromCLI() {
+        // Race-Guard: zweiter `sb refresh` während ein erster noch läuft würde
+        // sonst den Outcome-State des ersten überschreiben. Wir melden den
+        // Conflict ehrlich zurück statt einen falschen Erfolg zu schreiben.
+        if cliRefreshInFlight {
+            writeCLIRefreshOutcome(.failed, detail: "Refresh läuft bereits")
+            return
+        }
+        cliRefreshInFlight = true
+        cliRefreshErrorDetail = nil
+        scaBackoffUntil = nil
+
+        Task {
+            defer { cliRefreshInFlight = false }
+
+            // Gate: kein Refresh möglich ohne entsperrten Master-Password-Kontext.
+            guard !locked, let pw = masterPassword,
+                  let creds = try? CredentialsStore.load(masterPassword: pw) else {
+                writeCLIRefreshOutcome(.locked)
+                return
+            }
+
+            await refreshAsync()
+            // Transactions-Fetch ist für `sb refresh` Pflicht — refreshAsync() holt
+            // nur den Saldo wenn loadTransactionsOnStart=false.
+            await checkNewBookings(userId: creds.userId, password: creds.password)
+
+            // SCA-Backoff wurde während refreshAsync gesetzt → als failed werten,
+            // auch wenn kein einzelner catch-Block Detail geliefert hat.
+            if let detail = cliRefreshErrorDetail {
+                writeCLIRefreshOutcome(.failed, detail: detail)
+            } else if scaBackoffUntil != nil {
+                writeCLIRefreshOutcome(.failed, detail: "SCA-Freigabe erforderlich")
+            } else {
+                writeCLIRefreshOutcome(.success)
+            }
+        }
+    }
+
     // Called from SetupFlowPanel outcome — activates single demo
     @objc private func toggleDemoMode() {
         if !demoMode { setDemoSingle() } else { setDemoOff() }
@@ -1560,10 +1664,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             NSApp.mainMenu = NSMenu()
         }
 
-        // App menu with Cmd+Q → close visible windows (not quit)
+        // App menu with Cmd+Q — Action wird von applyDockMode() je nach
+        // Activation Policy gesetzt (Agent: "Fenster schließen", Dock: "Beenden").
         let appMenu = NSMenu()
-        let closeItem = NSMenuItem(title: t("Fenster schließen", "Close Window"), action: #selector(closeVisibleWindows), keyEquivalent: "q")
+        let closeItem = NSMenuItem(title: "", action: nil, keyEquivalent: "q")
         appMenu.addItem(closeItem)
+        appMenuCloseItem = closeItem
         let appMenuItem = NSMenuItem(title: "simplebanking", action: nil, keyEquivalent: "")
         appMenuItem.submenu = appMenu
         NSApp.mainMenu?.addItem(appMenuItem)
@@ -1580,6 +1686,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         editItem.submenu = editMenu
         NSApp.mainMenu?.addItem(editItem)
+    }
+
+    /// Schaltet zwischen Agent-Mode (nur Menüleiste) und Dock-Mode (zusätzlich Dock + Cmd-Tab)
+    /// anhand der `dockModeEnabled`-Einstellung. Kann jederzeit live gerufen werden.
+    func applyDockMode() {
+        let targetPolicy: NSApplication.ActivationPolicy = dockModeEnabled ? .regular : .accessory
+        if NSApp.activationPolicy() != targetPolicy {
+            NSApp.setActivationPolicy(targetPolicy)
+            AppLogger.log("applyDockMode: activationPolicy → \(dockModeEnabled ? ".regular" : ".accessory")",
+                          category: "App")
+        }
+        // Cmd-Q-Verhalten an Modus anpassen
+        if let item = appMenuCloseItem {
+            if dockModeEnabled {
+                item.title = L10n.t("simplebanking beenden", "Quit simplebanking")
+                item.action = #selector(NSApplication.terminate(_:))
+                item.target = nil  // first responder chain → NSApp
+            } else {
+                item.title = L10n.t("Fenster schließen", "Close Window")
+                item.action = #selector(closeVisibleWindows)
+                item.target = self
+            }
+        }
+    }
+
+    /// macOS ruft das auf, wenn der User das Dock-Icon klickt (nur im Dock-Mode).
+    /// Wir öffnen das Umsatzfenster, sofern es nicht schon sichtbar ist.
+    /// `hasVisibleWindows` zählt JEDES Fenster (Settings, Sheets …) — wir müssen
+    /// daher spezifisch den Sichtbarkeits-Status des Umsatzpanels prüfen, damit
+    /// die Zusage „Dock-Icon öffnet die Umsatzliste" auch dann stimmt, wenn
+    /// gerade nur Settings o.ä. offen ist.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if txPanel?.isVisible != true {
+            Task { [weak self] in await self?.openTransactionsPanel() }
+        }
+        return true
     }
 
     @objc private func closeVisibleWindows() {
@@ -2227,7 +2369,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     total += LeftToPayCalculator.compute(
                         payments: payments,
                         salaryDay: cfg.effectiveSalaryDay,
-                        tolerance: cfg.salaryDayTolerance
+                        toleranceBefore: cfg.salaryDayToleranceBefore,
+                        toleranceAfter: cfg.salaryDayToleranceAfter
                     )
                 }
             }
@@ -2293,6 +2436,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             forcedColorScheme: configuredColorScheme()
         )
         rootView.leftToPayAmount = txVM.leftToPayAmount
+        let subMetricsSettings = BankSlotSettingsStore.load(
+            slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        )
+        rootView.salaryDay = subMetricsSettings.effectiveSalaryDay
+        rootView.salaryToleranceBefore = subMetricsSettings.salaryDayToleranceBefore
+        rootView.salaryToleranceAfter = subMetricsSettings.salaryDayToleranceAfter
         rootView.onDoubleTap = { [weak self] in
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
@@ -2433,6 +2582,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             forcedColorScheme: configuredColorScheme()
         )
         rootView.leftToPayAmount = txVM.leftToPayAmount
+        let subMetricsSettings = BankSlotSettingsStore.load(
+            slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        )
+        rootView.salaryDay = subMetricsSettings.effectiveSalaryDay
+        rootView.salaryToleranceBefore = subMetricsSettings.salaryDayToleranceBefore
+        rootView.salaryToleranceAfter = subMetricsSettings.salaryDayToleranceAfter
         rootView.onDoubleTap = { [weak self] in
             self?.balancePopover?.performClose(nil)
             Task { await self?.openTransactionsPanel() }
@@ -2653,15 +2808,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     "Banking approval required — click \"Refresh\" when ready to approve the SCA request in your banking app"
                 )
                 AppLogger.log("SCA required — auto-refresh paused for 1h to preserve daily SCA limit", category: "Network", level: "WARN")
+                recordCLIRefreshError("SCA-Freigabe erforderlich")
             } else {
                 statusItem.button?.title = "— €"
                 statusItem.button?.toolTip = resp.error ?? "Keine Daten"
+                recordCLIRefreshError(resp.error ?? "Keine Daten")
             }
         } catch {
             statusItem.button?.title = "— €"
             statusItem.button?.toolTip = "Fehler: \(error.localizedDescription)"
             txVM.currentBalance = "— €"
             AppLogger.log("Balance refresh failed: \(error.localizedDescription)", category: "Network", level: "ERROR")
+            recordCLIRefreshError(error.localizedDescription)
         }
     }
 
@@ -3030,10 +3188,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 sendNewBookingNotification(transaction: newest)
             }
         } catch {
-            // ignore
+            // Silent in UI (das ist ein Hintergrund-Poll), aber wenn wir gerade
+            // im CLI-Pfad sind, soll `sb refresh` den Fehler ehrlich sehen.
+            recordCLIRefreshError(error.localizedDescription)
         }
     }
-    
+
     private func sendNewBookingNotification(transaction: TransactionsResponse.Transaction) {
         let isIncoming = transaction.parsedAmount >= 0
 
@@ -4016,6 +4176,9 @@ private struct StatusBalanceFlyoutCardView: View {
     var onSwitchToIndex: ((Int) -> Void)? = nil
     var onActivateUnified: (() -> Void)? = nil
     var leftToPayAmount: Double? = nil
+    var salaryDay: Int = 1                 // effective salary day for sub-metrics
+    var salaryToleranceBefore: Int = 0     // darf N Tage früher kommen (z.B. 4)
+    var salaryToleranceAfter: Int = 0      // darf N Tage später kommen (z.B. 1)
 
     @Environment(\.colorScheme) private var environmentColorScheme
 
@@ -4053,17 +4216,21 @@ private struct StatusBalanceFlyoutCardView: View {
         return L10n.t("Noch offen: \(formatted)", "Still to pay: \(formatted)")
     }
 
+    @AppStorage("balanceSubtitleStyle.flyout") private var flyoutSubtitleStyle: Int = 0
+
     @ViewBuilder
     private var leftToPaySubtitle: some View {
-        if let amount = leftToPayAmount {
-            let text: String = amount > 0.5
-                ? leftToPayLabel(amount)
-                : L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
-            Text(text)
-                .font(.system(size: 11, weight: .regular))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                .lineLimit(1)
-        }
+        // Unified-Mode: leftToPay ist pro-Slot aggregiert → Sub-Metrics würden gegen
+        // einen einzelnen Gehaltstag rechnen und wären fachlich inkonsistent.
+        BalanceSubtitleSwitch(
+            balance: balanceValue,
+            leftToPayAmount: leftToPayAmount,
+            salaryDay: salaryDay,
+            salaryToleranceBefore: salaryToleranceBefore,
+            salaryToleranceAfter: salaryToleranceAfter,
+            style: $flyoutSubtitleStyle,
+            forceClassic: isUnifiedMode
+        )
     }
 
     var body: some View {

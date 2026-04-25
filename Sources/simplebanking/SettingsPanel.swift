@@ -181,6 +181,7 @@ struct SettingsView: View {
     @AppStorage("resetAttempts") private var resetAttempts: Int = 0
     @AppStorage("swapClickBehavior") private var swapClickBehavior: Bool = false
     @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
+    @AppStorage("dockModeEnabled") private var dockModeEnabled: Bool = false
     @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.flyoutCard.rawValue
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
     @AppStorage("apiKeyPresent_anthropic") private var anthropicKeyPresent: Bool = false
@@ -251,6 +252,9 @@ struct SettingsView: View {
     @State private var logoCacheClearStatus: String = ""
     @State private var mcpConfigCopied: Bool = false
     @State private var mcpSetupState: MCPSetupState = .idle
+    @State private var cliInstalled: Bool = CLIInstaller.isInstalled
+    @State private var cliStatusMessage: String = ""
+    @State private var cliStatusIsError: Bool = false
 
     private enum MCPSetupState: Equatable {
         case idle, success, alreadySet, error(String)
@@ -1578,6 +1582,31 @@ struct SettingsView: View {
             )
 
             VStack(alignment: .leading, spacing: 8) {
+                SettingsSectionHeader(title: t("Dock", "Dock"), icon: "dock.rectangle")
+                Text(t(
+                    "Zeige simplebanking zusätzlich im Dock und in ⌘+Tab. Menüleisten-Icon bleibt aktiv.",
+                    "Also show simplebanking in the Dock and ⌘+Tab. The menu bar icon stays active."
+                ))
+                .font(ThemeFonts.body(size: 12))
+                .foregroundColor(.secondary)
+            }
+
+            SettingsToggleRow(
+                title: t("Im Dock anzeigen", "Show in Dock"),
+                subtitle: t(
+                    "Klick auf das Dock-Icon öffnet die Umsatzliste. ⌘+Q beendet die App.",
+                    "Clicking the Dock icon opens the transactions panel. ⌘+Q quits the app."
+                ),
+                isOn: $dockModeEnabled
+            )
+            .onChange(of: dockModeEnabled) { _ in
+                NotificationCenter.default.post(
+                    name: Notification.Name("simplebanking.dockModeChanged"),
+                    object: nil
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
                 SettingsSectionHeader(title: t("Kontostand anzeigen", "Show balance"), icon: "eye")
                 Text(t(
                     "Wähle, wie der Kontostand angezeigt wird: Flyout-Karte, Mausklick oder Mouse-Over.",
@@ -2228,6 +2257,11 @@ struct SettingsView: View {
 
             Divider()
 
+            // Terminal CLI (sb)
+            cliSettings
+
+            Divider()
+
             // Logo Cache löschen
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -2328,10 +2362,20 @@ struct SettingsView: View {
             .font(ThemeFonts.body(size: 12))
             .foregroundColor(.secondary)
 
+            // MCP ist nicht Claude-exklusiv — die Config (command/args/env) ist
+            // protokoll-kompatibel mit jedem MCP-Client. AnythingLLM ist der bekannteste
+            // Non-Claude-Client; wir erwähnen ihn stellvertretend.
+            Text(t(
+                "Das Protokoll ist offen: die gleiche Config läuft auch mit anderen MCP-Clients wie AnythingLLM oder Cline.",
+                "The protocol is open: the same config works with other MCP clients such as AnythingLLM or Cline."
+            ))
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
+
             VStack(alignment: .leading, spacing: 6) {
                 Text(t(
-                    "Füge dies in ~/Library/Application Support/Claude/claude_desktop_config.json ein:",
-                    "Add this to ~/Library/Application Support/Claude/claude_desktop_config.json:"
+                    "Für Claude Desktop: füge dies in ~/Library/Application Support/Claude/claude_desktop_config.json ein. Andere Clients (AnythingLLM u.a.) haben einen eigenen Import-Dialog, nutzen aber dasselbe JSON.",
+                    "For Claude Desktop: add this to ~/Library/Application Support/Claude/claude_desktop_config.json. Other clients (AnythingLLM, etc.) have their own import dialog but use the same JSON."
                 ))
                 .font(ThemeFonts.body(size: 11))
                 .foregroundColor(.secondary)
@@ -2405,6 +2449,121 @@ struct SettingsView: View {
 
         // Close settings and trigger app restart hint
         dismiss()
+    }
+
+    // MARK: - CLI Install
+
+    private var cliSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: t("Terminal CLI", "Terminal CLI"), icon: "terminal")
+
+            Text(t(
+                "Installiert das Kommandozeilen-Tool `sb` in `~/.local/bin/`. Nutzung: `sb balance`, `sb tx --days 30`, `sb summary`.",
+                "Installs the command-line tool `sb` into `~/.local/bin/`. Usage: `sb balance`, `sb tx --days 30`, `sb summary`."
+            ))
+            .font(ThemeFonts.body(size: 12))
+            .foregroundColor(.secondary)
+
+            // Privacy-Hinweis: Die CLI greift direkt auf den unverschlüsselten SQLite-Cache zu
+            // — exakt wie `sqlite3 transactions.db` das immer schon konnte. Wir sagen das
+            // explizit, damit niemand annimmt, das Master-Passwort würde den Lesezugriff blocken.
+            (Text(Image(systemName: "info.circle")) + Text(" ") + Text(t(
+                "Liest den unverschlüsselten lokalen Cache unter `~/Library/Application Support/simplebanking/`. Wer Dateisystem-Zugriff auf diesen Mac hat, konnte diese Daten schon immer mit `sqlite3` einsehen — das Master-Passwort schützt nur den Bank-Abruf, nicht den Cache.",
+                "Reads the unencrypted local cache under `~/Library/Application Support/simplebanking/`. Anyone with filesystem access to this Mac could already read this data with `sqlite3` — the master password only protects bank fetches, not the cache."
+            )))
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if !CLIInstaller.isAvailable {
+                Text(t(
+                    "CLI-Binary ist in diesem Build nicht enthalten. Bitte auf eine neuere Version aktualisieren.",
+                    "CLI binary is not bundled in this build. Please update to a newer version."
+                ))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.orange)
+            } else {
+                HStack(spacing: 8) {
+                    if cliInstalled {
+                        Label(t("Installiert: ~/.local/bin/sb", "Installed: ~/.local/bin/sb"),
+                              systemImage: "checkmark.circle.fill")
+                            .font(ThemeFonts.body(size: 12))
+                            .foregroundColor(.green)
+                    } else {
+                        Label(t("Nicht installiert", "Not installed"),
+                              systemImage: "xmark.circle")
+                            .font(ThemeFonts.body(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if cliInstalled {
+                        Button(t("Deinstallieren", "Uninstall")) {
+                            performCLIUninstall()
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button(t("Installieren", "Install")) {
+                            performCLIInstall()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+
+                if cliInstalled && !CLIInstaller.isInPath {
+                    Text(t(
+                        "Hinweis: `~/.local/bin` scheint nicht in deinem PATH zu sein. Füge folgende Zeile zu `~/.zshrc` (oder `~/.bashrc`) hinzu:\n`export PATH=\"$HOME/.local/bin:$PATH\"`\nDanach Terminal neu starten.",
+                        "Note: `~/.local/bin` does not appear to be in your PATH. Add this line to `~/.zshrc` (or `~/.bashrc`):\n`export PATH=\"$HOME/.local/bin:$PATH\"`\nThen restart Terminal."
+                    ))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.orange)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.08))
+                    .cornerRadius(6)
+                }
+
+                if !cliStatusMessage.isEmpty {
+                    Text(cliStatusMessage)
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(cliStatusIsError ? .sbRedStrong : .secondary)
+                        .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    private func performCLIInstall() {
+        do {
+            try CLIInstaller.install()
+            cliInstalled = true
+            cliStatusIsError = false
+            cliStatusMessage = t("CLI installiert. Öffne ein Terminal und tippe: sb balance",
+                                 "CLI installed. Open a terminal and type: sb balance")
+        } catch {
+            cliInstalled = CLIInstaller.isInstalled
+            cliStatusIsError = true
+            cliStatusMessage = error.localizedDescription
+        }
+        clearCLIStatusMessageAfterDelay()
+    }
+
+    private func performCLIUninstall() {
+        do {
+            try CLIInstaller.uninstall()
+            cliInstalled = false
+            cliStatusIsError = false
+            cliStatusMessage = t("CLI entfernt.", "CLI removed.")
+        } catch {
+            cliStatusIsError = true
+            cliStatusMessage = error.localizedDescription
+        }
+        clearCLIStatusMessageAfterDelay()
+    }
+
+    private func clearCLIStatusMessageAfterDelay() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            withAnimation { cliStatusMessage = "" }
+        }
     }
 }
 

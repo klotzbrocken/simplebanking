@@ -92,6 +92,16 @@ if [[ -f "$MCP_BIN" ]]; then
         "$MCP_BIN"
 fi
 
+# CLI helper binary (`sb`) — same rules as MCP: Developer ID + hardened runtime + timestamp.
+# Ohne diese Signierung lehnt Apple das gesamte Bundle als Invalid ab.
+CLI_BIN="$APP/Contents/MacOS/simplebanking-cli"
+if [[ -f "$CLI_BIN" ]]; then
+    codesign --force --timestamp --options runtime \
+        --sign "$SIGN_IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        "$CLI_BIN"
+fi
+
 # Main Swift binary — with sandbox entitlements
 codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" \

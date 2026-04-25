@@ -227,7 +227,11 @@ final class TransactionsViewModel: ObservableObject {
         case .pending:
             base = base.filter { $0.status == "pending" }
         case .reminders:
-            base = base.filter { enrichmentData[TransactionRecord.fingerprint(for: $0)]?.reminderId != nil }
+            base = base.filter { tx in
+                let slotId = tx.slotId ?? TransactionsDatabase.activeSlotId
+                let key = TxEnrichmentKey.make(slotId: slotId, txID: TransactionRecord.fingerprint(for: tx))
+                return enrichmentData[key]?.reminderId != nil
+            }
         }
 
         filteredTransactions = base

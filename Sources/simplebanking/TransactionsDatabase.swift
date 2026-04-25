@@ -3,6 +3,15 @@ import GRDB
 
 // MARK: - Transaction Enrichment
 
+/// Composite-Key `slotId|txID` für das Enrichment-Dictionary. Nach dem Composite-PK-
+/// Upgrade (Migration v19) kann derselbe `tx_id`-Fingerprint in mehreren Slots
+/// existieren; reines tx_id-Keying würde Notes/Reminder/etc. slot-übergreifend mischen.
+enum TxEnrichmentKey {
+    static func make(slotId: String, txID: String) -> String {
+        "\(slotId)|\(txID)"
+    }
+}
+
 struct TxEnrichment {
     var note: String?
     var attachmentCount: Int
@@ -207,6 +216,92 @@ enum TransactionsDatabase {
             // schema stability; it can be dropped in a later version if needed.
             try db.execute(sql: "UPDATE transactions SET is_flagged = 0 WHERE reminder_ek_id IS NULL")
         }
+        migrator.registerMigration("v19_composite_pk_slot_id") { db in
+            // P1-Fix: `tx_id` war Single-Key PRIMARY KEY, aber die DB speichert mehrere
+            // Slots gleichzeitig. Bei identischem Fingerprint auf verschiedenen Slots
+            // (Geldtransfer zwischen eigenen Konten, identische Lastschriften in Familien-
+            // Slots) kollidierten Records — der spätere Upsert überschrieb die Buchung
+            // des anderen Slots. slot_id in die PRIMARY-Key-Constraint einzubeziehen
+            // macht den Scope pro Slot eindeutig.
+            //
+            // SQLite erlaubt nicht `ALTER TABLE ... ADD PRIMARY KEY`, daher Tabelle neu
+            // bauen + Daten kopieren. Abhängige Tabellen (transaction_attachments) nutzen
+            // nur `tx_id` und brauchen keine Schema-Änderung.
+            try db.execute(sql: """
+                CREATE TABLE transactions_new (
+                    tx_id TEXT NOT NULL,
+                    end_to_end_id TEXT,
+                    datum TEXT NOT NULL,
+                    buchungsdatum TEXT NOT NULL,
+                    betrag REAL NOT NULL,
+                    waehrung TEXT NOT NULL DEFAULT 'EUR',
+                    empfaenger TEXT,
+                    absender TEXT,
+                    iban TEXT,
+                    verwendungszweck TEXT,
+                    kategorie TEXT,
+                    additional_information TEXT,
+                    effective_merchant TEXT NOT NULL DEFAULT '',
+                    normalized_merchant TEXT NOT NULL DEFAULT '',
+                    merchant_source TEXT NOT NULL DEFAULT 'unknown',
+                    merchant_confidence REAL NOT NULL DEFAULT 0,
+                    search_text TEXT NOT NULL DEFAULT '',
+                    raw_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    user_note TEXT,
+                    attachment_count INTEGER NOT NULL DEFAULT 0,
+                    slot_id TEXT NOT NULL DEFAULT 'legacy',
+                    status TEXT NOT NULL DEFAULT 'booked',
+                    is_unread INTEGER NOT NULL DEFAULT 0,
+                    is_flagged INTEGER NOT NULL DEFAULT 0,
+                    reminder_ek_id TEXT,
+                    PRIMARY KEY (tx_id, slot_id)
+                )
+                """)
+            // Kopieren: bei bestehenden Kollisionen (falls die v1-PK schon stille Merges
+            // verursacht hat) gewinnt die höchste updated_at-Version. Das ist eine
+            // best-effort-Recovery — stille Duplikate in der bisherigen DB können wir
+            // nicht rückgängig machen, aber ab v19 treten sie nicht mehr auf.
+            try db.execute(sql: """
+                INSERT INTO transactions_new
+                SELECT
+                    tx_id, end_to_end_id, datum, buchungsdatum, betrag, waehrung,
+                    empfaenger, absender, iban, verwendungszweck, kategorie,
+                    additional_information, effective_merchant, normalized_merchant,
+                    merchant_source, merchant_confidence, search_text, raw_json,
+                    updated_at, user_note, attachment_count, slot_id, status,
+                    is_unread, is_flagged, reminder_ek_id
+                FROM transactions
+                """)
+            try db.execute(sql: "DROP TABLE transactions")
+            try db.execute(sql: "ALTER TABLE transactions_new RENAME TO transactions")
+            // Indices neu erstellen (werden beim DROP nicht mitgenommen)
+            try db.execute(sql: "CREATE INDEX idx_transactions_datum ON transactions(datum DESC)")
+            try db.execute(sql: "CREATE INDEX idx_transactions_empfaenger ON transactions(empfaenger)")
+            try db.execute(sql: "CREATE INDEX idx_transactions_end_to_end_id ON transactions(end_to_end_id)")
+            try db.execute(sql: "CREATE INDEX idx_transactions_effective_merchant ON transactions(effective_merchant)")
+            try db.execute(sql: "CREATE INDEX idx_transactions_normalized_merchant ON transactions(normalized_merchant)")
+            try db.execute(sql: "CREATE INDEX idx_transactions_search_text ON transactions(search_text)")
+            try db.execute(sql: "CREATE INDEX idx_transactions_slot_id ON transactions(slot_id)")
+            try db.execute(sql: "CREATE INDEX idx_transactions_status ON transactions(status)")
+        }
+        migrator.registerMigration("v20_attachments_slot_id") { db in
+            // P2-Fix: transaction_attachments hatte nur (tx_id, bank_id) — nach Migration v19
+            // mit Composite-PK (tx_id, slot_id) können gleiche tx_id in verschiedenen Slots
+            // existieren, ohne slot_id würden Attachments queryübergreifend gemischt.
+            // Backfill via JOIN auf transactions.tx_id; bei Multi-Slot-Kollision wird ein
+            // beliebiger Slot zugewiesen (historische Ambiguität ist nicht auflösbar).
+            try addColumnIfMissing(db, table: "transaction_attachments",
+                                   column: "slot_id", definition: "TEXT NOT NULL DEFAULT 'legacy'")
+            try db.execute(sql: """
+                UPDATE transaction_attachments
+                SET slot_id = COALESCE(
+                    (SELECT slot_id FROM transactions WHERE transactions.tx_id = transaction_attachments.tx_id LIMIT 1),
+                    'legacy'
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_attachments_tx_slot ON transaction_attachments(tx_id, slot_id)")
+        }
         return migrator
     }
 
@@ -283,7 +378,7 @@ enum TransactionsDatabase {
                             merchant_source, merchant_confidence, search_text, raw_json, updated_at,
                             slot_id, status, is_unread
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                        ON CONFLICT(tx_id) DO UPDATE SET
+                        ON CONFLICT(tx_id, slot_id) DO UPDATE SET
                             end_to_end_id = excluded.end_to_end_id,
                             datum = excluded.datum,
                             buchungsdatum = excluded.buchungsdatum,
@@ -478,36 +573,61 @@ enum TransactionsDatabase {
 
     // MARK: - Notes
 
-    static func saveNote(txID: String, note: String?, bankId: String = "primary") throws {
+    static func saveNote(txID: String, slotId: String, note: String?, bankId: String = "primary") throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        let now = currentTimestamp()
         try queue.write { db in
             try db.execute(
-                sql: "UPDATE transactions SET user_note = ? WHERE tx_id = ?",
-                arguments: [note, txID]
+                sql: "UPDATE transactions SET user_note = ?, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
+                arguments: [note, now, txID, slotId]
             )
         }
     }
 
+    /// Maximaler `updated_at`-Timestamp über alle Tx eines oder mehrerer Slots.
+    /// Nützlich als Cache-Key für abgeleitete Berechnungen (z.B. Attention-Inbox):
+    /// jede Tx-Mutation (Insert/Update via upsert) bumpt `updated_at` auf `now()`,
+    /// und auch Enrichment-Writes (Notes, Flags, Reminder-Verknüpfung) gehen in denselben
+    /// Row → ein einziger MAX-Wert erfasst alle fachlich relevanten Änderungen.
+    /// Läuft auf indexed `updated_at` nicht, aber auf so kleiner Tabelle trivial schnell.
+    static func maxUpdatedAt(slots: [String]?, bankId: String = "primary") throws -> String? {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        return try queue.read { db in
+            if let slots, !slots.isEmpty {
+                let placeholders = slots.map { _ in "?" }.joined(separator: ",")
+                let sql = "SELECT MAX(updated_at) FROM transactions WHERE slot_id IN (\(placeholders))"
+                return try String.fetchOne(db, sql: sql, arguments: StatementArguments(slots))
+            }
+            return try String.fetchOne(db, sql: "SELECT MAX(updated_at) FROM transactions")
+        }
+    }
+
+    /// Rückgabe ist gekeyed auf `TxEnrichmentKey.make(slotId:txID:)` — zwei Rows mit
+    /// identischem `tx_id` aber unterschiedlichen `slot_id` werden als getrennte Einträge
+    /// geführt.
     static func loadEnrichmentData(bankId: String = "primary") throws -> [String: TxEnrichment] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
         return try queue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT tx_id, user_note, attachment_count, is_unread, is_flagged, reminder_ek_id
+                SELECT tx_id, slot_id, user_note, attachment_count, is_unread, is_flagged, reminder_ek_id
                 FROM transactions
                 WHERE is_unread = 1 OR is_flagged = 1 OR user_note IS NOT NULL OR attachment_count > 0 OR reminder_ek_id IS NOT NULL
                 """)
             var result: [String: TxEnrichment] = [:]
             for row in rows {
                 let txID: String = row["tx_id"]
+                let slotId: String = row["slot_id"] ?? "legacy"
                 let note: String? = row["user_note"]
                 let count: Int = row["attachment_count"] ?? 0
                 let unread: Bool = (row["is_unread"] as Int?) == 1
                 let flagged: Bool = (row["is_flagged"] as Int?) == 1
                 let reminderId: String? = row["reminder_ek_id"]
                 if note != nil || count > 0 || unread || flagged || reminderId != nil {
-                    result[txID] = TxEnrichment(note: note, attachmentCount: count, isUnread: unread, isFlagged: flagged, reminderId: reminderId)
+                    let key = TxEnrichmentKey.make(slotId: slotId, txID: txID)
+                    result[key] = TxEnrichment(note: note, attachmentCount: count, isUnread: unread, isFlagged: flagged, reminderId: reminderId)
                 }
             }
             return result
@@ -516,62 +636,79 @@ enum TransactionsDatabase {
 
     // MARK: - Swipe Flags
 
-    static func setUnread(txID: String, bankId: String = "primary", value: Bool) throws {
+    static func setUnread(txID: String, slotId: String, bankId: String = "primary", value: Bool) throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        let now = currentTimestamp()
         try queue.write { db in
             try db.execute(
-                sql: "UPDATE transactions SET is_unread = ? WHERE tx_id = ?",
-                arguments: [value ? 1 : 0, txID]
+                sql: "UPDATE transactions SET is_unread = ?, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
+                arguments: [value ? 1 : 0, now, txID, slotId]
             )
         }
     }
 
-    /// Marks every transaction in the given bank as read (is_unread = 0).
-    static func markAllRead(bankId: String = "primary") throws {
+    /// Markiert alle Transaktionen in der Bank-DB als gelesen.
+    /// Optional auf eine Teilmenge von Slots beschränkbar — der „Alle gelesen"-Footer
+    /// in der Single-Account-Ansicht darf nicht Buchungen anderer Slots mitmarkieren.
+    /// Leere/`nil`-Slots → kompletter Bank-Scope (Unified-Ansicht).
+    static func markAllRead(bankId: String = "primary", slotIds: [String]? = nil) throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        let now = currentTimestamp()
         try queue.write { db in
-            try db.execute(sql: "UPDATE transactions SET is_unread = 0 WHERE is_unread = 1")
+            if let slotIds, !slotIds.isEmpty {
+                let placeholders = slotIds.map { _ in "?" }.joined(separator: ",")
+                try db.execute(
+                    sql: "UPDATE transactions SET is_unread = 0, updated_at = ? WHERE is_unread = 1 AND slot_id IN (\(placeholders))",
+                    arguments: StatementArguments([now] + slotIds as [DatabaseValueConvertible])
+                )
+            } else {
+                try db.execute(sql: "UPDATE transactions SET is_unread = 0, updated_at = ? WHERE is_unread = 1",
+                               arguments: [now])
+            }
         }
     }
 
-    static func setFlagged(txID: String, bankId: String = "primary", value: Bool) throws {
+    static func setFlagged(txID: String, slotId: String, bankId: String = "primary", value: Bool) throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        let now = currentTimestamp()
         try queue.write { db in
             try db.execute(
-                sql: "UPDATE transactions SET is_flagged = ? WHERE tx_id = ?",
-                arguments: [value ? 1 : 0, txID]
+                sql: "UPDATE transactions SET is_flagged = ?, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
+                arguments: [value ? 1 : 0, now, txID, slotId]
             )
         }
     }
 
-    static func setReminderId(txID: String, bankId: String = "primary", reminderId: String?) throws {
+    static func setReminderId(txID: String, slotId: String, bankId: String = "primary", reminderId: String?) throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
+        let now = currentTimestamp()
         try queue.write { db in
             try db.execute(
-                sql: "UPDATE transactions SET reminder_ek_id = ? WHERE tx_id = ?",
-                arguments: [reminderId, txID]
+                sql: "UPDATE transactions SET reminder_ek_id = ?, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
+                arguments: [reminderId, now, txID, slotId]
             )
         }
     }
 
-    /// Returns all (txID, bankId, reminderId) tuples where reminder_ek_id IS NOT NULL.
+    /// Returns all (txID, slotId, bankId, reminderId) tuples where reminder_ek_id IS NOT NULL.
     /// Pass all known bankIds (from MultibankingStore.shared.slots) to scan across accounts.
-    static func allReminders(bankIds: [String]) -> [(txID: String, bankId: String, reminderId: String)] {
-        var result: [(String, String, String)] = []
+    static func allReminders(bankIds: [String]) -> [(txID: String, slotId: String, bankId: String, reminderId: String)] {
+        var result: [(String, String, String, String)] = []
         for bankId in bankIds {
             guard (try? migrate(bankId: bankId)) != nil,
                   let queue = try? makeQueue(bankId: bankId) else { continue }
             let rows = (try? queue.read { db in
-                try Row.fetchAll(db, sql: "SELECT tx_id, reminder_ek_id FROM transactions WHERE reminder_ek_id IS NOT NULL")
+                try Row.fetchAll(db, sql: "SELECT tx_id, slot_id, reminder_ek_id FROM transactions WHERE reminder_ek_id IS NOT NULL")
             }) ?? []
             for row in rows {
                 let txID: String = row["tx_id"]
+                let slotId: String = row["slot_id"] ?? "legacy"
                 let remId: String = row["reminder_ek_id"]
-                result.append((txID, bankId, remId))
+                result.append((txID, slotId, bankId, remId))
             }
         }
         return result
@@ -579,7 +716,23 @@ enum TransactionsDatabase {
 
     // MARK: - Attachments
 
-    static func attachmentsDirectory(txID: String, bankId: String = "primary") throws -> URL {
+    /// Neuer Pfad (ab Migration v20): `attachments/<bankId>/<slotId>/<txID>/`. Bei identischem
+    /// `txID` in zwei Slots (selbe Buchung auf Partner-Konto o.ä.) werden Files nicht mehr
+    /// vermischt. Für *bestehende* Attachments ohne Slot-Scoping wird über `legacyAttachmentsDirectory`
+    /// zurückgefallen.
+    static func attachmentsDirectory(txID: String, slotId: String, bankId: String = "primary") throws -> URL {
+        let credentialsURL = try CredentialsStore.defaultURL()
+        let appDirectory = credentialsURL.deletingLastPathComponent()
+        return appDirectory
+            .appendingPathComponent("attachments")
+            .appendingPathComponent(bankId)
+            .appendingPathComponent(slotId)
+            .appendingPathComponent(txID)
+    }
+
+    /// Legacy-Pfad vor v20 (`attachments/<bankId>/<txID>/`). Wird beim Lesen/Löschen
+    /// als Fallback probiert, falls die neue Slot-Struktur das File nicht enthält.
+    private static func legacyAttachmentsDirectory(txID: String, bankId: String) throws -> URL {
         let credentialsURL = try CredentialsStore.defaultURL()
         let appDirectory = credentialsURL.deletingLastPathComponent()
         return appDirectory
@@ -588,7 +741,16 @@ enum TransactionsDatabase {
             .appendingPathComponent(txID)
     }
 
-    static func addAttachment(txID: String, bankId: String = "primary", sourceURL: URL) throws -> AttachmentInfo {
+    /// Resolved die URL eines bestehenden Attachments: erst neuer Slot-Pfad, dann Legacy.
+    /// Wirft nur, wenn beide Varianten fehlen.
+    static func resolveAttachmentURL(txID: String, slotId: String, bankId: String = "primary", filename: String) throws -> URL {
+        let newURL = try attachmentsDirectory(txID: txID, slotId: slotId, bankId: bankId).appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: newURL.path) { return newURL }
+        let legacyURL = try legacyAttachmentsDirectory(txID: txID, bankId: bankId).appendingPathComponent(filename)
+        return legacyURL
+    }
+
+    static func addAttachment(txID: String, slotId: String, bankId: String = "primary", sourceURL: URL) throws -> AttachmentInfo {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
 
@@ -603,7 +765,8 @@ enum TransactionsDatabase {
 
         // Check current count (max 3)
         let currentCount = try queue.read { db -> Int in
-            let row = try Row.fetchOne(db, sql: "SELECT attachment_count FROM transactions WHERE tx_id = ?", arguments: [txID])
+            let row = try Row.fetchOne(db, sql: "SELECT attachment_count FROM transactions WHERE tx_id = ? AND slot_id = ?",
+                                       arguments: [txID, slotId])
             return row?["attachment_count"] ?? 0
         }
         guard currentCount < 3 else {
@@ -612,8 +775,8 @@ enum TransactionsDatabase {
             ])
         }
 
-        // Copy file to storage directory
-        let dir = try attachmentsDirectory(txID: txID, bankId: bankId)
+        // Copy file to storage directory (slot-scoped)
+        let dir = try attachmentsDirectory(txID: txID, slotId: slotId, bankId: bankId)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let attachmentID = UUID().uuidString
         let ext = sourceURL.pathExtension.lowercased()
@@ -628,27 +791,27 @@ enum TransactionsDatabase {
         try queue.write { db in
             try db.execute(
                 sql: """
-                    INSERT INTO transaction_attachments (id, tx_id, bank_id, filename, mime_type, file_size, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO transaction_attachments (id, tx_id, slot_id, bank_id, filename, mime_type, file_size, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                arguments: [info.id, txID, bankId, filename, mimeType, fileSize, now]
+                arguments: [info.id, txID, slotId, bankId, filename, mimeType, fileSize, now]
             )
             try db.execute(
-                sql: "UPDATE transactions SET attachment_count = attachment_count + 1 WHERE tx_id = ?",
-                arguments: [txID]
+                sql: "UPDATE transactions SET attachment_count = attachment_count + 1, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
+                arguments: [now, txID, slotId]
             )
         }
         return info
     }
 
-    static func loadAttachments(txID: String, bankId: String = "primary") throws -> [AttachmentInfo] {
+    static func loadAttachments(txID: String, slotId: String, bankId: String = "primary") throws -> [AttachmentInfo] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
         return try queue.read { db in
             let rows = try Row.fetchAll(
                 db,
-                sql: "SELECT id, tx_id, bank_id, filename, mime_type, file_size, created_at FROM transaction_attachments WHERE tx_id = ? ORDER BY created_at",
-                arguments: [txID]
+                sql: "SELECT id, tx_id, bank_id, filename, mime_type, file_size, created_at FROM transaction_attachments WHERE tx_id = ? AND slot_id = ? ORDER BY created_at",
+                arguments: [txID, slotId]
             )
             return rows.map { row in
                 AttachmentInfo(
@@ -664,7 +827,7 @@ enum TransactionsDatabase {
         }
     }
 
-    static func deleteAttachment(id: String, txID: String, bankId: String = "primary") throws {
+    static func deleteAttachment(id: String, txID: String, slotId: String, bankId: String = "primary") throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
 
@@ -674,20 +837,25 @@ enum TransactionsDatabase {
             return row?["filename"]
         }
 
-        // Delete file from disk
+        // Delete file from disk — try new slot-scoped path, fall back to legacy.
         if let filename {
-            let dir = try attachmentsDirectory(txID: txID, bankId: bankId)
-            let fileURL = dir.appendingPathComponent(filename)
-            try? FileManager.default.removeItem(at: fileURL)
+            let newURL = try attachmentsDirectory(txID: txID, slotId: slotId, bankId: bankId).appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: newURL.path) {
+                try? FileManager.default.removeItem(at: newURL)
+            } else {
+                let legacyURL = try legacyAttachmentsDirectory(txID: txID, bankId: bankId).appendingPathComponent(filename)
+                try? FileManager.default.removeItem(at: legacyURL)
+            }
         }
 
         // Remove from DB and decrement count
+        let now = currentTimestamp()
         try queue.write { db in
             try db.execute(sql: "DELETE FROM transaction_attachments WHERE id = ?", arguments: [id])
             if db.changesCount > 0 {
                 try db.execute(
-                    sql: "UPDATE transactions SET attachment_count = MAX(0, attachment_count - 1) WHERE tx_id = ?",
-                    arguments: [txID]
+                    sql: "UPDATE transactions SET attachment_count = MAX(0, attachment_count - 1), updated_at = ? WHERE tx_id = ? AND slot_id = ?",
+                    arguments: [now, txID, slotId]
                 )
             }
         }
@@ -715,18 +883,22 @@ enum TransactionsDatabase {
                 "SELECT tx_id FROM transactions WHERE slot_id = ?", arguments: [slotId])
             // Delete attachment metadata for all transactions in this slot
             if !txIds.isEmpty {
-                let placeholders = txIds.map { _ in "?" }.joined(separator: ",")
                 try db.execute(
-                    sql: "DELETE FROM transaction_attachments WHERE tx_id IN (\(placeholders))",
-                    arguments: StatementArguments(txIds))
+                    sql: "DELETE FROM transaction_attachments WHERE slot_id = ?",
+                    arguments: [slotId])
             }
             try db.execute(sql: "DELETE FROM transactions WHERE slot_id = ?", arguments: [slotId])
         }
-        // Delete attachment files on disk
+        // Delete attachment files on disk (new slot-scoped path).
         for txId in txIds {
-            if let dir = try? attachmentsDirectory(txID: txId, bankId: bankId),
+            if let dir = try? attachmentsDirectory(txID: txId, slotId: slotId, bankId: bankId),
                FileManager.default.fileExists(atPath: dir.path) {
                 try? FileManager.default.removeItem(at: dir)
+            }
+            // Legacy-Fallback: Attachments aus Pre-v20-Zeiten lagen unter bankId/txID/.
+            if let legacyDir = try? legacyAttachmentsDirectory(txID: txId, bankId: bankId),
+               FileManager.default.fileExists(atPath: legacyDir.path) {
+                try? FileManager.default.removeItem(at: legacyDir)
             }
         }
     }
@@ -865,12 +1037,13 @@ enum TransactionsDatabase {
         }
     }
 
-    /// Update the category label for a single transaction by tx_id.
-    static func updateKategorie(txID: String, kategorie: String) throws {
+    /// Update the category label for a single transaction by (tx_id, slot_id).
+    static func updateKategorie(txID: String, slotId: String, kategorie: String) throws {
         let queue = try makeQueue()
+        let now = currentTimestamp()
         try queue.write { db in
-            try db.execute(sql: "UPDATE transactions SET kategorie = ? WHERE tx_id = ?",
-                           arguments: [kategorie, txID])
+            try db.execute(sql: "UPDATE transactions SET kategorie = ?, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
+                           arguments: [kategorie, now, txID, slotId])
         }
     }
 

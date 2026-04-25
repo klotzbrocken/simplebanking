@@ -58,15 +58,15 @@ final class LeftToPayCalculatorTests: XCTestCase {
 
     // MARK: - Tolerance window
 
-    /// Preset "beginning of month" = salary day 1, tolerance 4.
-    /// Today = April 15 → cycle window starts April 1 - 4 = March 28,
-    /// ends May 1 + 4 = May 5 (salary might arrive late).
-    func test_cycleBoundaries_tolerance_widensBothEnds() {
+    /// Preset "beginning of month" = salary day 1, toleranceBefore=4, toleranceAfter=1.
+    /// Today = April 15 → cycle start = April 1 − 4 = March 28,
+    /// cycle end = May 1 + 1 = May 2 (salary might arrive 1 day late, asymmetric).
+    func test_cycleBoundaries_asymmetricTolerance() {
         let today = day(2026, 4, 15)
-        let start = LeftToPayCalculator.cycleStart(salaryDay: 1, tolerance: 4, today: today)
-        let end   = LeftToPayCalculator.cycleEnd(salaryDay: 1, tolerance: 4, today: today)
+        let start = LeftToPayCalculator.cycleStart(salaryDay: 1, toleranceBefore: 4, today: today)
+        let end   = LeftToPayCalculator.cycleEnd(salaryDay: 1, toleranceBefore: 4, toleranceAfter: 1, today: today)
         XCTAssertEqual(start, day(2026, 3, 28))
-        XCTAssertEqual(end,   day(2026, 5, 5))
+        XCTAssertEqual(end,   day(2026, 5, 2))
     }
 
     // MARK: - compute()

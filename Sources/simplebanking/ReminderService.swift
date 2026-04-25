@@ -86,7 +86,7 @@ final class ReminderService {
         let all = TransactionsDatabase.allReminders(bankIds: bankIds)
         for entry in all {
             if !reminderExists(id: entry.reminderId) {
-                try? TransactionsDatabase.setReminderId(txID: entry.txID, bankId: entry.bankId, reminderId: nil)
+                try? TransactionsDatabase.setReminderId(txID: entry.txID, slotId: entry.slotId, bankId: entry.bankId, reminderId: nil)
             }
         }
     }
