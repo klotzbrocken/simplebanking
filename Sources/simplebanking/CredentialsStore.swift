@@ -150,7 +150,12 @@ enum CredentialsStore {
         let key = try deriveKeyForEnvelope(password: masterPassword, salt: [UInt8](salt), envelope: env)
         let nonce = try AES.GCM.Nonce(data: nonceData)
         let box = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-        let plaintext = try AES.GCM.open(box, using: key)
+        var plaintext = try AES.GCM.open(box, using: key)
+        // Plaintext-JSON enthält Bank-User-ID + Passwort. Nach Decode in das
+        // StoredCredentials-Struct wird der Roh-Buffer zeroized — das Struct
+        // selbst lebt als String-Properties weiter (nicht wipe-bar in Swift),
+        // aber der zweite Heap-Buffer mit demselben Klartext geht weg.
+        defer { MemoryWipe.zeroize(&plaintext) }
         return try JSONDecoder().decode(StoredCredentials.self, from: plaintext)
     }
 
@@ -209,6 +214,10 @@ enum CredentialsStore {
 
     private static func derivePBKDF2Key(password: String, salt: [UInt8], iterations: Int) throws -> SymmetricKey {
         var derived = [UInt8](repeating: 0, count: 32)
+        // Defer zeroizes the derived key bytes nach SymmetricKey-Wrap, sodass das
+        // 32-Byte-Schlüsselmaterial nicht im Heap liegen bleibt. CryptoKit ist
+        // für sein eigenes Backing-Storage zuständig.
+        defer { MemoryWipe.zeroize(&derived) }
         let passwordLength = password.lengthOfBytes(using: .utf8)
 
         let status: Int32 = password.withCString { passwordPtr in
@@ -243,8 +252,15 @@ enum CredentialsStore {
 
     // Backward compatibility for existing v1 envelopes.
     private static func deriveLegacyKey(password: String, salt: [UInt8]) -> SymmetricKey {
-        let pw = Array(password.utf8)
+        var pw = Array(password.utf8)
         var data = Data(pw + salt)
+        // Pre-image (Passwort-Bytes + Salt + jede Iteration) wird nach SHA256-Loop
+        // explizit zeroized — sonst lebt das letzte Hash-Result als plain Data im Heap
+        // bis ARC es discardet.
+        defer {
+            MemoryWipe.zeroize(&pw)
+            MemoryWipe.zeroize(&data)
+        }
         for _ in 0..<100_000 {
             data = Data(SHA256.hash(data: data))
         }
