@@ -3161,8 +3161,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Avoid noisy UI if locked/hidden; still compute indicator.
         let from = isoDateDaysAgo(7)
         let slotId = TransactionsDatabase.activeSlotId
+        // Slot-Epoch beim Start festhalten — wenn der User mid-fetch den Slot
+        // wechselt, dürfen wir die Antwort nicht auf den neuen Slot anwenden
+        // (sonst falsche Notification, falscher Ripple, falscher Unread-Indikator).
+        // Gleicher Pattern wie in refreshAsync und openTransactionsPanel.
+        let epochAtStart = slotEpoch
         do {
             let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
+            // Bail wenn Slot mid-await gewechselt hat — Ergebnis gehört zum alten Slot.
+            guard slotEpoch == epochAtStart else { return }
             guard (resp.ok ?? false), let tx = resp.transactions, !tx.isEmpty else { return }
             let sorted = tx.sorted { ($0.bookingDate ?? $0.valueDate ?? "") > ($1.bookingDate ?? $1.valueDate ?? "") }
             let sig = computeTxSignature(sorted[0])
