@@ -304,6 +304,63 @@ enum TransactionsDatabase {
                 """)
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_attachments_tx_slot ON transaction_attachments(tx_id, slot_id)")
         }
+        migrator.registerMigration("v21_attachments_fk_cascade") { db in
+            // P2-Fix: transaction_attachments hatte keinen FK constraint auf transactions.
+            // Bei DELETE FROM transactions (z.B. Slot-Removal, v17 date-fix-wipe, manuelle
+            // Tx-Löschung) blieben orphaned attachment-Rows zurück + die files auf disk.
+            //
+            // SQLite erlaubt nicht `ALTER TABLE ... ADD CONSTRAINT`, daher Tabelle neu
+            // bauen mit `FOREIGN KEY (tx_id, slot_id) REFERENCES transactions(tx_id, slot_id)
+            // ON DELETE CASCADE`. PRAGMA foreign_keys=ON ist in makeQueue gesetzt.
+            //
+            // File-system cleanup ist NICHT Teil dieser Migration — bestehende deletion-
+            // pfade (deleteTransactionsForSlot, etc.) räumen Files separat auf, neue
+            // Cascades hinterlassen die files (separate orphan-sweep wäre P3).
+
+            // 1. Sweep DB-Orphans VOR FK-Aktivierung (sonst würde der INSERT scheitern,
+            //    weil die orphaned rows die neue FK constraint verletzen).
+            try db.execute(sql: """
+                DELETE FROM transaction_attachments
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM transactions t
+                    WHERE t.tx_id = transaction_attachments.tx_id
+                      AND t.slot_id = transaction_attachments.slot_id
+                )
+                """)
+
+            // 2. Tabelle neu mit FK + ON DELETE CASCADE
+            try db.execute(sql: """
+                CREATE TABLE transaction_attachments_new (
+                    id TEXT PRIMARY KEY,
+                    tx_id TEXT NOT NULL,
+                    slot_id TEXT NOT NULL DEFAULT 'legacy',
+                    bank_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    mime_type TEXT NOT NULL DEFAULT '',
+                    file_size INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (tx_id, slot_id)
+                        REFERENCES transactions(tx_id, slot_id)
+                        ON DELETE CASCADE
+                )
+                """)
+
+            // 3. Daten kopieren (orphans wurden in Schritt 1 entfernt)
+            try db.execute(sql: """
+                INSERT INTO transaction_attachments_new
+                    (id, tx_id, slot_id, bank_id, filename, mime_type, file_size, created_at)
+                SELECT id, tx_id, slot_id, bank_id, filename, mime_type, file_size, created_at
+                FROM transaction_attachments
+                """)
+
+            // 4. Swap
+            try db.execute(sql: "DROP TABLE transaction_attachments")
+            try db.execute(sql: "ALTER TABLE transaction_attachments_new RENAME TO transaction_attachments")
+
+            // 5. Indices wiederherstellen (DROP entfernt sie)
+            try db.execute(sql: "CREATE INDEX idx_attachments_tx_id ON transaction_attachments(tx_id)")
+            try db.execute(sql: "CREATE INDEX idx_attachments_tx_slot ON transaction_attachments(tx_id, slot_id)")
+        }
         return migrator
     }
 
@@ -931,7 +988,11 @@ enum TransactionsDatabase {
         return try DatabaseQueue(path: path, configuration: configuration)
     }
 
-    private static func databaseURL(bankId: String = "primary") throws -> URL {
+    /// Internal — Tests brauchen direkten DB-Zugriff, um Cascade-Verhalten und
+    /// andere Schema-Garantien zu verifizieren, ohne durch die public API gehen
+    /// zu müssen (die teilweise eigene cleanup-Steps macht und dadurch Cascade
+    /// maskiert).
+    static func databaseURL(bankId: String = "primary") throws -> URL {
         let credentialsURL = try CredentialsStore.defaultURL()
         let appDirectory = credentialsURL.deletingLastPathComponent()
         if bankId == "primary" {

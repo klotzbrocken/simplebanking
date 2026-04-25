@@ -1,4 +1,5 @@
 import XCTest
+import GRDB
 @testable import simplebanking
 
 // MARK: - TransactionsDatabase Regression Tests
@@ -94,6 +95,84 @@ final class TransactionsDatabaseTests: XCTestCase {
             "Slot B darf von der Slot-A-Manipulation unberührt bleiben.")
         XCTAssertNil(enrichment[keyB]?.reminderId,
             "Slot B darf den Reminder von Slot A NICHT bekommen — sonst würde Composite-PK-Semantik brechen.")
+    }
+
+    // MARK: - Migration v21: ON DELETE CASCADE für transaction_attachments
+
+    /// Schützt P2.16-Fix: wenn eine transactions-Row gelöscht wird, müssen
+    /// alle zugehörigen transaction_attachments-Rows automatisch mitgelöscht
+    /// werden. Vor v21 blieben sie als Orphans liegen, weil keine FK constraint
+    /// definiert war.
+    func test_regression_attachments_cascadeOnTransactionDelete() throws {
+        let tx = makeTx(endToEndId: "ete-cascade", merchant: "M", amount: -10.0)
+        let txID = TransactionRecord.fingerprint(for: tx)
+        let slotId = "slot-cascade"
+
+        TransactionsDatabase.activeSlotId = slotId
+        try TransactionsDatabase.upsert(transactions: [tx], bankId: testBankId)
+
+        // Direkter DB-Zugriff (umgeht den public deleteTransactions, der eigene
+        // attachment-cleanup macht und damit die Cascade maskieren würde).
+        let dbURL = try TransactionsDatabase.databaseURL(bankId: testBankId)
+        var config = Configuration()
+        // PRAGMA foreign_keys = ON pro Connection — sonst ignoriert SQLite die FK.
+        config.prepareDatabase { db in
+            try db.execute(sql: "PRAGMA foreign_keys = ON")
+        }
+        let queue = try DatabaseQueue(path: dbURL.path, configuration: config)
+
+        // Attachment direkt einfügen (kein File-Copy nötig — wir testen die DB).
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO transaction_attachments
+                    (id, tx_id, slot_id, bank_id, filename, mime_type, file_size, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: ["att-1", txID, slotId, testBankId,
+                                 "receipt.pdf", "application/pdf", 1024,
+                                 ISO8601DateFormatter().string(from: Date())])
+        }
+
+        // Sanity: attachment ist da.
+        let countBefore = try queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM transaction_attachments WHERE id = 'att-1'") ?? -1
+        }
+        XCTAssertEqual(countBefore, 1, "Attachment muss nach INSERT existieren")
+
+        // Tx direkt löschen (ohne den public-API-cleanup-Pfad).
+        try queue.write { db in
+            try db.execute(sql: "DELETE FROM transactions WHERE tx_id = ? AND slot_id = ?",
+                           arguments: [txID, slotId])
+        }
+
+        // Cascade muss das Attachment automatisch entfernt haben.
+        let countAfter = try queue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM transaction_attachments WHERE id = 'att-1'") ?? -1
+        }
+        XCTAssertEqual(countAfter, 0,
+            "ON DELETE CASCADE muss das Attachment löschen wenn die referenzierte Tx weg ist (v21 fix).")
+    }
+
+    /// Schema-Validierung: die FK constraint existiert tatsächlich auf der
+    /// Tabelle nach Migration v21. Schützt gegen Schema-Drift wenn jemand
+    /// die Migration umschreibt und vergisst die FK.
+    func test_regression_attachments_haveForeignKeyConstraint() throws {
+        // Migration triggern via einer beliebigen public method.
+        TransactionsDatabase.activeSlotId = "slot-fk"
+        try TransactionsDatabase.upsert(transactions:
+            [makeTx(endToEndId: "ete-fk", merchant: "M", amount: -1.0)],
+            bankId: testBankId)
+
+        let dbURL = try TransactionsDatabase.databaseURL(bankId: testBankId)
+        let queue = try DatabaseQueue(path: dbURL.path)
+
+        let fkInfo: [(table: String, onDelete: String)] = try queue.read { db in
+            let rows = try Row.fetchAll(db, sql: "PRAGMA foreign_key_list(transaction_attachments)")
+            return rows.map { ($0["table"], $0["on_delete"]) }
+        }
+        XCTAssertFalse(fkInfo.isEmpty,
+            "transaction_attachments muss eine FK constraint haben (v21).")
+        XCTAssertTrue(fkInfo.contains { $0.table == "transactions" && $0.onDelete == "CASCADE" },
+            "Die FK muss auf transactions zeigen mit ON DELETE CASCADE.")
     }
 
     // MARK: - Helpers

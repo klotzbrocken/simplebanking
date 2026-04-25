@@ -3435,6 +3435,7 @@ final class AccountNavModel: ObservableObject {
     }
 }
 
+@MainActor
 private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegate {
     private let settingsIdentifier = NSToolbarItem.Identifier("simplebanking.transactions.settings")
     private let pinIdentifier      = NSToolbarItem.Identifier("simplebanking.transactions.pin")
