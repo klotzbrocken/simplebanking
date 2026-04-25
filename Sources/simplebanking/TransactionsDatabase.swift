@@ -962,6 +962,26 @@ enum TransactionsDatabase {
         }
     }
 
+    /// WAL-Checkpoint mit TRUNCATE: schreibt alle ausstehenden WAL-Pages in die
+    /// Haupt-DB-Datei und löscht das WAL-File. Wird beim App-Terminate gerufen,
+    /// damit Time-Machine + Backups nur die main-DB sehen, nicht die separaten
+    /// `db-wal` und `db-shm` Sidecar-Files (~3× Speicherplatz sonst).
+    /// Idempotent + best-effort — Fehler werden geloggt aber nicht propagiert.
+    static func checkpointWAL(bankId: String = "primary") {
+        guard let queue = try? makeQueue(bankId: bankId) else {
+            AppLogger.log("WAL checkpoint skipped — DB queue unavailable", category: "DB", level: "WARN")
+            return
+        }
+        do {
+            try queue.write { db in
+                try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+            }
+            AppLogger.log("WAL checkpoint completed (TRUNCATE)", category: "DB")
+        } catch {
+            AppLogger.log("WAL checkpoint failed: \(error.localizedDescription)", category: "DB", level: "WARN")
+        }
+    }
+
     static func deleteDatabaseFileIfExists(bankId: String = "primary") throws {
         let fileManager = FileManager.default
         let url = try databaseURL(bankId: bankId)

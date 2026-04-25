@@ -96,6 +96,16 @@ enum CredentialsStore {
         try? fm.removeItem(at: appDir.appendingPathComponent("attachments"))
     }
 
+    /// Löscht die credentials-<slotId>.json Datei für einen entfernten Slot.
+    /// Best-effort: Fehler werden ignoriert (Datei könnte schon weg sein).
+    /// Der "legacy"-Slot ist geschützt (default-Slot, niemals gelöscht).
+    static func deleteSlotFile(slotId: String) {
+        guard slotId != "legacy" else { return }
+        guard let appDir = try? appSupportURL() else { return }
+        let url = appDir.appendingPathComponent("credentials-\(slotId).json")
+        try? FileManager.default.removeItem(at: url)
+    }
+
     static func save(_ creds: StoredCredentials, masterPassword: String) throws {
         // Always save to the slot-specific file (never the legacy path)
         let appDir = try appSupportURL()

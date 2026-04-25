@@ -208,7 +208,13 @@ enum OFXImporter {
 
     // MARK: - File reading
 
-    /// Read an OFX file with UTF-8 → ISO-8859-1 fallback (many DE bank exports are Latin-1).
+    /// Read an OFX file. OFX 1.x SGML deklariert die Encoding im plain-text-Header
+    /// (z.B. `CHARSET:1252`) — wenn vorhanden, nutzen wir die. Sonst Fallback auf
+    /// UTF-8 → ISO-8859-1.
+    ///
+    /// Hintergrund: Sparkasse exportiert oft Windows-1252 (CP1252). Ohne Header-
+    /// Erkennung wäre der UTF-8-Try fail (gut), aber der Latin-1-Fallback würde
+    /// das €-Zeichen (0x80 in CP1252, control char in Latin-1) falsch dekodieren.
     private static func readFileRobust(url: URL) throws -> String {
         let data: Data
         do {
@@ -216,11 +222,47 @@ enum OFXImporter {
         } catch {
             throw ImportError.parseFailed(error.localizedDescription)
         }
+
+        // 1. Header-deklarierte Encoding bevorzugen
+        if let declared = detectOFXHeaderEncoding(in: data),
+           let s = String(data: data, encoding: declared) {
+            return s
+        }
+
+        // 2. Fallback: UTF-8 → ISO-8859-1
         if let s = String(data: data, encoding: .utf8) { return s }
         if let s = String(data: data, encoding: .isoLatin1) { return s }
         throw ImportError.parseFailed(localized(
-            "Datei-Kodierung wird nicht unterstützt (UTF-8 oder ISO-8859-1 erwartet).",
-            "Unsupported file encoding (UTF-8 or ISO-8859-1 expected)."))
+            "Datei-Kodierung wird nicht unterstützt (UTF-8, ISO-8859-1 oder Windows-1252 erwartet).",
+            "Unsupported file encoding (UTF-8, ISO-8859-1, or Windows-1252 expected)."))
+    }
+
+    /// Liest die ersten ~1 KB der Datei als ASCII und sucht nach `CHARSET:`-Zeile
+    /// im OFX-1.x-SGML-Header. Pure function — getestet in OFXImporterTests.
+    /// Internal für Tests.
+    static func detectOFXHeaderEncoding(in data: Data) -> String.Encoding? {
+        let probe = data.prefix(1024)
+        guard let header = String(data: probe, encoding: .ascii) else { return nil }
+        // Header-Zeilen sind ASCII-only — typisch erste 9-15 Zeilen vor `<OFX>`.
+        for line in header.split(separator: "\n").prefix(20) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard trimmed.hasPrefix("CHARSET:") else { continue }
+            let value = String(trimmed.dropFirst("CHARSET:".count))
+                .trimmingCharacters(in: .whitespaces)
+            switch value {
+            case "1252", "WINDOWS-1252", "CP1252":
+                return .windowsCP1252
+            case "ISO-8859-1", "ISO8859-1", "LATIN1", "LATIN-1":
+                return .isoLatin1
+            case "UTF-8", "UTF8":
+                return .utf8
+            case "NONE", "USASCII", "US-ASCII", "ASCII":
+                return .ascii
+            default:
+                return nil  // unbekannter Wert → Fallback-Logik nutzen
+            }
+        }
+        return nil
     }
 
     // MARK: - i18n

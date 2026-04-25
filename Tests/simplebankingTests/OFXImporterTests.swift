@@ -175,4 +175,64 @@ final class OFXImporterTests: XCTestCase {
         let s = "<FOO>bar"
         XCTAssertNil(OFXImporter.extractValue(tag: "BAZ", in: s))
     }
+
+    // MARK: - Charset detection (P2.17 fix)
+
+    /// Sparkasse-typische Header mit `CHARSET:1252` muss als Windows-1252
+    /// erkannt werden — sonst wird das €-Zeichen (0x80 in CP1252,
+    /// control char in Latin-1) bei Latin-1-Fallback falsch dekodiert.
+    func test_detectOFXHeaderEncoding_charset1252_returnsWindowsCP1252() {
+        let header = """
+        OFXHEADER:100
+        DATA:OFXSGML
+        VERSION:102
+        SECURITY:NONE
+        ENCODING:USASCII
+        CHARSET:1252
+        COMPRESSION:NONE
+
+        <OFX>
+        """
+        let data = header.data(using: .ascii)!
+        XCTAssertEqual(OFXImporter.detectOFXHeaderEncoding(in: data), .windowsCP1252)
+    }
+
+    func test_detectOFXHeaderEncoding_charsetISO8859_returnsLatin1() {
+        let header = "OFXHEADER:100\nCHARSET:ISO-8859-1\n\n<OFX>"
+        let data = header.data(using: .ascii)!
+        XCTAssertEqual(OFXImporter.detectOFXHeaderEncoding(in: data), .isoLatin1)
+    }
+
+    func test_detectOFXHeaderEncoding_charsetUTF8_returnsUTF8() {
+        let header = "OFXHEADER:100\nCHARSET:UTF-8\n\n<OFX>"
+        let data = header.data(using: .ascii)!
+        XCTAssertEqual(OFXImporter.detectOFXHeaderEncoding(in: data), .utf8)
+    }
+
+    func test_detectOFXHeaderEncoding_charsetNONE_returnsASCII() {
+        let header = "OFXHEADER:100\nCHARSET:NONE\n\n<OFX>"
+        let data = header.data(using: .ascii)!
+        XCTAssertEqual(OFXImporter.detectOFXHeaderEncoding(in: data), .ascii)
+    }
+
+    func test_detectOFXHeaderEncoding_noCharsetHeader_returnsNil() {
+        let header = "OFXHEADER:100\nDATA:OFXSGML\n\n<OFX>"
+        let data = header.data(using: .ascii)!
+        XCTAssertNil(OFXImporter.detectOFXHeaderEncoding(in: data),
+            "Ohne CHARSET-Zeile muss nil zurück, damit der Fallback (UTF-8 → Latin-1) greift")
+    }
+
+    func test_detectOFXHeaderEncoding_unknownCharset_returnsNil() {
+        let header = "CHARSET:KOI8-R\n\n<OFX>"
+        let data = header.data(using: .ascii)!
+        XCTAssertNil(OFXImporter.detectOFXHeaderEncoding(in: data),
+            "Unbekannte Charsets müssen nil ergeben, damit Fallback-Logik greift")
+    }
+
+    func test_detectOFXHeaderEncoding_xmlBodyOnly_returnsNil() {
+        // OFX 2.x XML hat keinen plain-text-Header → nil → Fallback.
+        let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<OFX>...</OFX>"
+        let data = xml.data(using: .ascii)!
+        XCTAssertNil(OFXImporter.detectOFXHeaderEncoding(in: data))
+    }
 }
