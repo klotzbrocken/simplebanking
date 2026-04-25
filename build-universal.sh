@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
-# build-universal.sh — Universal (arm64 + x86_64) test build. Not for distribution.
+# build-universal.sh — DEPRECATED.
+#
+# Dieses Skript baut nur das App-Binary (universal) und kopiert weder
+# `simplebanking-mcp` noch `simplebanking-cli` ins Bundle. Wer es für
+# Releases nutzt, würde die seit 1.4.0 beworbenen Agenten-Funktionen
+# (CLI `sb`, MCP-Server) silent aus dem DMG entfernen. Außerdem ist
+# das hard-coded VERSION_BASE hier veraltet (1.3.1).
+#
+# Stattdessen: `bash build-app.sh` — baut alle 3 Targets (App + MCP + CLI),
+# erzeugt universal binary, kopiert alles ins Bundle.
+
 set -euo pipefail
+
+echo ""
+echo "build-universal.sh ist deprecated."
+echo "Stattdessen 'bash build-app.sh' nutzen — das baut zusätzlich"
+echo "simplebanking-mcp und simplebanking-cli und kopiert sie ins Bundle."
+echo ""
+echo "Falls du das alte Verhalten WIRKLICH brauchst (App-only Build),"
+echo "setze FORCE_UNIVERSAL_LEGACY=1 und ruf das Skript erneut."
+echo ""
+if [[ "${FORCE_UNIVERSAL_LEGACY:-0}" != "1" ]]; then
+    exit 1
+fi
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"

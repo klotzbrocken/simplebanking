@@ -222,7 +222,7 @@ struct TransactionDetailView: View {
     private func initializeCategorySelectionIfNeeded() {
         guard !categorySelectionReady else { return }
         selectedCategory = TransactionCategorizer.category(for: transaction)
-        hasCategoryOverride = TransactionCategorizer.hasOverride(txID: txFingerprint)
+        hasCategoryOverride = TransactionCategorizer.hasOverride(txID: txFingerprint, slotId: txSlotId)
         categorySelectionReady = true
     }
 
@@ -234,10 +234,12 @@ struct TransactionDetailView: View {
         categoryEditStatus = "Kategorie wird aktualisiert..."
 
         Task.detached {
+            // Slot-scoped override (Composite-Key seit v19) — sonst leakt der
+            // Override auf identische Tx in anderen Slots.
             if newCategory == autoCategory {
-                _ = TransactionCategorizer.removeOverride(txID: txID)
+                _ = TransactionCategorizer.removeOverride(txID: txID, slotId: capturedSlotId)
             } else {
-                TransactionCategorizer.saveOverride(txID: txID, category: newCategory)
+                TransactionCategorizer.saveOverride(txID: txID, slotId: capturedSlotId, category: newCategory)
             }
 
             do {
@@ -245,7 +247,7 @@ struct TransactionDetailView: View {
                 try TransactionsDatabase.updateKategorie(txID: txID, slotId: capturedSlotId, kategorie: newCategory.displayName)
                 await MainActor.run {
                     NotificationCenter.default.post(name: Notification.Name("TransactionCategoriesChanged"), object: nil)
-                    hasCategoryOverride = TransactionCategorizer.hasOverride(txID: txID)
+                    hasCategoryOverride = TransactionCategorizer.hasOverride(txID: txID, slotId: capturedSlotId)
                     categoryEditStatus = hasCategoryOverride
                         ? "Kategorie überschrieben."
                         : "Automatische Kategorie aktiv."
@@ -261,7 +263,7 @@ struct TransactionDetailView: View {
     }
 
     private func resetCategoryOverride() {
-        guard hasCategoryOverride || TransactionCategorizer.hasOverride(txID: txFingerprint) else {
+        guard hasCategoryOverride || TransactionCategorizer.hasOverride(txID: txFingerprint, slotId: txSlotId) else {
             categoryEditStatus = "Für diese Buchung ist kein Kategorie-Override vorhanden."
             return
         }
@@ -302,7 +304,7 @@ struct TransactionDetailView: View {
             merchantEditStatus = "Bitte einen Empfänger angeben."
             return
         }
-        MerchantResolver.saveOverride(txID: txFingerprint, merchant: merchant)
+        MerchantResolver.saveOverride(txID: txFingerprint, slotId: txSlotId, merchant: merchant)
         applyMerchantChange(successMessage: "Korrektur für diese Buchung gespeichert.")
     }
 
@@ -325,7 +327,7 @@ struct TransactionDetailView: View {
     }
 
     private func removeSingleOverride() {
-        let removedOverride = MerchantResolver.removeOverride(txID: txFingerprint)
+        let removedOverride = MerchantResolver.removeOverride(txID: txFingerprint, slotId: txSlotId)
         if removedOverride {
             applyMerchantChange(successMessage: "Buchungs-Override entfernt.")
             return

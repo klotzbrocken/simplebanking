@@ -509,34 +509,77 @@ enum MerchantResolver {
         return rule
     }
 
-    static func saveOverride(txID: String, merchant: String) {
-        let key = txID.lowercased()
+    /// Override-Storage seit Migration v19 mit Composite-Key `slotId|txID` —
+    /// derselbe Fingerprint kann in mehreren Slots existieren, manueller
+    /// Merchant-Override darf nicht slot-übergreifend leaken. Legacy-Einträge
+    /// (nur txID) werden im Read-Path noch gefunden, beim nächsten Save
+    /// migriert.
+    static func saveOverride(txID: String, slotId: String = TransactionsDatabase.activeSlotId,
+                             merchant: String) {
+        let key = compositeOverrideKey(slotId: slotId, txID: txID)
         let normalizedMerchant = (cleanMerchantName(merchant) ?? merchant).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
 
         var overrides = transactionOverrides()
+        let legacy = legacyOverrideKey(txID: txID)
         if normalizedMerchant.isEmpty {
             overrides.removeValue(forKey: key)
+            if !legacy.isEmpty { overrides.removeValue(forKey: legacy) }
         } else {
             overrides[key] = normalizedMerchant
+            // Legacy-Eintrag aufräumen, falls vorhanden — vermeidet Drift.
+            if !legacy.isEmpty { overrides.removeValue(forKey: legacy) }
         }
         persistOverrides(overrides)
     }
 
-    static func hasOverride(txID: String) -> Bool {
-        let key = txID.lowercased()
-        guard !key.isEmpty else { return false }
-        return transactionOverrides()[key] != nil
+    static func hasOverride(txID: String,
+                            slotId: String = TransactionsDatabase.activeSlotId) -> Bool {
+        overrideForTransaction(txID: txID, slotId: slotId) != nil
     }
 
     @discardableResult
-    static func removeOverride(txID: String) -> Bool {
-        let key = txID.lowercased()
-        guard !key.isEmpty else { return false }
+    static func removeOverride(txID: String,
+                               slotId: String = TransactionsDatabase.activeSlotId) -> Bool {
+        let composite = compositeOverrideKey(slotId: slotId, txID: txID)
+        let legacy = legacyOverrideKey(txID: txID)
+        guard !composite.isEmpty || !legacy.isEmpty else { return false }
         var overrides = transactionOverrides()
-        let removed = overrides.removeValue(forKey: key) != nil
+        var removed = false
+        if !composite.isEmpty, overrides.removeValue(forKey: composite) != nil { removed = true }
+        if !legacy.isEmpty, overrides.removeValue(forKey: legacy) != nil { removed = true }
         persistOverrides(overrides)
         return removed
+    }
+
+    /// Internal lookup helper — composite-Key bevorzugt, legacy-Key fallback.
+    static func overrideForTransaction(txID: String,
+                                       slotId: String = TransactionsDatabase.activeSlotId) -> String? {
+        let overrides = transactionOverrides()
+        let composite = compositeOverrideKey(slotId: slotId, txID: txID)
+        if !composite.isEmpty,
+           let merchant = overrides[composite],
+           !merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return merchant
+        }
+        let legacy = legacyOverrideKey(txID: txID)
+        if !legacy.isEmpty,
+           let merchant = overrides[legacy],
+           !merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return merchant
+        }
+        return nil
+    }
+
+    private static func compositeOverrideKey(slotId: String, txID: String) -> String {
+        let sid = slotId.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let tid = txID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sid.isEmpty, !tid.isEmpty else { return "" }
+        return "\(sid)|\(tid)"
+    }
+
+    private static func legacyOverrideKey(txID: String) -> String {
+        txID.lowercased()
     }
 
     @discardableResult
@@ -585,6 +628,9 @@ enum MerchantResolver {
         let txID = TransactionRecord.fingerprint(for: transaction)
         return resolve(
             txID: txID,
+            // transaction.slotId ist von DB-load gesetzt (unified-mode), sonst nil
+            // → fallback auf activeSlotId. Beides gibt slot-korrekten Override-Lookup.
+            slotId: transaction.slotId ?? TransactionsDatabase.activeSlotId,
             empfaenger: transaction.creditor?.name,
             absender: transaction.debtor?.name,
             verwendungszweck: remittance,
@@ -594,6 +640,7 @@ enum MerchantResolver {
 
     static func resolve(
         txID: String? = nil,
+        slotId: String = TransactionsDatabase.activeSlotId,
         empfaenger: String?,
         absender: String?,
         verwendungszweck: String?,
@@ -606,8 +653,7 @@ enum MerchantResolver {
         let payeeLower = payee?.lowercased() ?? ""
 
         if let txID,
-           let overrideMerchant = transactionOverrides()[txID.lowercased()],
-           !overrideMerchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+           let overrideMerchant = overrideForTransaction(txID: txID, slotId: slotId) {
             return makeResolution(merchant: overrideMerchant, source: "tx_override", confidence: 1.0)
         }
 
