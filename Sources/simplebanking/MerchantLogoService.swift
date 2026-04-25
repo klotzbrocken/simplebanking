@@ -722,8 +722,11 @@ final class MerchantLogoService: ObservableObject {
 
         for tryDomain in Self.brandfetchVariants(domain) {
             let urlString = "https://cdn.brandfetch.io/\(tryDomain)?c=\(clientId)"
-            guard let url = URL(string: urlString),
-                  let (data, response) = try? await URLSession.shared.data(from: url),
+            guard let url = URL(string: urlString) else { continue }
+            // Explizites Timeout 15s — Logos sind kleine Assets, sollten schnell laden.
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 15
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   data.count >= minBytes,
                   let image = NSImage(data: data) else { continue }
@@ -747,8 +750,13 @@ final class MerchantLogoService: ObservableObject {
 
     private func fetchDuckDuckGo(key: String, domain: String) async {
         let urlString = "https://icons.duckduckgo.com/ip3/\(domain).ico"
-        guard let url = URL(string: urlString),
-              let (data, _) = try? await URLSession.shared.data(from: url),
+        guard let url = URL(string: urlString) else {
+            await MainActor.run { inFlight.remove(key) }
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
               !data.isEmpty,
               let image = NSImage(data: data) else {
             await MainActor.run { inFlight.remove(key) }

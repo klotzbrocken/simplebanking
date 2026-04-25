@@ -120,7 +120,11 @@ final class SubscriptionLogoStore: ObservableObject {
 
             // 2. Im Hintergrund aktualisieren
             do {
-                let (data, response) = try await URLSession.shared.data(from: url)
+                // Explizites Timeout 15s — Logos sind kleine Bilder, sollten schnell laden.
+                // Ohne Timeout würde URLSession.shared bis zum macOS-Default (60s) hängen.
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 15
+                let (data, response) = try await URLSession.shared.data(for: request)
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return }
                 guard let image = NSImage(data: data) else { return }
                 if let cacheFile { try? data.write(to: cacheFile) }
