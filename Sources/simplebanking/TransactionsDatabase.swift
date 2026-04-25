@@ -258,10 +258,12 @@ enum TransactionsDatabase {
                     PRIMARY KEY (tx_id, slot_id)
                 )
                 """)
-            // Kopieren: bei bestehenden Kollisionen (falls die v1-PK schon stille Merges
-            // verursacht hat) gewinnt die höchste updated_at-Version. Das ist eine
-            // best-effort-Recovery — stille Duplikate in der bisherigen DB können wir
-            // nicht rückgängig machen, aber ab v19 treten sie nicht mehr auf.
+            // Kopieren: 1-zu-1 ohne dedup-Logik — die alte Tabelle hatte `tx_id` als
+            // Single-PK, jede tx_id existiert dort garantiert nur einmal. Wenn früher
+            // (vor v19) zwei Slots dieselbe tx_id hatten, wurde der spätere Insert vom
+            // älteren überschrieben (silent merge). Diese historische Datenverlust-Wirkung
+            // ist nicht reversibel — ab v19 koexistieren beide Versionen sauber, weil
+            // (tx_id, slot_id) jetzt zusammen PK sind.
             try db.execute(sql: """
                 INSERT INTO transactions_new
                 SELECT

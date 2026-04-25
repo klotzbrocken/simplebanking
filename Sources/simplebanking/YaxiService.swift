@@ -1293,6 +1293,25 @@ enum YaxiService {
         }
     }
 
+    /// Höhere Schwelle als die ursprünglichen 3, um Rate-Limit-Bursts (z.B. N26
+    /// schickt mehrere 429er hintereinander) nicht als fatalen SCA-Abbruch
+    /// zu interpretieren. 8 consecutive errors mit exponentiellem Backoff ergibt
+    /// realen Retry-Spielraum (insgesamt bis zu ~3 Min Pause zwischen Polls).
+    static let scaMaxConsecutiveErrors = 8
+
+    /// Exponentielles Backoff für SCA-Polling nach Bank-Errors. Wird ZUSÄTZLICH
+    /// zum bank-supplied `currentDelay` aufgeschlagen — die Bank kann uns also
+    /// nicht in zu schnelles Polling zwingen, wenn sie kurzzeitig instabil ist.
+    /// Curve: 2s, 4s, 8s, 16s, 30s (cap), 30s, 30s, 30s.
+    /// Pure function — public für Tests in `SCARetryBackoffTests`.
+    static func scaBackoffSeconds(forConsecutiveErrors n: Int,
+                                  base: TimeInterval = 2.0,
+                                  cap: TimeInterval = 30.0) -> TimeInterval {
+        guard n > 0 else { return 0 }
+        let exponent = Double(min(n - 1, 10))   // prevent pow overflow on absurd inputs
+        return min(base * pow(2.0, exponent), cap)
+    }
+
     private static func pollConfirmation(
         context: ConfirmationContext,
         delay: TimeInterval,
@@ -1307,12 +1326,15 @@ enum YaxiService {
         var ctx = context
         var currentDelay = delay
         var consecutiveErrors = 0
+        var errorBackoff: TimeInterval = 0
         for i in 0..<180 {
-            try? await Task.sleep(nanoseconds: UInt64(max(currentDelay, 1.0) * 1_000_000_000))
+            let sleepSeconds = max(currentDelay, 1.0) + errorBackoff
+            try? await Task.sleep(nanoseconds: UInt64(sleepSeconds * 1_000_000_000))
             if Task.isCancelled { return nil }
             do {
                 let next = try await confirm(ctx)
                 consecutiveErrors = 0
+                errorBackoff = 0  // reset nach erfolgreicher Antwort
                 switch next {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket,
@@ -1339,9 +1361,10 @@ enum YaxiService {
                 }
             } catch {
                 consecutiveErrors += 1
-                AppLogger.log("SCA Confirmation poll \(i) error (\(consecutiveErrors) consecutive): \(error.localizedDescription)", category: "YaxiService", level: "WARN")
-                // Abort only after 3 consecutive failures — single transient errors are retried
-                if consecutiveErrors >= 3 { return nil }
+                errorBackoff = scaBackoffSeconds(forConsecutiveErrors: consecutiveErrors)
+                AppLogger.log("SCA Confirmation poll \(i) error (\(consecutiveErrors) consecutive, next backoff \(errorBackoff)s): \(error.localizedDescription)", category: "YaxiService", level: "WARN")
+                // Höherer Threshold + Backoff schützt gegen 429-Rate-Limit-Bursts.
+                if consecutiveErrors >= scaMaxConsecutiveErrors { return nil }
             }
         }
         AppLogger.log("SCA Confirmation: timeout (180 attempts)", category: "YaxiService", level: "WARN")
@@ -1408,10 +1431,17 @@ enum YaxiService {
                 }
             } catch {
                 consecutiveErrors += 1
-                AppLogger.log("SCA Redirect poll error (\(consecutiveErrors) consecutive): \(error.localizedDescription)", category: "YaxiService", level: "WARN")
-                if consecutiveErrors >= 3 {
+                // pollRedirect schläft bereits 5s zwischen Polls — kleinerer
+                // additional Backoff (cap 15s) reicht, sonst staut sich die
+                // Gesamtwartezeit zu sehr auf.
+                let extra = scaBackoffSeconds(forConsecutiveErrors: consecutiveErrors, base: 2.0, cap: 15.0)
+                AppLogger.log("SCA Redirect poll error (\(consecutiveErrors) consecutive, extra backoff \(extra)s): \(error.localizedDescription)", category: "YaxiService", level: "WARN")
+                if consecutiveErrors >= scaMaxConsecutiveErrors {
                     await writeTrace(client: client, label: "pollRedirect", ticket: ticket, error: error)
                     return nil
+                }
+                if extra > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(extra * 1_000_000_000))
                 }
                 continue
             }
