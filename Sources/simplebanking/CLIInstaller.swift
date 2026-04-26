@@ -109,4 +109,87 @@ enum CLIInstaller {
             try fm.removeItem(at: symlinkURL)
         }
     }
+
+    // MARK: - PATH installation
+    //
+    // Wenn der User den PATH-Hinweis aus der App per Screenshot weiterleitet
+    // (Support, Discord, Slack), fängt macOS Live Text die kyrillischen
+    // Schwester-Glyphen statt $HOME (`Н О М Е` sehen identisch zu `H O M E`
+    // aus). Beim Pasten ins Terminal expandiert die Shell die Variable nicht.
+    // Wir bieten daher eine Auto-Fix-Aktion an, die die Zeile selbst ans rc-File
+    // schreibt — und einen Copy-Button, der ASCII garantiert ins Pasteboard
+    // legt (nicht erst durch Screenshot-OCR-Pipelines wandern muss).
+
+    /// Die Shell-rc-Zeile die wir anbieten. Garantiert ASCII.
+    static let shellRcLine = #"export PATH="$HOME/.local/bin:$PATH""#
+
+    /// Marker damit Re-Runs die Zeile finden (auch wenn die literal-line jemand
+    /// editiert hat) und idempotent bleiben.
+    static let shellRcMarker = "# Added by simplebanking - sb CLI"
+
+    enum ShellRcResult: Equatable {
+        case alreadyConfigured(rcFile: URL)
+        case appended(rcFile: URL)
+    }
+
+    enum ShellRcError: Error, LocalizedError {
+        case readFailed(String)
+        case writeFailed(String)
+        var errorDescription: String? {
+            switch self {
+            case .readFailed(let m):  return "rc-Datei konnte nicht gelesen werden: \(m)"
+            case .writeFailed(let m): return "rc-Datei konnte nicht geschrieben werden: \(m)"
+            }
+        }
+    }
+
+    /// Schreibt die PATH-Zeile ans Ende von `~/.zshrc` (oder `~/.bashrc` falls
+    /// `.zshrc` nicht existiert und `.bashrc` schon da ist). Idempotent — Re-Run
+    /// auf bereits konfiguriertem rc-File tut nichts.
+    static func ensurePathInShellRc() throws -> ShellRcResult {
+        let fm = FileManager.default
+        let home = fm.homeDirectoryForCurrentUser
+        let zshrc = home.appendingPathComponent(".zshrc")
+        let bashrc = home.appendingPathComponent(".bashrc")
+
+        // macOS-default ist zsh seit Catalina. Wir nutzen .zshrc (anlegen wenn nicht da),
+        // außer .bashrc existiert schon und .zshrc nicht.
+        let target: URL = {
+            if fm.fileExists(atPath: zshrc.path) { return zshrc }
+            if fm.fileExists(atPath: bashrc.path) { return bashrc }
+            return zshrc
+        }()
+
+        var existing = ""
+        if fm.fileExists(atPath: target.path) {
+            do {
+                existing = try String(contentsOf: target, encoding: .utf8)
+            } catch {
+                throw ShellRcError.readFailed(error.localizedDescription)
+            }
+        }
+
+        let updated = appendShellRcLineIfMissing(content: existing)
+        if updated == existing {
+            return .alreadyConfigured(rcFile: target)
+        }
+
+        do {
+            try updated.write(to: target, atomically: true, encoding: .utf8)
+        } catch {
+            throw ShellRcError.writeFailed(error.localizedDescription)
+        }
+        return .appended(rcFile: target)
+    }
+
+    /// Pure helper — entscheidet ob `content` schon konfiguriert ist und liefert
+    /// den ergänzten String zurück. Public für Tests.
+    static func appendShellRcLineIfMissing(content: String) -> String {
+        if content.contains(shellRcLine) || content.contains(shellRcMarker) {
+            return content
+        }
+        // Sicherer Newline-Handling: wenn content nicht mit \n endet, einen vorne dran.
+        let separator = (content.isEmpty || content.hasSuffix("\n")) ? "" : "\n"
+        return content + separator + "\n" + shellRcMarker + "\n" + shellRcLine + "\n"
+    }
 }
