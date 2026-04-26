@@ -57,8 +57,8 @@ final class CredentialsPanel {
         content.translatesAutoresizingMaskIntoConstraints = false
         panel.contentView = content
         
-        // App Logo - load from app bundle resources
-        if let logoImage = NSImage(named: "AppIcon") ?? NSImage(named: NSImage.applicationIconName) {
+        // App Logo — robust loader mit Fallback-Chain (siehe AppIconLoader).
+        if let logoImage = AppIconLoader.load() {
             logoView.image = logoImage
         }
         logoView.imageScaling = .scaleProportionallyUpOrDown

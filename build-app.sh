@@ -138,7 +138,12 @@ if [[ -f "$ICON_SRC" ]]; then
     iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
     rm -rf "$ICONSET"
     
-    ICON_KEY='<key>CFBundleIconFile</key><string>AppIcon</string>'
+    # CFBundleIconFile (legacy): Finder/Dock zeigen das .icns aus Resources/.
+    # CFBundleIconName (post-macOS-11): NSImage(named: "AppIcon") findet das Icon
+    # ohne Asset-Catalog. Beide setzen — Finder und SwiftUI gehen auf
+    # unterschiedliche Lookup-Pfade.
+    ICON_KEY='<key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIconName</key><string>AppIcon</string>'
     echo "Icon created from $ICON_SRC"
 else
     ICON_KEY=""

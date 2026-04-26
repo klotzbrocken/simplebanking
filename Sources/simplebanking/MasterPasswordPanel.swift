@@ -37,9 +37,10 @@ final class MasterPasswordPanel {
         content.translatesAutoresizingMaskIntoConstraints = false
         panel.contentView = content
 
-        // App Icon
+        // App Icon — robust loader mit Fallback-Chain (NSImage(named:) returnt nil
+        // ohne Asset-Catalog, NSApplicationIconName nur wenn macOS die App "kennt").
         let iconView = NSImageView()
-        if let appIcon = NSImage(named: "AppIcon") ?? NSImage(named: NSImage.applicationIconName) {
+        if let appIcon = AppIconLoader.load() {
             iconView.image = appIcon
         }
         iconView.imageScaling = .scaleProportionallyUpOrDown
