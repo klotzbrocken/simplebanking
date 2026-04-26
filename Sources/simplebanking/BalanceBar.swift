@@ -4104,21 +4104,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     private func setupGlobalHotkey() {
         let defaults = UserDefaults.standard
-        let enabled = defaults.object(forKey: "globalHotkeyEnabled") as? Bool ?? true
-        let rawKeyCode = defaults.integer(forKey: "globalHotkeyKeyCode")
-        let keyCode = rawKeyCode > 0 ? rawKeyCode : 1
-        let rawModifiers = defaults.integer(forKey: "globalHotkeyModifiers")
-        let modifiers = rawModifiers > 0 ? rawModifiers : 4352
 
-        if enabled {
-            GlobalHotkeyManager.shared.register(keyCode: keyCode, carbonModifiers: modifiers)
+        // Flyout-Hotkey (legacy seit 1.x — default ⌃⌘S)
+        let flyoutEnabled = defaults.object(forKey: "globalHotkeyEnabled") as? Bool ?? true
+        let flyoutKeyCode = defaults.integer(forKey: "globalHotkeyKeyCode") > 0
+            ? defaults.integer(forKey: "globalHotkeyKeyCode") : 1
+        let flyoutModifiers = defaults.integer(forKey: "globalHotkeyModifiers") > 0
+            ? defaults.integer(forKey: "globalHotkeyModifiers") : 4352
+
+        if flyoutEnabled {
+            GlobalHotkeyManager.shared.register(keyCode: flyoutKeyCode, carbonModifiers: flyoutModifiers, role: .flyout)
             GlobalHotkeyManager.shared.onTriggered = { @Sendable [weak self] in
                 // Hotkey always opens the flyout regardless of the configured click mode
                 // (mouseOver-mode would otherwise be a no-op for the hotkey).
                 MainActor.assumeIsolated { self?.showBalanceFlyout() }
             }
         } else {
-            GlobalHotkeyManager.shared.unregister()
+            GlobalHotkeyManager.shared.unregister(role: .flyout)
+        }
+
+        // Refresh-Hotkey (neu seit 1.4.0 — default ⌃⌘R, opt-in).
+        // Macht systemweit dasselbe wie das Menüleisten-„Aktualisieren" + ⌘R im Panel.
+        let refreshEnabled = defaults.object(forKey: "globalRefreshHotkeyEnabled") as? Bool ?? false
+        let refreshKeyCode = defaults.integer(forKey: "globalRefreshHotkeyKeyCode") > 0
+            ? defaults.integer(forKey: "globalRefreshHotkeyKeyCode") : 15  // R
+        let refreshModifiers = defaults.integer(forKey: "globalRefreshHotkeyModifiers") > 0
+            ? defaults.integer(forKey: "globalRefreshHotkeyModifiers") : 4352  // ⌃⌘
+
+        if refreshEnabled {
+            GlobalHotkeyManager.shared.register(keyCode: refreshKeyCode, carbonModifiers: refreshModifiers, role: .refresh)
+            GlobalHotkeyManager.shared.onRefreshTriggered = { @Sendable [weak self] in
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+        } else {
+            GlobalHotkeyManager.shared.unregister(role: .refresh)
         }
     }
 

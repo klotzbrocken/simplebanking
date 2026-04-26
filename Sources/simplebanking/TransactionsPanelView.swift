@@ -17,6 +17,7 @@ private struct TransactionsPanelView: View {
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
     @AppStorage("showTransactionCategories") private var showCategories: Bool = false
     @AppStorage("showFilterPills") private var showFilterPills: Bool = false
+    @AppStorage("attentionInboxEnabled") private var attentionInboxEnabled: Bool = true
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
@@ -305,6 +306,14 @@ private struct TransactionsPanelView: View {
     }
 
     private func recomputeAttentionInbox() {
+        // Wenn AttentionInbox vom User deaktiviert ist: gar nicht erst rechnen.
+        // Spart CPU + verhindert dass cards gefilled werden während die UI sie
+        // nicht zeigt (sonst würde ein späteres Re-Enable veraltete cards zeigen).
+        guard attentionInboxEnabled else {
+            attentionCards = []
+            attentionCacheSignature = ""
+            return
+        }
         // Cache-Fast-Path: wenn sich nichts geändert hat, die vorhandenen Cards wiederverwenden.
         let signature = computeAttentionSignature()
         if signature == attentionCacheSignature, !attentionCards.isEmpty {
@@ -1472,30 +1481,34 @@ private struct TransactionsPanelView: View {
                     .buttonStyle(PlainButtonStyle())
                     .help(L10n.t("Abos der letzten 60 Tage", "Subscriptions of the last 60 days"))
 
-                    // Inbox mit Badge
-                    Button(action: {
-                        recomputeAttentionInbox()
-                        showAttentionInbox = true
-                    }) {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: attentionCards.isEmpty ? "bell" : "bell.fill")
-                                .font(.system(size: 15))
-                                .foregroundColor(attentionCards.isEmpty ? .secondary : .primary)
-                            if !attentionCards.isEmpty {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.sbOrangeStrong)
-                                        .frame(width: 14, height: 14)
-                                    Text("\(min(attentionCards.count, 9))")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundColor(.white)
+                    // Inbox mit Badge — nur wenn vom User aktiviert (Setting in
+                    // SettingsPanel). Die Detector-Logik läuft bei deaktiviertem
+                    // Toggle gar nicht erst, sodass keine Cards gesammelt werden.
+                    if attentionInboxEnabled {
+                        Button(action: {
+                            recomputeAttentionInbox()
+                            showAttentionInbox = true
+                        }) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: attentionCards.isEmpty ? "bell" : "bell.fill")
+                                    .font(.system(size: 15))
+                                    .foregroundColor(attentionCards.isEmpty ? .secondary : .primary)
+                                if !attentionCards.isEmpty {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.sbOrangeStrong)
+                                            .frame(width: 14, height: 14)
+                                        Text("\(min(attentionCards.count, 9))")
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundColor(.white)
+                                    }
+                                    .offset(x: 6, y: -6)
                                 }
-                                .offset(x: 6, y: -6)
                             }
                         }
+                        .buttonStyle(PlainButtonStyle())
+                        .help(L10n.t("Attention Inbox", "Attention Inbox"))
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("Attention Inbox", "Attention Inbox"))
 
                     // Wenn Fenster maximiert: Financial Health, Kalender, Fixkosten als
                     // eigenständige Icon-Buttons. Sonst bleiben sie im „Mehr ▾"-Menü unten.

@@ -6,45 +6,94 @@ import Carbon
 final class GlobalHotkeyManager {
     nonisolated(unsafe) static let shared = GlobalHotkeyManager()
 
-    var onTriggered: (@Sendable () -> Void)?
+    /// Rolle eines Hotkeys — bestimmt welches Callback gefeuert wird.
+    enum Role: UInt32 {
+        case flyout  = 1   // legacy ID — bleibt rückwärts-kompat
+        case refresh = 2   // neu seit 1.4.0+
+    }
 
-    private var hotKeyRef: EventHotKeyRef?
+    /// Callback für Flyout-Hotkey (legacy, default ⌃⌘S).
+    var onTriggered: (@Sendable () -> Void)?
+    /// Callback für Refresh-Hotkey (neu, default ⌃⌘R).
+    var onRefreshTriggered: (@Sendable () -> Void)?
+
+    private var hotKeyRefs: [Role: EventHotKeyRef] = [:]
     private var eventHandlerRef: EventHandlerRef?
     private let signature: FourCharCode = 0x73626B79 // 'sbky'
 
     private init() {}
 
-    func register(keyCode: Int, carbonModifiers: Int) {
-        unregister()
+    /// Registriert oder überschreibt einen Hotkey-Slot. Pro Rolle ein Slot.
+    /// Aufruf mit gleicher Rolle überschreibt den vorherigen.
+    func register(keyCode: Int, carbonModifiers: Int, role: Role = .flyout) {
+        ensureEventHandlerInstalled()
+        // Vorhandenen Hotkey für diese Rolle wegräumen.
+        if let old = hotKeyRefs[role] {
+            UnregisterEventHotKey(old)
+            hotKeyRefs[role] = nil
+        }
 
+        var hkID = EventHotKeyID(signature: signature, id: role.rawValue)
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(keyCode), UInt32(carbonModifiers),
+            hkID, GetApplicationEventTarget(), 0, &ref
+        )
+        if status == noErr, let ref {
+            hotKeyRefs[role] = ref
+        }
+    }
+
+    /// Hebt einen einzelnen Hotkey-Slot auf.
+    func unregister(role: Role) {
+        if let ref = hotKeyRefs[role] {
+            UnregisterEventHotKey(ref)
+            hotKeyRefs[role] = nil
+        }
+    }
+
+    /// Hebt ALLE Hotkey-Slots auf + entfernt den Event-Handler.
+    func unregister() {
+        for (_, ref) in hotKeyRefs { UnregisterEventHotKey(ref) }
+        hotKeyRefs.removeAll()
+        if let ref = eventHandlerRef { RemoveEventHandler(ref); eventHandlerRef = nil }
+    }
+
+    private func ensureEventHandlerInstalled() {
+        guard eventHandlerRef == nil else { return }
         var spec = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
         )
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-
-        let status = InstallEventHandler(
+        InstallEventHandler(
             GetApplicationEventTarget(),
-            { (_, _, userData) -> OSStatus in
-                guard let ptr = userData else { return OSStatus(eventNotHandledErr) }
+            { (_, event, userData) -> OSStatus in
+                guard let ptr = userData, let event else { return OSStatus(eventNotHandledErr) }
                 let mgr = Unmanaged<GlobalHotkeyManager>.fromOpaque(ptr).takeUnretainedValue()
-                if let cb = mgr.onTriggered { DispatchQueue.main.async(execute: cb) }
+                // Welcher Hotkey-Slot wurde gefeuert? GetEventParameter liest die ID
+                // aus dem Carbon-Event aus. Ohne diesen Check würden alle Slots dasselbe
+                // Callback triggern.
+                var hkID = EventHotKeyID()
+                let getStatus = GetEventParameter(
+                    event, EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID), nil,
+                    MemoryLayout<EventHotKeyID>.size, nil, &hkID
+                )
+                guard getStatus == noErr, let role = Role(rawValue: hkID.id) else {
+                    return OSStatus(eventNotHandledErr)
+                }
+                let cb: (@Sendable () -> Void)? = {
+                    switch role {
+                    case .flyout:  return mgr.onTriggered
+                    case .refresh: return mgr.onRefreshTriggered
+                    }
+                }()
+                if let cb { DispatchQueue.main.async(execute: cb) }
                 return noErr
             },
             1, &spec, selfPtr, &eventHandlerRef
         )
-        guard status == noErr else { return }
-
-        var hkID = EventHotKeyID(signature: signature, id: 1)
-        RegisterEventHotKey(
-            UInt32(keyCode), UInt32(carbonModifiers),
-            hkID, GetApplicationEventTarget(), 0, &hotKeyRef
-        )
-    }
-
-    func unregister() {
-        if let ref = hotKeyRef { UnregisterEventHotKey(ref); hotKeyRef = nil }
-        if let ref = eventHandlerRef { RemoveEventHandler(ref); eventHandlerRef = nil }
     }
 
     // MARK: Carbon modifier helpers

@@ -56,6 +56,7 @@ struct TransactionDetailView: View {
     @State private var isSavingsBookmarked: Bool = false
     @State private var displayedMerchantInput: String = ""
     @State private var rulePatternInput: String = ""
+    @State private var rulePatternScope: MerchantUserRule.MatchScope = .verwendungszweck
     @State private var merchantEditStatus: String = ""
     @State private var isApplyingMerchantChange: Bool = false
     @State private var selectedCategory: TransactionCategory = .sonstiges
@@ -319,11 +320,21 @@ struct TransactionDetailView: View {
             merchantEditStatus = "Bitte ein Suchmuster für die Regel angeben."
             return
         }
-        guard MerchantResolver.saveRule(pattern: pattern, merchant: merchant, scope: .verwendungszweck, matchType: .contains) != nil else {
+        guard MerchantResolver.saveRule(pattern: pattern, merchant: merchant, scope: rulePatternScope, matchType: .contains) != nil else {
             merchantEditStatus = "Regel konnte nicht gespeichert werden."
             return
         }
-        applyMerchantChange(successMessage: "Regel gespeichert (nur Verwendungszweck) und auf Umsätze angewendet.")
+        let scopeLabel = ruleScopeLabel(rulePatternScope)
+        applyMerchantChange(successMessage: "Regel gespeichert (\(scopeLabel)) und auf Umsätze angewendet.")
+    }
+
+    private func ruleScopeLabel(_ scope: MerchantUserRule.MatchScope) -> String {
+        switch scope {
+        case .searchText:        return "Volltext"
+        case .empfaenger:        return "Empfänger"
+        case .verwendungszweck:  return "Verwendungszweck"
+        case .endToEndId:        return "End-to-End-ID"
+        }
     }
 
     private func removeSingleOverride() {
@@ -697,9 +708,20 @@ struct TransactionDetailView: View {
                         TextField("Empfänger", text: $displayedMerchantInput)
                             .textFieldStyle(RoundedBorderTextFieldStyle())
 
-                        TextField("Regel (Text im Verwendungszweck)", text: $rulePatternInput)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                        HStack(spacing: 8) {
+                            TextField("Regel-Pattern (contains)", text: $rulePatternInput)
+                                .textFieldStyle(RoundedBorderTextFieldStyle())
+                                .disabled(!effectiveMerchantPipelineEnabled)
+                            Picker("", selection: $rulePatternScope) {
+                                Text("Verwendungszweck").tag(MerchantUserRule.MatchScope.verwendungszweck)
+                                Text("Empfänger").tag(MerchantUserRule.MatchScope.empfaenger)
+                                Text("End-to-End-ID").tag(MerchantUserRule.MatchScope.endToEndId)
+                                Text("Volltext").tag(MerchantUserRule.MatchScope.searchText)
+                            }
+                            .labelsHidden()
+                            .frame(width: 150)
                             .disabled(!effectiveMerchantPipelineEnabled)
+                        }
 
                         HStack(spacing: 8) {
                             Button("Nur diese Buchung korrigieren") {
@@ -1007,15 +1029,40 @@ struct TransactionDetailView: View {
 private struct DetailRow: View {
     let label: String
     let value: String
-    
+    @State private var copyHovered: Bool = false
+    @State private var showCopiedToast: Bool = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
-            Text(value.isEmpty ? "—" : value)
-                .font(.system(size: 14))
-                .foregroundColor(.primary)
+            HStack(spacing: 6) {
+                Text(value.isEmpty ? "—" : value)
+                    .font(.system(size: 14))
+                    .foregroundColor(.primary)
+                    .textSelection(.enabled)
+                if !value.isEmpty {
+                    Button(action: copyToPasteboard) {
+                        Image(systemName: showCopiedToast ? "checkmark.circle.fill" : "doc.on.doc")
+                            .font(.system(size: 11))
+                            .foregroundColor(showCopiedToast ? .green : (copyHovered ? .accentColor : .secondary))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .onHover { copyHovered = $0 }
+                    .help("Kopieren")
+                }
+            }
+        }
+    }
+
+    private func copyToPasteboard() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(value, forType: .string)
+        showCopiedToast = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            showCopiedToast = false
         }
     }
 }
