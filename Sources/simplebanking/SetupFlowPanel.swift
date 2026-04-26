@@ -217,18 +217,52 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         content.translatesAutoresizingMaskIntoConstraints = false
         panel.contentView = content
 
+        // App-Icon-Header (Branding, persistent über alle Setup-Steps).
+        // AppIconLoader hat 3-stufige Fallback-Chain — funktioniert auch wenn
+        // LaunchServices die App noch nicht registriert hat (direkter
+        // Bundle-Disk-Read als letzter Fallback).
+        let brandHeader = NSStackView()
+        brandHeader.orientation = .horizontal
+        brandHeader.spacing = 10
+        brandHeader.alignment = .centerY
+        brandHeader.edgeInsets = NSEdgeInsets(top: 16, left: 40, bottom: 0, right: 40)
+        brandHeader.translatesAutoresizingMaskIntoConstraints = false
+
+        let brandIcon = NSImageView()
+        if let icon = AppIconLoader.load() {
+            brandIcon.image = icon
+        }
+        brandIcon.imageScaling = .scaleProportionallyUpOrDown
+        brandIcon.translatesAutoresizingMaskIntoConstraints = false
+        brandIcon.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        brandIcon.heightAnchor.constraint(equalToConstant: 28).isActive = true
+
+        let brandLabel = NSTextField(labelWithString: "simplebanking")
+        brandLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        brandLabel.textColor = .secondaryLabelColor
+
+        brandHeader.addArrangedSubview(brandIcon)
+        brandHeader.addArrangedSubview(brandLabel)
+
+        content.addSubview(brandHeader)
+
         rootStack.orientation = .vertical
         rootStack.spacing = 12
         rootStack.alignment = .leading
-        rootStack.edgeInsets = NSEdgeInsets(top: 32, left: 40, bottom: 32, right: 40)
+        rootStack.edgeInsets = NSEdgeInsets(top: 16, left: 40, bottom: 32, right: 40)
         rootStack.translatesAutoresizingMaskIntoConstraints = false
 
         content.addSubview(rootStack)
 
         NSLayoutConstraint.activate([
+            // Brand-Header oben fixed
+            brandHeader.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            brandHeader.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            brandHeader.topAnchor.constraint(equalTo: content.topAnchor, constant: 3),
+            // RootStack darunter
             rootStack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             rootStack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            rootStack.topAnchor.constraint(equalTo: content.topAnchor, constant: 3),
+            rootStack.topAnchor.constraint(equalTo: brandHeader.bottomAnchor),
             rootStack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
@@ -602,7 +636,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let title = NSTextField(labelWithString: t("Schütze deine Daten.", "Protect your data."))
         title.font = .systemFont(ofSize: 19, weight: .semibold)
 
-        let subtitle = NSTextField(wrappingLabelWithString: t("Dein Master-Passwort verschlüsselt alles auf deinem Mac.", "Your master password encrypts everything on your Mac."))
+        let subtitle = NSTextField(wrappingLabelWithString: t("Dein Master-Passwort verschlüsselt deine Bank-Zugangsdaten im Keychain.", "Your master password encrypts your bank credentials in the Keychain."))
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
 
@@ -833,7 +867,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         fields.spacing = 14
         fields.alignment = .leading
 
-        let securityInfo = infoBox(icon: "checkmark.shield.fill", t("Deine Bankdaten werden verschlüsselt lokal gespeichert. Für Kontoabfragen verbindet sich die App mit YAXI. Der optionale KI-Chat sendet Daten an Anthropic.", "Your banking data is stored encrypted locally. For account queries, the app connects to YAXI. The optional AI chat sends data to Anthropic."), tint: .systemGreen)
+        let securityInfo = infoBox(icon: "checkmark.shield.fill", t("Deine Bank-Zugangsdaten werden im Keychain verschlüsselt (AES-256). Umsätze werden lokal in einer SQLite-DB zwischengespeichert (für Offline-Zugriff via CLI/MCP). Für Kontoabfragen verbindet sich die App mit YAXI. Der optionale KI-Chat sendet Daten an Anthropic.", "Your bank credentials are encrypted in the Keychain (AES-256). Transactions are cached locally in a SQLite DB (for offline CLI/MCP access). For account queries, the app connects to YAXI. The optional AI chat sends data to Anthropic."), tint: .systemGreen)
 
         let buttonRow = horizontalButtons(
             backTitle: t("Zurück", "Back"),
@@ -1164,7 +1198,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
 
-        let f1 = featureRow(icon: "checkmark.shield.fill", title: t("Alles verschlüsselt", "Everything encrypted"), body: t("Deine Daten liegen nur auf deinem Mac – vollständig verschlüsselt.", "Your data stays only on your Mac – fully encrypted."))
+        let f1 = featureRow(icon: "checkmark.shield.fill", title: t("Bank-Zugangsdaten verschlüsselt", "Bank credentials encrypted"), body: t("Login + Passwort verschlüsselt im Keychain. Umsätze als lokaler Cache (für CLI/MCP).", "Login + password encrypted in the Keychain. Transactions kept as local cache (for CLI/MCP)."))
         let f2 = featureRow(icon: "touchid", title: t("Touch ID verfügbar", "Touch ID available"), body: t("Einmal einrichten, dann ohne Passwort entsperren.", "Set up once, then unlock without a password."))
         let f3 = featureRow(icon: "wifi.slash", title: t("Keine Cloud", "No cloud"), body: t("Wir schicken nichts ins Internet. Alles bleibt hier.", "We send nothing to the internet. Everything stays here."))
 

@@ -71,8 +71,10 @@ struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
         self.verwendungszweck = Self.clean((transaction.remittanceInformation ?? []).joined(separator: " "))
         self.additionalInformation = Self.clean(transaction.additionalInformation)
         let resolution = MerchantResolver.resolve(transaction: transaction)
+        let slotIdForCategory = transaction.slotId ?? TransactionsDatabase.activeSlotId
         let category = TransactionCategorizer.category(
             txID: self.txID,
+            slotId: slotIdForCategory,
             amount: transaction.parsedAmount,
             empfaenger: self.empfaenger,
             absender: self.absender,

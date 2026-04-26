@@ -10,7 +10,7 @@ enum OnboardingPanel {
         }
         let hostingController = NSHostingController(rootView: view)
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 460),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -70,7 +70,7 @@ private let pages: [OnboardingPage] = [
         title: "Deine Daten sind sicher",
         body: "",
         features: [
-            .init(icon: "key.fill", text: "Master-Passwort verschlüsselt alle Daten lokal"),
+            .init(icon: "key.fill", text: "Master-Passwort schützt deine Bank-Zugangsdaten im Keychain"),
             .init(icon: "touchid", text: "Touch ID für schnelles Entsperren aktivierbar"),
             .init(icon: "iphone.and.arrow.forward", text: "Keine Daten in der Cloud – alles bleibt auf deinem Mac"),
         ]
@@ -90,6 +90,19 @@ private struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // App-Icon-Header — gibt dem Wizard Branding statt nur SF-Symbols.
+            // AppIconLoader hat 3-stufige Fallback-Chain (Asset-Catalog,
+            // ApplicationIconName, direkter Bundle-Disk-Read aus AppIcon.icns).
+            if let appIcon = AppIconLoader.load() {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 11))
+                    .padding(.top, 24)
+                    .padding(.bottom, 4)
+            }
+
             // Content area
             ZStack {
                 ForEach(pages.indices, id: \.self) { index in
@@ -100,7 +113,7 @@ private struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, 40)
-            .padding(.top, 36)
+            .padding(.top, 12)
             .padding(.bottom, 20)
 
             // Bottom bar: dots + buttons
@@ -153,7 +166,7 @@ private struct OnboardingView: View {
                 .padding(.bottom, 20)
             }
         }
-        .frame(width: 460, height: 400)
+        .frame(width: 460, height: 460)
         .background(Color(NSColor.windowBackgroundColor))
     }
 }

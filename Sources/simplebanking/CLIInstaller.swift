@@ -67,6 +67,7 @@ enum CLIInstaller {
         case sourceMissing
         case createDirFailed(String)
         case symlinkFailed(String)
+        case foreignBinaryAtTarget(currentTarget: String?)
 
         var errorDescription: String? {
             switch self {
@@ -76,6 +77,9 @@ enum CLIInstaller {
                 return "Ordner ~/.local/bin konnte nicht angelegt werden: \(msg)"
             case .symlinkFailed(let msg):
                 return "Symlink konnte nicht gesetzt werden: \(msg)"
+            case .foreignBinaryAtTarget(let target):
+                let where_ = target.map { " (zeigt auf: \($0))" } ?? ""
+                return "Unter ~/.local/bin/sb existiert bereits etwas, das nicht von simplebanking ist\(where_). Bitte manuell wegräumen."
             }
         }
     }
@@ -90,8 +94,21 @@ enum CLIInstaller {
             throw InstallError.createDirFailed(error.localizedDescription)
         }
 
-        // Vorhandenen Symlink oder Datei wegräumen (z.B. von einem älteren Bundle-Pfad).
-        if fm.fileExists(atPath: symlinkURL.path) || (try? fm.destinationOfSymbolicLink(atPath: symlinkURL.path)) != nil {
+        // Owner-Check vor Remove: nur wegräumen wenn der existierende Symlink
+        // wirklich auf ein simplebanking-Binary zeigt. Sonst hätten User mit
+        // eigenem `sb`-Script (z.B. ein Brew-Tool, ein selbstgeschriebenes Wrapper)
+        // ihren Eintrag still verloren — wir würden sie ungefragt überschreiben.
+        if fm.fileExists(atPath: symlinkURL.path) ||
+           (try? fm.destinationOfSymbolicLink(atPath: symlinkURL.path)) != nil {
+            let target = try? fm.destinationOfSymbolicLink(atPath: symlinkURL.path)
+            // Wir akzeptieren nur Symlinks die auf ein simplebanking-cli-Binary
+            // im Bundle zeigen (absoluter Pfad ODER beliebiger Pfad mit dem
+            // bekannten Suffix — das deckt App-Verschiebungen ab).
+            let isOurs = target == sourceURL.path ||
+                (target?.hasSuffix("simplebanking.app/Contents/MacOS/simplebanking-cli") ?? false)
+            guard isOurs else {
+                throw InstallError.foreignBinaryAtTarget(currentTarget: target)
+            }
             try? fm.removeItem(at: symlinkURL)
         }
 
@@ -146,6 +163,11 @@ enum CLIInstaller {
     /// Schreibt die PATH-Zeile ans Ende von `~/.zshrc` (oder `~/.bashrc` falls
     /// `.zshrc` nicht existiert und `.bashrc` schon da ist). Idempotent — Re-Run
     /// auf bereits konfiguriertem rc-File tut nichts.
+    ///
+    /// Symlink-safe: wenn ~/.zshrc ein Symlink ist (z.B. dotfile-management
+    /// wie chezmoi/yadm/stow → ~/dotfiles/zshrc), schreiben wir auf den
+    /// resolved Target-Pfad. `.write(to:atomically:)` würde sonst den Symlink
+    /// durch eine reguläre Datei ersetzen + Permissions/Ownership ändern.
     static func ensurePathInShellRc() throws -> ShellRcResult {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
@@ -154,16 +176,30 @@ enum CLIInstaller {
 
         // macOS-default ist zsh seit Catalina. Wir nutzen .zshrc (anlegen wenn nicht da),
         // außer .bashrc existiert schon und .zshrc nicht.
-        let target: URL = {
+        let userFacing: URL = {
             if fm.fileExists(atPath: zshrc.path) { return zshrc }
             if fm.fileExists(atPath: bashrc.path) { return bashrc }
             return zshrc
         }()
 
+        // Symlink resolven: wenn userFacing ein Symlink ist, schreiben wir auf
+        // den realen Pfad. Sonst würde atomic-write den Symlink ersetzen.
+        let writeTarget: URL = {
+            guard let symlinkDest = try? fm.destinationOfSymbolicLink(atPath: userFacing.path) else {
+                return userFacing
+            }
+            // destinationOfSymbolicLink kann relativ oder absolut sein.
+            if (symlinkDest as NSString).isAbsolutePath {
+                return URL(fileURLWithPath: symlinkDest)
+            }
+            // Relativer Symlink → relativ zum Verzeichnis des Symlinks.
+            return userFacing.deletingLastPathComponent().appendingPathComponent(symlinkDest)
+        }()
+
         var existing = ""
-        if fm.fileExists(atPath: target.path) {
+        if fm.fileExists(atPath: writeTarget.path) {
             do {
-                existing = try String(contentsOf: target, encoding: .utf8)
+                existing = try String(contentsOf: writeTarget, encoding: .utf8)
             } catch {
                 throw ShellRcError.readFailed(error.localizedDescription)
             }
@@ -171,15 +207,18 @@ enum CLIInstaller {
 
         let updated = appendShellRcLineIfMissing(content: existing)
         if updated == existing {
-            return .alreadyConfigured(rcFile: target)
+            // Wir geben das user-facing path zurück (was der User in der Settings-
+            // Status-Message sieht), nicht den resolved Pfad — sonst wäre der
+            // dotfile-internal Pfad verwirrend.
+            return .alreadyConfigured(rcFile: userFacing)
         }
 
         do {
-            try updated.write(to: target, atomically: true, encoding: .utf8)
+            try updated.write(to: writeTarget, atomically: true, encoding: .utf8)
         } catch {
             throw ShellRcError.writeFailed(error.localizedDescription)
         }
-        return .appended(rcFile: target)
+        return .appended(rcFile: userFacing)
     }
 
     /// Pure helper — entscheidet ob `content` schon konfiguriert ist und liefert

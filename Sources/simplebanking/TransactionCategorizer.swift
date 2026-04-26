@@ -133,7 +133,11 @@ enum TransactionCategorizer {
 
     static func category(for transaction: TransactionsResponse.Transaction) -> TransactionCategory {
         let txID = TransactionRecord.fingerprint(for: transaction)
-        if let override = overrideCategory(txID: txID) {
+        // transaction.slotId ist von DB-load gesetzt (unified-mode), sonst nil
+        // → fallback auf activeSlotId. Beide gibt slot-korrekten Override-Lookup —
+        // sonst leakt activeSlot-Override auf identische Tx in anderen Slots.
+        let slotId = transaction.slotId ?? TransactionsDatabase.activeSlotId
+        if let override = overrideCategory(txID: txID, slotId: slotId) {
             return override
         }
 
@@ -165,6 +169,7 @@ enum TransactionCategorizer {
 
     static func category(
         txID: String,
+        slotId: String = TransactionsDatabase.activeSlotId,
         amount: Double,
         empfaenger: String?,
         absender: String?,
@@ -172,7 +177,9 @@ enum TransactionCategorizer {
         additionalInformation: String?,
         effectiveMerchant: String?
     ) -> TransactionCategory {
-        if let override = overrideCategory(txID: txID) {
+        // Slot-scoped Override-Lookup (Composite-Key seit v19) — sonst leakt
+        // activeSlot-Override auf gleichfingerprint Tx in anderen Slots.
+        if let override = overrideCategory(txID: txID, slotId: slotId) {
             return override
         }
 
