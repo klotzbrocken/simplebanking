@@ -12,6 +12,10 @@ struct MerchantUserRule: Codable, Identifiable {
         case searchText = "search_text"
         case empfaenger
         case verwendungszweck
+        // End-to-End-ID — bei SEPA-Lastschriften oft stabil pro Abo. Match z.B.
+        // bei Netflix endToEndId beginnt mit "NETFLIX-" o.ä. Verlässlicher als
+        // Verwendungszweck weil nicht von Bank umformatiert.
+        case endToEndId = "end_to_end_id"
     }
 
     enum MatchType: String, Codable, CaseIterable {
@@ -634,7 +638,8 @@ enum MerchantResolver {
             empfaenger: transaction.creditor?.name,
             absender: transaction.debtor?.name,
             verwendungszweck: remittance,
-            additionalInformation: transaction.additionalInformation
+            additionalInformation: transaction.additionalInformation,
+            endToEndId: transaction.endToEndId
         )
     }
 
@@ -644,7 +649,8 @@ enum MerchantResolver {
         empfaenger: String?,
         absender: String?,
         verwendungszweck: String?,
-        additionalInformation: String?
+        additionalInformation: String?,
+        endToEndId: String? = nil
     ) -> MerchantResolution {
         let payee = clean(empfaenger)
         let payer = clean(absender)
@@ -671,7 +677,8 @@ enum MerchantResolver {
             empfaenger: payee,
             verwendungszweck: purpose,
             additionalInformation: additional,
-            absender: payer
+            absender: payer,
+            endToEndId: endToEndId
         ) {
             return makeResolution(merchant: userRule.merchant, source: "user_rule", confidence: 0.99)
         }
@@ -787,7 +794,8 @@ enum MerchantResolver {
         empfaenger: String?,
         verwendungszweck: String?,
         additionalInformation: String?,
-        absender: String?
+        absender: String?,
+        endToEndId: String? = nil
     ) -> MerchantUserRule? {
         let rules = userRules()
             .filter { $0.enabled }
@@ -800,7 +808,7 @@ enum MerchantResolver {
 
         guard !rules.isEmpty else { return nil }
 
-        let searchRaw = [empfaenger, absender, verwendungszweck, additionalInformation]
+        let searchRaw = [empfaenger, absender, verwendungszweck, additionalInformation, endToEndId]
             .compactMap(clean)
             .joined(separator: " ")
         let searchNormalized = normalizeForSearch(searchRaw)
@@ -808,6 +816,8 @@ enum MerchantResolver {
         let payeeNormalized = normalizeForSearch(payeeRaw)
         let purposeRaw = [verwendungszweck, additionalInformation].compactMap(clean).joined(separator: " ")
         let purposeNormalized = normalizeForSearch(purposeRaw)
+        let endToEndRaw = endToEndId ?? ""
+        let endToEndNormalized = normalizeForSearch(endToEndRaw)
 
         for rule in rules {
             let targetRaw: String
@@ -822,6 +832,9 @@ enum MerchantResolver {
             case .verwendungszweck:
                 targetRaw = purposeRaw
                 targetNormalized = purposeNormalized
+            case .endToEndId:
+                targetRaw = endToEndRaw
+                targetNormalized = endToEndNormalized
             }
 
             if ruleMatches(rule: rule, normalizedTarget: targetNormalized, rawTarget: targetRaw) {

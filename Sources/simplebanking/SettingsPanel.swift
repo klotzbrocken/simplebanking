@@ -177,10 +177,14 @@ struct SettingsView: View {
     @AppStorage("globalHotkeyEnabled") private var globalHotkeyEnabled: Bool = true
     @AppStorage("globalHotkeyKeyCode") private var globalHotkeyKeyCode: Int = 1      // kVK_ANSI_S
     @AppStorage("globalHotkeyModifiers") private var globalHotkeyModifiers: Int = 4352 // controlKey | cmdKey
+    @AppStorage("globalRefreshHotkeyEnabled") private var globalRefreshHotkeyEnabled: Bool = false
+    @AppStorage("globalRefreshHotkeyKeyCode") private var globalRefreshHotkeyKeyCode: Int = 15  // kVK_ANSI_R
+    @AppStorage("globalRefreshHotkeyModifiers") private var globalRefreshHotkeyModifiers: Int = 4352 // controlKey | cmdKey
     @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("resetAttempts") private var resetAttempts: Int = 0
     @AppStorage("swapClickBehavior") private var swapClickBehavior: Bool = false
     @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
+    @AppStorage("attentionInboxEnabled") private var attentionInboxEnabled: Bool = true
     @AppStorage("dockModeEnabled") private var dockModeEnabled: Bool = false
     @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.flyoutCard.rawValue
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
@@ -808,7 +812,7 @@ struct SettingsView: View {
 
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Kurzbefehl", "Shortcut"))
+                    Text(t("Kurzbefehl: Flyout", "Shortcut: Flyout"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
                     Text(t("Flyout oder Kontostand ein-/ausblenden", "Show flyout or toggle balance"))
                         .font(ThemeFonts.body(size: 11))
@@ -825,6 +829,28 @@ struct SettingsView: View {
                     .toggleStyle(SwitchToggleStyle())
                     .labelsHidden()
                     .onChange(of: globalHotkeyEnabled) { _ in postHotkeyChanged() }
+            }
+
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Kurzbefehl: Aktualisieren", "Shortcut: Refresh"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Bank-Refresh systemweit auslösen (auch wenn die App im Hintergrund ist)",
+                           "Trigger bank refresh system-wide (also when the app is in background)"))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                HotkeyRecorderView(keyCode: $globalRefreshHotkeyKeyCode, modifiers: $globalRefreshHotkeyModifiers)
+                    .frame(width: 90, height: 24)
+                    .opacity(globalRefreshHotkeyEnabled ? 1.0 : 0.4)
+                    .allowsHitTesting(globalRefreshHotkeyEnabled)
+                    .onChange(of: globalRefreshHotkeyKeyCode) { _ in postHotkeyChanged() }
+                    .onChange(of: globalRefreshHotkeyModifiers) { _ in postHotkeyChanged() }
+                Toggle("", isOn: $globalRefreshHotkeyEnabled)
+                    .toggleStyle(SwitchToggleStyle())
+                    .labelsHidden()
+                    .onChange(of: globalRefreshHotkeyEnabled) { _ in postHotkeyChanged() }
             }
             }
             .padding(14)
@@ -1135,14 +1161,16 @@ struct SettingsView: View {
 
                             SettingsRow(
                                 title: t("Auto-Sync-Zeitraum", "Auto-sync range"),
-                                subtitle: t("Automatisch synchronisiert. Älteren Zeitraum einmalig laden: Import.",
-                                            "Automatically synced. Load older history once: Import.")
+                                subtitle: t(
+                                    "Wird bei jedem Refresh abgeholt (max. 90 Tage). Für ältere Historie (Abos finden, alte Buchungen) einmalig 'Importieren' → Deep-Sync 180 / 365 Tage.",
+                                    "Fetched on every refresh (max. 90 days). For older history (find subscriptions, old transactions) use 'Import' once → Deep-Sync 180 / 365 days."
+                                )
                             ) {
                                 AccountMenuPicker(
                                     items: [
                                         (title: t("30 Tage", "30 days"), value: 30),
                                         (title: t("60 Tage", "60 days"), value: 60),
-                                        (title: t("90 Tage", "90 days"), value: 90),
+                                        (title: t("90 Tage (Max)", "90 days (max)"), value: 90),
                                     ],
                                     selection: Binding(
                                         get: { currentSlotSettings.fetchDays },
@@ -1579,6 +1607,15 @@ struct SettingsView: View {
                     "Automatically loads more transactions while scrolling and replaces page indicators."
                 ),
                 isOn: $infiniteScrollEnabled
+            )
+
+            SettingsToggleRow(
+                title: t("Attention Inbox anzeigen", "Show Attention Inbox"),
+                subtitle: t(
+                    "Glocken-Icon mit Hinweisen auf doppelte Buchungen, neue Lastschriften und vermisste Gehälter. Aus = kein Detector, kein Icon.",
+                    "Bell icon with hints about duplicate transactions, new direct debits and missing salary. Off = no detector, no icon."
+                ),
+                isOn: $attentionInboxEnabled
             )
 
             VStack(alignment: .leading, spacing: 8) {
