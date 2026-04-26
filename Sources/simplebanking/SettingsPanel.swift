@@ -2031,7 +2031,7 @@ struct SettingsView: View {
             // App Icon and Name
             HStack(spacing: 16) {
                 Group {
-                    if let nsImage = NSImage(named: "AppIcon") ?? NSApp.applicationIconImage {
+                    if let nsImage = AppIconLoader.load() {
                         Image(nsImage: nsImage)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
