@@ -1,5 +1,50 @@
 # Changelog — simplebanking
 
+## [1.4.0] — 2026-04-26
+
+### Neu
+- **CLI `sb`** — Neues 3. Executable im Bundle. Read-only Cache-Zugriff aus dem Terminal: `sb balance`, `sb accounts`, `sb tx`, `sb summary`, `sb today`, `sb week`, `sb month`, `sb refresh`. Alle Subcommands mit `--json`-Flag, `--slot`-Filter, `--color auto|always|never`. `sb refresh` triggert die laufende App via DistributedNotification und zeigt ehrlichen Status (success / locked / failed) statt pauschal „aktualisiert".
+- **Dock-Mode** — Optionales Dock-Icon zusätzlich zur Menüleiste. Setting in „Allgemein → Dock". Cmd-Q-Verhalten passt sich an (Dock-Mode = „Beenden", Agent-Mode = „Fenster schließen"). Klick auf Dock-Icon öffnet das Umsatzfenster.
+- **Import-System** — Neuer Import-Dialog in Settings → Konten mit vier Quellen:
+  - **Deep-Sync 180 / 365 Tage** via YAXI (force-refetch, kann SCA/TAN triggern)
+  - **OFX-Datei** (OFX 1.x SGML + OFX 2.x XML, mit Charset-Erkennung CP1252/ISO-8859-1/UTF-8)
+  - **CAMT.053 XML** (Dialekt-Varianten 001.02–001.08+, getestet gegen DKB, Commerzbank, Sparkasse, ING, Comdirect)
+- **Transaktions-Detail-View** — Vollbild-Sheet mit allen Buchungs-Properties, manueller Kategorie- und Händler-Override (slot-scoped), Reminder-Erstellung mit Datumspicker, Notiz-Feld, Anhänge bis 3 MB / 3 Stück pro Buchung, Bookmark-Funktion.
+- **GreenZoneRing mit Dispo-Mode** — Neuer „Bin ich im grünen Bereich?"-Ring im Umsatzpanel. Diskrete semantische Farbbänder statt continuous hue: Freeze=Blau, Dispo (balance < 0)=Rot mit `|balance|/dispoLimit`-Anzeige, sonst Rot/Orange/Grün bei Schwellen 0.34/0.67.
+- **Universelle Fehler-Übersetzung** — Bank-Fehlermeldungen (`RoutexClientError`) werden jetzt zentral auf deutsche Texte mit Aktions-Vorschlägen gemappt. Beispiel: „UnexpectedError" → „Unerwarteter Bankfehler — Kurz warten, dann erneut versuchen". Plus Retry-After-Hinweis bei Rate-Limit.
+
+### Geändert
+- **Settings → Konten** komplett überarbeitet: 3 klare Cards pro Slot (Stammdaten, Finanz-Ziele, Kontostand-Schwellen), neuer Settings-Bereich für Dock + Infinite Scroll + Balance-Click-Mode-Picker.
+- **Menüleiste Unified-Mode-Icon**: `building.columns.fill` → `square.stack.3d.up.fill` (konsistent mit Flyout).
+- **Auto-Refresh Default** 60 → 240 Min (4 h) für Konsistenz mit Anzeige-Labels.
+- **App-Passwort-Beschreibung präzisiert** — schützt jetzt ehrlich nur die Bank-Zugangsdaten im Keychain. Lokal gespeicherte Umsätze (Cache) sind transparent als „auch für CLI/MCP lesbar" beschrieben.
+- **SCA-Polling Backoff** — Threshold von 3 auf 8 consecutive errors mit exponentiellem Backoff (2s/4s/8s/16s/30s cap). Schützt vor 429-Rate-Limit-Bursts (N26/Sparkasse).
+- **Routex SDK** auf 0.4.0 (war 0.3.0). Mac-Catalyst-Support hinzugefügt (für uns nicht relevant), erweiterte Test-Coverage.
+
+### Behoben
+- **Race bei Slot-Switch** — `checkNewBookings` hatte keinen `slotEpoch`-Check. Bei mid-fetch Slot-Wechsel landete die Antwort als Notification/Ripple/Unread-Indikator im neuen Slot. Plus: parallele HBCI-Calls aus `sb refresh` + Auto-Refresh-Timer wurden über zusätzlichen `isHBCICallInFlight`-Guard in `checkNewBookings` verhindert (vorher „Fehlender Dialogkontext" bei Sparkasse/Volksbank).
+- **OAuth-Listener Hardening** — Lokaler Callback-Listener bindet jetzt nur auf Loopback (127.0.0.1), nicht alle LAN-Interfaces. Plus Path-Validation: nur `/simplebanking-auth-callback` triggert das Polling-Wakeup.
+- **Master-Password Memory-Lifetime** — Abgeleitete PBKDF2-Schlüssel (32 Byte) und entschlüsselte Plaintext-Buffer werden nach Verwendung mit `memset_s` zeroized. Reduziert das Window in dem Schlüsselmaterial im Heap liegt.
+- **Slot-Switch atomarer** — `SlotContext.activate(slotId:)` als zentrale Stelle für Slot-Wechsel über alle Layer (YaxiService, CredentialsStore, TransactionsDatabase). Sechs verteilte Triple-Set-Callsites mit teilweise inkonsistenter Reihenfolge konsolidiert.
+- **Slot-Removal Cleanup** — `removeSlot` räumt jetzt auch UserDefaults-Bloat (`cachedBalance.<id>`, `lastSeenTxSig.<id>`), encrypted credentials-Files und YAXI-Session/connectionData auf. Vorher leakte ein entfernter Slot dauerhaft.
+- **Manuelle Kategorie-/Händler-Overrides slot-scoped** — Composite-Key `slotId|txID` (vorher nur txID). Identische Tx in mehreren Slots leakten Override sonst slot-übergreifend.
+- **Reminder-Erstellung atomar** — Wenn EventKit-Create succeeds aber DB-Write fails, wird der EventKit-Reminder rückwärts gerollt. Vorher orphaned Reminder in Reminders.app, den simplebanking nicht kannte.
+- **OFX-Charset-Erkennung** — Sparkasse-OFX-Files mit `CHARSET:1252`-Header werden jetzt korrekt als Windows-1252 dekodiert. Vorher Mojibake bei Umlauten + €-Zeichen (Latin-1-Fallback dekodiert 0x80 als Control-Char).
+- **CAMT.053 XXE-Härtung** — `XMLParser.shouldResolveExternalEntities = false` explizit gesetzt.
+- **Migration v21 — `ON DELETE CASCADE`** für `transaction_attachments`. Bei DELETE FROM transactions (Slot-Removal, v17 wipe) bleiben jetzt keine orphaned Attachment-Rows zurück.
+- **Compiler-Warnings** — `TransactionsPanelView` Toolbar-Delegate ist jetzt `@MainActor`, beseitigt Swift-6-Strict-Mode-Errors.
+- **AppLogger PII-Schutz** — Zentraler `LogSanitizer` redacted IBAN, Credentials (key=value-Pattern), und lange Tokens (≥24 chars) automatisch in allen 100+ Log-Calls.
+- **AI-Provider Fehlermeldungen** — 401/403/429/5xx werden jetzt verständlich gemappt („API-Schlüssel ungültig", „Rate-Limit, Retry in N s") statt rohem `AI API Fehler (401)`.
+- **URLSession-Timeouts** für Logo-Fetches (LogoAssets, MerchantLogoService brandfetch + duckduckgo) — 15s explizit. Vorher hingen die Tasks bis zum macOS-Default (60s).
+- **WAL-Sidecar Cleanup** beim App-Quit (`PRAGMA wal_checkpoint(TRUNCATE)`). Time-Machine-Backups sehen jetzt nur die Haupt-DB statt main + db-wal + db-shm (~3× kleiner).
+- **`build-universal.sh` deprecated** — baute nur App-Binary ohne MCP+CLI. War Distribution-Trap. Standardpfad bleibt `build-app.sh`.
+- **Tests verdreifacht** — 100 → 190. Neue Coverage für CLI-Refresh-Wire-Format, Slot-Context, Memory-Wipe, OAuth-Callback-Path-Matcher, AttentionInbox-Salary-Detection-Regression, Migration v21 Cascade, OFX-Charset-Erkennung, Override-Slot-Scope (Categorizer + MerchantResolver), AIHTTPError-Mapping, RoutexErrorMapper, LogSanitizer, SCA-Backoff.
+
+### SDK-Update
+- **Routex Client Swift 0.3.0 → 0.4.0** — kein Breaking-Change in unserem Use-Case. Alle 13 genutzten API-Calls funktionieren unverändert.
+
+---
+
 ## [1.3.8] — 2026-04-17 (Build 20260417_045814_93)
 
 ### Neu

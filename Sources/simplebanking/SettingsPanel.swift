@@ -2510,12 +2510,35 @@ struct SettingsView: View {
                 }
 
                 if cliInstalled && !CLIInstaller.isInPath {
-                    Text(t(
-                        "Hinweis: `~/.local/bin` scheint nicht in deinem PATH zu sein. Füge folgende Zeile zu `~/.zshrc` (oder `~/.bashrc`) hinzu:\n`export PATH=\"$HOME/.local/bin:$PATH\"`\nDanach Terminal neu starten.",
-                        "Note: `~/.local/bin` does not appear to be in your PATH. Add this line to `~/.zshrc` (or `~/.bashrc`):\n`export PATH=\"$HOME/.local/bin:$PATH\"`\nThen restart Terminal."
-                    ))
-                    .font(ThemeFonts.body(size: 11))
-                    .foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(t(
+                            "`~/.local/bin` ist nicht in deinem PATH. Wir können das automatisch eintragen.",
+                            "`~/.local/bin` is not in your PATH. We can fix this automatically."
+                        ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.orange)
+
+                        HStack(spacing: 8) {
+                            Button(action: performPathAutoFix) {
+                                Label(
+                                    t("PATH automatisch eintragen", "Add to PATH automatically"),
+                                    systemImage: "wand.and.stars"
+                                )
+                                .font(ThemeFonts.body(size: 11))
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.orange)
+
+                            Button(action: performPathLineCopy) {
+                                Label(
+                                    t("Zeile kopieren", "Copy line"),
+                                    systemImage: "doc.on.doc"
+                                )
+                                .font(ThemeFonts.body(size: 11))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.orange.opacity(0.08))
@@ -2557,6 +2580,42 @@ struct SettingsView: View {
             cliStatusIsError = true
             cliStatusMessage = error.localizedDescription
         }
+        clearCLIStatusMessageAfterDelay()
+    }
+
+    private func performPathAutoFix() {
+        do {
+            let result = try CLIInstaller.ensurePathInShellRc()
+            cliStatusIsError = false
+            switch result {
+            case .alreadyConfigured(let url):
+                cliStatusMessage = t(
+                    "PATH war schon konfiguriert (\(url.lastPathComponent)). Terminal neu starten.",
+                    "PATH was already configured (\(url.lastPathComponent)). Restart Terminal."
+                )
+            case .appended(let url):
+                cliStatusMessage = t(
+                    "Eintrag in \(url.lastPathComponent) hinzugefügt. Terminal neu starten, dann sb verfügbar.",
+                    "Added entry to \(url.lastPathComponent). Restart Terminal, then sb is available."
+                )
+            }
+        } catch {
+            cliStatusIsError = true
+            cliStatusMessage = error.localizedDescription
+        }
+        clearCLIStatusMessageAfterDelay()
+    }
+
+    private func performPathLineCopy() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let ok = pasteboard.setString(CLIInstaller.shellRcLine, forType: .string)
+        cliStatusIsError = !ok
+        cliStatusMessage = ok
+            ? t("Zeile in Zwischenablage. Terminal → ~/.zshrc öffnen, ans Ende einfügen, speichern.",
+                "Line in clipboard. Open ~/.zshrc in Terminal, paste at end, save.")
+            : t("Konnte nicht in Zwischenablage schreiben.",
+                "Could not write to clipboard.")
         clearCLIStatusMessageAfterDelay()
     }
 

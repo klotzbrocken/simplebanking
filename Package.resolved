@@ -1,5 +1,5 @@
 {
-  "originHash" : "0ebe2d5e0b766dc06be5511e98920b45f469f73f56894902bc03cbcb37d391d9",
+  "originHash" : "94b2e1260c5d71aae79b3154ff5907db6397fd4052baa62a6736d8e35d35e795",
   "pins" : [
     {
       "identity" : "grdb.swift",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/yaxitech/routex-client-swift",
       "state" : {
-        "revision" : "8779002ec6d090f17f0fe2063d605d5f22ba65dc",
-        "version" : "0.3.0"
+        "revision" : "983df000c5b09e0ef2f451169336d7482b50a621",
+        "version" : "0.4.0"
       }
     },
     {
