@@ -53,7 +53,7 @@ final class MasterPasswordPanel {
         
         let infoText = isUnlock
             ? "Gib dein Master-Passwort ein, um simplebanking zu entsperren."
-            : "Das Master-Passwort schützt deine Banking-Daten.\nEs wird NICHT gespeichert – merke es dir gut!"
+            : "Das Master-Passwort verschlüsselt deine Bank-Zugangsdaten im Keychain.\nEs wird NICHT gespeichert – merke es dir gut!"
         let info = NSTextField(wrappingLabelWithString: infoText)
         info.textColor = .secondaryLabelColor
         info.font = .systemFont(ofSize: NSFont.smallSystemFontSize)

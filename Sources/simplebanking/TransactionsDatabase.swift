@@ -1131,17 +1131,31 @@ enum TransactionsDatabase {
     }
 
     private static func backfillCategoryColumn(db: Database) throws {
-        let rows = try Row.fetchAll(
-            db,
-            sql: """
-                SELECT tx_id, betrag, empfaenger, absender, verwendungszweck,
-                       additional_information, effective_merchant
-                FROM transactions
-                """
-        )
+        // slot_id wurde erst in Migration v6 hinzugefügt — v4-Backfill läuft
+        // VOR v6 und sieht die Spalte nicht. Wir checken Schema dynamisch und
+        // nutzen "legacy" als Fallback wenn die Spalte fehlt.
+        let hasSlotId: Bool = {
+            let info = (try? Row.fetchAll(db, sql: "PRAGMA table_info(transactions)")) ?? []
+            return info.contains { ($0["name"] as String?) == "slot_id" }
+        }()
+        let selectSQL = hasSlotId
+            ? """
+              SELECT tx_id, slot_id, betrag, empfaenger, absender, verwendungszweck,
+                     additional_information, effective_merchant
+              FROM transactions
+              """
+            : """
+              SELECT tx_id, 'legacy' AS slot_id, betrag, empfaenger, absender, verwendungszweck,
+                     additional_information, effective_merchant
+              FROM transactions
+              """
+        let rows = try Row.fetchAll(db, sql: selectSQL)
 
         for row in rows {
             let txID: String = row["tx_id"]
+            // slot_id muss mitgenommen werden — sonst leakt slot-spezifischer
+            // Override über alle Slots hinweg (Composite-PK seit v19).
+            let slotId: String = row["slot_id"] ?? "legacy"
             let amount: Double = row["betrag"]
             let empfaenger: String? = row["empfaenger"]
             let absender: String? = row["absender"]
@@ -1151,6 +1165,7 @@ enum TransactionsDatabase {
 
             let category = TransactionCategorizer.category(
                 txID: txID,
+                slotId: slotId,
                 amount: amount,
                 empfaenger: empfaenger,
                 absender: absender,
@@ -1159,14 +1174,21 @@ enum TransactionsDatabase {
                 effectiveMerchant: effectiveMerchant
             )
 
-            try db.execute(
-                sql: """
-                    UPDATE transactions
-                    SET kategorie = ?
-                    WHERE tx_id = ?
-                    """,
-                arguments: [category.displayName, txID]
-            )
+            // UPDATE muss ebenfalls slot-scoped sein wenn slot_id existiert —
+            // sonst überschreibt es die Kategorie in allen Slots mit derselben
+            // tx_id. In v4 (vor Migration v6) gibt's noch keine slot_id, dann
+            // tx_id als alleiniges Kriterium (es gibt eh nur einen logischen Slot).
+            if hasSlotId {
+                try db.execute(
+                    sql: "UPDATE transactions SET kategorie = ? WHERE tx_id = ? AND slot_id = ?",
+                    arguments: [category.displayName, txID, slotId]
+                )
+            } else {
+                try db.execute(
+                    sql: "UPDATE transactions SET kategorie = ? WHERE tx_id = ?",
+                    arguments: [category.displayName, txID]
+                )
+            }
         }
     }
 

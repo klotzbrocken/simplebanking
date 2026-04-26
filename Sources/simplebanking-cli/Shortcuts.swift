@@ -60,8 +60,14 @@ enum Shortcuts {
 
     static func renderSummary(month: String?, slot: String?, json: Bool) throws {
         let targetMonth = month ?? currentMonthKey()
+        // Date-Range aus YYYY-MM ableiten — vorher fester 90-Tage-Cap, was für
+        // ältere Monate (>3 Monate zurück) zu leerem Output führte obwohl Daten
+        // im Cache waren. Wir laden vom 1. des Zielmonats bis heute mit etwas
+        // Buffer (Tage bis Heute + Monatsbreite + 7 Tage Reserve für mid-month
+        // bookingDate-Drift).
+        let daysAgo = daysFromTodayToStartOfMonth(targetMonth) + 7
         let rows = try DataReader.loadTransactions(
-            slotId: slot, sinceDaysAgo: 90, category: nil, limit: nil
+            slotId: slot, sinceDaysAgo: daysAgo, category: nil, limit: nil
         )
         let inMonth = rows.filter { $0.bookingDate.hasPrefix(targetMonth) }
         let expenses = inMonth.filter { $0.amount < 0 }
@@ -117,5 +123,26 @@ enum Shortcuts {
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = TimeZone.current
         return f.string(from: Date())
+    }
+
+    /// Anzahl Tage von heute zurück zum 1. des angegebenen Monats (YYYY-MM).
+    /// Für `--month 2026-01` an einem 26.4.2026 ergibt das z.B. 116 Tage.
+    /// Bei ungültigem Format → 90 (alter Default-Fallback).
+    static func daysFromTodayToStartOfMonth(_ yyyymm: String) -> Int {
+        let parts = yyyymm.split(separator: "-")
+        guard parts.count == 2, let year = Int(parts[0]), let month = Int(parts[1]) else {
+            return 90
+        }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone.current
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        comps.day = 1
+        guard let startOfMonth = cal.date(from: comps) else { return 90 }
+        let today = cal.startOfDay(for: Date())
+        let diff = cal.dateComponents([.day], from: startOfMonth, to: today).day ?? 90
+        // Bei zukünftigen Monaten (--month 2027-12 wenn heute 2026-04) → klein-Bound 1
+        return max(1, diff)
     }
 }

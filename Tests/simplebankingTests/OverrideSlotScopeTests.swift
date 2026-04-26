@@ -69,6 +69,34 @@ final class CategorizerOverrideSlotScopeTests: XCTestCase {
         writeOverrides(existing, storageKey: storageKey)
     }
 
+    /// Regression: category(for:) muss transaction.slotId für Override-Lookup
+    /// nutzen — sonst leakt der activeSlot-Override auf identische Tx in
+    /// anderen Slots (z.B. Unified-Inbox-View).
+    func test_categoryFor_usesTransactionSlotId_notActive() throws {
+        // Tx hat slotId = slotA via DB-load Pattern (transaction.slotId gesetzt).
+        let amt = TransactionsResponse.Amount(currency: "EUR", amount: "-10.00")
+        let creditor = TransactionsResponse.Party(name: "M", iban: nil, bic: nil)
+        var tx = TransactionsResponse.Transaction(
+            bookingDate: "2026-04-01", valueDate: "2026-04-01", status: "booked",
+            endToEndId: "ete-cat-readpath", amount: amt,
+            creditor: creditor, debtor: nil,
+            remittanceInformation: ["M"], additionalInformation: "M", purposeCode: nil
+        )
+        tx.slotId = slotA  // wie unified-inbox load sets
+        let txID = TransactionRecord.fingerprint(for: tx)
+
+        TransactionCategorizer.saveOverride(txID: txID, slotId: slotA, category: .freizeit)
+
+        // Active slot ist slotB — wenn category(for:) den activeSlot-Override
+        // nimmt statt transaction.slotId, würde es slotB sehen (kein Override) und
+        // die auto-Kategorie zurückgeben statt freizeit.
+        TransactionsDatabase.activeSlotId = slotB
+        defer { TransactionsDatabase.activeSlotId = "legacy" }
+
+        XCTAssertEqual(TransactionCategorizer.category(for: tx), .freizeit,
+            "category(for:) muss transaction.slotId nutzen, NICHT activeSlotId")
+    }
+
     func test_saveOverride_migratesLegacyEntry() {
         let legacyKey = txID.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let storageKey = TransactionCategorizer.overridesStorageKey
