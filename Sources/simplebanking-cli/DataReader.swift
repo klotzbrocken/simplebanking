@@ -185,7 +185,9 @@ enum DataReader {
             args.append(category)
         }
         sql += " ORDER BY buchungsdatum DESC"
-        if let limit { sql += " LIMIT \(limit)" }
+        // Defensive clamp: SQLite interpretiert LIMIT < 0 als „kein Limit".
+        // Wir wollen aber strikt „maximal N Zeilen", deshalb auf >= 0 klemmen.
+        if let limit { sql += " LIMIT \(max(0, limit))" }
 
         return try queue.read { db in
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))

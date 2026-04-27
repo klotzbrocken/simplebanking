@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/yaxitech/routex-client-swift",
       "state" : {
-        "revision" : "983df000c5b09e0ef2f451169336d7482b50a621",
-        "version" : "0.4.0"
+        "revision" : "c44e570eb11352e226a61c3d020aff3fb7277634",
+        "version" : "0.4.1"
       }
     },
     {

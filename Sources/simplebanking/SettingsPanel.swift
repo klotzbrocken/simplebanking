@@ -1979,8 +1979,8 @@ struct SettingsView: View {
                 Text(t("App-Passwort deaktivieren", "Disable app password"))
                     .font(ThemeFonts.heading(size: 18, weight: .bold))
                 Text(t(
-                    "Ohne Passwort hat jede Person mit Zugang zu deinem Mac direkten Einblick in alle deine Bankdaten.",
-                    "Without a password, anyone with access to your Mac can directly view all your banking data."
+                    "Ohne App-Passwort kann jede Person mit Zugang zu diesem Mac die App öffnen und neue Kontoabfragen starten. Lokal gecachte Umsätze sind ohnehin über CLI/MCP/SQLite lesbar — das Passwort schützt den Bankabruf, nicht den Cache.",
+                    "Without an app password, anyone with access to this Mac can open the app and trigger new bank queries. Locally cached transactions are readable via CLI/MCP/SQLite anyway — the password protects bank access, not the cache."
                 ))
                 .font(ThemeFonts.body(size: 13))
                 .foregroundColor(.secondary)

@@ -755,7 +755,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         statusRow.spacing = 6
         statusRow.alignment = .centerY
 
-        let yaxiInfo = infoBox(icon: "lock.shield.fill", t("Sicher & privat via YAXI Open Banking.\nNiemand außer dir sieht deine Zugangsdaten, Umsätze oder deinen Kontostand.\n\nNur Lesezugriff. Keine Überweisungen.", "Secure & private via YAXI Open Banking.\nNo one but you ever sees your credentials, transactions, or balance.\n\nRead-only access. No transfers."))
+        let yaxiInfo = infoBox(icon: "lock.shield.fill", t("Sicher & privat via YAXI Open Banking.\nDeine Bank-Zugangsdaten und Umsätze laufen durch einen hardware-verschlüsselten Tunnel direkt zwischen diesem Mac und deiner Bank — YAXI selbst kann sie nicht einsehen.\n\nNur Lesezugriff. Keine Überweisungen.", "Secure & private via YAXI Open Banking.\nYour bank credentials and transactions flow through a hardware-encrypted tunnel directly between this Mac and your bank — YAXI itself cannot see them.\n\nRead-only access. No transfers."))
 
         let hasConn = selectedConnection != nil
         let buttonRow = horizontalButtons(
@@ -867,7 +867,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         fields.spacing = 14
         fields.alignment = .leading
 
-        let securityInfo = infoBox(icon: "checkmark.shield.fill", t("Deine Bank-Zugangsdaten werden im Keychain verschlüsselt (AES-256). Umsätze werden lokal in einer SQLite-DB zwischengespeichert (für Offline-Zugriff via CLI/MCP). Für Kontoabfragen verbindet sich die App mit YAXI. Der optionale KI-Chat sendet Daten an Anthropic.", "Your bank credentials are encrypted in the Keychain (AES-256). Transactions are cached locally in a SQLite DB (for offline CLI/MCP access). For account queries, the app connects to YAXI. The optional AI chat sends data to Anthropic."), tint: .systemGreen)
+        let securityInfo = infoBox(icon: "checkmark.shield.fill", t("Deine Bank-Zugangsdaten werden im Keychain verschlüsselt (AES-256). Umsätze werden lokal in einer SQLite-DB zwischengespeichert (für Offline-Zugriff via CLI/MCP). Für Kontoabfragen verbindet sich die App mit YAXI. Der optionale KI-Chat sendet Daten an den von dir gewählten Anbieter (Anthropic, OpenAI oder Mistral).", "Your bank credentials are encrypted in the Keychain (AES-256). Transactions are cached locally in a SQLite DB (for offline CLI/MCP access). For account queries, the app connects to YAXI. The optional AI chat sends data to the provider you choose (Anthropic, OpenAI, or Mistral)."), tint: .systemGreen)
 
         let buttonRow = horizontalButtons(
             backTitle: t("Zurück", "Back"),
@@ -1191,7 +1191,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.alignment = .leading
         rootStack.spacing = 12
 
-        let titleLabel = NSTextField(labelWithString: t("100 % sicher. 100 % lokal.", "100% secure. 100% local."))
+        let titleLabel = NSTextField(labelWithString: t("100 % sicher. Deine Daten gehören dir.", "100% secure. Your data belongs to you."))
         titleLabel.font = .systemFont(ofSize: 19, weight: .semibold)
 
         let subtitle = NSTextField(wrappingLabelWithString: t("Deine Finanzdaten gehören nur dir.", "Your financial data belongs only to you."))
@@ -1200,7 +1200,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         let f1 = featureRow(icon: "checkmark.shield.fill", title: t("Bank-Zugangsdaten verschlüsselt", "Bank credentials encrypted"), body: t("Login + Passwort verschlüsselt im Keychain. Umsätze als lokaler Cache (für CLI/MCP).", "Login + password encrypted in the Keychain. Transactions kept as local cache (for CLI/MCP)."))
         let f2 = featureRow(icon: "touchid", title: t("Touch ID verfügbar", "Touch ID available"), body: t("Einmal einrichten, dann ohne Passwort entsperren.", "Set up once, then unlock without a password."))
-        let f3 = featureRow(icon: "wifi.slash", title: t("Keine Cloud", "No cloud"), body: t("Wir schicken nichts ins Internet. Alles bleibt hier.", "We send nothing to the internet. Everything stays here."))
+        let f3 = featureRow(icon: "wifi.slash", title: t("Kein Cloudkonto", "No cloud account"), body: t("Kein simplebanking-Backend. Bankabfragen laufen verschlüsselt über YAXI Open Banking, KI-Funktionen sind optional und nutzen den von dir gewählten Anbieter (Anthropic, OpenAI oder Mistral) — sonst bleibt alles lokal.", "No simplebanking backend. Bank queries run encrypted through YAXI Open Banking; AI features are optional and use the provider you choose (Anthropic, OpenAI, or Mistral) — everything else stays local."))
 
         let features = NSStackView(views: [f1, f2, f3])
         features.orientation = .vertical
