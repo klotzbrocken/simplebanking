@@ -191,6 +191,15 @@ struct TxCommand: ParsableCommand {
     @Flag(name: .long, help: "JSON-Output statt Text.")
     var json = false
 
+    mutating func validate() throws {
+        if days < 0 {
+            throw ValidationError("--days darf nicht negativ sein (erhalten: \(days)).")
+        }
+        if let l = limit, l < 0 {
+            throw ValidationError("--limit darf nicht negativ sein (erhalten: \(l)).")
+        }
+    }
+
     func run() throws {
         try Shortcuts.renderTransactions(
             days: days, slot: slot, category: category, limit: limit, json: json

@@ -72,7 +72,7 @@ private let pages: [OnboardingPage] = [
         features: [
             .init(icon: "key.fill", text: "Master-Passwort schützt deine Bank-Zugangsdaten im Keychain"),
             .init(icon: "touchid", text: "Touch ID für schnelles Entsperren aktivierbar"),
-            .init(icon: "iphone.and.arrow.forward", text: "Keine Daten in der Cloud – alles bleibt auf deinem Mac"),
+            .init(icon: "iphone.and.arrow.forward", text: "Privates bleibt auf deinem Mac"),
         ]
     ),
 ]
