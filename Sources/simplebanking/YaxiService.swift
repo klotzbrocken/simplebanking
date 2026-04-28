@@ -1051,7 +1051,8 @@ enum YaxiService {
         BalancesResponse.Balance(
             amount: (b.amount as NSDecimalNumber).stringValue,
             currency: b.currency,
-            balanceType: balanceTypeName(b.balanceType)
+            balanceType: balanceTypeName(b.balanceType),
+            creditLimitIncluded: b.creditLimitIncluded
         )
     }
 
