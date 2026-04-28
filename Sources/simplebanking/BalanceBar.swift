@@ -8,6 +8,7 @@ import ServiceManagement
 
 extension Notification.Name {
     static let slotSettingsChanged = Notification.Name("simplebanking.slotSettingsChanged")
+    static let creditLimitToggleChanged = Notification.Name("simplebanking.creditLimitToggleChanged")
 }
 
 // Custom vertical alignment: aligns ring center with balance-amount text center.
@@ -927,6 +928,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         NotificationCenter.default.addObserver(forName: .slotSettingsChanged, object: nil, queue: .main) { [weak self] _ in
             self?.refreshFlyoutIfVisible()
             self?.recomputeLeftToPay()
+        }
+        NotificationCenter.default.addObserver(forName: .creditLimitToggleChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.refresh()
         }
 
         // Register UserDefaults defaults (only apply when key has no stored value).
@@ -2758,13 +2762,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
             if resp.ok, let booked = resp.booked {
                 // Wenn die Bank den Kontostand inkl. Dispokredit liefert (z.B. C24),
-                // zieht die per-Slot-Einstellung `creditLimitIncluded` den Dispo ab,
-                // bevor irgendetwas angezeigt / gecacht wird.
+                // ziehen wir den Dispo ab. Primärer Auslöser ist der API-Flag
+                // `creditLimitIncluded` aus der YAXI/Routex-Response; die per-Slot-Einstellung
+                // bleibt als Override für Banken, die den Flag falsch oder gar nicht melden.
                 let slotSettings = BankSlotSettingsStore.load(slotId: YaxiService.activeSlotId)
                 let rawParsed = AmountParser.parse(booked.amount)
-                let adjustedBalance = (slotSettings.creditLimitIncluded && slotSettings.dispoLimit > 0)
-                    ? rawParsed - Double(slotSettings.dispoLimit)
-                    : rawParsed
+                let bankReportsIncluded = (booked.creditLimitIncluded == true)
+                UserDefaults.standard.set(
+                    bankReportsIncluded,
+                    forKey: "simplebanking.bankReportsCreditLimitIncluded.\(YaxiService.activeSlotId)"
+                )
+                let adjustedBalance = BalanceAdjustment.computeAdjustedBalance(
+                    raw: rawParsed,
+                    apiFlag: booked.creditLimitIncluded,
+                    userOverride: slotSettings.creditLimitIncluded,
+                    dispoLimit: slotSettings.dispoLimit
+                )
                 let roundedNoDecimals = adjustedBalance.rounded()
                 lastShownTitle = Self.eurWholeNumberFormatter.string(
                     from: NSNumber(value: roundedNoDecimals)

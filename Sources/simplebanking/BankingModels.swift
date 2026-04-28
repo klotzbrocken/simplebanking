@@ -22,6 +22,7 @@ struct BalancesResponse: Codable, Sendable {
         let amount: String
         let currency: String
         let balanceType: String?
+        let creditLimitIncluded: Bool?
     }
 
     let ok: Bool

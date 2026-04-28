@@ -585,6 +585,38 @@ struct SettingsView: View {
         NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
     }
 
+    @ViewBuilder
+    private func creditLimitApiStatusRow(slotId: String, dispoLimit: Int) -> some View {
+        let key = "simplebanking.bankReportsCreditLimitIncluded.\(slotId)"
+        let hasReport = UserDefaults.standard.object(forKey: key) != nil
+        let bankReports = UserDefaults.standard.bool(forKey: key)
+        if hasReport {
+            HStack(spacing: 6) {
+                Image(systemName: bankReports ? "checkmark.seal.fill" : "info.circle")
+                    .font(.system(size: 11))
+                    .foregroundColor(bankReports ? .green : .secondary)
+                Text(bankReports
+                     ? t("Auto-erkannt: Bank meldet Dispo als enthalten.",
+                         "Auto-detected: bank reports overdraft as included.")
+                     : t("Bank meldet Dispo als nicht enthalten.",
+                         "Bank reports overdraft as not included."))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
+            }
+            if bankReports && dispoLimit == 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.sbOrangeStrong)
+                    Text(t("Trage oben einen Dispo-Betrag ein, damit der Abzug greift.",
+                           "Enter an overdraft amount above so the adjustment can apply."))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
     // MARK: - Disable Password
 
     private func disablePasswordWithVerification() {
@@ -1299,17 +1331,33 @@ struct SettingsView: View {
                             }
 
                             SettingsRow(
-                                title: t("Dispo ist im Kontostand enthalten",
-                                         "Overdraft included in balance"),
-                                subtitle: t("Aktiviere dies, wenn deine Bank den Kontostand inkl. Dispokredit liefert (z.B. C24). Dispo wird dann abgezogen.",
-                                            "Enable this if your bank reports the balance with the overdraft already included (e.g. C24). The overdraft is then subtracted.")
+                                title: t("Dispo ist im Kontostand enthalten (Override)",
+                                         "Overdraft included in balance (override)"),
+                                subtitle: t("Normalerweise meldet die Bank das selbst. Diesen Override nur aktivieren, wenn deine Bank den Dispo einrechnet, ihn aber im API-Flag nicht meldet.",
+                                            "Normally the bank reports this itself. Only enable this override if your bank includes the overdraft but doesn't signal it via the API flag.")
                             ) {
                                 Toggle("", isOn: Binding(
                                     get: { currentSlotSettings.creditLimitIncluded },
-                                    set: { currentSlotSettings.creditLimitIncluded = $0; saveCurrentSlotSettings() }
+                                    set: { newValue in
+                                        currentSlotSettings.creditLimitIncluded = newValue
+                                        saveCurrentSlotSettings()
+                                        if let id = selectedSettingsSlotId {
+                                            UserDefaults.standard.removeObject(
+                                                forKey: "simplebanking.cachedBalance.\(id)"
+                                            )
+                                        }
+                                        NotificationCenter.default.post(
+                                            name: .creditLimitToggleChanged, object: nil
+                                        )
+                                    }
                                 ))
                                 .labelsHidden()
                                 .toggleStyle(.switch)
+                            }
+
+                            // Status-Zeile: zeigt was die Bank im letzten Refresh gemeldet hat.
+                            if let id = selectedSettingsSlotId {
+                                creditLimitApiStatusRow(slotId: id, dispoLimit: currentSlotSettings.dispoLimit)
                             }
                         }
                         .padding(12)
