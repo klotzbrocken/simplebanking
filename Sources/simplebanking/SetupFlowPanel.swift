@@ -755,7 +755,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         statusRow.spacing = 6
         statusRow.alignment = .centerY
 
-        let yaxiInfo = infoBox(icon: "lock.shield.fill", t("Sicher & privat via YAXI Open Banking.\nDeine Bank-Zugangsdaten und Umsätze laufen durch einen hardware-verschlüsselten Tunnel direkt zwischen diesem Mac und deiner Bank — YAXI selbst kann sie nicht einsehen.\n\nNur Lesezugriff. Keine Überweisungen.", "Secure & private via YAXI Open Banking.\nYour bank credentials and transactions flow through a hardware-encrypted tunnel directly between this Mac and your bank — YAXI itself cannot see them.\n\nRead-only access. No transfers."))
+        let yaxiInfo = infoBox(icon: "lock.shield.fill", t("Kontoabfragen laufen verschlüsselt über YAXI Open Banking.\nZugangsdaten werden lokal im Keychain gespeichert.\n\nNur Lesezugriff. Keine Überweisungen.", "Account queries run encrypted over YAXI Open Banking.\nCredentials are stored locally in your Keychain.\n\nRead-only access. No transfers."))
 
         let hasConn = selectedConnection != nil
         let buttonRow = horizontalButtons(
