@@ -160,8 +160,16 @@ struct BankingTools {
             """
 
         let rows = query(sql: sql, binds: binds) { stmt -> [String: Any] in
+            // DB-Identität ist seit Migration v19 (tx_id, slot_id) als Composite-PK.
+            // Zwei Slots dürfen denselben tx_id haben (Bank-Fingerprint kann kollidieren).
+            // `id` muss daher global eindeutig sein → slot_id|tx_id. Den Bank-tx_id
+            // exponieren wir zusätzlich separat, damit Clients ihn referenzieren können.
+            let txID    = col(stmt, 0) ?? ""
+            let slotID  = col(stmt, 9) ?? ""
+            let unique  = slotID.isEmpty ? txID : "\(slotID)|\(txID)"
             var row: [String: Any] = [
-                "id":           col(stmt, 0) ?? "",
+                "id":           unique,
+                "tx_id":        txID,
                 "date":         col(stmt, 1) ?? "",
                 "booking_date": col(stmt, 2) ?? "",
                 "amount":       sqlite3_column_double(stmt, 3)
@@ -171,7 +179,7 @@ struct BankingTools {
             if let v = col(stmt, 6) { row["sender"]      = v }
             if let v = col(stmt, 7) { row["purpose"]     = v }
             if let v = col(stmt, 8) { row["category"]    = v }
-            row["account_id"] = col(stmt, 9) ?? ""
+            row["account_id"] = slotID
             if let v = col(stmt, 10) { row["note"]       = v }
             return row
         }
