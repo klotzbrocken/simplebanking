@@ -1135,17 +1135,42 @@ private struct TransactionsPanelView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
 
-            // Filter-Pills — direkte Schnellfilter unter der Suche (toggelbar via Filter-Button)
+            // Filter-Pills — direkte Schnellfilter unter der Suche (toggelbar via Filter-Button).
+            // `.all` wird nicht als Pill gerendert: Klick auf einen aktiven Pill setzt zurück
+            // auf `.all`, der „Alle"-Slot spart einen sichtbaren Pill ein. Edge-Fade an beiden
+            // Seiten signalisiert dass die Reihe scrollbar ist; ScrollViewReader scrollt den
+            // aktiven Pill automatisch in die Mitte sobald er aktiviert wird.
             if showFilterPills {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(TxFilter.allCases, id: \.self) { filter in
-                            FilterPill(filter: filter, active: vm.activeFilter == filter) {
-                                vm.activeFilter = (vm.activeFilter == filter && filter != .all) ? .all : filter
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(TxFilter.allCases.filter { $0 != .all }, id: \.self) { filter in
+                                FilterPill(filter: filter, active: vm.activeFilter == filter) {
+                                    vm.activeFilter = (vm.activeFilter == filter) ? .all : filter
+                                }
+                                .id(filter)
                             }
                         }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
+                    .mask(
+                        LinearGradient(
+                            gradient: Gradient(stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .black, location: 0.04),
+                                .init(color: .black, location: 0.96),
+                                .init(color: .clear, location: 1.0)
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .onChange(of: vm.activeFilter) { newFilter in
+                        guard newFilter != .all else { return }
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            proxy.scrollTo(newFilter, anchor: .center)
+                        }
+                    }
                 }
                 .padding(.bottom, 10)
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -2369,6 +2394,11 @@ private struct FilterPill: View {
                     .font(.system(size: 11, weight: .medium))
                 Text(filter.label)
                     .font(.system(size: 11, weight: .medium))
+                if active {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                }
             }
             .foregroundColor(active ? .white : .secondary)
             .padding(.horizontal, 10)
@@ -2384,6 +2414,9 @@ private struct FilterPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .help(active
+              ? L10n.t("Filter aufheben", "Clear filter")
+              : filter.label)
     }
 }
 
