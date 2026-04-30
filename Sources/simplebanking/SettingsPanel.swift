@@ -436,6 +436,14 @@ struct SettingsView: View {
     // MARK: - AI Key
 
     private func requestMasterPassword() -> String? {
+        // App ist bereits entsperrt → Touch-ID-Cache nutzen, statt nochmal modal nachzufragen.
+        // Selbe Strategie wie BalanceBar-Startup (BalanceBar.swift:942) und Auto-Refresh.
+        // Cache wird via `CredentialsStore.load(masterPassword:)` validiert, sodass ein
+        // veralteter Cache (PW-Wechsel) nicht blind durchgewunken wird.
+        if let cached = BiometricStore.loadAutoUnlockPassword(),
+           (try? CredentialsStore.load(masterPassword: cached)) != nil {
+            return cached
+        }
         let panel = MasterPasswordPanel(isUnlock: true)
         let result = panel.runModalWithResult()
         if case .password(let password) = result {
