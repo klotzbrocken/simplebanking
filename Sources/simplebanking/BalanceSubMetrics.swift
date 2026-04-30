@@ -12,6 +12,7 @@ struct BalanceSubMetrics: Equatable {
     let daysUntilSalary: Int      // Tage bis Gehaltseingang (≥ 1 außer im .unknown-State)
     let dailyBudget: Double       // availableAmount / daysUntilSalary
     let salaryDayOfMonth: Int     // Tag-des-Monats des nächsten Gehaltseingangs
+    let cycleEnd: Date            // konkretes Datum des Cycle-Ends, fürs Compact-Format im Flyout
     let state: State
 
     enum State: Equatable {
@@ -39,7 +40,8 @@ struct BalanceSubMetrics: Equatable {
     ) -> BalanceSubMetrics {
         guard let balance, let ltp = leftToPay else {
             return BalanceSubMetrics(availableAmount: 0, daysUntilSalary: 0,
-                                     dailyBudget: 0, salaryDayOfMonth: salaryDay, state: .unknown)
+                                     dailyBudget: 0, salaryDayOfMonth: salaryDay,
+                                     cycleEnd: today, state: .unknown)
         }
 
         let available = balance - ltp
@@ -65,16 +67,19 @@ struct BalanceSubMetrics: Equatable {
         // Defensiv: falls das je anders sein sollte, Fallback auf .unknown statt divide-by-zero.
         guard daysRaw > 0 else {
             return BalanceSubMetrics(availableAmount: available, daysUntilSalary: daysRaw,
-                                     dailyBudget: 0, salaryDayOfMonth: salaryDom, state: .unknown)
+                                     dailyBudget: 0, salaryDayOfMonth: salaryDom,
+                                     cycleEnd: cycleEnd, state: .unknown)
         }
         if available < 0 {
             return BalanceSubMetrics(availableAmount: available, daysUntilSalary: daysRaw,
-                                     dailyBudget: 0, salaryDayOfMonth: salaryDom, state: .overdrawn)
+                                     dailyBudget: 0, salaryDayOfMonth: salaryDom,
+                                     cycleEnd: cycleEnd, state: .overdrawn)
         }
 
         let daily = available / Double(daysRaw)
         return BalanceSubMetrics(availableAmount: available, daysUntilSalary: daysRaw,
-                                 dailyBudget: daily, salaryDayOfMonth: salaryDom, state: .normal)
+                                 dailyBudget: daily, salaryDayOfMonth: salaryDom,
+                                 cycleEnd: cycleEnd, state: .normal)
     }
 }
 
@@ -85,6 +90,10 @@ struct BalanceSubMetricsLabel: View {
     /// `true` = nur die Tages-Budget-Zeile („€ Z/Tag verfügbar") zeigen, ohne „bis zum X.".
     /// Overdrawn-Warnung bleibt unverändert (kritisch), `.unknown` rendert nichts.
     var dayOnly: Bool = false
+    /// `true` = Kompakt-Format für schmale Container (z.B. 348-px-Flyout): „1.234 € bis 15.05."
+    /// statt „1.234 € bis zum 15. verfügbar". Der breite Transactions-Panel nutzt weiter das
+    /// längere Format.
+    var compact: Bool = false
 
     private static let eurNoDecimals: NumberFormatter = {
         let f = NumberFormatter()
@@ -95,8 +104,27 @@ struct BalanceSubMetricsLabel: View {
         return f
     }()
 
+    private static let shortDateDE: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "dd.MM."
+        return f
+    }()
+
+    private static let shortDateEN: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "M/d"
+        return f
+    }()
+
     private func euro(_ amount: Double) -> String {
         Self.eurNoDecimals.string(from: NSNumber(value: amount.rounded())) ?? "\(Int(amount.rounded())) €"
+    }
+
+    private func shortCycleEnd() -> String {
+        let isDE = Locale.current.language.languageCode?.identifier == "de"
+        return (isDE ? Self.shortDateDE : Self.shortDateEN).string(from: metrics.cycleEnd)
     }
 
     var body: some View {
@@ -119,6 +147,15 @@ struct BalanceSubMetricsLabel: View {
                 .font(.system(size: 13, weight: .regular))
                 .foregroundColor(Color(NSColor.secondaryLabelColor))
                 .lineLimit(1)
+            } else if compact {
+                Text(L10n.t(
+                    "\(euro(metrics.availableAmount)) bis \(shortCycleEnd())",
+                    "\(euro(metrics.availableAmount)) until \(shortCycleEnd())"
+                ))
+                .font(.system(size: 13, weight: .regular))
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .lineLimit(1)
+                .truncationMode(.tail)
             } else {
                 Text(L10n.t(
                     "\(euro(metrics.availableAmount)) bis zum \(metrics.salaryDayOfMonth). verfügbar",

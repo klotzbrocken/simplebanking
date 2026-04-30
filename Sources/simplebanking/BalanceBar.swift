@@ -4277,7 +4277,8 @@ private struct StatusBalanceFlyoutCardView: View {
             salaryToleranceBefore: salaryToleranceBefore,
             salaryToleranceAfter: salaryToleranceAfter,
             style: $flyoutSubtitleStyle,
-            forceClassic: isUnifiedMode
+            forceClassic: isUnifiedMode,
+            compact: true
         )
     }
 

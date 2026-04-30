@@ -20,6 +20,9 @@ struct BalanceSubtitleSwitch: View {
     /// `leftToPayAmount` gegen einen einzelnen Slot-Gehaltstag rechnen würden
     /// und damit fachlich inkonsistent wären.
     var forceClassic: Bool = false
+    /// `true` reicht das Compact-Flag an `BalanceSubMetricsLabel` weiter, damit der schmale
+    /// Flyout-Container kein Truncation-Wording zeigt. Default: false (breite Container).
+    var compact: Bool = false
 
     private static let classicFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -111,7 +114,7 @@ struct BalanceSubtitleSwitch: View {
         )
         switch metrics.state {
         case .normal, .overdrawn:
-            BalanceSubMetricsLabel(metrics: metrics, dayOnly: dayOnly)
+            BalanceSubMetricsLabel(metrics: metrics, dayOnly: dayOnly, compact: compact)
         case .unknown:
             classicContent
         }
