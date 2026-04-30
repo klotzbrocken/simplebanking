@@ -263,6 +263,11 @@ struct ImportSheet: View {
                 days: days,
                 masterPassword: pw
             )
+            // Persistiere die Import-Tiefe, damit die UI nach dem Deep-Sync auch
+            // wirklich alle 180/365 Tage anzeigt (Auto-Sync bleibt bei fetchDays-Cap).
+            var s = BankSlotSettingsStore.load(slotId: slotId)
+            s.lastImportedDays = max(s.lastImportedDays ?? 0, days)
+            BankSlotSettingsStore.save(s, slotId: slotId)
             isRunning = false
             result = r
         } catch {

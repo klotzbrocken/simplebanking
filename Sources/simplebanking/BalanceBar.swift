@@ -2986,21 +2986,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         txVM.error = nil
         txVM.errorNeedsReconnect = false
 
-        let fetchDaysSetting = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
+        let slotSettings = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy")
+        let fetchDaysSetting = slotSettings.fetchDays
         let daysToFetch = fetchDaysSetting > 0 ? fetchDaysSetting : 60
+        // Auto-Sync bleibt bei `fetchDays` (90-Cap), aber die UI darf alles zeigen,
+        // was nach einem Deep-Sync-Import in der DB liegt.
+        let displayDays = max(daysToFetch, slotSettings.lastImportedDays ?? 0)
         // Do not force 365-day network sync on each panel open, because this can
         // repeatedly trigger SCA/TAN at some banks. Historical data remains in SQLite.
         let syncDays = daysToFetch
         let from = isoDateDaysAgo(syncDays)
         let to = Self.iso8601UTCFormatter.string(from: Date())
 
-        txVM.fromDate = isoDateDaysAgo(daysToFetch)
+        txVM.fromDate = isoDateDaysAgo(displayDays)
         txVM.toDate = to
 
         var cachedTransactions: [TransactionsResponse.Transaction] = []
         var confettiTransactions: [TransactionsResponse.Transaction] = []
         do {
-            cachedTransactions = try TransactionsDatabase.loadTransactions(days: daysToFetch)
+            cachedTransactions = try TransactionsDatabase.loadTransactions(days: displayDays)
             if !cachedTransactions.isEmpty {
                 if !txVM.isUnifiedMode {
                     txVM.transactions = sortTransactionsNewestFirst(cachedTransactions)
