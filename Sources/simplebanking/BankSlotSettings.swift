@@ -17,6 +17,10 @@ struct BankSlotSettings: Codable {
     /// `true` = die Bank liefert den Kontostand inklusive Dispokredit (z.B. C24) → Dispo wird
     /// vom angezeigten Saldo abgezogen. Per-Slot einstellbar in Settings → Konten.
     var creditLimitIncluded: Bool = false
+    /// Tiefe des letzten erfolgreichen Deep-Sync-Imports in Tagen. Erweitert den UI-Read-Range
+    /// über `fetchDays` hinaus (Auto-Sync bleibt bei `fetchDays`-Cap), sodass nach einem
+    /// 365-Tage-Import auch wirklich 365 Tage in der Liste angezeigt werden. nil = kein Import.
+    var lastImportedDays: Int?
 
     /// Effective center day for the salary period, derived from preset.
     var effectiveSalaryDay: Int {
@@ -78,6 +82,7 @@ struct BankSlotSettings: Codable {
         salaryAmount                 = (try? c.decodeIfPresent(Int.self, forKey: .salaryAmount)) ?? 0
         salaryDayPreset              = (try? c.decodeIfPresent(Int.self, forKey: .salaryDayPreset)) ?? 2
         creditLimitIncluded          = (try? c.decodeIfPresent(Bool.self, forKey: .creditLimitIncluded)) ?? false
+        lastImportedDays             = try? c.decodeIfPresent(Int.self, forKey: .lastImportedDays)
     }
 }
 
