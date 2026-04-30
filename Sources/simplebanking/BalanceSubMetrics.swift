@@ -123,7 +123,10 @@ struct BalanceSubMetricsLabel: View {
     }
 
     private func shortCycleEnd() -> String {
-        let isDE = Locale.current.language.languageCode?.identifier == "de"
+        // Konsistent mit `L10n.t`: respektiert User-Override in den Settings (`appLanguage`)
+        // statt nur `Locale.current.language` zu lesen — sonst zeigt der Flyout das US-Format
+        // „05/15", obwohl die App-Strings auf DE stehen.
+        let isDE = AppLanguage.resolved() == .de
         return (isDE ? Self.shortDateDE : Self.shortDateEN).string(from: metrics.cycleEnd)
     }
 
