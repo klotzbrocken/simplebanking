@@ -258,7 +258,11 @@ struct BankingTools {
     private static func getBalance(args: [String: Any]) -> (String, Bool) {
         let accountId = args["account_id"] as? String
 
-        // Load cached (real) balances from the app's UserDefaults plist
+        // Load cached (real) balances from the app's UserDefaults plist.
+        // Im Demo-Mode nur Demo-Slots zurückgeben, sonst Demo-Slots ausschließen — sonst
+        // mischt MCP Live-Konten mit Demo-Daten, was insbesondere für Claude-Antworten
+        // verwirrend wäre.
+        let demo = isDemoMode
         let prefsPath = FileManager.default.homeDirectoryForCurrentUser.path
             + "/Library/Preferences/tech.yaxi.simplebanking.plist"
         var cachedBalances: [String: Double] = [:]
@@ -268,6 +272,8 @@ struct BankingTools {
                 if key.hasPrefix("simplebanking.cachedBalance."),
                    let balance = value as? Double {
                     let slotId = String(key.dropFirst("simplebanking.cachedBalance.".count))
+                    let slotIsDemo = slotId.hasPrefix("demo-slot-")
+                    guard slotIsDemo == demo else { continue }
                     cachedBalances[slotId] = balance
                 }
             }
