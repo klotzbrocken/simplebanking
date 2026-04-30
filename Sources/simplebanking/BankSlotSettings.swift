@@ -22,6 +22,13 @@ struct BankSlotSettings: Codable {
     /// 365-Tage-Import auch wirklich 365 Tage in der Liste angezeigt werden. nil = kein Import.
     var lastImportedDays: Int?
 
+    /// Read-Range für UI-Listen, CSV-Export, Kategorisierung etc. — alles, was lokale DB-Daten
+    /// liest (nicht Bank-Fetches). `max(fetchDays, lastImportedDays ?? 0)`. Auto-Sync und
+    /// Bank-Fetches nutzen weiterhin `fetchDays` direkt (90-Cap).
+    var displayDays: Int {
+        max(fetchDays > 0 ? fetchDays : 60, lastImportedDays ?? 0)
+    }
+
     /// Effective center day for the salary period, derived from preset.
     var effectiveSalaryDay: Int {
         switch salaryDayPreset {

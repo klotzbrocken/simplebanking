@@ -2492,8 +2492,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Ensure transactions are loaded before computing the ring fraction.
         // Without this, the ring is empty on first flyout open (before panel is opened).
         if txVM.transactions.isEmpty {
-            let days = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
-            let daysToUse = days > 0 ? days : 60
+            let slotSettings = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy")
+            let daysToUse = slotSettings.displayDays
             if demoMode {
                 // Replay the same seed sequence as openTransactionsPanel so transactions are identical.
                 if isMultiDemo {
@@ -2922,8 +2922,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // Load from local DB immediately — panel shows instant data while network loads.
         // Opening the transactions panel counts as "seen" for new-booking indicator.
-        let fetchDaysPreview = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
-        let daysToPreview = fetchDaysPreview > 0 ? fetchDaysPreview : 60
+        let daysToPreview = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").displayDays
         let activeSlotIdNow = TransactionsDatabase.activeSlotId
         if txVM.isUnifiedMode {
             let allSlotIds = MultibankingStore.shared.slots.map { $0.id }
@@ -3038,7 +3037,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
                 do {
                     try TransactionsDatabase.upsert(transactions: sortedNetwork)
-                    let persistedTransactions = try TransactionsDatabase.loadTransactions(days: daysToFetch)
+                    let persistedTransactions = try TransactionsDatabase.loadTransactions(days: displayDays)
                     txVM.transactions = sortTransactionsNewestFirst(persistedTransactions)
                     // Reload enrichment so newly inserted rows (is_unread=1) show
                     // the blue unread dot immediately, not after the next onAppear.
@@ -3081,10 +3080,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             maybeTriggerTransactionsConfetti(transactions: confettiTransactions, currentBalance: self.lastBalance)
         }
 
-        // AI categorization — fire-and-forget, silent on error, reloads from DB when done
+        // AI categorization — fire-and-forget, silent on error, reloads from DB when done.
+        // Re-load nutzt `displayDays`, damit nach einem Deep-Sync-Import auch die kategorisierten
+        // Transactions außerhalb der `fetchDays`-Range in der UI auftauchen.
         let pwForCategorization = pw
         let epochForCategorization = slotEpoch
-        let daysForCategorization = daysToFetch
+        let daysForCategorization = displayDays
         let unifiedForCategorization = txVM.isUnifiedMode
         let slotIdsForCategorization = MultibankingStore.shared.slots.map { $0.id }
         Task.detached {
@@ -3447,7 +3448,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
 
         // Show cached transactions from DB right away (no network wait)
-        if let cached = try? TransactionsDatabase.loadTransactions(days: 60), !cached.isEmpty {
+        let bootstrapDays = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").displayDays
+        if let cached = try? TransactionsDatabase.loadTransactions(days: bootstrapDays), !cached.isEmpty {
             txVM.transactions = sortTransactionsNewestFirst(cached)
             txVM.resetPaging()
         }
