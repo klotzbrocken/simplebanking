@@ -1518,8 +1518,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         lastBalance = total
         lastShownTitle = formatEURNoDecimals(String(format: "%.2f", total))
         txVM.currentBalance = formatEURWithCents(total)
-        txVM.connectedBankDisplayName = "Demo"
-        txVM.connectedBankLogoID = nil
         txVM.connectedBankIBAN = nil
         applyBalanceDisplayModeConstraints()
         updateStatusBalanceTitle()
@@ -1530,6 +1528,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         for slot in demoSlots {
             let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: nil)
             BankLogoStore.shared.preload(brand: brand)
+        }
+
+        // Active-Slot ins ViewModel spiegeln, damit der Flyout sofort die richtige Bank-Logo
+        // zeigt. Ohne diesen Call sieht der erste Open in Multi-Demo nur einen wallet.pass-
+        // Fallback bis der User die Banken durchklickt.
+        if let activeDemo = MultibankingStore.shared.activeSlot ?? demoSlots.first {
+            applySlotToViewModel(activeDemo)
         }
     }
 
@@ -2458,8 +2463,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             rootView.unifiedSlots = computeFlyoutSlots()
             rootView.unifiedTotalBalance = computeUnifiedFlyoutTotal()
         } else {
-            // Bank logo
-            if demoMode {
+            // Bank logo. Single-Demo („Demo-Bank" ohne reale Marke) → generisches wallet-Symbol.
+            // Live UND Multi-Demo → Marke aus dem aktiven Slot auflösen (Multi-Demo hat reale
+            // Bank-Brands aus BankLogoAssets, die in activateMultiDemo per applySlotToViewModel
+            // ins txVM gespiegelt werden).
+            if demoMode && !isMultiDemo {
                 rootView.bankLogoImage = NSImage(systemSymbolName: "wallet.pass", accessibilityDescription: "Demo")
             } else {
                 let flyoutBrand = BankLogoAssets.resolve(displayName: txVM.connectedBankDisplayName,
