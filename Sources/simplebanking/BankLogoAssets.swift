@@ -352,12 +352,21 @@ enum BankLogoAssets {
     // MARK: - Dark Mode Detection
 
     /// Gibt true zurück wenn das Logo dieser Bank im Dark Mode invertiert werden soll.
-    /// Kriterien: SVG hat data-maskable="true" UND data-primary-color mit Luminanz < 0.15.
-    static func isDark(brandId: String) -> Bool { darkBrandIDs.contains(brandId) }
+    /// Kriterien: User-Setting `bankLogoAdaptDarkMode` ist nicht abgeschaltet UND SVG hat
+    /// data-maskable="true" UND lineare Rec.709-Luminanz der Brandfarbe < 0.10.
+    static func isDark(brandId: String) -> Bool {
+        // Default: angeschaltet (object == nil → ?? true). User kann in Settings
+        // → Verhalten den Auto-Invert für Bank-Logos deaktivieren.
+        let enabled = UserDefaults.standard.object(forKey: "bankLogoAdaptDarkMode") as? Bool ?? true
+        guard enabled else { return false }
+        return darkBrandIDs.contains(brandId)
+    }
 
     private static let darkBrandIDs: Set<String> = {
         var result: Set<String> = []
-        let pattern = #"data-primary-color="(#[0-9A-Fa-f]{6})""#
+        // Akzeptiert 6-stelliges Hex (RGB) UND 8-stelliges Hex (RGBA, z.B. „#0949cfff").
+        // Vorher matchte nur 6 → C24 und andere Banken mit Alpha-Komponente fielen durch.
+        let pattern = #"data-primary-color="(#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)""#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return result }
         for brand in brands {
             guard brand.logoURL.isFileURL,
@@ -371,13 +380,25 @@ enum BankLogoAssets {
         return result
     }()
 
+    /// Liefert true wenn die Brandfarbe so dunkel ist, dass das Logo auf einem dunklen
+    /// Hintergrund untergehen würde. Gerechnet mit korrekter Gamma-Linearisierung
+    /// (sRGB → linear) + Rec.709-Luminanz, sonst überschätzt rot/blau die Helligkeit
+    /// und Banken wie Deutsche Bank (#1e2a78) fallen knapp über die Schwelle, obwohl
+    /// sie offensichtlich dunkel sind.
     private static func isHexColorDark(_ hex: String) -> Bool {
         let h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-        guard h.count == 6, let n = UInt64(h, radix: 16) else { return false }
-        let r = Double((n >> 16) & 0xFF) / 255
-        let g = Double((n >> 8)  & 0xFF) / 255
-        let b = Double(n         & 0xFF) / 255
-        return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.15
+        // 6-stellig RGB oder 8-stellig RGBA — Alpha wird für Luminanz ignoriert.
+        guard (h.count == 6 || h.count == 8), let n = UInt64(h.prefix(6), radix: 16) else { return false }
+        let r = sRGBToLinear(Double((n >> 16) & 0xFF) / 255)
+        let g = sRGBToLinear(Double((n >> 8)  & 0xFF) / 255)
+        let b = sRGBToLinear(Double(n         & 0xFF) / 255)
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return luminance < 0.10
+    }
+
+    /// IEC 61966-2-1 sRGB-Decoding zu linearem Wert für korrekte Luminanzberechnung.
+    private static func sRGBToLinear(_ c: Double) -> Double {
+        c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
     }
 
     /// Returns a file URL to a bundled SVG in Resources/bank-logos/, or falls back to a placeholder.
