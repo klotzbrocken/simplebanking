@@ -3024,12 +3024,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
 
         do {
-            let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
+            // Pull-to-Refresh und Panel-Open holen Balance UND Transactions parallel.
+            // Bisher fetcht openTransactionsPanel nur Transactions — User berichtete dass
+            // ein Pull in der Liste den Saldo nicht aktualisiert. Beide Calls laufen
+            // jetzt zeitgleich; Balance ist meist schnell (~1-3s), TX kann länger
+            // dauern, aber die Wartezeit erhöht sich nicht.
+            async let balancesTask = YaxiService.fetchBalances(userId: userId, password: password)
+            async let txTask       = YaxiService.fetchTransactions(userId: userId, password: password, from: from)
+            let balancesResp = try? await balancesTask
+            let resp = try await txTask
 
             // Bail if the slot changed while we were awaiting the network response
             guard slotEpoch == epochAtStart else {
                 txVM.isLoading = false
                 return
+            }
+
+            // Balance anwenden — selbe Logik wie in refreshAsync (creditLimitIncluded-Adjust,
+            // cachedBalance-Persist, Display-Update). Best-effort: bei Fehler Balance einfach
+            // überspringen, Transaktionen-Anzeige bleibt davon unberührt.
+            if let bResp = balancesResp, bResp.ok, let booked = bResp.booked {
+                let slotSettings = BankSlotSettingsStore.load(slotId: YaxiService.activeSlotId)
+                let rawParsed = AmountParser.parse(booked.amount)
+                let bankReportsIncluded = (booked.creditLimitIncluded == true)
+                UserDefaults.standard.set(
+                    bankReportsIncluded,
+                    forKey: "simplebanking.bankReportsCreditLimitIncluded.\(YaxiService.activeSlotId)"
+                )
+                let adjustedBalance = BalanceAdjustment.computeAdjustedBalance(
+                    raw: rawParsed,
+                    apiFlag: booked.creditLimitIncluded,
+                    userOverride: slotSettings.creditLimitIncluded,
+                    dispoLimit: slotSettings.dispoLimit
+                )
+                let roundedNoDecimals = adjustedBalance.rounded()
+                lastShownTitle = Self.eurWholeNumberFormatter.string(
+                    from: NSNumber(value: roundedNoDecimals)
+                ) ?? "0"
+                lastBalance = adjustedBalance
+                txVM.currentBalance = formatEURWithCents(lastBalance ?? 0)
+                txVM.currentBalanceFetchedAt = Date()
+                if !booked.currency.isEmpty {
+                    if !demoMode {
+                        MultibankingStore.shared.updateCurrency(booked.currency, forSlotId: YaxiService.activeSlotId)
+                    }
+                    txVM.connectedBankCurrency = booked.currency
+                }
+                if let balance = lastBalance {
+                    UserDefaults.standard.set(balance, forKey: "simplebanking.cachedBalance.\(YaxiService.activeSlotId)")
+                }
+                applyBalanceDisplayModeConstraints()
+                updateStatusBalanceTitle()
             }
 
             if (resp.ok ?? false), let tx = resp.transactions {
