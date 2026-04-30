@@ -54,17 +54,33 @@ enum DataReader {
         return nil
     }
 
+    /// Liest den Demo-Mode-Flag aus den App-Defaults. Wenn `true`, schalten alle
+    /// nachfolgenden Reads auf Demo-DB + Demo-Slots. Dadurch sieht `sb` exakt das,
+    /// was die Menüleisten-App im aktuellen Mode zeigt.
+    static var isDemoMode: Bool {
+        if let n = CFPreferencesCopyAppValue("demoMode" as CFString, bundleIdentifier as CFString) as? NSNumber {
+            return n.boolValue
+        }
+        return false
+    }
+
     static func transactionsDBPath() throws -> URL {
         let fm = FileManager.default
         let dir = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
                              appropriateFor: nil, create: false)
-        return dir.appendingPathComponent("simplebanking/transactions.db")
+        let filename = isDemoMode ? "transactions-demo.db" : "transactions.db"
+        return dir.appendingPathComponent("simplebanking/\(filename)")
     }
 
     // MARK: - Slots
 
     /// Liest die persistierte Slot-Liste aus den App-Defaults und dekodiert sie.
+    /// Im Demo-Mode synthesisiert die Liste aus den `simplebanking.cachedBalance.demo-slot-N`
+    /// Keys, weil Demo-Slots nicht in der Multibanking-JSON persistiert werden.
     static func loadSlots() -> [Slot] {
+        if isDemoMode {
+            return loadDemoSlots()
+        }
         guard let data = prefData("simplebanking.multibanking.slots") else {
             return legacyFallbackSlots()
         }
@@ -75,6 +91,9 @@ enum DataReader {
             guard let id = dict["id"] as? String,
                   let iban = dict["iban"] as? String,
                   let displayName = dict["displayName"] as? String else { return nil }
+            // In Live-Mode versehentlich vorhandene Demo-Slot-Einträge überspringen,
+            // damit `sb balance` keine Demo-Reste zeigt.
+            if id.hasPrefix("demo-slot-") { return nil }
             return Slot(
                 id: id,
                 iban: iban,
@@ -83,6 +102,26 @@ enum DataReader {
                 currency: dict["currency"] as? String
             )
         }
+    }
+
+    /// Synthesisiert Demo-Slots aus den im Plist persistierten cachedBalance-Keys.
+    /// Die App speichert pro aktivem Multi-Demo-Slot
+    /// `simplebanking.cachedBalance.demo-slot-N` → wir leiten daraus IDs ab.
+    private static func loadDemoSlots() -> [Slot] {
+        var slots: [Slot] = []
+        for i in 0..<3 {
+            let id = "demo-slot-\(i)"
+            if cachedBalance(slotId: id) != nil {
+                slots.append(Slot(
+                    id: id,
+                    iban: "DE\(String(format: "%020d", i))",
+                    displayName: "Demo \(i + 1)",
+                    nickname: nil,
+                    currency: "EUR"
+                ))
+            }
+        }
+        return slots
     }
 
     /// Legacy-Fallback: frische App-Installationen ohne Multibanking-JSON.
