@@ -194,6 +194,7 @@ struct SettingsView: View {
     @AppStorage(AIProvider.storageKey) private var selectedAIProvider: String = AIProvider.anthropic.rawValue
     @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
     @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
+    @AppStorage("bankLogoAdaptDarkMode") private var bankLogoAdaptDarkMode: Bool = true
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
@@ -1810,16 +1811,50 @@ struct SettingsView: View {
 
             Divider()
 
-            HStack {
-                Text(t("Menüleiste", "Menu Bar"))
-                    .font(ThemeFonts.body(size: 13, weight: .medium))
-                Spacer()
-                Picker("", selection: $menubarStyle) {
-                    Text(t("Lang", "Long")).tag(0)
-                    Text(t("Kurz", "Short")).tag(1)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t("Menüleiste-Breite", "Menu bar width"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(t("Fest = konstante Breite, Nachbar-Icons springen nicht. Dynamisch = passt sich an den Saldo an.",
+                               "Fixed = constant width, neighboring icons don't shift. Dynamic = adapts to the balance text."))
+                            .font(ThemeFonts.body(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Picker("", selection: $menubarStyle) {
+                        Text(t("Fest", "Fixed")).tag(0)
+                        Text(t("Dynamisch", "Dynamic")).tag(1)
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .frame(width: 140)
+                    .disabled(selectedBalanceClickMode == .flyoutCard)
                 }
-                .pickerStyle(SegmentedPickerStyle())
-                .frame(width: 120)
+                if selectedBalanceClickMode == .flyoutCard {
+                    Text(t("Im Flyout-Modus zeigt die Menüleiste den Saldo nicht direkt — Einstellung daher inaktiv.",
+                           "In flyout mode the menu bar doesn't show the balance text directly — setting inactive."))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Bank-Logos im Dark Mode anpassen", "Adapt bank logos in dark mode"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Sehr dunkle Logos (z.B. Deutsche Bank) werden im Dark Mode invertiert, damit sie lesbar bleiben.",
+                           "Very dark logos (e.g. Deutsche Bank) are inverted in dark mode so they stay legible."))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("", isOn: $bankLogoAdaptDarkMode)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
             }
 
             Divider()
