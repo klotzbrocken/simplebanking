@@ -564,14 +564,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
 
-        // Hidden balance
+        // Hidden balance — Stimmungs-Emoji bleibt sichtbar wenn aktiviert,
+        // sodass User auch ohne Saldotext sehen wie es ums Konto steht.
         if isHiddenBalance && !isHoverRevealingBalance {
+            let hiddenEmoji = balanceMoodEmojiEnabled && computeUnifiedBalanceTitle() == nil
+                ? currentMoodEmojiPrefix()
+                : ""
             if isShort {
-                // Short: logo only (or "€" if no logo)
-                setButtonTitle(button, logo != nil ? "" : "€")
+                // Short: logo + (optional) emoji, kein Mask-Text
+                setButtonTitle(button, logo != nil ? hiddenEmoji : "\(hiddenEmoji)€")
             } else {
-                // Long: logo + mask
-                setButtonTitle(button, "\(p)•••.•• ")
+                // Long: logo + (optional) emoji + Mask
+                setButtonTitle(button, "\(p)\(hiddenEmoji)•••.•• ")
             }
             statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
             return
