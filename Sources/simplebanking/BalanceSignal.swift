@@ -158,6 +158,20 @@ enum BalanceSignal {
         return .veryGood
     }
 
+    /// Money-Mood-Emoticon pro Tier. Wird optional in der Menüleiste neben dem
+    /// Bank-Icon angezeigt (Toggle `balanceMoodEmojiEnabled`).
+    static func emoji(for level: BalanceSignalLevel) -> String? {
+        switch level {
+        case .deepOverdraft: return "💀"
+        case .overdraft:     return "😟"
+        case .low:           return "🥵"
+        case .medium:        return "🙃"
+        case .good:          return "🙂"
+        case .veryGood:      return "😎"
+        case .unknown:       return nil
+        }
+    }
+
     static func style(for level: BalanceSignalLevel) -> BalanceSignalStyle {
         switch level {
         case .deepOverdraft:

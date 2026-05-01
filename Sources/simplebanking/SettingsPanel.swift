@@ -195,6 +195,7 @@ struct SettingsView: View {
     @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
     @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
     @AppStorage("bankLogoAdaptDarkMode") private var bankLogoAdaptDarkMode: Bool = true
+    @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
@@ -1948,6 +1949,33 @@ struct SettingsView: View {
                 Toggle("", isOn: $bankLogoAdaptDarkMode)
                     .labelsHidden()
                     .toggleStyle(.switch)
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Money-Mood Emoji in Menüleiste", "Money-mood emoji in menu bar"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Zeigt zusätzlich zum Bank-Logo ein Emoji passend zum aktuellen Saldo: 💀 🥵 🙃 🙂 😎. Im Unified-Mode (mehrere Konten zusammen) ausgeblendet.",
+                           "Shows an emoji matching the current balance next to the bank logo: 💀 🥵 🙃 🙂 😎. Hidden in unified mode (multiple accounts combined)."))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { balanceMoodEmojiEnabled },
+                    set: { newValue in
+                        balanceMoodEmojiEnabled = newValue
+                        // Wirkung sofort sichtbar machen — der bestehende Listener
+                        // in BalanceBar (`.slotSettingsChanged`) wird auch für
+                        // Menüleisten-Refresh genutzt.
+                        NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
             }
 
             Divider()
