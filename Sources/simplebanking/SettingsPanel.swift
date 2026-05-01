@@ -212,8 +212,10 @@ struct SettingsView: View {
     @AppStorage("targetBuffer") private var targetBuffer: Int = 500
     @AppStorage("targetSavingsRate") private var targetSavingsRate: Int = 20
     @AppStorage("fetchDays") private var fetchDays: Int = 60
+    @AppStorage("balanceSignalDeepOverdraftThreshold") private var balanceSignalDeepOverdraftThreshold: Int = -1000
     @AppStorage("balanceSignalLowUpperBound") private var balanceSignalLowUpperBound: Int = 500
     @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
+    @AppStorage("balanceSignalVeryGoodLowerBound") private var balanceSignalVeryGoodLowerBound: Int = 5000
     @AppStorage("confettiIncomeThreshold") private var confettiIncomeThreshold: Int = 50
     @AppStorage("confettiEffect") private var confettiEffect: Int = ConfettiEffect.money.rawValue
     @AppStorage("celebrationStyle") private var celebrationStyle: Int = 1
@@ -288,11 +290,26 @@ struct SettingsView: View {
     }
 
     private var normalizedBalanceSignalThresholds: BalanceSignalThresholds {
-        BalanceSignal.normalizedThresholds(low: balanceSignalLowUpperBound, medium: balanceSignalMediumUpperBound)
+        BalanceSignal.normalizedThresholds(
+            deepOverdraft: balanceSignalDeepOverdraftThreshold,
+            low: balanceSignalLowUpperBound,
+            medium: balanceSignalMediumUpperBound,
+            veryGood: balanceSignalVeryGoodLowerBound
+        )
     }
 
     private var selectedBalanceClickMode: BalanceClickMode {
         BalanceClickMode(rawValue: balanceClickMode) ?? .mouseClick
+    }
+
+    private var balanceSignalDeepBinding: Binding<Int> {
+        Binding(
+            get: { balanceSignalDeepOverdraftThreshold },
+            set: { newValue in
+                // Strikt negativ klemmen, sonst gibt es keinen „leichten Überzug"-Bereich.
+                balanceSignalDeepOverdraftThreshold = min(-1, newValue)
+            }
+        )
     }
 
     private var balanceSignalLowBinding: Binding<Int> {
@@ -304,6 +321,9 @@ struct SettingsView: View {
                 if balanceSignalMediumUpperBound <= normalizedLow {
                     balanceSignalMediumUpperBound = normalizedLow + 1
                 }
+                if balanceSignalVeryGoodLowerBound <= balanceSignalMediumUpperBound {
+                    balanceSignalVeryGoodLowerBound = balanceSignalMediumUpperBound + 1
+                }
             }
         )
     }
@@ -313,21 +333,43 @@ struct SettingsView: View {
             get: { balanceSignalMediumUpperBound },
             set: { newValue in
                 let minAllowed = max(0, balanceSignalLowUpperBound) + 1
-                balanceSignalMediumUpperBound = max(minAllowed, newValue)
+                let normalizedMedium = max(minAllowed, newValue)
+                balanceSignalMediumUpperBound = normalizedMedium
+                if balanceSignalVeryGoodLowerBound <= normalizedMedium {
+                    balanceSignalVeryGoodLowerBound = normalizedMedium + 1
+                }
+            }
+        )
+    }
+
+    private var balanceSignalVeryGoodBinding: Binding<Int> {
+        Binding(
+            get: { balanceSignalVeryGoodLowerBound },
+            set: { newValue in
+                let minAllowed = balanceSignalMediumUpperBound + 1
+                balanceSignalVeryGoodLowerBound = max(minAllowed, newValue)
             }
         )
     }
 
     private func normalizeBalanceSignalThresholds() {
         let normalized = normalizedBalanceSignalThresholds
+        let normalizedDeep = Int(normalized.deepOverdraftThreshold)
         let normalizedLow = Int(normalized.lowUpperBound)
         let normalizedMedium = Int(normalized.mediumUpperBound)
+        let normalizedVeryGood = Int(normalized.veryGoodLowerBound)
 
+        if balanceSignalDeepOverdraftThreshold != normalizedDeep {
+            balanceSignalDeepOverdraftThreshold = normalizedDeep
+        }
         if balanceSignalLowUpperBound != normalizedLow {
             balanceSignalLowUpperBound = normalizedLow
         }
         if balanceSignalMediumUpperBound != normalizedMedium {
             balanceSignalMediumUpperBound = normalizedMedium
+        }
+        if balanceSignalVeryGoodLowerBound != normalizedVeryGood {
+            balanceSignalVeryGoodLowerBound = normalizedVeryGood
         }
     }
     
@@ -1378,11 +1420,30 @@ struct SettingsView: View {
                                 title: t("Kontostand-Schwellen", "Balance thresholds"),
                                 icon: "chart.bar.fill"
                             )
-                            Text(t("Bei welchem Kontostand wechselt die Stimmung des Symbols?",
-                                   "At what balance does the indicator change mood?"))
+                            Text(t("Bei welchen Kontoständen wechseln die Stimmungen? (sechs Stufen)",
+                                   "At what balances does the indicator change mood? (six tiers)"))
                                 .font(ThemeFonts.body(size: 11))
                                 .foregroundColor(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+
+                            // Tief im Dispo ab (Burgund)
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    TextField("-1000", value: Binding(
+                                        get: { currentSlotSettings.balanceSignalDeepOverdraftThreshold },
+                                        set: { v in
+                                            currentSlotSettings.balanceSignalDeepOverdraftThreshold = min(-1, v)
+                                            saveCurrentSlotSettings()
+                                        }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                                Text(t("Tief im Dispo ab", "Deep overdraft below"))
+                                    .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+                            }
 
                             // Kritisch ab
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1393,6 +1454,9 @@ struct SettingsView: View {
                                             currentSlotSettings.balanceSignalLowUpperBound = max(0, v)
                                             if currentSlotSettings.balanceSignalMediumUpperBound <= currentSlotSettings.balanceSignalLowUpperBound {
                                                 currentSlotSettings.balanceSignalMediumUpperBound = currentSlotSettings.balanceSignalLowUpperBound + 1
+                                            }
+                                            if currentSlotSettings.balanceSignalVeryGoodLowerBound <= currentSlotSettings.balanceSignalMediumUpperBound {
+                                                currentSlotSettings.balanceSignalVeryGoodLowerBound = currentSlotSettings.balanceSignalMediumUpperBound + 1
                                             }
                                             saveCurrentSlotSettings()
                                         }
@@ -1442,6 +1506,26 @@ struct SettingsView: View {
                                 }
                             }
 
+                            // Sehr wohlhabend ab (Smaragd)
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    TextField("5000", value: Binding(
+                                        get: { currentSlotSettings.balanceSignalVeryGoodLowerBound },
+                                        set: { v in
+                                            let clamped = max(currentSlotSettings.balanceSignalMediumUpperBound + 1, v)
+                                            currentSlotSettings.balanceSignalVeryGoodLowerBound = clamped
+                                            saveCurrentSlotSettings()
+                                        }
+                                    ), format: .number)
+                                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    Text("€").font(ThemeFonts.body(size: 13)).foregroundColor(.secondary)
+                                        .frame(width: 16, alignment: .leading)
+                                }
+                                .frame(width: 185)
+                                Text(t("Sehr wohlhabend ab", "Very wealthy from"))
+                                    .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+                            }
+
                             // Nettogehalt / Monat — setzt gleichzeitig die Grün-Schwelle
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 HStack(spacing: 6) {
@@ -1481,6 +1565,15 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+
+                            // Live-Preview-Skala (6 Bänder) mit Marker am aktuellen Saldo
+                            BalanceMoodPreviewBar(
+                                deepThr: currentSlotSettings.balanceSignalDeepOverdraftThreshold,
+                                lowUB: currentSlotSettings.balanceSignalLowUpperBound,
+                                medUB: currentSlotSettings.balanceSignalMediumUpperBound,
+                                veryGoodLB: currentSlotSettings.balanceSignalVeryGoodLowerBound
+                            )
+                            .padding(.top, 6)
                         }
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))

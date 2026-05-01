@@ -8,8 +8,10 @@ struct BankSlotSettings: Codable {
     var targetBuffer: Int = 500
     var targetSavingsRate: Int = 20
     var fetchDays: Int = 60
+    var balanceSignalDeepOverdraftThreshold: Int = -1000
     var balanceSignalLowUpperBound: Int = 500
     var balanceSignalMediumUpperBound: Int = 2000
+    var balanceSignalVeryGoodLowerBound: Int = 5000
     /// Fixed salary amount — also sets MoneyMood green threshold (Option C). 0 = auto-detect.
     var salaryAmount: Int = 0
     /// 0 = Anfang des Monats (day 1, ±4 d), 1 = Mitte (day 15, ±4 d), 2 = Individuell (exact salaryDay).
@@ -84,8 +86,10 @@ struct BankSlotSettings: Codable {
         targetBuffer                 = (try? c.decodeIfPresent(Int.self, forKey: .targetBuffer)) ?? 500
         targetSavingsRate            = (try? c.decodeIfPresent(Int.self, forKey: .targetSavingsRate)) ?? 20
         fetchDays                    = (try? c.decodeIfPresent(Int.self, forKey: .fetchDays)) ?? 60
+        balanceSignalDeepOverdraftThreshold = (try? c.decodeIfPresent(Int.self, forKey: .balanceSignalDeepOverdraftThreshold)) ?? -1000
         balanceSignalLowUpperBound   = (try? c.decodeIfPresent(Int.self, forKey: .balanceSignalLowUpperBound)) ?? 500
         balanceSignalMediumUpperBound = (try? c.decodeIfPresent(Int.self, forKey: .balanceSignalMediumUpperBound)) ?? 2000
+        balanceSignalVeryGoodLowerBound = (try? c.decodeIfPresent(Int.self, forKey: .balanceSignalVeryGoodLowerBound)) ?? 5000
         salaryAmount                 = (try? c.decodeIfPresent(Int.self, forKey: .salaryAmount)) ?? 0
         salaryDayPreset              = (try? c.decodeIfPresent(Int.self, forKey: .salaryDayPreset)) ?? 2
         creditLimitIncluded          = (try? c.decodeIfPresent(Bool.self, forKey: .creditLimitIncluded)) ?? false

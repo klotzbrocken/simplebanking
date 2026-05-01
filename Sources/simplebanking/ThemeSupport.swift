@@ -414,6 +414,12 @@ extension Color {
     static var sbRedMid: Color    { dynamicHex(light: "#D98A8A", dark: "#E39A9A") }
     static var sbRedSoft: Color   { dynamicHex(light: "#F8E9E9", dark: "#402222") }
 
+    // Burgundy — deep overdraft (Stufe unter Red, „tief im Dispo")
+    static var sbBurgundyStrong: Color { dynamicHex(light: "#7A2A2A", dark: "#B05050") }
+
+    // Emerald — very good buffer (Stufe über Green, „sehr wohlhabend")
+    static var sbEmeraldStrong: Color { dynamicHex(light: "#2D6F4D", dark: "#5DBE8B") }
+
     // Neutral — warm taupe for "other" / rest categories.
     // Not system gray — deliberately part of the palette so "other" reads as
     // a real category, not leftover space.
