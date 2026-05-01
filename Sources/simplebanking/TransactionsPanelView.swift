@@ -189,8 +189,10 @@ private struct TransactionsPanelView: View {
     private var normalizedBalanceThresholds: BalanceSignalThresholds {
         let s = activeSlotSettings
         return BalanceSignal.normalizedThresholds(
+            deepOverdraft: s.balanceSignalDeepOverdraftThreshold,
             low: s.balanceSignalLowUpperBound,
-            medium: s.balanceSignalMediumUpperBound
+            medium: s.balanceSignalMediumUpperBound,
+            veryGood: s.balanceSignalVeryGoodLowerBound
         )
     }
 
@@ -438,8 +440,10 @@ private struct TransactionsPanelView: View {
         // the sentiment colors stay consistent with individual account cards.
         let slotCount = max(1, slots.count)
         let aggregatedThresholds = BalanceSignalThresholds(
+            deepOverdraftThreshold: normalizedBalanceThresholds.deepOverdraftThreshold * Double(slotCount),
             lowUpperBound: normalizedBalanceThresholds.lowUpperBound * Double(slotCount),
-            mediumUpperBound: normalizedBalanceThresholds.mediumUpperBound * Double(slotCount)
+            mediumUpperBound: normalizedBalanceThresholds.mediumUpperBound * Double(slotCount),
+            veryGoodLowerBound: normalizedBalanceThresholds.veryGoodLowerBound * Double(slotCount)
         )
         // Aggregated view uses neutral grey — no signal coloring for combined balance
         let totalSignalColor: Color = .primary

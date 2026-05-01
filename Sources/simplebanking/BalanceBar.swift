@@ -2430,8 +2430,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let activeSlotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
         let activeSlotCfg = BankSlotSettingsStore.load(slotId: activeSlotId)
         let thresholds = BalanceSignal.normalizedThresholds(
+            deepOverdraft: activeSlotCfg.balanceSignalDeepOverdraftThreshold,
             low: activeSlotCfg.balanceSignalLowUpperBound,
-            medium: activeSlotCfg.balanceSignalMediumUpperBound
+            medium: activeSlotCfg.balanceSignalMediumUpperBound,
+            veryGood: activeSlotCfg.balanceSignalVeryGoodLowerBound
         )
         let store = MultibankingStore.shared
         let idx = store.activeIndex
@@ -2583,8 +2585,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let refreshSlotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
         let refreshSlotCfg = BankSlotSettingsStore.load(slotId: refreshSlotId)
         let thresholds = BalanceSignal.normalizedThresholds(
+            deepOverdraft: refreshSlotCfg.balanceSignalDeepOverdraftThreshold,
             low: refreshSlotCfg.balanceSignalLowUpperBound,
-            medium: refreshSlotCfg.balanceSignalMediumUpperBound
+            medium: refreshSlotCfg.balanceSignalMediumUpperBound,
+            veryGood: refreshSlotCfg.balanceSignalVeryGoodLowerBound
         )
         var rootView = StatusBalanceFlyoutCardView(
             balanceText: balanceText,
