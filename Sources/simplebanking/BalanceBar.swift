@@ -3058,25 +3058,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
 
         do {
-            // Pull-to-Refresh und Panel-Open holen Balance UND Transactions parallel.
-            // Bisher fetcht openTransactionsPanel nur Transactions — User berichtete dass
-            // ein Pull in der Liste den Saldo nicht aktualisiert. Beide Calls laufen
-            // jetzt zeitgleich; Balance ist meist schnell (~1-3s), TX kann länger
-            // dauern, aber die Wartezeit erhöht sich nicht.
-            async let balancesTask = YaxiService.fetchBalances(userId: userId, password: password)
-            async let txTask       = YaxiService.fetchTransactions(userId: userId, password: password, from: from)
-            let balancesResp = try? await balancesTask
-            let resp = try await txTask
-
-            // Bail if the slot changed while we were awaiting the network response
+            // Pull-to-Refresh und Panel-Open holen Balance UND Transactions, aber
+            // strikt sequentiell. Parallel via `async let` würde zwei gleichzeitige
+            // HBCI-Requests auf dieselbe Bank-Connection feuern — FinTS-Banken (Volksbank,
+            // Genossenschaftsbanken, viele Sparkassen) sind dialog-orientiert und
+            // antworten dann mit „Fehlender Dialogkontext". Genau aus diesem Grund
+            // schützt `isHBCICallInFlight` (refreshAsync :2658-2675) andere Aufruf-
+            // Pfade gegeneinander — innerhalb desselben Pfads müssen wir die Calls
+            // ebenfalls serialisieren. Balance zuerst (ist schnell ~1-3s), Transactions
+            // danach (~5-30s) — UX gefühlt gleich, weil der Saldo früh sichtbar wird.
+            let balancesResp = try? await YaxiService.fetchBalances(userId: userId, password: password)
             guard slotEpoch == epochAtStart else {
                 txVM.isLoading = false
                 return
             }
 
-            // Balance anwenden — selbe Logik wie in refreshAsync (creditLimitIncluded-Adjust,
-            // cachedBalance-Persist, Display-Update). Best-effort: bei Fehler Balance einfach
-            // überspringen, Transaktionen-Anzeige bleibt davon unberührt.
+            // Balance sofort anwenden — User sieht den frischen Saldo bevor Transactions
+            // (langsamerer Call) zurückkommen. Selbe Logik wie in refreshAsync. Best-effort:
+            // bei Fehler Balance einfach überspringen, Transaktionen-Anzeige bleibt davon
+            // unberührt.
             if let bResp = balancesResp, bResp.ok, let booked = bResp.booked {
                 let slotSettings = BankSlotSettingsStore.load(slotId: YaxiService.activeSlotId)
                 let rawParsed = AmountParser.parse(booked.amount)
@@ -3109,6 +3109,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 }
                 applyBalanceDisplayModeConstraints()
                 updateStatusBalanceTitle()
+            }
+
+            let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
+
+            // Bail if the slot changed while we were awaiting the network response
+            guard slotEpoch == epochAtStart else {
+                txVM.isLoading = false
+                return
             }
 
             if (resp.ok ?? false), let tx = resp.transactions {
