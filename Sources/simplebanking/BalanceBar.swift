@@ -243,6 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage("menubarStyle") private var menubarStyle: Int = 1  // 0=lang (fixed), 1=kurz (dynamic)
+    @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
@@ -576,14 +577,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
 
-        // Normal balance (unified sum when in unified mode)
+        // Normal balance (unified sum when in unified mode).
+        // Optional Money-Mood-Emoji als Präfix bei Single-Slot-Anzeige; im Unified-
+        // Mode ist die Stimmung mehrdeutig (verschiedene Salden), daher kein Emoji.
+        let moodEmoji = (balanceMoodEmojiEnabled && computeUnifiedBalanceTitle() == nil)
+            ? currentMoodEmojiPrefix()
+            : ""
         if let unifiedTitle = computeUnifiedBalanceTitle() {
             let indicator = latestTxSigBySlot.contains { id, sig in !sig.isEmpty && sig != lastSeenTxSig(for: id) } ? "  ●" : ""
             setButtonTitle(button, "\(unifiedTitle)\(indicator)")
         } else {
-            setButtonTitle(button, "\(p)\(decoratedTitle(lastShownTitle))")
+            setButtonTitle(button, "\(p)\(moodEmoji)\(decoratedTitle(lastShownTitle))")
         }
         statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
+    }
+
+    /// Liefert das Money-Mood-Emoji für den aktuellen Saldo des aktiven Slots, gefolgt
+    /// von einem schmalen Leerzeichen. Leer wenn kein Saldo bekannt oder Toggle aus.
+    private func currentMoodEmojiPrefix() -> String {
+        guard balanceMoodEmojiEnabled, let bal = lastBalance else { return "" }
+        let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        let cfg = BankSlotSettingsStore.load(slotId: slotId)
+        let thresholds = BalanceSignal.normalizedThresholds(
+            deepOverdraft: cfg.balanceSignalDeepOverdraftThreshold,
+            low: cfg.balanceSignalLowUpperBound,
+            medium: cfg.balanceSignalMediumUpperBound,
+            veryGood: cfg.balanceSignalVeryGoodLowerBound
+        )
+        let level = BalanceSignal.classify(balance: bal, thresholds: thresholds)
+        guard let emoji = BalanceSignal.emoji(for: level) else { return "" }
+        return "\(emoji) "
     }
 
     private func menubarFixedWidth() -> CGFloat {
@@ -928,6 +951,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         NotificationCenter.default.addObserver(forName: .slotSettingsChanged, object: nil, queue: .main) { [weak self] _ in
             self?.refreshFlyoutIfVisible()
             self?.recomputeLeftToPay()
+            // Menüleisten-Button neu rendern, damit der Money-Mood-Emoji-Toggle
+            // (Settings → Verhalten) sofort wirkt, statt erst beim nächsten Refresh.
+            self?.updateMenuBarButton()
         }
         NotificationCenter.default.addObserver(forName: .creditLimitToggleChanged, object: nil, queue: .main) { [weak self] _ in
             self?.refresh()
