@@ -4281,6 +4281,7 @@ private struct FlyoutVibrancyBackground: NSViewRepresentable {
 }
 
 private struct StatusBalanceFlyoutCardView: View {
+    @AppStorage("balanceMoodEmojiEnabled") private var emojiEnabled: Bool = false
     let balanceText: String
     let balanceValue: Double?
     let thresholds: BalanceSignalThresholds
@@ -4578,6 +4579,9 @@ private struct StatusBalanceFlyoutCardView: View {
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
                 Spacer()
+                if emojiEnabled, let emoji = BalanceSignal.emoji(for: level) {
+                    Text(emoji).font(.system(size: 16))
+                }
             }
 
             HStack(alignment: .balanceTextCenter, spacing: 12) {
