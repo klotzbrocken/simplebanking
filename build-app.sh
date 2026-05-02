@@ -56,12 +56,13 @@ printf "%s\n" "$BUILD_SEQ" > "$BUILD_NUMBER_FILE"
 BUILD_DATE="$(date '+%Y-%m-%d')"
 BUILD_TIME="$(date '+%H:%M:%S')"
 BUILD_TIMESTAMP="$BUILD_DATE $BUILD_TIME"
-# CFBundleVersion-Format laut Apple TN2420: 1–3 ganzzahlige Komponenten, durch Punkte getrennt.
-# Punkte funktionieren auch für Sparkles SUStandardVersionComparator (vergleicht Komponente
-# für Komponente numerisch); Bindestriche dürfen nicht, Underscores werden von strengen
-# Validierern (App Store, MDM-Tools, amore.computer) abgelehnt.
+# CFBundleVersion-Format laut Apple TN2420: 1–3 ganzzahlige Komponenten durch Punkte
+# getrennt, max. 18 Zeichen Gesamtlänge. Strenge Validierer (amore.computer u.a.) lehnen
+# auch Underscores oder zu lange Strings ab. Daher Sekunden weglassen → bleibt unter 18:
+#   YYYYMMDD.HHMM.SEQ  →  „20260502.0507.155" = 17 Zeichen.
+# Monoton steigend bei mehreren Builds pro Minute via SEQ-Komponente.
 BUILD_DATE_NODASH="$(date '+%Y%m%d')"
-BUILD_TIME_NOCOLON="$(date '+%H%M%S')"
+BUILD_TIME_NOCOLON="$(date '+%H%M')"
 BUILD_NUMBER="${BUILD_DATE_NODASH}.${BUILD_TIME_NOCOLON}.${BUILD_SEQ}"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
