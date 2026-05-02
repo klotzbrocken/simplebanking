@@ -56,12 +56,17 @@ printf "%s\n" "$BUILD_SEQ" > "$BUILD_NUMBER_FILE"
 BUILD_DATE="$(date '+%Y-%m-%d')"
 BUILD_TIME="$(date '+%H:%M:%S')"
 BUILD_TIMESTAMP="$BUILD_DATE $BUILD_TIME"
-# CFBundleVersion: minimalistisches Single-Integer-Format. Apples TN2420 erlaubt 1–3
-# Komponenten, eine reicht; das ist auch für strenge/alte Validierer (Amore u.a.) der
-# einfachste akzeptierte Pfad — keine Punkte, keine führenden Nullen, keine Längen-
-# probleme. Datum/Zeit bleiben in den Custom-Keys SBBuildDate/SBBuildTime erhalten,
-# CFBundleShortVersionString bleibt das User-sichtbare „1.4.0".
-BUILD_NUMBER="${BUILD_SEQ}"
+# CFBundleVersion: konkateniertes YYYYMMDD-SEQ als single-Integer.
+# Hintergrund: Sparkles SUStandardVersionComparator vergleicht <sparkle:version>
+# component-weise (split auf '.' '_' '-'). Bestands-User mit alten Date-Format-Builds
+# (z.B. CFBundleVersion „20260417_045814_93" für 1.3.8) hätten bei plain-int CFBundle-
+# Version (z.B. „161") component-weise: 20260417 > 161 → User wird als „up to date"
+# eingestuft trotz neuem Release. Daher CFBundleVersion ≥ alte Date-Format-Builds:
+# „20260502161" (11 Zeichen, single int, < 18-Char-Limit, keine führenden Nullen,
+# Apple-/Amore-/MDM-konform). Monotonie: YYYYMMDD steigt, SEQ steigt innerhalb des
+# Tages.
+BUILD_DATE_NODASH="$(date '+%Y%m%d')"
+BUILD_NUMBER="${BUILD_DATE_NODASH}${BUILD_SEQ}"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
