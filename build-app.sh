@@ -57,13 +57,13 @@ BUILD_DATE="$(date '+%Y-%m-%d')"
 BUILD_TIME="$(date '+%H:%M:%S')"
 BUILD_TIMESTAMP="$BUILD_DATE $BUILD_TIME"
 # CFBundleVersion-Format laut Apple TN2420: 1–3 ganzzahlige Komponenten durch Punkte
-# getrennt, max. 18 Zeichen Gesamtlänge. Strenge Validierer (amore.computer u.a.) lehnen
-# auch Underscores oder zu lange Strings ab. Daher Sekunden weglassen → bleibt unter 18:
-#   YYYYMMDD.HHMM.SEQ  →  „20260502.0507.155" = 17 Zeichen.
-# Monoton steigend bei mehreren Builds pro Minute via SEQ-Komponente.
+# getrennt, max. 18 Zeichen, keine führenden Nullen (strenge Validierer wie amore.computer
+# nutzen Regex `^[1-9][0-9]*(\.[1-9][0-9]*){0,2}$`). Daher Zeitkomponente komplett weglassen
+# (würde z.B. „0513" als führende Null beanstanden):
+#   YYYYMMDD.SEQ  →  „20260502.157" = 12 Zeichen, monoton via SEQ pro Tag, neue Tage
+#   bringen ohnehin höhere YYYYMMDD-Komponente.
 BUILD_DATE_NODASH="$(date '+%Y%m%d')"
-BUILD_TIME_NOCOLON="$(date '+%H%M')"
-BUILD_NUMBER="${BUILD_DATE_NODASH}.${BUILD_TIME_NOCOLON}.${BUILD_SEQ}"
+BUILD_NUMBER="${BUILD_DATE_NODASH}.${BUILD_SEQ}"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
