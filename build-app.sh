@@ -56,11 +56,13 @@ printf "%s\n" "$BUILD_SEQ" > "$BUILD_NUMBER_FILE"
 BUILD_DATE="$(date '+%Y-%m-%d')"
 BUILD_TIME="$(date '+%H:%M:%S')"
 BUILD_TIMESTAMP="$BUILD_DATE $BUILD_TIME"
-# Sparkle's version comparator breaks at '-' (treats it as pre-release dash).
-# Use dash-free format: YYYYMMDD_HHMMSS_SEQ → Sparkle compares as single number 20260301 > 2026
+# CFBundleVersion-Format laut Apple TN2420: 1–3 ganzzahlige Komponenten, durch Punkte getrennt.
+# Punkte funktionieren auch für Sparkles SUStandardVersionComparator (vergleicht Komponente
+# für Komponente numerisch); Bindestriche dürfen nicht, Underscores werden von strengen
+# Validierern (App Store, MDM-Tools, amore.computer) abgelehnt.
 BUILD_DATE_NODASH="$(date '+%Y%m%d')"
 BUILD_TIME_NOCOLON="$(date '+%H%M%S')"
-BUILD_NUMBER="${BUILD_DATE_NODASH}_${BUILD_TIME_NOCOLON}_${BUILD_SEQ}"
+BUILD_NUMBER="${BUILD_DATE_NODASH}.${BUILD_TIME_NOCOLON}.${BUILD_SEQ}"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
