@@ -1,5 +1,31 @@
 # Changelog — simplebanking
 
+## [1.4.1] — 2026-05-02
+
+### Neu
+- **Money-Mood 6-Tier-System** — Stimmungs-Indikator wechselt jetzt durch sechs Stufen statt vier: `Tief im Dispo` (Burgund) — `Überzogen` (Rot) — `Knapp` (Orange) — `Komfortzone` (Sand) — `Gutes Polster` (Grün) — `Sehr wohlhabend` (Smaragd). Zwei neue per-Slot-Schwellen in Settings → Konten → Kontostand-Schwellen: „Tief im Dispo ab" (Default −1000 €) und „Sehr wohlhabend ab" (Default 5000 €), plus Live-Preview-Skala mit Marker am aktuellen Saldo.
+- **Money-Mood Emojis (optional)** — Toggle in Settings → Verhalten: zeigt 💀 / 😟 / 🥵 / 🙃 / 🙂 / 😎 neben dem Bank-Logo in der Menüleiste und im Flyout-Popover. Bleibt sichtbar wenn der Saldo versteckt ist (Hide-Timer / privacy mode).
+- **Bank-Logo Dark-Mode-Toggle** — Settings → Verhalten: kontrolliert ob sehr dunkle Bank-Logos (z.B. Deutsche Bank, C24) im Dark Mode automatisch invertiert werden. Default an. Luminanz-Berechnung jetzt mit korrekter sRGB-Linearisierung (war vorher fehlerhaft, daher haben einige Banken keinen Effekt gezeigt).
+- **Demo-Mode global** — `sb` CLI und MCP-Server folgen jetzt dem App-Demo-Mode: ein Toggle, alle drei Pfade flippen mit auf Demo-Daten. CLI synthesisiert Demo-Slots aus den persistierten cachedBalance-Keys.
+- **`creditLimitIncluded` API-Flag** — YAXI/Routex liefert pro Balance einen Flag, ob der Dispokredit bereits im Kontostand enthalten ist (z.B. C24). Wird jetzt automatisch ausgewertet; manuelle Override-Setting bleibt für Banken die den Flag falsch melden. Pure Funktion `BalanceAdjustment.computeAdjustedBalance` mit 8 Unit-Tests.
+
+### Geändert
+- **Setup-Copy ehrlicher** — Keine Behauptungen mehr über YAXIs interne Architektur („Tunnel", „YAXI sieht nichts"); stattdessen aus Code beweisbare Aussagen: TLS-verschlüsselte Bank-Abfragen, lokaler Keychain-Speicher, Read-Only-Zugriff. KI-Anbieter werden alle drei genannt (Anthropic / OpenAI / Mistral) statt nur Anthropic.
+- **Filter-Pills im Umsatzpanel** — Edge-Fade-Gradient an beiden Seiten signalisiert Scrollbarkeit, ScrollViewReader scrollt den aktiven Pill automatisch in die Mitte. „Alle"-Pill entfällt; Reset via Klick auf aktiven Pill (mit kleinem ✕-Indikator).
+- **Flyout-Subtitle kompakt** — Statt „1.234 € bis zum 1. verfügbar" (truncated) jetzt „1.234 € bis 15.05." mit Datum. Unverändert in der breiteren Transaktions-Panel-Anzeige.
+- **Menüleiste-Breite umbenannt** — „Lang/Kurz" → „Fest/Dynamisch" mit Erklärtext (es geht um Breiten-Modus, nicht um Textlänge). Disabled wenn Flyout-Click-Mode aktiv ist.
+- **Bank-Import Touch-ID-Cache** — Kein modaler Master-Password-Prompt mehr beim Deep-Sync-Import, wenn die App bereits via Touch-ID entsperrt ist (selbe Strategie wie BalanceBar-Startup).
+- **Pull-to-Refresh holt Balance + Transactions** — Bisher nur Transactions; jetzt zusätzlich Balance (sequentiell, um HBCI-Dialog-Konflikte bei FinTS-Banken wie Volksbank zu vermeiden). Saldo erscheint früh, Transaktionen ziehen nach.
+- **MCP `get_transactions` Composite-ID** — Seit DB-Migration v19 ist (tx_id, slot_id) Composite-PK. MCP-Output hat jetzt `id = "<slot_id>|<tx_id>"` plus separates `tx_id`-Feld. Vorher konnten zwei Buchungen in verschiedenen Slots dieselbe `id` haben — Dedup-Falle für MCP-Clients.
+
+### Behoben
+- **365-Tage-Import wird vollständig angezeigt** — `BankSlotSettings.lastImportedDays` trackt die Tiefe des letzten Deep-Sync-Imports; alle DB-Lese-Pfade (Flyout, Panel-Open, CSV-Export, Categorization-Reload, Slot-Switch-Bootstrap) nutzen jetzt `displayDays = max(fetchDays, lastImportedDays)`. Vorher schnitt die Liste nach `fetchDays` (default 60) ab, obwohl 365 Tage in der DB lagen.
+- **Multi-Demo Bank-Logo** — Beim ersten Flyout-Open in Multi-Demo erscheint sofort das echte Bank-Logo (Sparkasse, Commerzbank etc.), nicht mehr ein generisches `wallet.pass`-Symbol. Vorher musste man die Banken einmal durchklicken.
+- **Flyout-Datum-Format** — Respektiert jetzt die App-Sprache (`AppLanguage.resolved()`) statt nur das System-Locale: bei deutscher App + englischem System steht jetzt korrekt „15.05." statt „05/15".
+- **Pull-to-Refresh-Regression** — Vorige Version feuerte `fetchBalances` und `fetchTransactions` parallel via `async let`; das brach FinTS-Banken (Volksbank, Genossenschaftsbanken, manche Sparkassen) mit „Fehlender Dialogkontext"-Fehlern. Jetzt strikt sequentiell.
+- **CFBundleVersion-Format** — Plain Build-Sequence-Integer statt vorher Datums-String mit Underscores. Apple-Notary war schon immer lenient, aber strenge Validierer (Amore, MDM-Tools, App Store Connect) lehnten das alte Format ab.
+- **Diverse kleinere Fixes** — Filter-Pills-Layout, BalanceBar-Refresh-Hooks, mehrere Demo-Mode-Konsistenz-Bugs.
+
 ## [1.4.0] — 2026-04-26
 
 ### Neu
