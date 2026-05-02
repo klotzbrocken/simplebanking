@@ -4,11 +4,11 @@
         <title>simplebanking</title>
         <item>
             <title>1.4.1</title>
-            <pubDate>Sat, 02 May 2026 18:29:06 +0200</pubDate>
-            <sparkle:version>160</sparkle:version>
+            <pubDate>Sat, 02 May 2026 18:45:29 +0200</pubDate>
+            <sparkle:version>20260502161</sparkle:version>
             <sparkle:shortVersionString>1.4.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.4.1/simplebanking-20260502-182601.dmg" length="28034164" type="application/octet-stream" sparkle:edSignature="VOGZb8HEViz22SQjqW07JssNjFm2M1R3PrLnMwRGh8DNYSN8UFZ4/VEztujQNJvpH87sBjNRJv/vMjX1D52zDg=="/>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.4.1/simplebanking-20260502-184229.dmg" length="28034194" type="application/octet-stream" sparkle:edSignature="sfGW7FW3zlP7CGTL85Cpu4/Vtf+CMo2AgzzjGxvXExpoleS/Y9PmD9ENuFNo3dh4DzXCh7TxfKZ1/MjT+gw/Dw=="/>
         </item>
     </channel>
 </rss>
