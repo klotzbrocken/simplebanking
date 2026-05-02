@@ -56,14 +56,12 @@ printf "%s\n" "$BUILD_SEQ" > "$BUILD_NUMBER_FILE"
 BUILD_DATE="$(date '+%Y-%m-%d')"
 BUILD_TIME="$(date '+%H:%M:%S')"
 BUILD_TIMESTAMP="$BUILD_DATE $BUILD_TIME"
-# CFBundleVersion-Format laut Apple TN2420: 1–3 ganzzahlige Komponenten durch Punkte
-# getrennt, max. 18 Zeichen, keine führenden Nullen (strenge Validierer wie amore.computer
-# nutzen Regex `^[1-9][0-9]*(\.[1-9][0-9]*){0,2}$`). Daher Zeitkomponente komplett weglassen
-# (würde z.B. „0513" als führende Null beanstanden):
-#   YYYYMMDD.SEQ  →  „20260502.157" = 12 Zeichen, monoton via SEQ pro Tag, neue Tage
-#   bringen ohnehin höhere YYYYMMDD-Komponente.
-BUILD_DATE_NODASH="$(date '+%Y%m%d')"
-BUILD_NUMBER="${BUILD_DATE_NODASH}.${BUILD_SEQ}"
+# CFBundleVersion: minimalistisches Single-Integer-Format. Apples TN2420 erlaubt 1–3
+# Komponenten, eine reicht; das ist auch für strenge/alte Validierer (Amore u.a.) der
+# einfachste akzeptierte Pfad — keine Punkte, keine führenden Nullen, keine Längen-
+# probleme. Datum/Zeit bleiben in den Custom-Keys SBBuildDate/SBBuildTime erhalten,
+# CFBundleShortVersionString bleibt das User-sichtbare „1.4.0".
+BUILD_NUMBER="${BUILD_SEQ}"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
