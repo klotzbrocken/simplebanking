@@ -243,6 +243,10 @@ struct SettingsView: View {
     @AppStorage("biometricOfferDismissed") private var biometricOfferDismissed: Bool = false
     @State private var anthropicAPIKeyInput: String = ""
     @State private var aiStatusMessage: String = ""
+    @ObservedObject private var licenseManager = LicenseManager.shared
+    @State private var licenseKeyInput: String = ""
+    @State private var licenseStatusMessage: String = ""
+    @State private var licenseIsActivating: Bool = false
     private var activeAIProvider: AIProvider {
         AIProvider(rawValue: selectedAIProvider) ?? .anthropic
     }
@@ -2275,6 +2279,158 @@ struct SettingsView: View {
     
     // MARK: - About Section
     
+    private var licenseSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsSectionHeader(
+                title: t("Lizenz: Geld senden", "License: Send Money"),
+                icon: "key.fill"
+            )
+
+            licenseStatusBadge
+
+            switch licenseManager.status {
+            case .licensed, .offlineGrace:
+                licensedView
+            case .unlicensed, .unknown:
+                unlicensedView
+            case .notConfigured:
+                notConfiguredView
+            }
+
+            if !licenseStatusMessage.isEmpty {
+                Text(licenseStatusMessage)
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var licenseStatusBadge: some View {
+        HStack(spacing: 6) {
+            switch licenseManager.status {
+            case .licensed(let last):
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundColor(.sbGreenStrong)
+                Text(t("Aktiv", "Active"))
+                    .font(ThemeFonts.body(size: 12, weight: .medium))
+                Text(t("(zuletzt geprüft \(formatRelative(last)))",
+                       "(last checked \(formatRelative(last)))"))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
+            case .offlineGrace(let last):
+                Image(systemName: "clock.arrow.circlepath")
+                    .foregroundColor(.sbOrangeStrong)
+                Text(t("Aktiv (offline)", "Active (offline)"))
+                    .font(ThemeFonts.body(size: 12, weight: .medium))
+                Text(t("(letzte Prüfung \(formatRelative(last)))",
+                       "(last checked \(formatRelative(last)))"))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
+            case .unlicensed:
+                Image(systemName: "lock.fill")
+                    .foregroundColor(.secondary)
+                Text(t("Keine Lizenz aktiv", "No license active"))
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.secondary)
+            case .unknown:
+                Image(systemName: "ellipsis.circle")
+                    .foregroundColor(.secondary)
+                Text(t("Wird geprüft…", "Checking…"))
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.secondary)
+            case .notConfigured:
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.sbOrangeStrong)
+                Text(t("Konfiguration fehlt", "Configuration missing"))
+                    .font(ThemeFonts.body(size: 12, weight: .medium))
+            }
+        }
+    }
+
+    private var licensedView: some View {
+        HStack(spacing: 8) {
+            Spacer()
+            Button(t("Auf diesem Gerät deaktivieren",
+                     "Deactivate on this device")) {
+                licenseManager.deactivate()
+                licenseStatusMessage = t(
+                    "Lizenz lokal entfernt. Im Gumroad-Dashboard kannst Du den Use-Count zurücksetzen, falls Du auf einem anderen Mac aktivieren willst.",
+                    "License removed locally. To free up a slot for another Mac, reset the use count in your Gumroad dashboard."
+                )
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var unlicensedView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(t("Lizenz-Key eingeben:", "Enter license key:"))
+                .font(ThemeFonts.body(size: 12))
+                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                SecureField("XXXX-XXXX-XXXX-XXXX", text: $licenseKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(licenseIsActivating)
+                Button(action: { Task { await activateLicense() } }) {
+                    if licenseIsActivating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text(t("Aktivieren", "Activate"))
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(licenseIsActivating || licenseKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            HStack {
+                Spacer()
+                Link(t("Lizenz kaufen (\(LicenseConfig.displayPrice))",
+                       "Buy license (\(LicenseConfig.displayPrice))"),
+                     destination: LicenseConfig.purchaseURL)
+                    .font(ThemeFonts.body(size: 12))
+            }
+        }
+    }
+
+    private var notConfiguredView: some View {
+        Text(t(
+            "Diese Build-Variante hat noch keine Gumroad-Anbindung. Bitte kontaktiere den Entwickler.",
+            "This build has no Gumroad configuration. Please contact the developer."
+        ))
+        .font(ThemeFonts.body(size: 12))
+        .foregroundColor(.secondary)
+    }
+
+    private func activateLicense() async {
+        licenseIsActivating = true
+        licenseStatusMessage = ""
+        defer { licenseIsActivating = false }
+        do {
+            try await licenseManager.activate(licenseKey: licenseKeyInput)
+            licenseStatusMessage = t("Lizenz aktiviert.", "License activated.")
+            licenseKeyInput = ""
+        } catch let error as LicenseError {
+            switch error {
+            case .invalid(let m):    licenseStatusMessage = m
+            case .network(let e):    licenseStatusMessage = t(
+                                        "Netzwerkfehler: \(e.localizedDescription)",
+                                        "Network error: \(e.localizedDescription)")
+            case .notConfigured:     licenseStatusMessage = t(
+                                        "Lizenz noch nicht konfiguriert.",
+                                        "License not yet configured.")
+            }
+        } catch {
+            licenseStatusMessage = error.localizedDescription
+        }
+    }
+
+    private func formatRelative(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        formatter.locale = Locale(identifier: AppLanguage.resolved() == .de ? "de_DE" : "en_US")
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
     private var aboutSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             // App Icon and Name
@@ -2344,9 +2500,13 @@ struct SettingsView: View {
                         .font(ThemeFonts.body(size: 13))
                 }
             }
-            
+
             Divider()
-            
+
+            licenseSection
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 8) {
                 SettingsSectionHeader(title: t("Technologie", "Technology"), icon: "cpu")
                 

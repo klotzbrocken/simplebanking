@@ -1,5 +1,25 @@
 # Changelog — simplebanking
 
+## [1.5.0] — 2026-05-03
+
+### Neu
+
+- **Geld senden** — kostenpflichtige Erweiterung (€19 one-time, lifetime updates innerhalb 1.x). SEPA-Überweisung direkt aus simplebanking heraus, ohne die Banking-App zu öffnen.
+  - Single-Input-Eingabe: tippe Empfänger-Name oder IBAN, Live-Vorschläge aus Deiner Buchungs-Historie (Top 5 nach Frequenz × Recency)
+  - Klick auf Vorschlag füllt IBAN, Default-Betrag (häufigster Wert an diesen Empfänger) und Default-Verwendungszweck (letzter)
+  - SEPA-Validation (IBAN mod-97, 34 Länder), Sicherheits-Limit 100.000 €
+  - SCA-Flow (TAN/Browser-Redirect) wie gewohnt direkt mit der Bank — simplebanking sieht keine Bank-Daten
+  - Demo-Mode-User können das Feature ohne Lizenz visuell testen (Mock-Sends, kein echter Bank-Call)
+  - Lizenz-Verkauf via Gumroad. Aktivierung in Einstellungen → Über → Lizenz-Sektion. Lizenz-Key per Email nach Kauf.
+- **TransferRecipientStore** — neue lokale Aggregation auf der `transactions`-Tabelle für die Autocomplete-Vorschläge. Slot-scoped, sortiert nach `frequency × max(0.1, 1 − daysSinceLast / 365)`.
+
+### Geändert
+- **Setup-Copy** — die Aussage „Nur Lesezugriff. Keine Überweisungen." entfällt, da Geld-senden nun als optionale Erweiterung verfügbar ist. Neue Formulierung nennt es ehrlich als kostenpflichtiges Add-on.
+- **Menüleiste** — neuer Eintrag „Geld senden…" (⌘N) zwischen „Aktualisieren" und „Automatisch verstecken".
+
+### Behoben
+- Diverse Code-Ergonomie-Anpassungen rund um den TransferSheet-Workflow.
+
 ## [1.4.1] — 2026-05-02
 
 ### Neu

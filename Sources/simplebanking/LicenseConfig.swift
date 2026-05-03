@@ -12,14 +12,18 @@ import Foundation
 // `unlicensed`-Zustand und das Feature ist nicht zugänglich.
 
 enum LicenseConfig {
-    /// Gumroad Product Permalink (z.B. „simplebanking-pro") oder numerische
-    /// Product-ID. Beides wird vom Gumroad-License-API akzeptiert.
-    /// Setzen via Gumroad-Dashboard → Product → URL.
-    static let gumroadProductId: String = "PLACEHOLDER_REPLACE_ME"
+    /// Gumroad Product Permalink. Die License-Verify-API akzeptiert den
+    /// Permalink-String unter dem Schlüssel `product_id`.
+    /// Quelle: Gumroad-Dashboard → Product → Custom URL.
+    static let gumroadProductId: String = "simplebanking"
 
-    /// Verkaufs-URL, an die das UpsellSheet linkt. Format:
-    /// `https://gumroad.com/l/<permalink>` oder Custom-Domain.
-    static let purchaseURL: URL = URL(string: "https://gumroad.com/l/PLACEHOLDER_REPLACE_ME")!
+    /// Verkaufs-URL, an die das UpsellSheet linkt.
+    static let purchaseURL: URL = URL(string: "https://klotzzy2.gumroad.com/l/simplebanking")!
+
+    /// Anzeige-Preis fürs UpsellSheet. Der echte Preis kommt aus Gumroad
+    /// (Stripe-Checkout zeigt den live konfigurierten Wert) — hier nur die
+    /// Kommunikation an den User.
+    static let displayPrice: String = "€19"
 
     /// Offline-Grace-Period: wie lange darf die App ohne erfolgreiche
     /// Re-Validation als „lizenziert" gelten? Schützt User mit instabiler

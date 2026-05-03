@@ -1360,11 +1360,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     // MARK: - Geld senden
 
     private var transferWindow: NSWindow?
+    private var upsellWindow: NSWindow?
 
     @objc private func sendMoney() {
-        // TODO Schritt 6-8: hier kommt der LicenseManager-Gate. Bei
-        // unlizenziertem User → UpsellSheet statt TransferSheet öffnen.
-        showTransferSheet()
+        // Lizenz-Gate: ohne aktive Lizenz öffnet sich das UpsellSheet,
+        // Demo-Modus-User dürfen das Feature mock-weise antesten.
+        if LicenseManager.shared.isLicensedOrDemo {
+            showTransferSheet()
+        } else {
+            showUpsellSheet()
+        }
+    }
+
+    private func showUpsellSheet() {
+        if let existing = upsellWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let sheet = UpsellSheet(
+            onClose: { [weak self] in
+                self?.upsellWindow?.close()
+                self?.upsellWindow = nil
+            },
+            onOpenSettings: { [weak self] in
+                self?.upsellWindow?.close()
+                self?.upsellWindow = nil
+                self?.showSettings()
+            }
+        )
+        let host = NSHostingController(rootView: sheet)
+        let window = NSWindow(contentViewController: host)
+        window.title = L10n.t("Geld senden — Lizenz", "Send Money — License")
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 460, height: 380))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        upsellWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func showTransferSheet() {
