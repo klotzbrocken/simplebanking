@@ -1363,12 +1363,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var upsellWindow: NSWindow?
 
     @objc private func sendMoney() {
-        // Lizenz-Gate: ohne aktive Lizenz öffnet sich das UpsellSheet,
-        // Demo-Modus-User dürfen das Feature mock-weise antesten.
-        if LicenseManager.shared.isLicensedOrDemo {
-            showTransferSheet()
-        } else {
+        // Lizenz-Gate ist nur aktiv wenn LicenseConfig.licensingEnabled=true.
+        // Solange Gumroad-Setup nicht steht, ist „Geld senden" für alle frei
+        // zugänglich (Demo-Mode-User sowieso).
+        if LicenseConfig.licensingEnabled, !LicenseManager.shared.isLicensedOrDemo {
             showUpsellSheet()
+        } else {
+            showTransferSheet()
         }
     }
 

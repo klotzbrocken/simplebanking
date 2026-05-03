@@ -2501,9 +2501,10 @@ struct SettingsView: View {
                 }
             }
 
-            Divider()
-
-            licenseSection
+            if LicenseConfig.licensingEnabled {
+                Divider()
+                licenseSection
+            }
 
             Divider()
 

@@ -12,6 +12,17 @@ import Foundation
 // `unlicensed`-Zustand und das Feature ist nicht zugänglich.
 
 enum LicenseConfig {
+    /// Master-Switch. Wenn `false`, ist das gesamte Lizenz-System UI-seitig
+    /// **deaktiviert**: kein Lizenz-Gate vor TransferSheet, kein UpsellSheet,
+    /// keine License-Section in den Einstellungen. „Geld senden" ist für alle
+    /// frei zugänglich.
+    ///
+    /// Auf `true` setzen wenn das Gumroad-Setup komplett ist (Produkt
+    /// angelegt, License-Keys aktiviert, Permalink/Product-ID + Preis
+    /// im Code unten korrekt). Dann erscheint der Paywall vor dem
+    /// TransferSheet automatisch.
+    static let licensingEnabled: Bool = false
+
     /// Gumroad Product Permalink. Die License-Verify-API akzeptiert den
     /// Permalink-String unter dem Schlüssel `product_id`.
     /// Quelle: Gumroad-Dashboard → Product → Custom URL.
