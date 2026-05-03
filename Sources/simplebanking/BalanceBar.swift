@@ -1005,6 +1005,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img.isTemplate = true; refreshItem.image = img
         }
         menu.addItem(refreshItem)
+
+        // ── Geld senden… (Lizenz-Gate kommt in Schritt 6-8) ───────────────
+        let sendMoneyItem = NSMenuItem(title: t("Geld senden…", "Send Money…"),
+                                       action: #selector(sendMoney),
+                                       keyEquivalent: "n")
+        sendMoneyItem.target = self
+        if let img = NSImage(systemSymbolName: "arrow.up.right.square",
+                             accessibilityDescription: nil) {
+            img.isTemplate = true
+            sendMoneyItem.image = img
+        }
+        menu.addItem(sendMoneyItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // ── Automatisch verstecken (submenu) ─────────────────────────────
@@ -1342,6 +1355,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Manual refresh always clears the SCA backoff — user explicitly wants to retry.
         scaBackoffUntil = nil
         Task { await refreshAsync() }
+    }
+
+    // MARK: - Geld senden
+
+    private var transferWindow: NSWindow?
+
+    @objc private func sendMoney() {
+        // TODO Schritt 6-8: hier kommt der LicenseManager-Gate. Bei
+        // unlizenziertem User → UpsellSheet statt TransferSheet öffnen.
+        showTransferSheet()
+    }
+
+    private func showTransferSheet() {
+        if let existing = transferWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let sheet = TransferSheet(
+            requestMasterPassword: { [weak self] in self?.requestMasterPassword() },
+            onClose: { [weak self] in
+                self?.transferWindow?.close()
+                self?.transferWindow = nil
+            }
+        )
+        let host = NSHostingController(rootView: sheet)
+        let window = NSWindow(contentViewController: host)
+        window.title = L10n.t("Geld senden", "Send Money")
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 460, height: 520))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        transferWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Liefert das Master-Passwort: erst aus dem in-memory-Cache (BalanceBar
+    /// ist nach Touch-ID-Unlock im Besitz), sonst aus BiometricStore-Auto-
+    /// Unlock-Cache, sonst nil. TransferSheet kann dann selbst entscheiden,
+    /// ob es modal nachfragt.
+    fileprivate func requestMasterPassword() -> String? {
+        if let pw = masterPassword { return pw }
+        if let auto = BiometricStore.loadAutoUnlockPassword(),
+           (try? CredentialsStore.load(masterPassword: auto)) != nil {
+            return auto
+        }
+        return nil
     }
 
     // MARK: - CLI refresh outcome
