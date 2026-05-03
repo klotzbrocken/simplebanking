@@ -596,6 +596,87 @@ enum TransactionsDatabase {
         }
     }
 
+    /// Aggregiert ausgehende Transaktionen (`betrag < 0`) eines Slots zu
+    /// `TransferRecipientCandidate`s — eine pro `(empfaenger, iban)`-Paar.
+    /// Nur Buchungen mit Empfänger-Name UND IBAN werden berücksichtigt
+    /// (für eine Überweisung sind beide nötig).
+    /// Sortierung in SQL nach `frequency DESC, last_date DESC`; ein
+    /// Recency-Boost-Re-Sort findet im `TransferRecipientStore` statt.
+    static func loadOutgoingRecipientCandidates(
+        slotId: String,
+        limit: Int = 30,
+        bankId: String = "primary"
+    ) throws -> [TransferRecipientCandidate] {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+
+        let aggSql = """
+            SELECT empfaenger AS name, iban AS iban,
+                   COUNT(*) AS freq,
+                   MAX(buchungsdatum) AS last_date
+            FROM transactions
+            WHERE slot_id = ? AND betrag < 0
+                  AND empfaenger IS NOT NULL AND empfaenger != ''
+                  AND iban IS NOT NULL AND iban != ''
+            GROUP BY empfaenger, iban
+            ORDER BY freq DESC, last_date DESC
+            LIMIT ?
+            """
+
+        return try queue.read { db in
+            let aggRows = try Row.fetchAll(db, sql: aggSql, arguments: [slotId, limit])
+            var candidates: [TransferRecipientCandidate] = []
+            candidates.reserveCapacity(aggRows.count)
+            for row in aggRows {
+                let name: String = row["name"] ?? ""
+                let iban: String = row["iban"] ?? ""
+                let freq: Int = row["freq"] ?? 0
+                let lastDate: String = row["last_date"] ?? ""
+
+                // Most-frequent absolute Betrag — Mode statt Mean, damit Miete
+                // (immer 1200 €) trotz einer Sonderzahlung (300 €) als Default-
+                // Wert erscheint. Bei Ties: kleinster Betrag (defensiv).
+                let amountSql = """
+                    SELECT abs(betrag) AS amt, COUNT(*) AS cnt
+                    FROM transactions
+                    WHERE slot_id = ? AND empfaenger = ? AND iban = ? AND betrag < 0
+                    GROUP BY abs(betrag)
+                    ORDER BY cnt DESC, amt ASC
+                    LIMIT 1
+                    """
+                let amountRow = try Row.fetchOne(db, sql: amountSql, arguments: [slotId, name, iban])
+                let mostFrequentAmount: Decimal? = amountRow.flatMap {
+                    if let d: Double = $0["amt"] {
+                        return Decimal(d)
+                    }
+                    return nil
+                }
+
+                // Letzter Verwendungszweck — egal ob leer oder gefüllt; UI-Code
+                // entscheidet ob er als Default eingesetzt wird.
+                let remSql = """
+                    SELECT verwendungszweck
+                    FROM transactions
+                    WHERE slot_id = ? AND empfaenger = ? AND iban = ? AND betrag < 0
+                    ORDER BY buchungsdatum DESC
+                    LIMIT 1
+                    """
+                let remRow = try Row.fetchOne(db, sql: remSql, arguments: [slotId, name, iban])
+                let lastRemittance: String? = remRow?["verwendungszweck"]
+
+                candidates.append(TransferRecipientCandidate(
+                    creditorName: name,
+                    creditorIban: iban,
+                    mostFrequentAmount: mostFrequentAmount,
+                    lastRemittance: lastRemittance,
+                    frequency: freq,
+                    lastBookingDate: lastDate
+                ))
+            }
+            return candidates
+        }
+    }
+
     static func executeReadOnlyQuery(sql: String, bankId: String = "primary") throws -> [[String: String]] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
