@@ -23,7 +23,7 @@ enum LicenseConfig {
     /// Anzeige-Preis fürs UpsellSheet. Der echte Preis kommt aus Gumroad
     /// (Stripe-Checkout zeigt den live konfigurierten Wert) — hier nur die
     /// Kommunikation an den User.
-    static let displayPrice: String = "€19"
+    static let displayPrice: String = "€14"
 
     /// Offline-Grace-Period: wie lange darf die App ohne erfolgreiche
     /// Re-Validation als „lizenziert" gelten? Schützt User mit instabiler

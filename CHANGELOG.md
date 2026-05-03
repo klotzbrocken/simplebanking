@@ -4,7 +4,7 @@
 
 ### Neu
 
-- **Geld senden** — kostenpflichtige Erweiterung (€19 one-time, lifetime updates innerhalb 1.x). SEPA-Überweisung direkt aus simplebanking heraus, ohne die Banking-App zu öffnen.
+- **Geld senden** — kostenpflichtige Erweiterung (€14 one-time, lifetime updates innerhalb 1.x). SEPA-Überweisung direkt aus simplebanking heraus, ohne die Banking-App zu öffnen.
   - Single-Input-Eingabe: tippe Empfänger-Name oder IBAN, Live-Vorschläge aus Deiner Buchungs-Historie (Top 5 nach Frequenz × Recency)
   - Klick auf Vorschlag füllt IBAN, Default-Betrag (häufigster Wert an diesen Empfänger) und Default-Verwendungszweck (letzter)
   - SEPA-Validation (IBAN mod-97, 34 Länder), Sicherheits-Limit 100.000 €
