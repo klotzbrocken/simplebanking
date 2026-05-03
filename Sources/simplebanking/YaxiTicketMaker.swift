@@ -53,6 +53,15 @@ enum YaxiTicketMaker {
         return "\(signingInput).\(signature)"
     }
 
+    /// Convenience: Transfer-Ticket. Laut YAXI-Doku
+    /// (`docs.yaxi.tech/transfer.html`, „The service does not accept any
+    /// ticket data.") trägt das Ticket-Payload kein Daten-Argument; alle
+    /// Empfänger-Details werden direkt beim `client.transfer(details:)`
+    /// Aufruf übergeben.
+    static func issueTransferTicket() -> String {
+        return issueTicket(service: "Transfer", data: nil)
+    }
+
     /// Convenience: Transactions ticket including account and date range in the payload.
     static func issueTransactionsTicket(iban: String, currency: String = "EUR", from: String? = nil, to: String? = nil) -> String {
         var range: [String: Any] = [:]

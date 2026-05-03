@@ -129,6 +129,33 @@ struct TransferRequest: Equatable, Sendable {
     ]
 }
 
+// MARK: - Outcome
+
+/// App-eigenes Result-Modell für `YaxiService.sendTransfer`. Bewusst klein
+/// gehalten: Bank-Antwort enthält bei Erfolg keine zusätzlichen Daten („data: {}"
+/// laut YAXI-Doku), nur das Faktum, dass die Bank die Initiation entgegen-
+/// genommen hat.
+struct TransferOutcome: Sendable, Equatable {
+    let ok: Bool
+    /// `true` wenn der Versand abgebrochen wurde weil SCA-Genehmigung
+    /// (TAN/Browser-Redirect) noch fehlt — sehr selten als End-State, weil
+    /// `handleSCA` in YaxiService normalerweise die Dialoge selbst bedient.
+    let scaRequired: Bool
+    /// Technische Fehler-ID (z.B. „PaymentFailed", „UnsupportedProduct").
+    let error: String?
+    /// Bank-spezifische User-facing-Message (DE/EN gemischt).
+    let userMessage: String?
+    /// Wichtige Edge-Cases laut YAXI-Doku: bei `UnexpectedError` und
+    /// `ProviderError` kann der Transfer trotzdem ausgeführt worden sein,
+    /// die Bank-API hat nur das Acknowledgment nicht zurückgeschickt.
+    let mayHaveBeenExecuted: Bool
+
+    static let demoSuccess = TransferOutcome(
+        ok: true, scaRequired: false, error: nil, userMessage: nil,
+        mayHaveBeenExecuted: false
+    )
+}
+
 // MARK: - Errors
 
 enum TransferRequestError: Error, Equatable {

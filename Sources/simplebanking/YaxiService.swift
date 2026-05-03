@@ -1017,6 +1017,172 @@ enum YaxiService {
             msg.contains("user id and a password")
     }
 
+    // MARK: - sendTransfer
+
+    /// Initiiert eine SEPA-Überweisung über `client.transfer()` für den
+    /// aktiven Slot. Im Demo-Mode wird die Bank-Anfrage durch ein Mock-
+    /// Result ersetzt — kein Routex-Call.
+    ///
+    /// SCA (TAN/Browser-Redirect) wird über die bestehende `handleSCA`-
+    /// Infrastruktur abgewickelt, identisch zu `fetchBalances`.
+    ///
+    /// - Returns: `TransferOutcome` mit `ok=true` bei Erfolg. Bei
+    ///   `UnexpectedError`/`ProviderError` ist `mayHaveBeenExecuted=true`,
+    ///   weil die Bank den Transfer trotzdem ausgeführt haben kann
+    ///   (laut YAXI-Doku) — die UI muss das ehrlich kommunizieren.
+    static func sendTransfer(
+        request: TransferRequest,
+        userId: String,
+        password: String
+    ) async throws -> TransferOutcome {
+        // Demo-Mode: kein Routex-Call, Mock-Erfolg. Stays consistent mit
+        // dem Demo-Mode-Pattern in BalanceBar / MCP / CLI.
+        if UserDefaults.standard.bool(forKey: "demoMode") {
+            AppLogger.log("sendTransfer (demo): \(request.amountEUR) EUR → \(request.creditorIban.prefix(8))…", category: "YaxiService")
+            try? await Task.sleep(nanoseconds: 800_000_000)  // ~UX-realistisches Delay
+            return .demoSuccess
+        }
+
+        let slotSnapshot = activeSlotId
+        let connIdKey = connectionIdKey(for: slotSnapshot)
+        let model = loadCredentialsModel(slotId: slotSnapshot)
+        let d = UserDefaults.standard
+        guard let connectionId = d.string(forKey: connIdKey), !connectionId.isEmpty else {
+            return TransferOutcome(ok: false, scaRequired: false,
+                                   error: "no connectionId yet",
+                                   userMessage: nil, mayHaveBeenExecuted: false)
+        }
+
+        let storedCD = await sessionStore.connectionData()
+        let storedSession = await sessionStore.session(for: .balances)
+        let creds = buildCredentials(
+            connectionId: connectionId, model: model,
+            connectionData: storedCD, userId: userId, password: password
+        )
+
+        let client = RoutexClient()
+        let ticket = YaxiTicketMaker.issueTransferTicket()
+
+        let amountString = NSDecimalNumber(decimal: request.amountEUR).stringValue
+        let amount = Routex.Amount(currency: "EUR", amount: Decimal(string: amountString) ?? request.amountEUR)
+        let details = [
+            Routex.TransferDetails(
+                endToEndIdentification: request.endToEndId,
+                amount: amount,
+                creditorAccount: .iban(request.creditorIban),
+                creditorAgentBic: nil,
+                creditorName: request.creditorName,
+                creditorAddress: nil,
+                remittance: request.remittance,
+                chargeBearer: nil
+            )
+        ]
+
+        AppLogger.log("sendTransfer: slot=\(slotSnapshot.prefix(8)) connId=\(connectionId.prefix(8)) → \(request.creditorIban.prefix(8))… amount=\(amountString)€", category: "YaxiService")
+
+        do {
+            var resp: Routex.TransferResponse
+            do {
+                resp = try await client.transfer(
+                    credentials: creds,
+                    session: storedSession,
+                    recurringConsents: true,
+                    ticket: ticket,
+                    product: .sepaCreditTransfer,
+                    details: details,
+                    debtorAccount: nil,
+                    debtorName: nil,
+                    requestedExecutionDate: nil
+                )
+            } catch {
+                if shouldRetryWithoutUserId(error: error, model: model, userId: userId) {
+                    let credsNoUserId = buildCredentials(
+                        connectionId: connectionId, model: model,
+                        connectionData: storedCD, userId: nil, password: password
+                    )
+                    resp = try await client.transfer(
+                        credentials: credsNoUserId,
+                        session: storedSession,
+                        recurringConsents: true,
+                        ticket: ticket,
+                        product: .sepaCreditTransfer,
+                        details: details,
+                        debtorAccount: nil,
+                        debtorName: nil,
+                        requestedExecutionDate: nil
+                    )
+                } else if isConnectionResetError(error), storedCD != nil {
+                    AppLogger.log("sendTransfer: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                    let credsNoCD = buildCredentials(
+                        connectionId: connectionId, model: model,
+                        connectionData: nil, userId: userId, password: password
+                    )
+                    resp = try await client.transfer(
+                        credentials: credsNoCD,
+                        session: storedSession,
+                        recurringConsents: true,
+                        ticket: ticket,
+                        product: .sepaCreditTransfer,
+                        details: details,
+                        debtorAccount: nil,
+                        debtorName: nil,
+                        requestedExecutionDate: nil
+                    )
+                } else {
+                    throw error
+                }
+            }
+
+            let confirm: @Sendable (ConfirmationContext) async throws -> SCACommon = { ctx in
+                try await toSCACommon(client.confirmTransfer(ticket: ticket, context: ctx))
+            }
+            let respond: @Sendable (InputContext, String) async throws -> SCACommon = { ctx, r in
+                try await toSCACommon(client.respondTransfer(ticket: ticket, context: ctx, response: r))
+            }
+
+            guard let outcome = await handleSCA(
+                initial: toSCACommon(resp), client: client, ticket: ticket,
+                confirm: confirm, respond: respond
+            ) else {
+                return TransferOutcome(ok: false, scaRequired: true, error: nil,
+                                       userMessage: nil, mayHaveBeenExecuted: false)
+            }
+
+            // Connection-Data refreshen (Session ist out-of-band sowieso obsolete
+            // nach dem Call, aber connectionData kann erneuert worden sein).
+            await sessionStore.update(scope: .balances,
+                                      session: outcome.session,
+                                      connectionData: outcome.connectionData,
+                                      slotId: slotSnapshot)
+
+            guard case .transfer = outcome.payload else {
+                return TransferOutcome(ok: false, scaRequired: false,
+                                       error: "unexpected result type",
+                                       userMessage: nil, mayHaveBeenExecuted: false)
+            }
+
+            AppLogger.log("sendTransfer: success", category: "YaxiService")
+            return TransferOutcome(ok: true, scaRequired: false, error: nil,
+                                   userMessage: nil, mayHaveBeenExecuted: false)
+
+        } catch {
+            await writeTrace(client: client, label: "sendTransfer", ticket: ticket, error: error)
+            AppLogger.log("sendTransfer error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
+            // YAXI-Doku-Hinweis: bei UnexpectedError/ProviderError kann der
+            // Transfer trotzdem ausgeführt worden sein. Caller-UI muss
+            // ehrlich kommunizieren: „Status unklar, prüfe Banking-App".
+            let msg = error.localizedDescription.lowercased()
+            let mayBeExecuted =
+                msg.contains("unexpected") || msg.contains("provider")
+            return TransferOutcome(
+                ok: false, scaRequired: false,
+                error: error.localizedDescription,
+                userMessage: nil,
+                mayHaveBeenExecuted: mayBeExecuted
+            )
+        }
+    }
+
     // MARK: - Response mapping
 
     private static func makeBalancesResponse(
@@ -1140,6 +1306,7 @@ enum YaxiService {
         case balances(AuthenticatedBalancesResult)
         case transactions(AuthenticatedTransactionsResult)
         case accounts(AuthenticatedAccountsResult)
+        case transfer(AuthenticatedTransferResult)
     }
 
     private struct SCAOutcome {
@@ -1167,6 +1334,15 @@ enum YaxiService {
     private static func toSCACommon(_ r: Routex.TransactionsResponse) -> SCACommon {
         switch r {
         case .result(let res, let s, let cd): return .result(.transactions(res), s, cd)
+        case .dialog(_, _, _, let input):     return .dialog(input)
+        case .redirect(let url, let ctx):     return .redirect(url, ctx)
+        case .redirectHandle(let h, let ctx): return .redirectHandle(h, ctx)
+        }
+    }
+
+    private static func toSCACommon(_ r: Routex.TransferResponse) -> SCACommon {
+        switch r {
+        case .result(let res, let s, let cd): return .result(.transfer(res), s, cd)
         case .dialog(_, _, _, let input):     return .dialog(input)
         case .redirect(let url, let ctx):     return .redirect(url, ctx)
         case .redirectHandle(let h, let ctx): return .redirectHandle(h, ctx)
