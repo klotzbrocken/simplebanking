@@ -1386,6 +1386,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             onOpenSettings: { [weak self] in
                 self?.upsellWindow?.close()
                 self?.upsellWindow = nil
+                // Direkt auf den Über-Tab springen, wo die License-Sektion lebt.
+                UserDefaults.standard.set(5, forKey: "settingsLastTab")
                 self?.showSettings()
             }
         )

@@ -226,7 +226,7 @@ struct SettingsView: View {
     // Sicherheit
     @AppStorage("passwordRequired") private var passwordRequired: Bool = true
 
-    @State private var selectedTab: Int = 0
+    @AppStorage("settingsLastTab") private var selectedTab: Int = 0
     @State private var showResetConfirmation: Bool = false
     @State private var slotToDelete: BankSlot? = nil
     @State private var showSlotDeleteConfirmation: Bool = false
