@@ -79,15 +79,38 @@ final class TransferRecipientStoreTests: XCTestCase {
         XCTAssertTrue(candidates.isEmpty)
     }
 
-    func test_loadCandidates_excludesTxWithoutIban() throws {
-        let txNoIban = makeTx(endToEndId: "out-1", merchant: "Bar Cash",
+    /// Manuelle SEPA-Aufträge kommen oft ohne IBAN aus der Bank zurück.
+    /// Solche Empfänger müssen trotzdem als Kandidat erscheinen — die UI
+    /// fragt dann den User nach der IBAN. Vorher wurden sie hart aus-
+    /// gefiltert.
+    func test_loadCandidates_includesTxWithoutIban_forManualEntry() throws {
+        let txNoIban = makeTx(endToEndId: "out-1", merchant: "Anna Klein",
                               iban: nil, amount: -25)
         try TransactionsDatabase.upsert(transactions: [txNoIban], bankId: testBankId)
 
         let candidates = try TransferRecipientStore.loadCandidates(
             slotId: "slot-a", today: date(2026, 5, 1), bankId: testBankId
         )
-        XCTAssertTrue(candidates.isEmpty)
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertEqual(candidates.first?.creditorName, "Anna Klein")
+        XCTAssertEqual(candidates.first?.creditorIban, "",
+                       "Empty IBAN signals that UI must prompt the user before sending")
+    }
+
+    /// Zwei verschiedene Empfänger ohne IBAN müssen als getrennte
+    /// Kandidaten erscheinen, nicht zu einem Eintrag zusammengelegt.
+    func test_loadCandidates_ibanLessRecipients_separatedByName() throws {
+        let a = makeTx(endToEndId: "a", merchant: "Anna",
+                       iban: nil, amount: -10, bookingDate: "2026-04-01")
+        let b = makeTx(endToEndId: "b", merchant: "Bert",
+                       iban: nil, amount: -20, bookingDate: "2026-04-02")
+        try TransactionsDatabase.upsert(transactions: [a, b], bankId: testBankId)
+
+        let candidates = try TransferRecipientStore.loadCandidates(
+            slotId: "slot-a", today: date(2026, 5, 1), bankId: testBankId
+        )
+        let names = Set(candidates.map(\.creditorName))
+        XCTAssertEqual(names, ["Anna", "Bert"])
     }
 
     // MARK: - Slot isolation
@@ -233,6 +256,38 @@ final class TransferRecipientStoreTests: XCTestCase {
         let filtered = TransferRecipientStore.filter(cs, query: "DE89 3704")
         XCTAssertEqual(filtered.count, 1)
         XCTAssertEqual(filtered.first?.creditorName, "Vermieter")
+    }
+
+    // MARK: - Debtor-only counterparty (FinTS-Mapping-Quirk)
+
+    /// Manche Bank-Backends (insb. historische FinTS-SEPA-Aufträge) liefern
+    /// den Counterparty einer ausgehenden Buchung im `debtor`-Feld statt
+    /// `creditor`. Das landet im DB-Feld `absender` und früher hat der
+    /// `empfaenger != ''`-Filter solche Buchungen ausgeschlossen — der User
+    /// sah keine Vorschläge zu Personen, an die er manuell Geld gesendet hat.
+    func test_loadCandidates_debtorOnlyCounterparty_isFound() throws {
+        let amt = TransactionsResponse.Amount(currency: "EUR", amount: "-50.00")
+        let party = TransactionsResponse.Party(
+            name: "Max Hoffmann", iban: "DE12700100800123456789", bic: nil
+        )
+        // Outgoing (amount < 0), aber Counterparty steckt im `debtor` —
+        // `creditor` ist leer.
+        let txDebtorOnly = TransactionsResponse.Transaction(
+            bookingDate: "2026-04-15", valueDate: "2026-04-15", status: "booked",
+            endToEndId: "manual-1", amount: amt,
+            creditor: nil, debtor: party,
+            remittanceInformation: ["Geschenk"], additionalInformation: nil,
+            purposeCode: nil
+        )
+        try TransactionsDatabase.upsert(transactions: [txDebtorOnly], bankId: testBankId)
+
+        let candidates = try TransferRecipientStore.loadCandidates(
+            slotId: "slot-a", today: date(2026, 5, 1), bankId: testBankId
+        )
+        XCTAssertEqual(candidates.count, 1, "debtor-only Buchung muss als Kandidat erscheinen")
+        XCTAssertEqual(candidates.first?.creditorName, "Max Hoffmann")
+        XCTAssertEqual(candidates.first?.creditorIban, "DE12700100800123456789")
+        XCTAssertEqual(candidates.first?.lastRemittance, "Geschenk")
     }
 
     // MARK: - Score function

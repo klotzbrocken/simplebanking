@@ -5,7 +5,7 @@ import AppKit
 //
 // Wird gezeigt wenn ein User ohne aktive Lizenz auf „Geld senden…" klickt.
 // Erklärt das Feature, zeigt Preis, hat zwei klare Wege:
-// 1. „Lizenz kaufen" → Gumroad-Checkout im Browser
+// 1. „Lizenz kaufen" → Polar-Checkout im Browser
 // 2. „Lizenz-Key eingeben" → Sprung in Settings → Über
 //
 // Für Demo-Modus-User wird der Sheet nicht gezeigt — sie können das
@@ -119,8 +119,8 @@ struct UpsellSheet: View {
             alert.messageText = L10n.t("Lizenz noch nicht konfiguriert",
                                        "License not yet configured")
             alert.informativeText = L10n.t(
-                "Diese Build-Variante hat noch keine Gumroad-Anbindung. Bitte kontaktiere den Entwickler.",
-                "This build has no Gumroad configuration. Please contact the developer.")
+                "Diese Build-Variante hat noch keine Polar-Anbindung. Bitte kontaktiere den Entwickler.",
+                "This build has no Polar configuration. Please contact the developer.")
             alert.alertStyle = .warning
             alert.runModal()
             return

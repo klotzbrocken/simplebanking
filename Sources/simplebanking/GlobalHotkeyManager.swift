@@ -8,14 +8,27 @@ final class GlobalHotkeyManager {
 
     /// Rolle eines Hotkeys — bestimmt welches Callback gefeuert wird.
     enum Role: UInt32 {
-        case flyout  = 1   // legacy ID — bleibt rückwärts-kompat
-        case refresh = 2   // neu seit 1.4.0+
+        case flyout         = 1   // legacy ID — bleibt rückwärts-kompat
+        case refresh        = 2   // neu seit 1.4.0+
+        case cycleBankPrev  = 3   // ← bei gehaltenem Flyout-Hotkey (Centered-Modus)
+        case cycleBankNext  = 4   // → bei gehaltenem Flyout-Hotkey (Centered-Modus)
     }
 
     /// Callback für Flyout-Hotkey (legacy, default ⌃⌘S).
     var onTriggered: (@Sendable () -> Void)?
     /// Callback für Refresh-Hotkey (neu, default ⌃⌘R).
     var onRefreshTriggered: (@Sendable () -> Void)?
+    /// Callback wenn der Flyout-Hotkey LOSGELASSEN wird — wird vom Hold-to-Show-
+    /// Centered-Flyout-Feature genutzt (zentrierte Variante schließt beim Release).
+    /// Im normalen Popover-Modus ungenutzt.
+    var onTriggerReleased: (@Sendable () -> Void)?
+    /// Callback wenn der Refresh-Hotkey losgelassen wird. Aktuell ungenutzt,
+    /// API-symmetrisch zu onTriggerReleased.
+    var onRefreshTriggerReleased: (@Sendable () -> Void)?
+    /// Callbacks für Bank-Cycle ← / → bei gehaltenem Flyout-Hotkey.
+    /// Nur registriert solange das centered Flyout sichtbar ist.
+    var onCycleBankPrev: (@Sendable () -> Void)?
+    var onCycleBankNext: (@Sendable () -> Void)?
 
     private var hotKeyRefs: [Role: EventHotKeyRef] = [:]
     private var eventHandlerRef: EventHandlerRef?
@@ -61,19 +74,24 @@ final class GlobalHotkeyManager {
 
     private func ensureEventHandlerInstalled() {
         guard eventHandlerRef == nil else { return }
-        var spec = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
+        // Beide Event-Kinds (Pressed + Released) registrieren — Released wird
+        // für die Hold-to-Show-Centered-Flyout-Variante gebraucht.
+        var specs = [
+            EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyPressed)
+            ),
+            EventTypeSpec(
+                eventClass: OSType(kEventClassKeyboard),
+                eventKind: UInt32(kEventHotKeyReleased)
+            )
+        ]
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(
             GetApplicationEventTarget(),
             { (_, event, userData) -> OSStatus in
                 guard let ptr = userData, let event else { return OSStatus(eventNotHandledErr) }
                 let mgr = Unmanaged<GlobalHotkeyManager>.fromOpaque(ptr).takeUnretainedValue()
-                // Welcher Hotkey-Slot wurde gefeuert? GetEventParameter liest die ID
-                // aus dem Carbon-Event aus. Ohne diesen Check würden alle Slots dasselbe
-                // Callback triggern.
                 var hkID = EventHotKeyID()
                 let getStatus = GetEventParameter(
                     event, EventParamName(kEventParamDirectObject),
@@ -83,16 +101,22 @@ final class GlobalHotkeyManager {
                 guard getStatus == noErr, let role = Role(rawValue: hkID.id) else {
                     return OSStatus(eventNotHandledErr)
                 }
+                let kind = GetEventKind(event)
                 let cb: (@Sendable () -> Void)? = {
-                    switch role {
-                    case .flyout:  return mgr.onTriggered
-                    case .refresh: return mgr.onRefreshTriggered
+                    switch (role, kind) {
+                    case (.flyout,         UInt32(kEventHotKeyPressed)):  return mgr.onTriggered
+                    case (.flyout,         UInt32(kEventHotKeyReleased)): return mgr.onTriggerReleased
+                    case (.refresh,        UInt32(kEventHotKeyPressed)):  return mgr.onRefreshTriggered
+                    case (.refresh,        UInt32(kEventHotKeyReleased)): return mgr.onRefreshTriggerReleased
+                    case (.cycleBankPrev,  UInt32(kEventHotKeyPressed)):  return mgr.onCycleBankPrev
+                    case (.cycleBankNext,  UInt32(kEventHotKeyPressed)):  return mgr.onCycleBankNext
+                    default: return nil
                     }
                 }()
                 if let cb { DispatchQueue.main.async(execute: cb) }
                 return noErr
             },
-            1, &spec, selfPtr, &eventHandlerRef
+            2, &specs, selfPtr, &eventHandlerRef
         )
     }
 

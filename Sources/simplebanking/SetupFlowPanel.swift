@@ -1644,7 +1644,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     nonisolated func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         MainActor.assumeIsolated {
             let conn = filteredConnections[row]
-            let cell = NSTextField(labelWithString: conn.displayName)
+            let flag = BankCountryResolver.resolve(displayName: conn.displayName).flag
+            let cell = NSTextField(labelWithString: "\(conn.displayName)  \(flag)")
             cell.font = .systemFont(ofSize: 13)
             cell.lineBreakMode = .byTruncatingTail
             return cell

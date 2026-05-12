@@ -172,21 +172,26 @@ struct SettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
-    @AppStorage("menubarStyle") private var menubarStyle: Int = 0
+    // menubarStyle in v1.5.0 entfernt — feste Breite ist fix.
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
     @AppStorage("globalHotkeyEnabled") private var globalHotkeyEnabled: Bool = true
     @AppStorage("globalHotkeyKeyCode") private var globalHotkeyKeyCode: Int = 1      // kVK_ANSI_S
     @AppStorage("globalHotkeyModifiers") private var globalHotkeyModifiers: Int = 4352 // controlKey | cmdKey
+    /// Hold-to-Show-Variante: bei aktivem Setting wird das Flyout zentriert
+    /// auf dem Screen mit Dim-Overlay gezeigt, solange der Flyout-Hotkey
+    /// gedrückt gehalten wird. Loslassen schließt.
+    @AppStorage("flyoutHoldCenterEnabled") private var flyoutHoldCenterEnabled: Bool = false
     @AppStorage("globalRefreshHotkeyEnabled") private var globalRefreshHotkeyEnabled: Bool = false
     @AppStorage("globalRefreshHotkeyKeyCode") private var globalRefreshHotkeyKeyCode: Int = 15  // kVK_ANSI_R
     @AppStorage("globalRefreshHotkeyModifiers") private var globalRefreshHotkeyModifiers: Int = 4352 // controlKey | cmdKey
     @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("resetAttempts") private var resetAttempts: Int = 0
-    @AppStorage("swapClickBehavior") private var swapClickBehavior: Bool = false
-    @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
     @AppStorage("attentionInboxEnabled") private var attentionInboxEnabled: Bool = true
+    /// Sendeverzögerung in Sekunden (0=aus, 5/10/20). Wird in TransferSheet
+    /// als Countdown ausgespielt; während der Delay kann der User abbrechen.
+    @AppStorage("transferDelaySeconds") private var transferDelaySeconds: Int = 5
     @AppStorage("dockModeEnabled") private var dockModeEnabled: Bool = false
-    @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.flyoutCard.rawValue
+    @AppStorage("showBalanceInMenuBar") private var showBalanceInMenuBar: Bool = false
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
     @AppStorage("apiKeyPresent_anthropic") private var anthropicKeyPresent: Bool = false
     @AppStorage("apiKeyPresent_mistral") private var mistralKeyPresent: Bool = false
@@ -194,7 +199,6 @@ struct SettingsView: View {
     @AppStorage(AIProvider.storageKey) private var selectedAIProvider: String = AIProvider.anthropic.rawValue
     @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
     @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
-    @AppStorage("bankLogoAdaptDarkMode") private var bankLogoAdaptDarkMode: Bool = true
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
@@ -218,8 +222,6 @@ struct SettingsView: View {
     @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
     @AppStorage("balanceSignalVeryGoodLowerBound") private var balanceSignalVeryGoodLowerBound: Int = 5000
     @AppStorage("confettiIncomeThreshold") private var confettiIncomeThreshold: Int = 50
-    @AppStorage("confettiEffect") private var confettiEffect: Int = ConfettiEffect.money.rawValue
-    @AppStorage("celebrationStyle") private var celebrationStyle: Int = 1
     @AppStorage("rippleAlwaysOn") private var rippleAlwaysOn: Bool = false
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
 
@@ -247,6 +249,7 @@ struct SettingsView: View {
     @State private var licenseKeyInput: String = ""
     @State private var licenseStatusMessage: String = ""
     @State private var licenseIsActivating: Bool = false
+    @State private var clipboardKeyCandidate: String? = nil
     private var activeAIProvider: AIProvider {
         AIProvider(rawValue: selectedAIProvider) ?? .anthropic
     }
@@ -301,10 +304,6 @@ struct SettingsView: View {
             medium: balanceSignalMediumUpperBound,
             veryGood: balanceSignalVeryGoodLowerBound
         )
-    }
-
-    private var selectedBalanceClickMode: BalanceClickMode {
-        BalanceClickMode(rawValue: balanceClickMode) ?? .mouseClick
     }
 
     private var balanceSignalDeepBinding: Binding<Int> {
@@ -484,10 +483,13 @@ struct SettingsView: View {
     // MARK: - AI Key
 
     private func requestMasterPassword() -> String? {
-        // App ist bereits entsperrt → Touch-ID-Cache nutzen, statt nochmal modal nachzufragen.
-        // Selbe Strategie wie BalanceBar-Startup (BalanceBar.swift:942) und Auto-Refresh.
-        // Cache wird via `CredentialsStore.load(masterPassword:)` validiert, sodass ein
-        // veralteter Cache (PW-Wechsel) nicht blind durchgewunken wird.
+        // App ist bereits entsperrt? → BalanceBar-In-Memory-Cache nutzen,
+        // statt nochmal modal nachzufragen.
+        if let provided = SettingsPanel.masterPasswordProvider?(),
+           (try? CredentialsStore.load(masterPassword: provided)) != nil {
+            return provided
+        }
+        // Touch-ID-Cache als zweiter Layer (gefüllt nach „App-PW deaktiviert").
         if let cached = BiometricStore.loadAutoUnlockPassword(),
            (try? CredentialsStore.load(masterPassword: cached)) != nil {
             return cached
@@ -828,7 +830,7 @@ struct SettingsView: View {
         .onChange(of: refreshInterval) { _ in
             NotificationCenter.default.post(name: Notification.Name("RefreshIntervalChanged"), object: nil)
         }
-        .onChange(of: balanceClickMode) { _ in
+        .onChange(of: showBalanceInMenuBar) { _ in
             NotificationCenter.default.post(name: Notification.Name("BalanceDisplayModeChanged"), object: nil)
         }
         .onChange(of: effectiveMerchantPipelineEnabled) { newValue in
@@ -917,6 +919,27 @@ struct SettingsView: View {
                     .toggleStyle(SwitchToggleStyle())
                     .labelsHidden()
                     .onChange(of: globalHotkeyEnabled) { _ in postHotkeyChanged() }
+            }
+
+            // Hold-to-Show: zentriertes Flyout mit Dim-Overlay
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Zentriert anzeigen (Halten)", "Centered (hold-to-show)"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t(
+                        "Statt am Status-Item aufzupoppen erscheint das Flyout solange der Hotkey gedrückt wird zentriert auf dem Bildschirm. Hintergrund wird abgedunkelt; Loslassen schließt.",
+                        "Instead of popping up at the status item, the flyout appears centered on screen while the hotkey is held. Background dims; release closes."
+                    ))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("", isOn: $flyoutHoldCenterEnabled)
+                    .toggleStyle(SwitchToggleStyle())
+                    .labelsHidden()
+                    .disabled(!globalHotkeyEnabled)
+                    .opacity(globalHotkeyEnabled ? 1 : 0.4)
             }
 
             HStack(spacing: 10) {
@@ -1713,57 +1736,6 @@ struct SettingsView: View {
     
     private var behaviorSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionHeader(title: t("Mausklick-Verhalten", "Mouse click behavior"), icon: "cursorarrow.click")
-                Text(t("Bestimmt, welche Aktion bei Klick bzw. Doppelklick ausgeführt wird", "Defines which action runs on click or double-click"))
-                    .font(ThemeFonts.body(size: 12))
-                    .foregroundColor(.secondary)
-            }
-            
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 20) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(t("Einfacher Klick", "Single click"))
-                            .font(ThemeFonts.body(size: 12, weight: .medium))
-                        Text(swapClickBehavior ? t("Umsatzliste öffnen", "Open transactions") : selectedBalanceClickMode.actionDescription)
-                            .font(ThemeFonts.body(size: 11))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-                
-                HStack(spacing: 20) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(t("Doppelklick", "Double click"))
-                            .font(ThemeFonts.body(size: 12, weight: .medium))
-                        Text(swapClickBehavior ? selectedBalanceClickMode.actionDescription : t("Umsatzliste öffnen", "Open transactions"))
-                            .font(ThemeFonts.body(size: 11))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.settingsCard)
-            )
-            
-            SettingsToggleRow(
-                title: t("Mausklick tauschen", "Swap click actions"),
-                subtitle: t("Tauscht die Aktionen für Klick und Doppelklick", "Swaps actions for click and double-click"),
-                isOn: $swapClickBehavior
-            )
-
-            SettingsToggleRow(
-                title: t("Infinite Scroll", "Infinite scroll"),
-                subtitle: t(
-                    "Lädt beim Scrollen automatisch weitere Umsätze und ersetzt die Seitenanzeige.",
-                    "Automatically loads more transactions while scrolling and replaces page indicators."
-                ),
-                isOn: $infiniteScrollEnabled
-            )
-
             SettingsToggleRow(
                 title: t("Attention Inbox anzeigen", "Show Attention Inbox"),
                 subtitle: t(
@@ -1772,6 +1744,11 @@ struct SettingsView: View {
                 ),
                 isOn: $attentionInboxEnabled
             )
+
+            if FeatureFlags.transferMoneyEnabled {
+                Divider()
+                transferDelaySection
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 SettingsSectionHeader(title: t("Dock", "Dock"), icon: "dock.rectangle")
@@ -1799,21 +1776,28 @@ struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                SettingsSectionHeader(title: t("Kontostand anzeigen", "Show balance"), icon: "eye")
+                SettingsSectionHeader(title: t("Kontostand-Anzeige", "Balance display"), icon: "eye")
                 Text(t(
-                    "Wähle, wie der Kontostand angezeigt wird: Flyout-Karte, Mausklick oder Mouse-Over.",
-                    "Choose how the balance is shown: flyout card, mouse click, or mouse over."
+                    "Entweder dauerhaft in der Menüleiste oder erst beim Klick als Flyout-Karte.",
+                    "Either permanently in the menu bar or only on click as flyout card."
                 ))
                 .font(ThemeFonts.body(size: 12))
                 .foregroundColor(.secondary)
 
-                Picker("", selection: $balanceClickMode) {
-                    ForEach(BalanceClickMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.label).tag(mode.rawValue)
-                    }
+                Picker("", selection: $showBalanceInMenuBar) {
+                    Text(t("In der Menüleiste", "In menu bar")).tag(true)
+                    Text(t("Flyout-Karte beim Klick", "Flyout on click")).tag(false)
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .frame(maxWidth: .infinity)
+
+                Text(showBalanceInMenuBar
+                     ? t("Saldo dauerhaft sichtbar — kein Flyout beim Klick.",
+                         "Balance always visible — no flyout on click.")
+                     : t("Nur Bank-Logo in der Menüleiste — Klick öffnet die Flyout-Karte mit Saldo.",
+                         "Only bank logo in the menu bar — click opens the flyout card with balance."))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
             }
             .padding(12)
             .background(
@@ -1885,10 +1869,6 @@ struct SettingsView: View {
                     .pickerStyle(MenuPickerStyle())
                     .frame(width: 180)
                 }
-                Text("\(t("Theme-Ordner", "Theme folder")): \(ThemeManager.shared.themesDirectoryPath)")
-                    .font(ThemeFonts.body(size: 10))
-                    .foregroundColor(.secondary)
-                    .textSelection(.enabled)
             }
 
             Divider()
@@ -1905,54 +1885,6 @@ struct SettingsView: View {
                 }
                 .pickerStyle(SegmentedPickerStyle())
                 .frame(width: 200)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(t("Menüleiste-Breite", "Menu bar width"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Text(t("Fest = konstante Breite, Nachbar-Icons springen nicht. Dynamisch = passt sich an den Saldo an.",
-                               "Fixed = constant width, neighboring icons don't shift. Dynamic = adapts to the balance text."))
-                            .font(ThemeFonts.body(size: 11))
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer()
-                    Picker("", selection: $menubarStyle) {
-                        Text(t("Fest", "Fixed")).tag(0)
-                        Text(t("Dynamisch", "Dynamic")).tag(1)
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .frame(width: 140)
-                    .disabled(selectedBalanceClickMode == .flyoutCard)
-                }
-                if selectedBalanceClickMode == .flyoutCard {
-                    Text(t("Im Flyout-Modus zeigt die Menüleiste den Saldo nicht direkt — Einstellung daher inaktiv.",
-                           "In flyout mode the menu bar doesn't show the balance text directly — setting inactive."))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Divider()
-
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Bank-Logos im Dark Mode anpassen", "Adapt bank logos in dark mode"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Sehr dunkle Logos (z.B. Deutsche Bank) werden im Dark Mode invertiert, damit sie lesbar bleiben.",
-                           "Very dark logos (e.g. Deutsche Bank) are inverted in dark mode so they stay legible."))
-                        .font(ThemeFonts.body(size: 11))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Toggle("", isOn: $bankLogoAdaptDarkMode)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
             }
 
             Divider()
@@ -1988,7 +1920,7 @@ struct SettingsView: View {
                 SettingsSectionHeader(title: t("Effekte", "Effects"), icon: "sparkles")
 
                 HStack(spacing: 8) {
-                    Text(t("Effekte bei Einnahme ab", "Effects from income of"))
+                    Text(t("Ripple bei Einnahme ab", "Ripple from income of"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
                     TextField("50", value: $confettiIncomeThreshold, format: .number)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -1996,49 +1928,56 @@ struct SettingsView: View {
                     Text("€")
                         .font(ThemeFonts.body(size: 13))
                 }
-                Text(t("Effekte erscheinen bei neuen Einnahmen ab diesem Betrag. Setze 0 für keinen Effekt.", "Effects appear for new income above this amount. Set 0 for no effect."))
+                Text(t("Ripple-Welle erscheint bei neuen Einnahmen ab diesem Betrag. Setze 0 für keinen Effekt.",
+                       "Ripple wave appears for new income above this amount. Set 0 for no effect."))
                     .font(ThemeFonts.body(size: 12))
                     .foregroundStyle(.secondary)
 
-                HStack {
-                    Text(t("Stil", "Style"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Spacer()
-                    Picker("", selection: $celebrationStyle) {
-                        Text(t("Classic (Konfetti)", "Classic (Confetti)")).tag(0)
-                        Text(t("Ripple", "Ripple")).tag(1)
-                    }
-                    .frame(width: 180)
-                }
+                SettingsToggleRow(
+                    title: t("Dauerhaft", "Always on"),
+                    subtitle: t("Ripple bei jedem Öffnen — nicht nur bei neuen Einnahmen.",
+                                "Ripple on every open — not only on new income."),
+                    isOn: $rippleAlwaysOn
+                )
                 .disabled(confettiIncomeThreshold == 0)
-
-                if celebrationStyle == 0 {
-                    HStack {
-                        Text(t("Konfetti-Stil", "Confetti style"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Spacer()
-                        Picker("", selection: $confettiEffect) {
-                            ForEach(ConfettiEffect.allCases, id: \.rawValue) { effect in
-                                Text(effect.label).tag(effect.rawValue)
-                            }
-                        }
-                        .frame(width: 185)
-                    }
-                    .disabled(confettiIncomeThreshold == 0)
-                } else {
-                    Text(t("Ripple-Welle erscheint auf der Kontostand-Kachel und im Flyout.", "Ripple wave appears on the balance card and in the flyout."))
-                        .font(ThemeFonts.body(size: 12))
-                        .foregroundStyle(.secondary)
-                    SettingsToggleRow(
-                        title: t("Dauerhaft", "Always on"),
-                        subtitle: t("Ripple bei jedem Öffnen — nicht nur bei neuen Einnahmen.", "Ripple on every open — not only on new income."),
-                        isOn: $rippleAlwaysOn
-                    )
-                }
             }
         }
     }
-    
+
+    // MARK: - Geld senden (Verzögerung)
+
+    private var transferDelaySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionHeader(
+                title: t("Geld senden", "Send Money"),
+                icon: "paperplane.fill"
+            )
+
+            HStack(spacing: 8) {
+                Text(t("Verzögert ausführen", "Delay execution"))
+                    .font(ThemeFonts.body(size: 13, weight: .medium))
+                Spacer()
+                Picker("", selection: $transferDelaySeconds) {
+                    Text(t("Aus", "Off")).tag(0)
+                    Text("5s").tag(5)
+                    Text("10s").tag(10)
+                    Text("20s").tag(20)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+            }
+
+            Text(t(
+                "Nach Bestätigen wartet die App diese Zeitspanne, bevor die Überweisung tatsächlich an die Bank geht. Während des Countdowns kannst du noch abbrechen — als Schutz vor Klick- und Tippfehlern.",
+                "After Confirm the app waits this period before actually submitting the transfer. You can still cancel during the countdown — a safety net against click and typing mistakes."
+            ))
+                .font(ThemeFonts.body(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // MARK: - Security Settings
 
     private var securitySettings: some View {
@@ -2355,8 +2294,8 @@ struct SettingsView: View {
                      "Deactivate on this device")) {
                 licenseManager.deactivate()
                 licenseStatusMessage = t(
-                    "Lizenz lokal entfernt. Im Gumroad-Dashboard kannst Du den Use-Count zurücksetzen, falls Du auf einem anderen Mac aktivieren willst.",
-                    "License removed locally. To free up a slot for another Mac, reset the use count in your Gumroad dashboard."
+                    "Lizenz lokal entfernt. Im Polar-Customer-Portal kannst Du sie auf einem anderen Mac wieder aktivieren.",
+                    "License removed locally. Reactivate it on another Mac via your Polar customer portal."
                 )
             }
             .buttonStyle(.bordered)
@@ -2365,6 +2304,9 @@ struct SettingsView: View {
 
     private var unlicensedView: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let candidate = clipboardKeyCandidate, !licenseIsActivating {
+                clipboardBanner(candidate: candidate)
+            }
             Text(t("Lizenz-Key eingeben:", "Enter license key:"))
                 .font(ThemeFonts.body(size: 12))
                 .foregroundColor(.secondary)
@@ -2390,12 +2332,76 @@ struct SettingsView: View {
                     .font(ThemeFonts.body(size: 12))
             }
         }
+        .onAppear { refreshClipboardKeyCandidate() }
+        // Bei Window-Aktivierung neu scannen — User kommt typisch aus dem
+        // Browser zurück, nachdem er den Key kopiert hat.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshClipboardKeyCandidate()
+        }
+    }
+
+    private func clipboardBanner(candidate: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.on.clipboard")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(t("Lizenz-Key in Zwischenablage erkannt",
+                       "License key detected in clipboard"))
+                    .font(ThemeFonts.body(size: 12, weight: .medium))
+                Text(displayKey(candidate))
+                    .font(ThemeFonts.body(size: 10).monospacedDigit())
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(t("Übernehmen & aktivieren", "Use & activate")) {
+                licenseKeyInput = candidate
+                Task { await activateLicense() }
+            }
+            .controlSize(.small)
+            Button {
+                clipboardKeyCandidate = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.accentColor.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor.opacity(0.30), lineWidth: 0.5)
+        )
+    }
+
+    /// Maskiert alles außer Prefix + letzten 6 Zeichen, damit ein Screenshot
+    /// vom Settings-Fenster nicht den vollständigen Key leakt.
+    private func displayKey(_ key: String) -> String {
+        guard key.count > 12 else { return key }
+        if let dash = key.firstIndex(of: "-") {
+            let prefix = key[..<dash]
+            let suffix = key.suffix(6)
+            return "\(prefix)-…-\(suffix)"
+        }
+        return "…\(key.suffix(6))"
+    }
+
+    private func refreshClipboardKeyCandidate() {
+        let detected = LicenseClipboardScanner.detectKey()
+        // Nicht aufdrängen wenn der User schon was getippt hat
+        guard licenseKeyInput.isEmpty else { return }
+        clipboardKeyCandidate = detected
     }
 
     private var notConfiguredView: some View {
         Text(t(
-            "Diese Build-Variante hat noch keine Gumroad-Anbindung. Bitte kontaktiere den Entwickler.",
-            "This build has no Gumroad configuration. Please contact the developer."
+            "Diese Build-Variante hat noch keine Polar-Anbindung. Bitte kontaktiere den Entwickler.",
+            "This build has no Polar configuration. Please contact the developer."
         ))
         .font(ThemeFonts.body(size: 12))
         .foregroundColor(.secondary)
@@ -2501,7 +2507,7 @@ struct SettingsView: View {
                 }
             }
 
-            if LicenseConfig.licensingEnabled {
+            if LicenseConfig.licensingEnabled && FeatureFlags.transferMoneyEnabled {
                 Divider()
                 licenseSection
             }
@@ -2546,20 +2552,12 @@ struct SettingsView: View {
                     .fill(Color.sbBlueSoft)
             )
 
-            // Clippy Open-Source & Lizenzen
+            // Open-Source & Lizenzen
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text("📎")
-                        .font(.system(size: 13))
-                    Text("Open-Source & Lizenzen")
-                        .font(ThemeFonts.body(size: 12, weight: .medium))
-                }
-                Text("Diese App verwendet Teile des Open-Source-Projekts \u{201E}Clippy\u{201C} von Felix Rieseberg (MIT-Lizenz). Der Programmcode dieser App steht unter der MIT-Lizenz.")
-                    .font(ThemeFonts.body(size: 11))
-                    .foregroundColor(.secondary)
-                Link("→ felixrieseberg/clippy auf GitHub", destination: URL(string: "https://github.com/felixrieseberg/clippy/")!)
-                    .font(ThemeFonts.body(size: 11))
-                Text("Die Figur \u{201E}Clippy\u{201C}, zugeh\u{00F6}rige Bilder und andere Marken sind urheberrechtlich und markenrechtlich Eigentum der Microsoft Corporation. Die Verwendung dieser Inhalte in dieser App erfolgt ausschlie\u{00DF}lich zu nostalgischen und edukativen Zwecken und begr\u{00FC}ndet keine Rechte an geistigem Eigentum von Microsoft.")
+                Text(t("Lizenz", "License"))
+                    .font(ThemeFonts.body(size: 12, weight: .medium))
+                Text(t("Der Programmcode dieser App steht unter der MIT-Lizenz.",
+                       "This app's source code is licensed under the MIT license."))
                     .font(ThemeFonts.body(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -2620,6 +2618,29 @@ struct SettingsView: View {
 
     private var labsSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // Header-Hinweis: Labs sind experimentelle / Power-User-Features
+            HStack(spacing: 8) {
+                Image(systemName: "flask")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.accentColor)
+                Text(t(
+                    "Experimentelle Funktionen und Entwickler-Optionen. Die App funktioniert auch ohne diese Einstellungen.",
+                    "Experimental features and developer options. The app works fine without these."
+                ))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.accentColor.opacity(0.08))
+            )
+
+            Divider()
+
             // AI Assistant
             aiAssistantSettings
 
@@ -2662,13 +2683,35 @@ struct SettingsView: View {
 
             Divider()
 
-            // Claude / MCP
-            mcpSettings
+            // Agenten & Automatisierung — Lese-only-Zugriff über externe Tools.
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsSectionHeader(
+                    title: t("Agenten & Automatisierung", "Agents & Automation"),
+                    icon: "command.square"
+                )
+                Text(t(
+                    "Lese-only-Zugriff auf die App-Daten über externe Tools — Claude Desktop (MCP) und Kommandozeile.",
+                    "Read-only access to app data via external tools — Claude Desktop (MCP) and command line."
+                ))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
 
-            Divider()
+                DisclosureGroup {
+                    mcpSettings
+                        .padding(.top, 8)
+                } label: {
+                    Label(t("Claude Desktop (MCP)", "Claude Desktop (MCP)"), systemImage: "server.rack")
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                }
 
-            // Terminal CLI (sb)
-            cliSettings
+                DisclosureGroup {
+                    cliSettings
+                        .padding(.top, 8)
+                } label: {
+                    Label(t("Kommandozeile (CLI)", "Command line (CLI)"), systemImage: "terminal")
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                }
+            }
 
             Divider()
 
@@ -2763,8 +2806,6 @@ struct SettingsView: View {
 
     private var mcpSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SettingsSectionHeader(title: t("Claude / MCP", "Claude / MCP"), icon: "server.rack")
-
             Text(t(
                 "Der integrierte MCP-Server ermöglicht Claude Desktop direkten Lesezugriff auf deine lokalen Transaktionsdaten — ohne laufende App. Lokaler MCP-Zugriff; Claude kann Inhalte je nach Nutzung weiterverarbeiten.",
                 "The built-in MCP server lets Claude Desktop read your local transaction data directly — no running app required. Local MCP access; Claude may process content depending on usage."
@@ -2865,8 +2906,6 @@ struct SettingsView: View {
 
     private var cliSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SettingsSectionHeader(title: t("Terminal CLI", "Terminal CLI"), icon: "terminal")
-
             Text(t(
                 "Installiert das Kommandozeilen-Tool `sb` in `~/.local/bin/`. Nutzung: `sb balance`, `sb tx --days 30`, `sb summary`.",
                 "Installs the command-line tool `sb` into `~/.local/bin/`. Usage: `sb balance`, `sb tx --days 30`, `sb summary`."
@@ -3163,6 +3202,11 @@ private struct AboutRow: View {
 @MainActor
 final class SettingsPanel {
     private var window: NSWindow?
+
+    /// Optional Closure, gesetzt von BalanceBar. Wird in
+    /// `SettingsView.requestMasterPassword` als erster Cache-Layer geprüft,
+    /// sodass nach erfolgreichem App-Unlock kein zweiter PW-Prompt nötig ist.
+    static var masterPasswordProvider: (() -> String?)?
 
     private func localizedTitle() -> String {
         L10n.t("Einstellungen", "Settings")

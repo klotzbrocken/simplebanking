@@ -156,6 +156,17 @@ else
     echo "Warning: Icon source not found at $ICON_SRC"
 fi
 
+# Routex-SDK-Version aus Package.resolved für die Diagnose-Ansicht extrahieren.
+# Fällt zurück auf "?" falls Datei nicht da oder Format unerwartet.
+ROUTEX_VERSION="?"
+ROUTEX_REVISION="?"
+if [[ -f "$ROOT/Package.resolved" ]]; then
+    ROUTEX_VERSION=$(awk '/"identity" : "routex-client-swift"/ { found=1 } found && /"version"/ { gsub(/[",]/, "", $3); print $3; exit }' "$ROOT/Package.resolved" 2>/dev/null || echo "?")
+    ROUTEX_REVISION=$(awk '/"identity" : "routex-client-swift"/ { found=1 } found && /"revision"/ { gsub(/[",]/, "", $3); print $3; exit }' "$ROOT/Package.resolved" 2>/dev/null | cut -c1-7 || echo "?")
+    [[ -z "$ROUTEX_VERSION" ]] && ROUTEX_VERSION="?"
+    [[ -z "$ROUTEX_REVISION" ]] && ROUTEX_REVISION="?"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -173,6 +184,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>SBBuildDate</key><string>${BUILD_DATE}</string>
   <key>SBBuildTime</key><string>${BUILD_TIME}</string>
   <key>SBBuildTimestamp</key><string>${BUILD_TIMESTAMP}</string>
+  <key>SBRoutexVersion</key><string>${ROUTEX_VERSION}</string>
+  <key>SBRoutexRevision</key><string>${ROUTEX_REVISION}</string>
   <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>SUFeedURL</key><string>${SPARKLE_FEED_URL}</string>

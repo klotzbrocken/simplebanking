@@ -42,9 +42,51 @@ final class TransactionsViewModel: ObservableObject {
     @Published var errorNeedsReconnect: Bool = false
     @Published var transactions: [TransactionsResponse.Transaction] = [] {
         didSet {
-            rebuildSearchIndex()
-            rebuildSubscriptionIndex()
+            // Indizes off-main rebuilden (Search-Index, Fixed-Costs, Subscriptions)
+            // — bei Unified-Mode + 365-Tage-Import + 3 Banken können das schnell
+            // 5–10k Transaktionen werden, jeder Resolver-Call ist nicht-trivial.
+            // Vorher synchron auf MainActor → spürbarer UI-Hänger.
+            // Filter wird sofort mit ALTEM Index angewandt damit die `.all`-View
+            // nicht stale ist; nach Rebuild wird re-applied (deckt Search/Subs/Fixed).
             applyCurrentFilter(resetPage: true)
+            scheduleIndexRebuild()
+        }
+    }
+
+    private var indexGen: Int = 0
+    private var indexRebuildTask: Task<Void, Never>?
+
+    /// Berechnet Search-Index, Fixed-Costs-Set und Subscription-IDs off-main
+    /// auf einem Snapshot der aktuellen Transaktionen. Älterer Rebuild wird
+    /// gecancelt; Stale-Results werden via Generation-Token verworfen.
+    private func scheduleIndexRebuild() {
+        indexGen &+= 1
+        let gen = indexGen
+        let snapshot = transactions
+        indexRebuildTask?.cancel()
+        indexRebuildTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            // Pure Funktionen / read-only Resolver — safe off-main.
+            let search = snapshot.map(Self.computeSearchIndexText)
+            if Task.isCancelled { return }
+            let fixed = FixedCostsAnalyzer.getFixedCostMerchants(transactions: snapshot)
+            if Task.isCancelled { return }
+            let subs = SubscriptionDetector.detect(in: snapshot)
+            if Task.isCancelled { return }
+            var subIDs: Set<String> = []
+            for c in subs {
+                for tx in c.matchedTransactions {
+                    subIDs.insert(TransactionRecord.fingerprint(for: tx))
+                }
+            }
+            await MainActor.run {
+                guard self.indexGen == gen else { return }   // stale → discard
+                self.searchIndex = search
+                self.fixedMerchants = fixed
+                self.subscriptionTxIDs = subIDs
+                // Re-apply mit frischem Index — relevant für Search/Subs/FixedCosts.
+                self.applyCurrentFilter(resetPage: false)
+            }
         }
     }
     private var subscriptionTxIDs: Set<String> = []
@@ -106,7 +148,10 @@ final class TransactionsViewModel: ObservableObject {
         queryTask?.cancel()
     }
 
-    private func clean(_ s: String?) -> String {
+    private func clean(_ s: String?) -> String { Self.clean(s) }
+
+    /// Pure helper — wird off-main vom Index-Rebuild genutzt.
+    nonisolated private static func clean(_ s: String?) -> String {
         (s ?? "")
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -128,6 +173,15 @@ final class TransactionsViewModel: ObservableObject {
     }
 
     private func searchableText(for transaction: TransactionsResponse.Transaction) -> String {
+        Self.computeSearchableText(transaction)
+    }
+
+    private func buildSearchIndexText(for transaction: TransactionsResponse.Transaction) -> String {
+        Self.computeSearchIndexText(transaction)
+    }
+
+    /// Off-main-fähige Variante — nur read-only Resolver + pure String-Ops.
+    nonisolated private static func computeSearchableText(_ transaction: TransactionsResponse.Transaction) -> String {
         let remittance = (transaction.remittanceInformation ?? []).map(clean).joined(separator: " ")
         let resolvedMerchant = MerchantResolver.resolve(transaction: transaction).effectiveMerchant
         let resolvedCategory = TransactionCategorizer.category(for: transaction).displayName
@@ -153,8 +207,8 @@ final class TransactionsViewModel: ObservableObject {
         return fields.joined(separator: " ").lowercased()
     }
 
-    private func buildSearchIndexText(for transaction: TransactionsResponse.Transaction) -> String {
-        let base = searchableText(for: transaction)
+    nonisolated static func computeSearchIndexText(_ transaction: TransactionsResponse.Transaction) -> String {
+        let base = computeSearchableText(transaction)
         let amountRaw = clean(transaction.amount?.amount).lowercased()
         let amountDot = amountRaw.replacingOccurrences(of: ",", with: ".")
         let amountCompact = amountDot.replacingOccurrences(of: ".", with: "")
@@ -163,24 +217,8 @@ final class TransactionsViewModel: ObservableObject {
             .joined(separator: " ")
     }
 
-    private func rebuildSearchIndex() {
-        searchIndex = transactions.map(buildSearchIndexText)
-        fixedMerchants = FixedCostsAnalyzer.getFixedCostMerchants(transactions: transactions)
-    }
-
-    /// Erkennt Abos identisch zur Abos-&-Verträge-Ansicht (SubscriptionDetector)
-    /// und cached die zugehörigen Transaction-Fingerprints. Filter und Detail-View
-    /// zeigen damit dieselbe Wahrheit. Confidence ≥7 = bestätigt + möglich.
-    private func rebuildSubscriptionIndex() {
-        let candidates = SubscriptionDetector.detect(in: transactions)
-        var ids: Set<String> = []
-        for c in candidates {
-            for tx in c.matchedTransactions {
-                ids.insert(TransactionRecord.fingerprint(for: tx))
-            }
-        }
-        subscriptionTxIDs = ids
-    }
+    // rebuildSearchIndex / rebuildSubscriptionIndex sind entfallen — Berechnung
+    // läuft jetzt off-main via `scheduleIndexRebuild()` (Generation-Token-Pattern).
 
     private func rebuildUniqueDateCache() {
         guard !isSearchActive else {

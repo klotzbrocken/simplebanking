@@ -23,6 +23,14 @@ enum YaxiService {
     /// Called on MainActor when a SCA/TAN confirmation is waiting (true) or done (false).
     nonisolated(unsafe) static var onTanStateChanged: (@MainActor (Bool) -> Void)?
 
+    /// Wird vom SCA-`.field`-Branch in `handleSCA` aufgerufen, wenn die Bank
+    /// eine TAN/PIN-Eingabe verlangt. Liefert den eingegebenen String oder
+    /// nil bei User-Cancel. Wird einmalig in `BalanceBar` beim App-Start
+    /// auf `SCAFieldInputPresenter.present(_:)` verdrahtet. Bleibt nil in
+    /// Test-/CLI-Kontexten — dann bricht der Branch wie bisher mit WARN ab.
+    nonisolated(unsafe) static var fieldInputProvider:
+        (@Sendable (SCAFieldInput.Spec) async -> String?)?
+
     // MARK: - UserDefaults keys (per-slot)
     // "legacy" slot uses the original key names for backward compatibility.
 
@@ -86,6 +94,7 @@ enum YaxiService {
 
         private var balancesSession: Data?
         private var transactionsSession: Data?
+        private var transferSession: Data?
         private var storedConnectionData: Data?
 
         // MARK: - Keychain primitives
@@ -176,6 +185,9 @@ enum YaxiService {
             transactionsSession = SessionStore.persistRead("session.transactions", slotId: "legacy")
                 ?? (ud.string(forKey: "simplebanking.yaxi.session.transactions") ?? legB64)
                     .flatMap { Data(base64Encoded: $0) }
+            transferSession = SessionStore.persistRead("session.transfer", slotId: "legacy")
+                ?? ud.string(forKey: "simplebanking.yaxi.session.transfer")
+                    .flatMap { Data(base64Encoded: $0) }
             storedConnectionData = SessionStore.persistRead("connectionData", slotId: "legacy")
                 ?? ud.string(forKey: "simplebanking.yaxi.connectionData")
                     .flatMap { Data(base64Encoded: $0) }
@@ -187,6 +199,7 @@ enum YaxiService {
             switch scope {
             case .balances:     return balancesSession
             case .transactions: return transactionsSession
+            case .transfer:     return transferSession
             }
         }
 
@@ -202,6 +215,9 @@ enum YaxiService {
                 case .transactions:
                     transactionsSession = s
                     persistWrite("session.transactions", slotId: sid, data: s)
+                case .transfer:
+                    transferSession = s
+                    persistWrite("session.transfer", slotId: sid, data: s)
                 }
             }
             if let cd = connectionData {
@@ -219,24 +235,28 @@ enum YaxiService {
 
         func clearAll(slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
-            balancesSession = nil; transactionsSession = nil; storedConnectionData = nil
+            balancesSession = nil; transactionsSession = nil; transferSession = nil; storedConnectionData = nil
             persistDelete("session.balances",    slotId: sid)
             persistDelete("session.transactions", slotId: sid)
+            persistDelete("session.transfer",     slotId: sid)
             persistDelete("connectionData",       slotId: sid)
             defaults.removeObject(forKey: "simplebanking.yaxi.session")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.balances\(SessionStore.suffix(for: sid))")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.transactions\(SessionStore.suffix(for: sid))")
+            defaults.removeObject(forKey: "simplebanking.yaxi.session.transfer\(SessionStore.suffix(for: sid))")
             defaults.removeObject(forKey: "simplebanking.yaxi.connectionData\(SessionStore.suffix(for: sid))")
         }
 
         func clearSessionsOnly(slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
-            balancesSession = nil; transactionsSession = nil
+            balancesSession = nil; transactionsSession = nil; transferSession = nil
             persistDelete("session.balances",    slotId: sid)
             persistDelete("session.transactions", slotId: sid)
+            persistDelete("session.transfer",     slotId: sid)
             defaults.removeObject(forKey: "simplebanking.yaxi.session")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.balances\(SessionStore.suffix(for: sid))")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.transactions\(SessionStore.suffix(for: sid))")
+            defaults.removeObject(forKey: "simplebanking.yaxi.session.transfer\(SessionStore.suffix(for: sid))")
         }
 
         func clearConnectionDataOnly(slotId: String? = nil) {
@@ -256,6 +276,9 @@ enum YaxiService {
             transactionsSession = SessionStore.persistRead("session.transactions", slotId: sid)
                 ?? (defaults.string(forKey: "simplebanking.yaxi.session.transactions\(sfx)") ?? legB64)
                     .flatMap { Data(base64Encoded: $0) }
+            transferSession = SessionStore.persistRead("session.transfer", slotId: sid)
+                ?? defaults.string(forKey: "simplebanking.yaxi.session.transfer\(sfx)")
+                    .flatMap { Data(base64Encoded: $0) }
             storedConnectionData = SessionStore.persistRead("connectionData", slotId: sid)
                 ?? defaults.string(forKey: "simplebanking.yaxi.connectionData\(sfx)")
                     .flatMap { Data(base64Encoded: $0) }
@@ -263,7 +286,7 @@ enum YaxiService {
         }
 
         func copyConnectionDataAndSessions(fromSlotId: String, toSlotId: String) {
-            for key in ["connectionData", "session.balances", "session.transactions"] {
+            for key in ["connectionData", "session.balances", "session.transactions", "session.transfer"] {
                 if let data = SessionStore.persistRead(key, slotId: fromSlotId) {
                     persistWrite(key, slotId: toSlotId, data: data)
                 }
@@ -273,18 +296,20 @@ enum YaxiService {
         func clearLegacySessionData() {
             persistDelete("session.balances",    slotId: "legacy")
             persistDelete("session.transactions", slotId: "legacy")
+            persistDelete("session.transfer",     slotId: "legacy")
             persistDelete("connectionData",       slotId: "legacy")
             defaults.removeObject(forKey: "simplebanking.yaxi.session")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.balances")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.transactions")
+            defaults.removeObject(forKey: "simplebanking.yaxi.session.transfer")
             defaults.removeObject(forKey: "simplebanking.yaxi.connectionData")
             if YaxiService.activeSlotId == "legacy" {
-                balancesSession = nil; transactionsSession = nil; storedConnectionData = nil
+                balancesSession = nil; transactionsSession = nil; transferSession = nil; storedConnectionData = nil
             }
             AppLogger.log("clearLegacySessionData: legacy slot cleared", category: "YaxiService")
         }
 
-        enum Scope { case balances, transactions }
+        enum Scope { case balances, transactions, transfer }
     }
 
     // Throttle re-opening the bank redirect URL (< 290 s cooldown).
@@ -543,9 +568,41 @@ enum YaxiService {
         return authResult.toData().data
     }
 
-    static func fetchBalances(userId: String, password: String) async throws -> BalancesResponse {
+    /// `alwaysTrace=true` schreibt nach erfolgreicher Antwort zusätzlich
+    /// einen YAXI-Trace via `writeTrace()` — für Diagnose-Probes, die auch
+    /// bei Erfolg den vollen HTTP-Roundtrip dokumentieren wollen. Im
+    /// normalen Refresh-Pfad (default false) bleibt der Trace nur Error-Pfad.
+    static func fetchBalances(userId: String, password: String, alwaysTrace: Bool = false) async throws -> BalancesResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
+        // HBCI-Mutex via withSlot — Acquire/Release atomar im Actor, damit
+        // sequenzielle Folge-Calls den Slot nicht fälschlich als busy sehen
+        // (P1.1: alte tryAcquire/Task-release-Kombi konnte race-en).
+        let result: BalancesResponse? = try await BankRequestQueue.shared.withSlot(slotSnapshot) {
+            try await fetchBalancesLocked(
+                slotSnapshot: slotSnapshot,
+                userId: userId,
+                password: password,
+                alwaysTrace: alwaysTrace
+            )
+        }
+        guard let response = result else {
+            AppLogger.log("fetchBalances: slot busy, skip slot=\(slotSnapshot.prefix(8))", category: "YaxiService", level: "WARN")
+            return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
+                                   connectionData: nil, error: "bank busy",
+                                   userMessage: nil, scaRequired: nil)
+        }
+        return response
+    }
+
+    /// Eigentlicher Bank-Call. Vorausgesetzt: Caller hält den BankRequestQueue-
+    /// Slot. Niemals direkt aufrufen — immer über `fetchBalances`.
+    private static func fetchBalancesLocked(
+        slotSnapshot: String,
+        userId: String,
+        password: String,
+        alwaysTrace: Bool
+    ) async throws -> BalancesResponse {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let ibanKeySnap = ibanKey(for: slotSnapshot)
         let model = loadCredentialsModel(slotId: slotSnapshot)
@@ -599,22 +656,13 @@ enum YaxiService {
                         ticket: ticket,
                         accounts: accountRefs
                     )
-                } else if storedSession != nil {
-                    // Retry without session token (e.g. Revolut/Open Banking returns
-                    // UnexpectedError when a stale YAXI session token is sent)
-                    AppLogger.log("fetchBalances: error with session, retrying without: \(error)", category: "YaxiService", level: "WARN")
-                    await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
-                    resp = try await client.balances(
-                        credentials: creds,
-                        session: nil,
-                        recurringConsents: true,
-                        ticket: ticket,
-                        accounts: accountRefs
-                    )
                 } else if isConnectionResetError(error), storedCD != nil {
                     // Consent abgelaufen (Unauthorized / ConsentExpired):
                     // YAXI-Empfehlung: gleiche Anfrage ohne connectionData wiederholen —
                     // die Bank erneuert den Consent und liefert neue connectionData zurück.
+                    // MUSS vor dem `storedSession != nil`-Retry kommen, sonst greift
+                    // letzterer mit der schlechten CD und wirft erneut Unauthorized
+                    // (1822-Bug, 2026-05).
                     AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
@@ -623,6 +671,20 @@ enum YaxiService {
                     resp = try await client.balances(
                         credentials: credsNoCD,
                         session: storedSession,
+                        recurringConsents: true,
+                        ticket: ticket,
+                        accounts: accountRefs
+                    )
+                } else if storedSession != nil {
+                    // Retry without session token (e.g. Revolut/Open Banking returns
+                    // UnexpectedError when a stale YAXI session token is sent).
+                    // UnexpectedError ist explizit nicht in isConnectionResetError,
+                    // dieser Branch greift also nicht für 1822-Unauthorized.
+                    AppLogger.log("fetchBalances: error with session, retrying without: \(error)", category: "YaxiService", level: "WARN")
+                    await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
+                    resp = try await client.balances(
+                        credentials: creds,
+                        session: nil,
                         recurringConsents: true,
                         ticket: ticket,
                         accounts: accountRefs
@@ -676,6 +738,9 @@ enum YaxiService {
                     storeDiscoveredIBAN(discovered)
                 }
             }
+            if alwaysTrace {
+                await writeTrace(client: client, label: "diag-fetchBalances-ok", ticket: ticket, error: nil)
+            }
             return makeBalancesResponse(result, session: outcome.session, connectionData: outcome.connectionData)
 
         } catch {
@@ -694,9 +759,37 @@ enum YaxiService {
         }
     }
 
-    static func fetchTransactions(userId: String, password: String, from: String) async throws -> TransactionsResponse {
+    static func fetchTransactions(userId: String, password: String, from: String, alwaysTrace: Bool = false) async throws -> TransactionsResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
+        // HBCI-Mutex via withSlot (siehe fetchBalances).
+        let result: TransactionsResponse? = try await BankRequestQueue.shared.withSlot(slotSnapshot) {
+            try await fetchTransactionsLocked(
+                slotSnapshot: slotSnapshot,
+                userId: userId,
+                password: password,
+                from: from,
+                alwaysTrace: alwaysTrace
+            )
+        }
+        guard let response = result else {
+            AppLogger.log("fetchTransactions: slot busy, skip slot=\(slotSnapshot.prefix(8))", category: "YaxiService", level: "WARN")
+            return TransactionsResponse(ok: false, transactions: nil, session: nil,
+                                       connectionData: nil, error: "bank busy",
+                                       userMessage: nil, scaRequired: nil)
+        }
+        return response
+    }
+
+    /// Eigentlicher Bank-Call. Vorausgesetzt: Caller hält den BankRequestQueue-
+    /// Slot. Niemals direkt aufrufen — immer über `fetchTransactions`.
+    private static func fetchTransactionsLocked(
+        slotSnapshot: String,
+        userId: String,
+        password: String,
+        from: String,
+        alwaysTrace: Bool
+    ) async throws -> TransactionsResponse {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let ibanKeySnap = ibanKey(for: slotSnapshot)
         let model = loadCredentialsModel(slotId: slotSnapshot)
@@ -746,18 +839,12 @@ enum YaxiService {
                         recurringConsents: true,
                         ticket: ticket
                     )
-                } else if storedSession != nil {
-                    AppLogger.log("fetchTransactions: error with session, retrying without: \(error)", category: "YaxiService", level: "WARN")
-                    await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
-                    resp = try await client.transactions(
-                        credentials: creds,
-                        session: nil,
-                        recurringConsents: true,
-                        ticket: ticket
-                    )
                 } else if isConnectionResetError(error), storedCD != nil {
                     // Consent abgelaufen (Unauthorized / ConsentExpired):
                     // YAXI-Empfehlung: gleiche Anfrage ohne connectionData wiederholen.
+                    // MUSS vor dem `storedSession != nil`-Retry kommen, sonst greift
+                    // letzterer mit der schlechten CD und wirft erneut Unauthorized
+                    // (1822-Bug, 2026-05).
                     AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
@@ -766,6 +853,17 @@ enum YaxiService {
                     resp = try await client.transactions(
                         credentials: credsNoCD,
                         session: storedSession,
+                        recurringConsents: true,
+                        ticket: ticket
+                    )
+                } else if storedSession != nil {
+                    // Stale-Session-Retry für Revolut/Open-Banking-Quirks
+                    // (UnexpectedError, nicht in isConnectionResetError).
+                    AppLogger.log("fetchTransactions: error with session, retrying without: \(error)", category: "YaxiService", level: "WARN")
+                    await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
+                    resp = try await client.transactions(
+                        credentials: creds,
+                        session: nil,
                         recurringConsents: true,
                         ticket: ticket
                     )
@@ -808,6 +906,9 @@ enum YaxiService {
                 return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                            connectionData: nil, error: "unexpected result type",
                                            userMessage: nil, scaRequired: nil)
+            }
+            if alwaysTrace {
+                await writeTrace(client: client, label: "diag-fetchTransactions-ok", ticket: ticket, error: nil)
             }
             return makeTransactionsResponse(result, session: outcome.session, connectionData: outcome.connectionData)
 
@@ -968,16 +1069,25 @@ enum YaxiService {
 
     // MARK: - Error classification (mirrors isConnectionResetError / isObsoleteSessionError)
 
-    private static func isConnectionResetError(_ error: Error) -> Bool {
+    /// Internal (statt private) für `@testable import`-Coverage —
+    /// `RoutexClientErrorClassificationTests` prüft die Klassifizierung
+    /// (Branch-Reorder-Schutz in fetchBalances/fetchTransactions/sendTransfer).
+    static func isConnectionResetError(_ error: Error) -> Bool {
         guard let re = error as? RoutexClientError else { return false }
         switch re {
-        // UnexpectedError is intentionally excluded: HBCI gateway errors like
-        // "FGW Gatewaywechsel" and "FGW Fehlender Dialogkontext" are transient
-        // infrastructure hiccups that only need session clearing, not full state reset.
-        // Full clearAll on UnexpectedError caused Volksbank users to re-do 2FA on
-        // every fetch after any transient HBCI error.
-        case .Unauthorized, .ConsentExpired: return true
-        default: return false
+        case .Unauthorized, .ConsentExpired:
+            return true
+        case .UnexpectedError(let userMessage):
+            // Build-181-Logik (urspr. NetworkService.swift, bei der routex-client-swift-
+            // Migration verloren gegangen): UnexpectedError mit leerem userMessage ist
+            // bei Sparkasse & Co. häufig stale ConnectionData → frische SCA nötig.
+            // HBCI-Gateway-Errors (Volksbank: "FGW Gatewaywechsel", "Fehlender
+            // Dialogkontext") haben userMessage gesetzt und fallen durch — die werden
+            // weiterhin via isHBCITransientError mit clearSessionsOnly behandelt,
+            // damit kein erzwungenes Re-2FA bei jedem Gateway-Hiccup entsteht.
+            return userMessage == nil
+        default:
+            return false
         }
     }
 
@@ -1030,10 +1140,15 @@ enum YaxiService {
     ///   `UnexpectedError`/`ProviderError` ist `mayHaveBeenExecuted=true`,
     ///   weil die Bank den Transfer trotzdem ausgeführt haben kann
     ///   (laut YAXI-Doku) — die UI muss das ehrlich kommunizieren.
+    /// `requestedExecutionDate` ist optional. nil = sofort (SEPA Instant).
+    /// Routex/YAXI nimmt einen `Date` und überträgt ihn als ISO-Date an die
+    /// Bank. Wochenende/Feiertage werden serverseitig validiert; im
+    /// Fehlerfall kommt ein `.failed`-Outcome mit der Bank-Begründung zurück.
     static func sendTransfer(
         request: TransferRequest,
         userId: String,
-        password: String
+        password: String,
+        requestedExecutionDate: Date? = nil
     ) async throws -> TransferOutcome {
         // Demo-Mode: kein Routex-Call, Mock-Erfolg. Stays consistent mit
         // dem Demo-Mode-Pattern in BalanceBar / MCP / CLI.
@@ -1044,6 +1159,37 @@ enum YaxiService {
         }
 
         let slotSnapshot = activeSlotId
+        // HBCI-Mutex via withSlot — blockiert parallele balance/transactions-
+        // Refreshes während SCA gerade läuft. Bei busy graceful failen.
+        let result: TransferOutcome? = try await BankRequestQueue.shared.withSlot(slotSnapshot) {
+            try await sendTransferLocked(
+                slotSnapshot: slotSnapshot,
+                request: request,
+                userId: userId,
+                password: password,
+                requestedExecutionDate: requestedExecutionDate
+            )
+        }
+        guard let outcome = result else {
+            AppLogger.log("sendTransfer: slot busy, abort slot=\(slotSnapshot.prefix(8))", category: "YaxiService", level: "WARN")
+            return TransferOutcome(ok: false, scaRequired: false,
+                                   error: "bank busy",
+                                   userMessage: L10n.t("Bankverbindung gerade beschäftigt — bitte gleich erneut versuchen.",
+                                                       "Bank connection busy — please try again shortly."),
+                                   mayHaveBeenExecuted: false)
+        }
+        return outcome
+    }
+
+    /// Eigentlicher Transfer-Call. Vorausgesetzt: Caller hält den
+    /// BankRequestQueue-Slot. Niemals direkt aufrufen — immer über `sendTransfer`.
+    private static func sendTransferLocked(
+        slotSnapshot: String,
+        request: TransferRequest,
+        userId: String,
+        password: String,
+        requestedExecutionDate: Date?
+    ) async throws -> TransferOutcome {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let model = loadCredentialsModel(slotId: slotSnapshot)
         let d = UserDefaults.standard
@@ -1054,14 +1200,14 @@ enum YaxiService {
         }
 
         let storedCD = await sessionStore.connectionData()
-        let storedSession = await sessionStore.session(for: .balances)
+        let storedSession = await sessionStore.session(for: .transfer)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
             connectionData: storedCD, userId: userId, password: password
         )
 
         let client = RoutexClient()
-        let ticket = YaxiTicketMaker.issueTransferTicket()
+        let ticket = await YaxiTicketMaker.issueTransferTicket()
 
         let amountString = NSDecimalNumber(decimal: request.amountEUR).stringValue
         let amount = Routex.Amount(currency: "EUR", amount: Decimal(string: amountString) ?? request.amountEUR)
@@ -1092,7 +1238,7 @@ enum YaxiService {
                     details: details,
                     debtorAccount: nil,
                     debtorName: nil,
-                    requestedExecutionDate: nil
+                    requestedExecutionDate: requestedExecutionDate
                 )
             } catch {
                 if shouldRetryWithoutUserId(error: error, model: model, userId: userId) {
@@ -1109,7 +1255,7 @@ enum YaxiService {
                         details: details,
                         debtorAccount: nil,
                         debtorName: nil,
-                        requestedExecutionDate: nil
+                        requestedExecutionDate: requestedExecutionDate
                     )
                 } else if isConnectionResetError(error), storedCD != nil {
                     AppLogger.log("sendTransfer: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
@@ -1126,7 +1272,7 @@ enum YaxiService {
                         details: details,
                         debtorAccount: nil,
                         debtorName: nil,
-                        requestedExecutionDate: nil
+                        requestedExecutionDate: requestedExecutionDate
                     )
                 } else {
                     throw error
@@ -1150,7 +1296,9 @@ enum YaxiService {
 
             // Connection-Data refreshen (Session ist out-of-band sowieso obsolete
             // nach dem Call, aber connectionData kann erneuert worden sein).
-            await sessionStore.update(scope: .balances,
+            // Transfer hat eigenen Scope, damit der Session-Token nicht in
+            // Folge-Balance/Transactions-Calls leakt.
+            await sessionStore.update(scope: .transfer,
                                       session: outcome.session,
                                       connectionData: outcome.connectionData,
                                       slotId: slotSnapshot)
@@ -1426,9 +1574,55 @@ enum YaxiService {
                     )
                 }
 
-            case .field:
-                AppLogger.log("SCA: unhandled field input", category: "YaxiService", level: "WARN")
-                return nil
+            case .field(let type, let secrecy, let minLen, let maxLen, let context):
+                // Kein Provider gesetzt = wir laufen ohne UI (Tests/CLI). Sauberer
+                // Abbruch wie bisher, damit nicht-UI-Konsumenten nicht crashen.
+                guard let provider = fieldInputProvider else {
+                    AppLogger.log("SCA field: no provider registered, aborting",
+                                  category: "YaxiService", level: "WARN")
+                    return nil
+                }
+                let slotEpochSnapshot = await MainActor.run {
+                    MultibankingStore.shared.activeSlotEpoch
+                }
+                let bankName = await MainActor.run {
+                    MultibankingStore.shared.activeSlot?.displayName ?? "Bank"
+                }
+                let spec = SCAFieldInput.Spec(
+                    type: type, secrecyLevel: secrecy,
+                    minLength: minLen, maxLength: maxLen,
+                    bankDisplayName: bankName,
+                    slotEpochAtRequest: slotEpochSnapshot
+                )
+                // Nur Metadaten loggen — der eingegebene Wert ist Secret.
+                AppLogger.log(
+                    "SCA field: requesting input type=\(type) secrecy=\(secrecy) " +
+                    "min=\(minLen.map(String.init) ?? "—") max=\(maxLen.map(String.init) ?? "—")",
+                    category: "YaxiService"
+                )
+                guard let userValue = await provider(spec) else {
+                    AppLogger.log("SCA field: user cancelled", category: "YaxiService")
+                    return nil
+                }
+                // Slot-Race: User hat während Eingabe Bank gewechselt → der
+                // InputContext zeigt auf eine fremde Session, nicht abschicken.
+                let currentEpoch = await MainActor.run {
+                    MultibankingStore.shared.activeSlotEpoch
+                }
+                guard currentEpoch == slotEpochSnapshot else {
+                    AppLogger.log("SCA field: slot epoch changed during input, aborting",
+                                  category: "YaxiService", level: "WARN")
+                    return nil
+                }
+                do {
+                    let next = try await respond(context, userValue)
+                    return await handleSCA(initial: next, client: client, ticket: ticket,
+                                           confirm: confirm, respond: respond, depth: depth + 1)
+                } catch {
+                    AppLogger.log("SCA field respond error: \(error.localizedDescription)",
+                                  category: "YaxiService", level: "ERROR")
+                    return nil
+                }
             }
 
         case .redirect(let url, let context):

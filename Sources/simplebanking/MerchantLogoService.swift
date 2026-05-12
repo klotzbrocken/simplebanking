@@ -11,7 +11,9 @@ final class MerchantLogoService: ObservableObject {
     @Published private(set) var imageCache: [String: NSImage] = [:]
     private var inFlight: Set<String> = []
     private var persistedLogosLoaded = false
-    private(set) var customLogoKeys: Set<String> = []
+    /// @Published damit der X-Lösch-Button (hasCustomLogo) reaktiv erscheint
+    /// /verschwindet wenn Custom-Logos gesetzt oder entfernt werden.
+    @Published private(set) var customLogoKeys: Set<String> = []
 
     // MARK: - Merchant → bundled SVG filename
     private static let svgMap: [String: String] = [

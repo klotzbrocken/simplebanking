@@ -242,14 +242,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         set { UserDefaults.standard.set(newValue, forKey: "hideIndex") }
     }
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
-    @AppStorage("menubarStyle") private var menubarStyle: Int = 1  // 0=lang (fixed), 1=kurz (dynamic)
+    // Menüleiste-Breite ist seit v1.5.0 fest auf "lang"; kein User-Setting mehr.
+    // Konstante bleibt damit die `isShort = menubarStyle == 1` Auswertung
+    // korrekt zu false reduziert (Compiler optimiert das raus).
+    private let menubarStyle: Int = 0
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
-    @AppStorage("swapClickBehavior") private var swapClickBehavior: Bool = false
-    @AppStorage("balanceClickMode") private var balanceClickMode: Int = BalanceClickMode.flyoutCard.rawValue
+    /// Mausklick-Tausch wurde in v1.5.0 entfernt — Click-Verhalten ist
+    /// fest: Single = Balance-Action, Double = Umsatzliste. Die Konstante
+    /// bleibt nur, damit die ehemaligen Branches sich trivial auf die
+    /// Default-Pfade reduzieren (Compiler optimiert das raus).
+    private let swapClickBehavior: Bool = false
+    @AppStorage("showBalanceInMenuBar") private var showBalanceInMenuBar: Bool = false
     @AppStorage("balanceSignalLowUpperBound") private var balanceSignalLowUpperBound: Int = 500
     @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
@@ -334,13 +341,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         L10n.t(de, en)
     }
 
-    private var activeBalanceClickMode: BalanceClickMode {
-        BalanceClickMode(rawValue: balanceClickMode) ?? .mouseClick
-    }
+    /// Legacy-Konstante: BalanceClickMode war früher ein 3-Wege-Picker.
+    /// In v1.5.0 reduziert auf zwei Modi (showBalanceInMenuBar Bool).
+    /// Der Wert wird nirgendwo mehr ausgewertet, bleibt nur als Konstante
+    /// für ehemalige Switch-Pfade die compiler-statisch wegfallen.
+    private var activeBalanceClickMode: BalanceClickMode { .flyoutCard }
 
-    private var isMouseOverBalanceMode: Bool {
-        activeBalanceClickMode == .mouseOver
-    }
+    private var isMouseOverBalanceMode: Bool { false }
 
     private func hiddenBalanceMaskTitle() -> String {
         "•••.•• €"
@@ -533,7 +540,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard let button = statusItem?.button else { return }
         guard !locked else { return }
 
-        let isShort = menubarStyle == 1
+        // v1.5.0: `showBalanceInMenuBar` steuert die Breite und den Title:
+        //   true  → fest-breite Variante mit voller Saldo-Anzeige
+        //   false → variable Breite, nur Icon (+ optional Mood-Emoji)
+        // Direkt aus UserDefaults lesen statt aus dem @AppStorage-Wrapper —
+        // letzterer kann in NSObject-Klassen außerhalb von SwiftUI veraltete
+        // Werte zurückgeben.
+        // v1.5.0 — 2 Modi:
+        //   showBalanceInMenuBar = true  → feste Breite, voller Saldo-Text
+        //   showBalanceInMenuBar = false → variable Breite, nur Icon (+Emoji)
+        // Direkt aus UserDefaults lesen (AppStorage in NSObject-Klassen kann
+        // veraltete Werte liefern).
+        let showBalanceLive = UserDefaults.standard.object(forKey: "showBalanceInMenuBar") as? Bool ?? false
+        let isShort = !showBalanceLive
         let logo = menuBarLogoImage()
 
         // Logo on the LEFT, text on the right.
@@ -587,7 +606,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let moodEmoji = (balanceMoodEmojiEnabled && computeUnifiedBalanceTitle() == nil)
             ? currentMoodEmojiPrefix()
             : ""
-        if let unifiedTitle = computeUnifiedBalanceTitle() {
+        if isShort {
+            // Flyout-Mode: kein Saldo-Text, nur Bank-Icon (+ optional Emoji).
+            setButtonTitle(button, moodEmoji)
+        } else if let unifiedTitle = computeUnifiedBalanceTitle() {
             let indicator = latestTxSigBySlot.contains { id, sig in !sig.isEmpty && sig != lastSeenTxSig(for: id) } ? "  ●" : ""
             setButtonTitle(button, "\(unifiedTitle)\(indicator)")
         } else {
@@ -598,8 +620,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     /// Liefert das Money-Mood-Emoji für den aktuellen Saldo des aktiven Slots, gefolgt
     /// von einem schmalen Leerzeichen. Leer wenn kein Saldo bekannt oder Toggle aus.
-    private func currentMoodEmojiPrefix() -> String {
-        guard balanceMoodEmojiEnabled, let bal = lastBalance else { return "" }
+    /// `forceEnabled=true` umgeht den `@AppStorage`-Cache und liest direkt aus
+    /// UserDefaults — wichtig in `updateMenuBarButton` wo der Wrapper-Wert
+    /// veraltet sein kann.
+    private func currentMoodEmojiPrefix(forceEnabled: Bool = false) -> String {
+        let enabled = forceEnabled
+            || UserDefaults.standard.bool(forKey: "balanceMoodEmojiEnabled")
+        guard enabled, let bal = lastBalance else { return "" }
         let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
         let cfg = BankSlotSettingsStore.load(slotId: slotId)
         let thresholds = BalanceSignal.normalizedThresholds(
@@ -619,7 +646,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         ]
         let textWidth = (refString as NSString).size(withAttributes: attrs).width
-        return textWidth + 22  // 22px for the logo image + gap
+        // Emoji-Reserve einplanen wenn das Mood-Emoji rendert (kostet ~22 px),
+        // sonst schneidet macOS den Saldo ab.
+        let emojiEnabled = UserDefaults.standard.bool(forKey: "balanceMoodEmojiEnabled")
+        let emojiReserve: CGFloat = emojiEnabled ? 22 : 0
+        return textWidth + emojiReserve + 22  // 22px für das Logo-Image + Gap
     }
 
     private func setButtonTitle(_ button: NSStatusBarButton, _ text: String) {
@@ -658,8 +689,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// Hover-Reveal nur für den klassischen Auto-Hide-Pfad (alter
+    /// hideIndex-Mechanismus, isHiddenBalance=true). Im Flyout-Mode soll
+    /// der Saldo NICHT per Hover erscheinen — entweder/oder.
     private func revealBalanceOnHoverIfNeeded() {
-        guard isMouseOverBalanceMode else { return }
         guard !locked, isHiddenBalance else { return }
         guard !isHoverRevealingBalance else { return }
         isHoverRevealingBalance = true
@@ -668,7 +701,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func hideHoverRevealIfNeeded() {
-        guard isMouseOverBalanceMode else { return }
         guard !locked, isHiddenBalance else { return }
         guard isHoverRevealingBalance else { return }
         isHoverRevealingBalance = false
@@ -771,6 +803,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var txPanel: TransactionsPanel?
     private var statusMenu: NSMenu?
     private var balancePopover: NSPopover?
+    /// Vollbild-Dim-Overlays (1 pro Screen) + zentriertes Flyout-Fenster für
+    /// den Hold-to-Show-Modus. Leben nur während der Hotkey gedrückt ist;
+    /// werden in hideCenteredFlyout() animiert entfernt.
+    private var centeredFlyoutDimWindows: [NSWindow] = []
+    private var centeredFlyoutContentWindow: NSWindow?
+    /// Watchdog falls das Released-Event verloren geht (App-Switch via Cmd-Tab,
+    /// Hotkey-Driver-Hänger, …). Schließt nach Hard-Timeout.
+    private var centeredFlyoutWatchdog: DispatchWorkItem?
+    /// Observer, der das Overlay schließt sobald die App den Fokus verliert.
+    private var centeredFlyoutResignObserver: NSObjectProtocol?
+    /// Verhindert konkurrierende Animationen (z.B. Press → schnelles Release).
+    private var centeredFlyoutAnimating: Bool = false
     private var isFlyoutHovered: Bool = false
     private var statusButtonTrackingArea: NSTrackingArea?
     private var isHoverRevealingBalance: Bool = false
@@ -817,6 +861,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.isTanPending = isPending
             self?.txVM.isTanPending = isPending
             self?.updateMenuBarButton()
+        }
+
+        // SCA `.field`-Branch (TAN-Eingabe-Dialog) — Bank verlangt einen
+        // Textcode statt Push-Bestätigung. UI lebt in SCAFieldInputSheet.
+        YaxiService.fieldInputProvider = { spec in
+            await SCAFieldInputPresenter.present(spec)
         }
 
         // Task 4: Set active slot IDs in all data layers at startup
@@ -964,7 +1014,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
 
         // Register UserDefaults defaults (only apply when key has no stored value).
-        UserDefaults.standard.register(defaults: ["celebrationStyle": 1])
+        // celebrationStyle in v1.5.0 entfernt — Ripple ist die einzige Variante.
 
         // Unlock on startup if encrypted credentials exist (but not in demo mode)
         if CredentialsStore.exists() && !demoMode {
@@ -1006,17 +1056,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         menu.addItem(refreshItem)
 
-        // ── Geld senden… (Lizenz-Gate kommt in Schritt 6-8) ───────────────
-        let sendMoneyItem = NSMenuItem(title: t("Geld senden…", "Send Money…"),
-                                       action: #selector(sendMoney),
-                                       keyEquivalent: "n")
-        sendMoneyItem.target = self
-        if let img = NSImage(systemSymbolName: "arrow.up.right.square",
-                             accessibilityDescription: nil) {
-            img.isTemplate = true
-            sendMoneyItem.image = img
+        // ── Geld senden… (Lizenz-Gate + FeatureFlag) ──────────────────────
+        // Im Demo-Mode immer sichtbar — auch ohne Tester-Build-Flag,
+        // damit das Feature vollständig getestet werden kann.
+        if FeatureFlags.transferMoneyEnabled || demoMode {
+            let sendMoneyItem = NSMenuItem(title: t("Geld senden…", "Send Money…"),
+                                           action: #selector(sendMoney),
+                                           keyEquivalent: "n")
+            sendMoneyItem.target = self
+            if let img = NSImage(systemSymbolName: "arrow.up.right.square",
+                                 accessibilityDescription: nil) {
+                img.isTemplate = true
+                sendMoneyItem.image = img
+            }
+            menu.addItem(sendMoneyItem)
         }
-        menu.addItem(sendMoneyItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1120,16 +1174,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // ── Support (submenu) ─────────────────────────────────────────────
         let supportSub = NSMenu()
 
-        let diagEnableItem = NSMenuItem(title: t("Diagnose aktivieren", "Enable Diagnostics"), action: #selector(toggleSupportDiagnostics), keyEquivalent: "")
-        diagEnableItem.tag = 501
-        diagEnableItem.target = self
-        diagEnableItem.state = appLoggingEnabled ? .on : .off
-        supportSub.addItem(diagEnableItem)
+        // v1.5.0: separater "Diagnose aktivieren"-Toggle entfernt — die
+        // Bank-Diagnose schaltet Verbose-Logging selbst ein und am Ende
+        // wieder aus (siehe DiagnosticSession).
 
         let diagReportItem = NSMenuItem(title: t("Diagnosebericht versenden…", "Send Diagnostic Report…"), action: #selector(sendDiagnosticReport), keyEquivalent: "")
         diagReportItem.tag = 502
         diagReportItem.target = self
         supportSub.addItem(diagReportItem)
+
+        let bankDiagItem = NSMenuItem(title: t("Bank-Diagnose…", "Bank Diagnostics…"), action: #selector(openBankDiagnostics), keyEquivalent: "")
+        bankDiagItem.tag = 506
+        bankDiagItem.target = self
+        if let img = NSImage(systemSymbolName: "stethoscope", accessibilityDescription: nil) {
+            img.isTemplate = true
+            bankDiagItem.image = img
+        }
+        supportSub.addItem(bankDiagItem)
 
         supportSub.addItem(NSMenuItem.separator())
 
@@ -1204,6 +1265,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         updateTxPanelAccountNav()
         settingsPanel = SettingsPanel()
 
+        // SettingsPanel kann den schon entsperrten BalanceBar-PW-Cache nutzen,
+        // statt im SettingsPanel ein zweites PW-Modal zu zeigen.
+        SettingsPanel.masterPasswordProvider = { [weak self] in self?.requestMasterPassword() }
+
         setupRefreshTimer()
         applyAppearance()
         applyBalanceDisplayModeConstraints()
@@ -1255,6 +1320,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             guard let self else { return }
             Task { @MainActor in
                 self.applyBalanceDisplayModeConstraints()
+                // Title + Width-Logik liegt in updateMenuBarButton — sonst
+                // greift der Mode-Wechsel erst nach App-Restart.
+                self.updateMenuBarButton()
             }
         }
 
@@ -1306,12 +1374,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         SubscriptionLogoStore.shared.preloadInitial(displayNames: LogoAssets.allDisplayNames)
 
         autoStartSetupWizardIfNeeded()
+        showWhatsNewIfNeeded()
 
         setupGlobalHotkey()
         globalHotkeyObserver = NotificationCenter.default.addObserver(
             forName: Notification.Name("simplebanking.globalHotkeyChanged"),
             object: nil, queue: .main
         ) { [weak self] _ in self?.setupGlobalHotkey() }
+
+        // „Geld senden…" aus dem TransactionsPanel-Mehr-Menü öffnen.
+        // BalanceBar bleibt der zentrale Eintrittspunkt mit Lizenz-Routing.
+        // FeatureFlag-gated, aber Demo-Mode bypassed das Flag (Feature-Test).
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.openTransferSheet"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard FeatureFlags.transferMoneyEnabled || (self?.demoMode ?? false) else { return }
+            self?.sendMoney()
+        }
 
         updateChecker = UpdateChecker()
     }
@@ -1361,12 +1441,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     private var transferWindow: NSWindow?
     private var upsellWindow: NSWindow?
+    private var bankDiagnosticsWindow: NSWindow?
 
     @objc private func sendMoney() {
+        // Demo-Mode: kein Lizenz-Gate, immer Transfer-Sheet öffnen. Sends sind
+        // ohnehin Mock (siehe YaxiService.sendTransfer Demo-Branch).
+        if demoMode {
+            showTransferSheet()
+            return
+        }
         // Lizenz-Gate ist nur aktiv wenn LicenseConfig.licensingEnabled=true.
-        // Solange Gumroad-Setup nicht steht, ist „Geld senden" für alle frei
-        // zugänglich (Demo-Mode-User sowieso).
-        if LicenseConfig.licensingEnabled, !LicenseManager.shared.isLicensedOrDemo {
+        // Solange Gumroad-Setup nicht steht, ist „Geld senden" für alle frei.
+        if LicenseConfig.licensingEnabled, !LicenseManager.shared.isLicensed {
             showUpsellSheet()
         } else {
             showTransferSheet()
@@ -1405,6 +1491,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    @objc private func openBankDiagnostics() {
+        if let existing = bankDiagnosticsWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let sheet = DiagnosticAssistantSheet(
+            requestMasterPassword: { [weak self] in self?.requestMasterPassword() },
+            onClose: { [weak self] in
+                self?.bankDiagnosticsWindow?.close()
+                self?.bankDiagnosticsWindow = nil
+            }
+        )
+        let host = NSHostingController(rootView: sheet)
+        let window = NSWindow(contentViewController: host)
+        window.title = L10n.t("Bank-Diagnose", "Bank Diagnostics")
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 540, height: 580))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        bankDiagnosticsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func showTransferSheet() {
         if let existing = transferWindow, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
@@ -1416,19 +1528,119 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             onClose: { [weak self] in
                 self?.transferWindow?.close()
                 self?.transferWindow = nil
+            },
+            onSwitchSlot: { [weak self] idx in
+                Task { await self?.switchToSlot(index: idx) }
             }
         )
-        let host = NSHostingController(rootView: sheet)
-        let window = NSWindow(contentViewController: host)
-        window.title = L10n.t("Geld senden", "Send Money")
-        window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 460, height: 520))
-        window.center()
-        window.isReleasedWhenClosed = false
-        window.level = .floating
-        transferWindow = window
-        window.makeKeyAndOrderFront(nil)
+
+        // NSPanel mit identischem Chrome wie das TransactionsPanel — damit
+        // beide Fenster nebeneinander dieselbe Höhe + Titelbar-Optik haben.
+        // Title-Visibility hidden + transparent + unifiedCompact-Toolbar
+        // matched die Chrome-Höhe.
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = L10n.t("Geld senden", "Send Money")
+        // Title sichtbar lassen — User wollte den Header in die Titlebar,
+        // nicht doppelt im Content.
+        panel.titleVisibility = .visible
+        panel.titlebarAppearsTransparent = true
+        panel.backgroundColor = NSColor(name: nil) { appearance in
+            let theme = ThemeManager.shared.currentTheme
+            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+                ? theme.panelDarkColor
+                : theme.panelLightColor
+        }
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        if #available(macOS 11.0, *) {
+            panel.toolbarStyle = .unifiedCompact
+        }
+        panel.collectionBehavior = [.fullScreenNone, .managed]
+
+        // Leere NSToolbar anhängen — sorgt dafür dass die Chrome-Höhe exakt
+        // dem TransactionsPanel matched (unifiedCompact braucht eine Toolbar
+        // um seine kompakte Höhe zu rendern).
+        let toolbar = NSToolbar(identifier: NSToolbar.Identifier("simplebanking.transfer.toolbar"))
+        toolbar.showsBaselineSeparator = false
+        panel.toolbar = toolbar
+
+        // Initial: 620 content. Wenn das TransactionsPanel offen ist, gleich
+        // unten die FRAME-Höhe identisch matchen — TransactionsPanel hat
+        // unifiedCompact + Toolbar-Items, was die Chrome-Höhe vergrößert.
+        // Mit Frame-Match auf gleichen total-height-Wert wird der Höhenunterschied
+        // vollständig neutralisiert.
+        panel.setContentSize(NSSize(width: 480, height: 620))
+        panel.minSize = NSSize(width: 480, height: 480)
+        panel.maxSize = NSSize(width: 480, height: 1200)
+
+        // HostingView via Auto-Layout in einem Container — gleich wie TransactionsPanel.
+        let host = NSHostingView(rootView: sheet)
+        host.translatesAutoresizingMaskIntoConstraints = false
+        let content = NSView()
+        content.addSubview(host)
+        panel.contentView = content
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            host.topAnchor.constraint(equalTo: content.topAnchor),
+            host.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        ])
+
+        panel.isReleasedWhenClosed = false
+
+        // Frame-Höhe exakt an Umsatzfenster matchen, wenn dieses sichtbar ist.
+        // Macht jede Chrome-Differenz (unifiedCompact-Toolbar in TxPanel vs.
+        // bare Titlebar bei uns) irrelevant.
+        if let tx = txPanel, tx.isVisible {
+            let target = tx.frame.height
+            var frame = panel.frame
+            frame.size.height = target
+            panel.setFrame(frame, display: false)
+        }
+
+        positionTransferWindow(panel)
+        transferWindow = panel
+        panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Positioniert das Transfer-Window: wenn das Umsatzfenster offen ist,
+    /// direkt rechts daneben (oder links, falls rechts kein Platz). Sonst
+    /// klassisch zentriert. Bottom-Kante matched die des Umsatzfensters.
+    private func positionTransferWindow(_ window: NSWindow) {
+        guard let tx = txPanel, tx.isVisible else {
+            window.center()
+            return
+        }
+        let txFrame = tx.frame
+        let gap: CGFloat = 8
+        let myWidth = window.frame.width
+        let originY = txFrame.minY
+
+        // Den Bildschirm wählen, auf dem das Umsatzfenster liegt — wichtig
+        // für Multi-Monitor-Setups.
+        let screenFrame = (NSScreen.screens.first { $0.frame.contains(txFrame.origin) }
+                           ?? NSScreen.main)?.visibleFrame ?? .zero
+
+        // Versuch 1: rechts vom txPanel
+        let rightX = txFrame.maxX + gap
+        if rightX + myWidth <= screenFrame.maxX {
+            window.setFrameOrigin(NSPoint(x: rightX, y: originY))
+            return
+        }
+        // Versuch 2: links vom txPanel
+        let leftX = txFrame.minX - gap - myWidth
+        if leftX >= screenFrame.minX {
+            window.setFrameOrigin(NSPoint(x: leftX, y: originY))
+            return
+        }
+        // Fallback: nichts passt nebeneinander → zentrieren
+        window.center()
     }
 
     /// Liefert das Master-Passwort: erst aus dem in-memory-Cache (BalanceBar
@@ -1503,9 +1715,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 return
             }
 
-            await refreshAsync()
-            // Transactions-Fetch ist für `sb refresh` Pflicht — refreshAsync() holt
-            // nur den Saldo wenn loadTransactionsOnStart=false.
+            // suppressTransactionsFetch=true: refreshAsync() darf nicht zusätzlich
+            // den impliziten TX-Fetch starten, sonst rennen zwei parallel gegen den
+            // HBCI-Mutex. Der Pflicht-Fetch passiert direkt danach sequentiell.
+            await refreshAsync(suppressTransactionsFetch: true)
             await checkNewBookings(userId: creds.userId, password: creds.password)
 
             // SCA-Backoff wurde während refreshAsync gesetzt → als failed werten,
@@ -1982,13 +2195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         menu.item(withTag: 202)?.title = t("Nach Updates suchen…", "Check for Updates…")
 
-        // Support submenu
+        // Support submenu — Tag 501 (Diagnose aktivieren) wurde in v1.5.0
+        // entfernt; Bank-Diagnose-Sheet schaltet Logging selbst.
         if let supportItem = menu.item(withTag: 500), let sub = supportItem.submenu {
             supportItem.title = t("Support", "Support")
-            if let diagItem = sub.item(withTag: 501) {
-                diagItem.title = t("Diagnose aktivieren", "Enable Diagnostics")
-                diagItem.state = appLoggingEnabled ? .on : .off
-            }
             sub.item(withTag: 502)?.title = t("Diagnosebericht versenden…", "Send Diagnostic Report…")
             sub.item(withTag: 503)?.title = t("Logs öffnen", "Open Logs")
             sub.item(withTag: 504)?.title = t("Dokumentation", "Documentation")
@@ -2386,14 +2596,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func performBalancePrimaryAction() {
-        switch activeBalanceClickMode {
-        case .mouseClick:
-            toggleBalanceVisibility()
-        case .flyoutCard:
-            showBalanceFlyout()
-        case .mouseOver:
+        // v1.5.0: 2 Modi.
+        //   showBalanceInMenuBar = true  → Saldo permanent sichtbar, Click → kein Flyout.
+        //   showBalanceInMenuBar = false → nur Bank-Icon, Click → Flyout-Karte.
+        if showBalanceInMenuBar {
             return
         }
+        showBalanceFlyout()
     }
     
     // MARK: - YAXI error helpers
@@ -2553,6 +2762,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         popover.animates = true
         popover.delegate = self
 
+        let result = buildFlyoutHost(onDoubleTap: { [weak self] in
+            self?.balancePopover?.performClose(nil)
+            Task { await self?.openTransactionsPanel() }
+        })
+        let host = result.host
+        let hasDots = result.hasDots
+        popover.contentSize = NSSize(width: 348, height: hasDots ? 192 : 170)
+        popover.contentViewController = host
+        balancePopover = popover
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        // If auto-hide is enabled, close the flyout after the same delay.
+        let flyoutDelay: TimeInterval? = hideIndex == 1 ? 2 : hideIndex == 2 ? 5 : hideIndex == 3 ? 10 : hideIndex == 4 ? 20 : nil
+        if let delay = flyoutDelay {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.balancePopover?.isShown == true else { return }
+                if self.isFlyoutHovered {
+                    self.deferFlyoutCloseUntilMouseLeaves()
+                    return
+                }
+                self.balancePopover?.performClose(nil)
+            }
+        }
+    }
+
+    /// Baut den Flyout-Host samt aller State-Injection. Wird vom Popover-
+    /// und vom Centered-Hold-Pfad benutzt — `onDoubleTap` ist Caller-spezifisch
+    /// (Popover closed via performClose, Centered via hideCenteredFlyout).
+    private func buildFlyoutHost(onDoubleTap: @escaping () -> Void) -> (host: NSHostingController<StatusBalanceFlyoutCardView>, hasDots: Bool) {
         let isUnified = txVM.isUnifiedMode && (!demoMode || isMultiDemo)
         let balanceText = isUnified
             ? (computeUnifiedFlyoutBalanceText() ?? "--,-- €")
@@ -2583,22 +2821,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.salaryDay = subMetricsSettings.effectiveSalaryDay
         rootView.salaryToleranceBefore = subMetricsSettings.salaryDayToleranceBefore
         rootView.salaryToleranceAfter = subMetricsSettings.salaryDayToleranceAfter
-        rootView.onDoubleTap = { [weak self] in
-            self?.balancePopover?.performClose(nil)
-            Task { await self?.openTransactionsPanel() }
-        }
+        rootView.onDoubleTap = onDoubleTap
         rootView.onHoverChanged = { [weak self] hovering in
             self?.isFlyoutHovered = hovering
         }
         if isUnified {
-            // Unified flyout: show aggregated card with per-slot pills, no cycle button
             rootView.unifiedSlots = computeFlyoutSlots()
             rootView.unifiedTotalBalance = computeUnifiedFlyoutTotal()
         } else {
-            // Bank logo. Single-Demo („Demo-Bank" ohne reale Marke) → generisches wallet-Symbol.
-            // Live UND Multi-Demo → Marke aus dem aktiven Slot auflösen (Multi-Demo hat reale
-            // Bank-Brands aus BankLogoAssets, die in activateMultiDemo per applySlotToViewModel
-            // ins txVM gespiegelt werden).
             if demoMode && !isMultiDemo {
                 rootView.bankLogoImage = NSImage(systemSymbolName: "wallet.pass", accessibilityDescription: "Demo")
             } else {
@@ -2614,20 +2844,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             rootView.bankName = txVM.connectedBankDisplayName
             rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
         }
-        // Ripple if unread new transactions, or always-on Ripple mode
         let rippleAlwaysOn = UserDefaults.standard.bool(forKey: "rippleAlwaysOn")
-            && UserDefaults.standard.integer(forKey: "celebrationStyle") == 1
         let hasUnseenTx = latestTxSigBySlot.contains { slotId, sig in !sig.isEmpty && sig != lastSeenTxSig(for: slotId) }
         if rippleAlwaysOn || hasUnseenTx {
             rootView.rippleTrigger = max(1, flyoutRippleTrigger)
         }
-        // Ensure transactions are loaded before computing the ring fraction.
-        // Without this, the ring is empty on first flyout open (before panel is opened).
         if txVM.transactions.isEmpty {
             let slotSettings = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy")
             let daysToUse = slotSettings.displayDays
             if demoMode {
-                // Replay the same seed sequence as openTransactionsPanel so transactions are identical.
                 if isMultiDemo {
                     var seed = UInt64(truncatingIfNeeded: demoSeed)
                     let slots = MultibankingStore.shared.slots
@@ -2659,33 +2884,244 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
         let host = NSHostingController(rootView: rootView)
         host.view.wantsLayer = true
-        // Freeze-Mode: Blue Soft aus der Color Harmony Palette (theme-aware via dynamic NSColor).
         host.view.layer?.backgroundColor = FreezeState.shared.isActive
             ? NSColor(name: nil) { appearance in
                 let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
                 return AppTheme.color(from: isDark ? "#1F3144" : "#EAF1F8", fallback: .controlBackgroundColor)
             }.cgColor
             : NSColor.windowBackgroundColor.cgColor
-        popover.contentSize = NSSize(width: 348, height: hasDots ? 192 : 170)
-        popover.contentViewController = host
-        balancePopover = popover
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        return (host, hasDots)
+    }
 
-        // If auto-hide is enabled, close the flyout after the same delay.
-        // This handles the case where the balance is already hidden when the flyout opens
-        // (the main auto-hide timer already fired and won't fire again for this cycle).
-        let flyoutDelay: TimeInterval? = hideIndex == 1 ? 2 : hideIndex == 2 ? 5 : hideIndex == 3 ? 10 : hideIndex == 4 ? 20 : nil
-        if let delay = flyoutDelay {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.balancePopover?.isShown == true else { return }
-                if self.isFlyoutHovered {
-                    // Mouse is over the flyout — defer close until mouse leaves
-                    self.deferFlyoutCloseUntilMouseLeaves()
-                    return
-                }
-                self.balancePopover?.performClose(nil)
-            }
+    // MARK: - Centered Hold-to-Show Flyout
+
+    /// Hard-Timeout falls das Hotkey-Released-Event verloren geht.
+    private static let centeredFlyoutMaxHoldSeconds: TimeInterval = 30
+
+    /// Window-Level für Content: ein Tick über dem Dim, damit die Z-Order
+    /// nicht von der `orderFront`-Reihenfolge abhängt.
+    private static let centeredFlyoutDimLevel = NSWindow.Level.popUpMenu
+    private static let centeredFlyoutContentLevel = NSWindow.Level(
+        rawValue: NSWindow.Level.popUpMenu.rawValue + 1
+    )
+
+    /// Sichtbarkeits-Sentinel — Quelle der Wahrheit ist das Content-Window,
+    /// nicht die `flyoutHoldCenterEnabled`-Preference (die kann sich live ändern
+    /// während das Overlay noch offen ist).
+    fileprivate var isCenteredFlyoutVisible: Bool {
+        centeredFlyoutContentWindow != nil || !centeredFlyoutDimWindows.isEmpty
+    }
+
+    /// Zeigt das Flyout zentriert auf dem Mauszeiger-Screen mit verdunkeltem
+    /// Hintergrund auf ALLEN Screens. Wird vom Global-Hotkey gerufen wenn
+    /// Setting `flyoutHoldCenterEnabled == true` ist. Re-Entry while open:
+    /// no-op (Hotkey-Auto-Repeat).
+    fileprivate func showCenteredFlyout() {
+        guard !isCenteredFlyoutVisible, !centeredFlyoutAnimating else { return }
+        balancePopover?.performClose(nil)                       // Modi exklusiv
+
+        let primaryScreen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
+            ?? NSScreen.main
+        guard let primaryFrame = primaryScreen?.frame else { return }
+
+        // Reduce-Transparency / Increase-Contrast respektieren — dichteres Dim
+        // statt halbtransparenter Verdunklung.
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        let increaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        let targetDimAlpha: CGFloat = (reduceTransparency || increaseContrast) ? 0.85 : 0.62
+
+        // Dim auf ALLEN Screens (Multi-Monitor — sonst bleibt der Rest hell).
+        for screen in NSScreen.screens {
+            let dim = NSWindow(
+                contentRect: screen.frame,
+                styleMask: [.borderless],
+                backing: .buffered, defer: false
+            )
+            dim.level = Self.centeredFlyoutDimLevel
+            dim.backgroundColor = NSColor.black
+            dim.isOpaque = false
+            dim.hasShadow = false
+            dim.ignoresMouseEvents = false
+            dim.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+            dim.isReleasedWhenClosed = false
+            dim.alphaValue = 0    // wird im Fade hochanimiert
+            let clickRecognizer = NSClickGestureRecognizer(
+                target: self, action: #selector(centeredFlyoutDimClicked)
+            )
+            dim.contentView?.addGestureRecognizer(clickRecognizer)
+            dim.setFrame(screen.frame, display: true)
+            centeredFlyoutDimWindows.append(dim)
         }
+
+        // Content
+        let result = buildFlyoutHost(onDoubleTap: { [weak self] in
+            self?.hideCenteredFlyout()
+            Task { await self?.openTransactionsPanel() }
+        })
+        let contentHeight: CGFloat = result.hasDots ? 192 : 170
+        let contentWidth: CGFloat = 348
+        let content = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight),
+            styleMask: [.borderless],
+            backing: .buffered, defer: false
+        )
+        content.level = Self.centeredFlyoutContentLevel
+        content.isOpaque = false
+        content.backgroundColor = .clear
+        content.hasShadow = true
+        content.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        content.isReleasedWhenClosed = false
+        content.contentViewController = result.host
+        content.alphaValue = 0    // wird im Fade hochanimiert
+
+        // NSPopover-ähnliche Optik: gerundete Ecken + dezenter Rahmen am
+        // Host-Layer. `masksToBounds=true` clipped die SwiftUI-Inhalte sauber.
+        result.host.view.layer?.cornerRadius = 10
+        result.host.view.layer?.masksToBounds = true
+        result.host.view.layer?.borderWidth = 0.5
+        result.host.view.layer?.borderColor = NSColor.separatorColor.cgColor
+
+        // Innerhalb visibleFrame zentrieren — `visibleFrame` schließt Notch
+        // und Menubar bereits aus, damit das Flyout nicht hinter dem Notch
+        // landet wenn der Screen sehr klein ist (Stage Manager / 13"-MBP).
+        let visible = primaryScreen?.visibleFrame ?? primaryFrame
+        let cx = visible.midX - contentWidth / 2
+        let cy = visible.midY - contentHeight / 2
+        content.setFrameOrigin(NSPoint(x: cx, y: cy))
+
+        centeredFlyoutContentWindow = content
+        for dim in centeredFlyoutDimWindows { dim.orderFront(nil) }
+        content.orderFront(nil)
+
+        // Fade-In: Dim auf targetDimAlpha, Content auf 1.0
+        centeredFlyoutAnimating = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.16
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            for dim in centeredFlyoutDimWindows {
+                dim.animator().alphaValue = targetDimAlpha
+            }
+            content.animator().alphaValue = 1.0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                self?.centeredFlyoutAnimating = false
+            }
+        })
+
+        installCenteredFlyoutObservers()
+        installCenteredFlyoutBankCycleHotkeys()
+        scheduleCenteredFlyoutWatchdog()
+    }
+
+    /// Schließt Dim + Content mit Fade-Out. Idempotent.
+    fileprivate func hideCenteredFlyout() {
+        guard isCenteredFlyoutVisible else { return }
+
+        // Observer + Watchdog + Cycle-Hotkeys sofort entfernen — egal wie
+        // wir hier reinkommen.
+        removeCenteredFlyoutObservers()
+        removeCenteredFlyoutBankCycleHotkeys()
+        centeredFlyoutWatchdog?.cancel()
+        centeredFlyoutWatchdog = nil
+
+        let dimsToClose = centeredFlyoutDimWindows
+        let contentToClose = centeredFlyoutContentWindow
+        centeredFlyoutDimWindows = []
+        centeredFlyoutContentWindow = nil
+
+        centeredFlyoutAnimating = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            for dim in dimsToClose { dim.animator().alphaValue = 0 }
+            contentToClose?.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                for dim in dimsToClose { dim.orderOut(nil) }
+                contentToClose?.orderOut(nil)
+                self?.centeredFlyoutAnimating = false
+            }
+        })
+    }
+
+    @objc private func centeredFlyoutDimClicked() {
+        hideCenteredFlyout()
+    }
+
+    /// Schließt das Overlay, wenn die App den Fokus verliert (Cmd-Tab etc.).
+    /// Sonst bleibt es als zombie-Layer über fremden Apps hängen.
+    private func installCenteredFlyoutObservers() {
+        removeCenteredFlyoutObservers()  // idempotent
+        centeredFlyoutResignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated { self.hideCenteredFlyout() }
+        }
+    }
+
+    private func removeCenteredFlyoutObservers() {
+        if let obs = centeredFlyoutResignObserver {
+            NotificationCenter.default.removeObserver(obs)
+            centeredFlyoutResignObserver = nil
+        }
+    }
+
+    /// Hard-Timeout — falls Released-Event verloren ging (Hotkey-Driver-Hänger,
+    /// Cmd-Tab während gedrückt, …), schließt das Overlay nach 30s.
+    private func scheduleCenteredFlyoutWatchdog() {
+        centeredFlyoutWatchdog?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated { self.hideCenteredFlyout() }
+        }
+        centeredFlyoutWatchdog = item
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.centeredFlyoutMaxHoldSeconds,
+            execute: item
+        )
+    }
+
+    /// Registriert ←/→-Hotkeys mit denselben Modifiern wie der konfigurierte
+    /// Flyout-Hotkey, solange das Centered-Overlay sichtbar ist. Nur wenn
+    /// Multibanking eingerichtet ist (>1 Slot) — sonst kein Cycle nötig.
+    /// Carbon-Hotkeys brauchen keine Accessibility-Permissions, im Gegensatz
+    /// zu einem globalen NSEvent-Monitor.
+    private func installCenteredFlyoutBankCycleHotkeys() {
+        guard MultibankingStore.shared.slots.count > 1 else { return }
+        let defaults = UserDefaults.standard
+        let flyoutModifiers = defaults.integer(forKey: "globalHotkeyModifiers") > 0
+            ? defaults.integer(forKey: "globalHotkeyModifiers") : 4352   // ⌃⌘
+        // keyCodes: 123 = ←, 124 = →
+        GlobalHotkeyManager.shared.register(keyCode: 123, carbonModifiers: flyoutModifiers, role: .cycleBankPrev)
+        GlobalHotkeyManager.shared.register(keyCode: 124, carbonModifiers: flyoutModifiers, role: .cycleBankNext)
+    }
+
+    private func removeCenteredFlyoutBankCycleHotkeys() {
+        GlobalHotkeyManager.shared.unregister(role: .cycleBankPrev)
+        GlobalHotkeyManager.shared.unregister(role: .cycleBankNext)
+    }
+
+    /// Wechselt zur vorherigen (-1) oder nächsten (+1) Bank, wenn das
+    /// Centered-Flyout offen ist und Multibanking eingerichtet ist.
+    /// Wraps am Ende (modulo). No-op außerhalb des Centered-Modus.
+    private func cycleCenteredFlyoutBank(direction: Int) {
+        guard isCenteredFlyoutVisible else { return }
+        let store = MultibankingStore.shared
+        let count = store.slots.count
+        guard count > 1 else { return }
+        let next = ((store.activeIndex + direction) % count + count) % count
+        txVM.unifiedModeEnabled = false
+        Task { [weak self] in
+            await self?.switchToSlot(index: next)
+            await MainActor.run { self?.refreshFlyoutIfVisible() }
+        }
+        // Sofortiger Refresh — slots/dots-Indikator springt direkt, auch
+        // bevor die Bank-Daten async geladen sind. Der zweite Refresh oben
+        // aktualisiert dann den Balance-Text nach erfolgter Slot-Aktivierung.
+        refreshFlyoutIfVisible()
     }
 
     /// Polls until the mouse leaves the flyout, then closes it.
@@ -2701,10 +3137,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     /// Updates the flyout card in-place after a slot switch, without closing/reopening.
+    /// Aktualisiert sowohl das Status-Item-Popover als auch das zentrierte
+    /// Hold-Overlay, je nachdem was gerade sichtbar ist.
     private func refreshFlyoutIfVisible() {
-        guard let popover = balancePopover, popover.isShown,
-              let host = popover.contentViewController as? NSHostingController<StatusBalanceFlyoutCardView>
-        else { return }
+        let popoverHost: NSHostingController<StatusBalanceFlyoutCardView>? = {
+            guard let p = balancePopover, p.isShown else { return nil }
+            return p.contentViewController as? NSHostingController<StatusBalanceFlyoutCardView>
+        }()
+        let centeredHost = centeredFlyoutContentWindow?.contentViewController
+            as? NSHostingController<StatusBalanceFlyoutCardView>
+        guard popoverHost != nil || centeredHost != nil else { return }
         let store = MultibankingStore.shared
         let idx = store.activeIndex
         let count = store.slots.count
@@ -2761,8 +3203,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
         applyFlyoutDots(to: &rootView)
         let hasDots = store.slots.count > 1 && (!demoMode || isMultiDemo)
-        popover.contentSize = NSSize(width: 348, height: hasDots ? 192 : 170)
-        host.rootView = rootView
+        let newSize = NSSize(width: 348, height: hasDots ? 192 : 170)
+
+        if let popover = balancePopover, popover.isShown {
+            popover.contentSize = newSize
+        }
+        popoverHost?.rootView = rootView
+
+        if let content = centeredFlyoutContentWindow, let centeredHost {
+            // Re-Center bei Größenänderung — sonst springt das Window am
+            // Ankerpunkt (0,0 origin) statt mittig.
+            var frame = content.frame
+            if frame.size != newSize,
+               let screen = NSScreen.screens.first(where: {
+                   $0.frame.intersects(frame)
+               }) ?? NSScreen.main {
+                let visible = screen.visibleFrame
+                frame.size = newSize
+                frame.origin.x = visible.midX - newSize.width / 2
+                frame.origin.y = visible.midY - newSize.height / 2
+                content.setFrame(frame, display: true)
+            }
+            centeredHost.rootView = rootView
+        }
     }
 
     /// Populates dot-indicator data on a flyout rootView.
@@ -2788,7 +3251,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         Task { await openTransactionsPanel() }
     }
 
-    private func refreshAsync() async {
+    /// Refresht den Kontostand und triggert optional einen TX-Fetch.
+    ///
+    /// `suppressTransactionsFetch`: wenn true, wird der implizite TX-Fetch
+    /// auch bei `loadTransactionsOnStart=true` übersprungen. Der Caller ist
+    /// dann verantwortlich, selbst `checkNewBookings` aufzurufen. Wichtig
+    /// für `refreshFromCLI()`, das den TX-Fetch sequentiell selbst macht —
+    /// sonst rennen zwei TX-Fetches parallel gegen den HBCI-Mutex.
+    private func refreshAsync(suppressTransactionsFetch: Bool = false) async {
         // Prevent concurrent HBCI calls — banks like Volksbank fail with "Fehlender Dialogkontext"
         // when two simultaneous requests hit the same HBCI connection.
         guard !isHBCICallInFlight else {
@@ -2947,7 +3417,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 applyHideTimer()
 
                 // Avoid implicit TAN prompts on startup/auto-refresh unless explicitly enabled.
-                if loadTransactionsOnStart {
+                // CLI-Refresh setzt suppressTransactionsFetch=true und macht den TX-Fetch
+                // sequentiell selbst, sonst rennen zwei TX-Fetches parallel gegen den
+                // HBCI-Mutex und einer endet als „bank busy".
+                if loadTransactionsOnStart, !suppressTransactionsFetch {
                     Task { await checkNewBookings(userId: userId, password: password) }
                 }
 
@@ -3352,21 +3825,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     private func maybeTriggerTransactionsConfetti(transactions: [TransactionsResponse.Transaction], currentBalance: Double?) {
         guard hasNewIncomeForConfetti(in: transactions) else { return }
-        if UserDefaults.standard.integer(forKey: "celebrationStyle") == 1 {
-            txVM.rippleTrigger += 1
-        } else {
-            txVM.confettiTrigger += 1
-        }
+        txVM.rippleTrigger += 1
     }
 
     private func triggerInitialConfettiIfNeeded() -> Bool {
         guard !confettiInitialShown else { return false }
         confettiInitialShown = true
-        if UserDefaults.standard.integer(forKey: "celebrationStyle") == 1 {
-            txVM.rippleTrigger += 1
-        } else {
-            txVM.confettiTrigger += 1
-        }
+        txVM.rippleTrigger += 1
         return true
     }
 
@@ -3573,6 +4038,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             } else {
                 self.runSetupWizardIfNeeded()
             }
+        }
+    }
+
+    /// Zeigt nach einem Versions-Update einmalig kuratierte Highlights.
+    /// - Wird NICHT bei Erst-Installation gezeigt (Onboarding handled das).
+    /// - Wird NICHT gezeigt, wenn der User noch im Setup-Flow ist
+    ///   (`autoStartSetupWizardIfNeeded` triggert oben — eines von beiden).
+    /// - Setzt den Flag immer wenn die Sheet geöffnet wurde — kein erneutes
+    ///   Erscheinen bei mid-flow-Cancel.
+    private func showWhatsNewIfNeeded() {
+        guard !demoMode else { return }
+        let existingUser = CredentialsStore.exists()
+        guard existingUser else { return }   // Erst-Installation → setup wizard übernimmt
+        guard WhatsNewTrigger.shouldShowOnLaunch(isExistingUser: existingUser) else { return }
+        guard let version = WhatsNewTrigger.currentVersion() else { return }
+
+        // Launch-Settle-Delay analog zum Setup-Wizard, damit die Sheet
+        // nicht mitten ins Status-Item-Setup fällt.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            WhatsNewTrigger.markShown()
+            let panel = WhatsNewPanel(version: version)
+            panel.runModal()
         }
     }
 
@@ -3912,6 +4399,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Fresh setup — mark legacy slot migration as done so it never wipes sessions on first restart
             UserDefaults.standard.set(true, forKey: "simplebanking.migration.legacySlotFullReset.v1")
             Task { await self.refreshAsync() }
+            // 5-Schritte-Folge-Wizard nach allererstem Bank-Connect (nur einmal).
+            // Liegt absichtlich VOR promptAddAnotherAccount damit der User die
+            // Settings vor dem evtl. nächsten Bank-Setup gesehen hat.
+            runInitialSetupExtensionIfNeeded(slotId: "legacy")
             // After first-time setup: offer to add a second account
             promptAddAnotherAccount()
         case .demoMode:
@@ -3921,6 +4412,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
     
+    /// Zeigt nach dem allerersten Bank-Connect einen 5-Schritte-Folge-Wizard
+    /// (Gehaltstag, Dispo, App-Schutz, Dock-Mode, MCP). Wird nur einmal
+    /// gezeigt — Flag wird BEVOR die Sheet öffnet gesetzt damit der User
+    /// nicht genervt wird wenn er die Sheet schließt ohne durchzulaufen.
+    /// Add-Account-Pfad ruft diese Funktion nicht auf (separater Branch).
+    private func runInitialSetupExtensionIfNeeded(slotId: String) {
+        let key = "simplebanking.initialWizardCompleted"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        let panel = InitialSetupExtensionPanel(
+            slotId: slotId,
+            requestMasterPassword: { [weak self] in self?.requestMasterPassword() }
+        )
+        panel.runModal()
+    }
+
     private func promptAddAnotherAccount() {
         let alert = NSAlert()
         alert.messageText = t("Weiteres Konto einrichten?", "Add another account?")
@@ -4331,7 +4838,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             GlobalHotkeyManager.shared.onTriggered = { @Sendable [weak self] in
                 // Hotkey always opens the flyout regardless of the configured click mode
                 // (mouseOver-mode would otherwise be a no-op for the hotkey).
-                MainActor.assumeIsolated { self?.showBalanceFlyout() }
+                // Hold-to-Show-Modus: zentriert + Dim statt Popover am Status-Item.
+                MainActor.assumeIsolated {
+                    if UserDefaults.standard.bool(forKey: "flyoutHoldCenterEnabled") {
+                        self?.showCenteredFlyout()
+                    } else {
+                        self?.showBalanceFlyout()
+                    }
+                }
+            }
+            GlobalHotkeyManager.shared.onTriggerReleased = { @Sendable [weak self] in
+                // Release schließt das zentrierte Overlay, wenn eines offen ist.
+                // Wir checken den tatsächlichen Sichtbarkeits-Status statt die
+                // Preference: so funktioniert das Release auch nach einem
+                // Live-Toggle des Settings, und der Popover-Modus bleibt
+                // toggle-basiert (no-op beim Release).
+                MainActor.assumeIsolated {
+                    if self?.isCenteredFlyoutVisible == true {
+                        self?.hideCenteredFlyout()
+                    }
+                }
             }
         } else {
             GlobalHotkeyManager.shared.unregister(role: .flyout)
@@ -4352,6 +4878,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
         } else {
             GlobalHotkeyManager.shared.unregister(role: .refresh)
+        }
+
+        // Bank-Cycle-Callbacks (←/→) sind permanent gehookt; die Carbon-
+        // Registration passiert dynamisch in show/hideCenteredFlyout, damit
+        // die Pfeiltasten nur während des Hold-Mode global gegrabbed werden.
+        GlobalHotkeyManager.shared.onCycleBankPrev = { @Sendable [weak self] in
+            MainActor.assumeIsolated { self?.cycleCenteredFlyoutBank(direction: -1) }
+        }
+        GlobalHotkeyManager.shared.onCycleBankNext = { @Sendable [weak self] in
+            MainActor.assumeIsolated { self?.cycleCenteredFlyoutBank(direction: +1) }
         }
     }
 

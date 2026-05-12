@@ -597,28 +597,32 @@ enum TransactionsDatabase {
     }
 
     /// Aggregiert ausgehende Transaktionen (`betrag < 0`) eines Slots zu
-    /// `TransferRecipientCandidate`s — eine pro `(empfaenger, iban)`-Paar.
-    /// Nur Buchungen mit Empfänger-Name UND IBAN werden berücksichtigt
-    /// (für eine Überweisung sind beide nötig).
-    /// Sortierung in SQL nach `frequency DESC, last_date DESC`; ein
-    /// Recency-Boost-Re-Sort findet im `TransferRecipientStore` statt.
+    /// `TransferRecipientCandidate`s. Name kommt aus `empfaenger` ODER
+    /// `absender` — manche Bank-Backends (insb. FinTS-SEPA-Aufträge) legen
+    /// den Counterparty im `debtor`-Feld ab. IBAN kann fehlen (manuelle
+    /// Aufträge ohne IBAN-Rückgabe von der Bank); solche Kandidaten
+    /// erscheinen trotzdem in der Liste — die UI fragt dann den User nach
+    /// der IBAN, bevor gesendet wird. Gruppierung: nach `(iban, name)` —
+    /// gleiche IBAN = ein Empfänger; wenn IBAN fehlt, nach Name getrennt.
+    /// Sortierung: `frequency DESC, last_date DESC`; Recency-Boost-Re-Sort
+    /// findet im `TransferRecipientStore` statt.
     static func loadOutgoingRecipientCandidates(
         slotId: String,
-        limit: Int = 30,
+        limit: Int = 1000,
         bankId: String = "primary"
     ) throws -> [TransferRecipientCandidate] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
 
         let aggSql = """
-            SELECT empfaenger AS name, iban AS iban,
+            SELECT IFNULL(iban, '') AS iban_key,
+                   COALESCE(NULLIF(empfaenger, ''), NULLIF(absender, '')) AS name_key,
                    COUNT(*) AS freq,
                    MAX(buchungsdatum) AS last_date
             FROM transactions
             WHERE slot_id = ? AND betrag < 0
-                  AND empfaenger IS NOT NULL AND empfaenger != ''
-                  AND iban IS NOT NULL AND iban != ''
-            GROUP BY empfaenger, iban
+            GROUP BY iban_key, name_key
+            HAVING name_key IS NOT NULL
             ORDER BY freq DESC, last_date DESC
             LIMIT ?
             """
@@ -628,23 +632,28 @@ enum TransactionsDatabase {
             var candidates: [TransferRecipientCandidate] = []
             candidates.reserveCapacity(aggRows.count)
             for row in aggRows {
-                let name: String = row["name"] ?? ""
-                let iban: String = row["iban"] ?? ""
+                let name: String = row["name_key"] ?? ""
+                let iban: String = row["iban_key"] ?? ""
                 let freq: Int = row["freq"] ?? 0
                 let lastDate: String = row["last_date"] ?? ""
 
                 // Most-frequent absolute Betrag — Mode statt Mean, damit Miete
                 // (immer 1200 €) trotz einer Sonderzahlung (300 €) als Default-
                 // Wert erscheint. Bei Ties: kleinster Betrag (defensiv).
+                // Match auf das gleiche (iban, name)-Paar wie die Aggregation —
+                // sonst würden bei mehreren IBAN-losen Empfängern die Beträge
+                // gemischt.
                 let amountSql = """
                     SELECT abs(betrag) AS amt, COUNT(*) AS cnt
                     FROM transactions
-                    WHERE slot_id = ? AND empfaenger = ? AND iban = ? AND betrag < 0
+                    WHERE slot_id = ? AND betrag < 0
+                          AND IFNULL(iban, '') = ?
+                          AND COALESCE(NULLIF(empfaenger, ''), NULLIF(absender, '')) = ?
                     GROUP BY abs(betrag)
                     ORDER BY cnt DESC, amt ASC
                     LIMIT 1
                     """
-                let amountRow = try Row.fetchOne(db, sql: amountSql, arguments: [slotId, name, iban])
+                let amountRow = try Row.fetchOne(db, sql: amountSql, arguments: [slotId, iban, name])
                 let mostFrequentAmount: Decimal? = amountRow.flatMap {
                     if let d: Double = $0["amt"] {
                         return Decimal(d)
@@ -657,11 +666,13 @@ enum TransactionsDatabase {
                 let remSql = """
                     SELECT verwendungszweck
                     FROM transactions
-                    WHERE slot_id = ? AND empfaenger = ? AND iban = ? AND betrag < 0
+                    WHERE slot_id = ? AND betrag < 0
+                          AND IFNULL(iban, '') = ?
+                          AND COALESCE(NULLIF(empfaenger, ''), NULLIF(absender, '')) = ?
                     ORDER BY buchungsdatum DESC
                     LIMIT 1
                     """
-                let remRow = try Row.fetchOne(db, sql: remSql, arguments: [slotId, name, iban])
+                let remRow = try Row.fetchOne(db, sql: remSql, arguments: [slotId, iban, name])
                 let lastRemittance: String? = remRow?["verwendungszweck"]
 
                 candidates.append(TransferRecipientCandidate(
@@ -1143,47 +1154,81 @@ enum TransactionsDatabase {
     }
 
     private static func backfillMerchantColumns(db: Database) throws {
-        let rows = try Row.fetchAll(
-            db,
-            sql: """
+        // Slot-scoped Migration: seit v6 existiert die `slot_id`-Spalte und ab
+        // v19 ist (tx_id, slot_id) Composite-PK. Frühe Migrationen (v2/v3)
+        // rufen diesen Backfill noch ohne slot_id-Spalte auf — wir branchen.
+        let columns = try Row.fetchAll(db, sql: "PRAGMA table_info(transactions)")
+        let hasSlotId = columns.contains { ($0["name"] as String?) == "slot_id" }
+
+        let selectSQL: String = hasSlotId
+            ? """
+                SELECT tx_id, slot_id, empfaenger, absender, verwendungszweck,
+                       additional_information, iban
+                FROM transactions
+                """
+            : """
                 SELECT tx_id, empfaenger, absender, verwendungszweck,
                        additional_information, iban
                 FROM transactions
                 """
-        )
+        let rows = try Row.fetchAll(db, sql: selectSQL)
 
         for row in rows {
             let txID: String = row["tx_id"]
+            let slotId: String? = hasSlotId ? row["slot_id"] : nil
             let empfaenger: String? = row["empfaenger"]
             let absender: String? = row["absender"]
             let verwendungszweck: String? = row["verwendungszweck"]
             let additionalInformation: String? = row["additional_information"]
             let iban: String? = row["iban"]
 
+            let resolverSlotId = slotId ?? TransactionsDatabase.activeSlotId
             let resolution = MerchantResolver.resolve(
                 txID: txID,
+                slotId: resolverSlotId,
                 empfaenger: empfaenger,
                 absender: absender,
                 verwendungszweck: verwendungszweck,
                 additionalInformation: additionalInformation
             )
-            try db.execute(
-                sql: """
-                    UPDATE transactions
-                    SET effective_merchant = ?,
-                        normalized_merchant = ?,
-                        merchant_source = ?,
-                        merchant_confidence = ?
-                    WHERE tx_id = ?
-                    """,
-                arguments: [
-                    resolution.effectiveMerchant,
-                    resolution.normalizedMerchant,
-                    resolution.source,
-                    resolution.confidence,
-                    txID,
-                ]
-            )
+            if let slotId {
+                try db.execute(
+                    sql: """
+                        UPDATE transactions
+                        SET effective_merchant = ?,
+                            normalized_merchant = ?,
+                            merchant_source = ?,
+                            merchant_confidence = ?
+                        WHERE tx_id = ? AND slot_id = ?
+                        """,
+                    arguments: [
+                        resolution.effectiveMerchant,
+                        resolution.normalizedMerchant,
+                        resolution.source,
+                        resolution.confidence,
+                        txID,
+                        slotId,
+                    ]
+                )
+            } else {
+                try db.execute(
+                    sql: """
+                        UPDATE transactions
+                        SET effective_merchant = ?,
+                            normalized_merchant = ?,
+                            merchant_source = ?,
+                            merchant_confidence = ?
+                        WHERE tx_id = ?
+                        """,
+                    arguments: [
+                        resolution.effectiveMerchant,
+                        resolution.normalizedMerchant,
+                        resolution.source,
+                        resolution.confidence,
+                        txID,
+                    ]
+                )
+            }
         }
     }
 

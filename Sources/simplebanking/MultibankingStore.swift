@@ -31,6 +31,12 @@ final class MultibankingStore: ObservableObject {
 
     @Published private(set) var slots: [BankSlot] = []
     @Published private(set) var activeIndex: Int = 0
+    /// Monoton steigender Counter, der bei jedem Slot-Switch inkrementiert
+    /// wird. Async Bank-Calls schnappen einen Snapshot und verwerfen ihre
+    /// Continuation, wenn der Snapshot nicht mehr passt — verhindert dass
+    /// Daten aus Slot A nach einem Switch im Kontext von Slot B landen.
+    /// Genutzt vom `YaxiService` SCA-Field-Branch für die Slot-Race-Defense.
+    @Published private(set) var activeSlotEpoch: Int = 0
 
     var activeSlot: BankSlot? { slots.indices.contains(activeIndex) ? slots[activeIndex] : slots.first }
 
@@ -89,6 +95,7 @@ final class MultibankingStore: ObservableObject {
     func setActive(index: Int) {
         guard slots.indices.contains(index) else { return }
         activeIndex = index
+        activeSlotEpoch &+= 1   // overflow-safe — Snapshots vergleichen mit ==
         UserDefaults.standard.set(activeIndex, forKey: activeIndexKey)
     }
 

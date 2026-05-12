@@ -119,4 +119,36 @@ final class LogSanitizerTests: XCTestCase {
         XCTAssertFalse(output.contains("hans.mueller@example.com"),
             "account=value muss als secret redacted werden")
     }
+
+    // MARK: - Diagnose-Werte bleiben sichtbar (Bug-Fix 2026-05-07)
+
+    func test_keepsDiagnosticByteCount() {
+        // Vorher: "outcome.connectionData=168b" → "outcome.<redacted-secret>" (verlor 168b)
+        let input = "fetchBalances: outcome.connectionData=168b"
+        let output = LogSanitizer.redact(input)
+        XCTAssertTrue(output.contains("connectionData=168b"),
+            "Diagnostic byte counts wie '168b' sind nicht sensitiv und sollen sichtbar bleiben")
+    }
+
+    func test_keepsDiagnosticNil() {
+        let input = "SCA result: connectionData=nil"
+        let output = LogSanitizer.redact(input)
+        XCTAssertTrue(output.contains("connectionData=nil"))
+    }
+
+    func test_keepsDiagnosticBool() {
+        let input = "session=true useKC=false"
+        let output = LogSanitizer.redact(input)
+        XCTAssertTrue(output.contains("session=true"))
+        XCTAssertTrue(output.contains("useKC=false"))
+    }
+
+    func test_redactionPreservesKeyName() {
+        // Key bleibt sichtbar, Wert wird ersetzt.
+        let input = "auth password=geheim123 status=ok"
+        let output = LogSanitizer.redact(input)
+        XCTAssertTrue(output.contains("password=<redacted-secret>"),
+            "Replacement muss den Key-Namen erhalten")
+        XCTAssertFalse(output.contains("geheim123"))
+    }
 }

@@ -506,39 +506,45 @@ struct TransactionDetailView: View {
                 VStack(spacing: 16) {
                     // Betrag-Kachel mit Logo / Kategorie-Icon
                     HStack(spacing: 16) {
-                        // Logo-Bereich: Klick = Dateiauswahl, Drag & Drop = eigenes Logo
-                        ZStack {
-                            if let logo = displayLogo {
-                                Image(nsImage: logo)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 48, height: 48)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
-                            } else {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color.secondary.opacity(0.12))
-                                    .frame(width: 48, height: 48)
-                                    .overlay(
-                                        Image(systemName: selectedCategory.icon)
-                                            .font(.system(size: 22))
-                                            .foregroundColor(.secondary)
-                                    )
+                        // Logo-Bereich: Klick = Dateiauswahl, Drag & Drop = eigenes Logo.
+                        // Button statt .onTapGesture — letzteres hat in einer ScrollView
+                        // bei manchen Layout-Konstellationen flackernde Hit-Tests; Button
+                        // mit .contentShape(Rectangle()) ist die robuste macOS-Variante.
+                        Button(action: { openLogoPicker() }) {
+                            ZStack {
+                                if let logo = displayLogo {
+                                    Image(nsImage: logo)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 48, height: 48)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)
+                                } else {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color.secondary.opacity(0.12))
+                                        .frame(width: 48, height: 48)
+                                        .overlay(
+                                            Image(systemName: selectedCategory.icon)
+                                                .font(.system(size: 22))
+                                                .foregroundColor(.secondary)
+                                        )
+                                }
+                                // Drop-Highlight
+                                if isLogoDropTargeted {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .strokeBorder(Color.accentColor, lineWidth: 2)
+                                        .frame(width: 48, height: 48)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(Color.accentColor.opacity(0.15))
+                                        )
+                                }
                             }
-                            // Drop-Highlight
-                            if isLogoDropTargeted {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                                    .frame(width: 48, height: 48)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(Color.accentColor.opacity(0.15))
-                                    )
-                            }
+                            .frame(width: 48, height: 48)
+                            .contentShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        .frame(width: 48, height: 48)
+                        .buttonStyle(PlainButtonStyle())
                         .help("Klick oder Drag & Drop für eigenes Logo")
-                        .onTapGesture { openLogoPicker() }
                         .onDrop(of: ["public.file-url"], isTargeted: $isLogoDropTargeted) { providers in
                             handleLogoDrop(providers)
                         }

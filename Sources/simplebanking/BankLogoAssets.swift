@@ -352,13 +352,10 @@ enum BankLogoAssets {
     // MARK: - Dark Mode Detection
 
     /// Gibt true zurück wenn das Logo dieser Bank im Dark Mode invertiert werden soll.
-    /// Kriterien: User-Setting `bankLogoAdaptDarkMode` ist nicht abgeschaltet UND SVG hat
-    /// data-maskable="true" UND lineare Rec.709-Luminanz der Brandfarbe < 0.10.
+    /// Kriterien: SVG hat `data-maskable="true"` UND lineare Rec.709-Luminanz
+    /// der Brandfarbe < 0.10. Seit v1.5.0 kein User-Toggle mehr — Auto-Invert
+    /// ist immer aktiv (war Default-on).
     static func isDark(brandId: String) -> Bool {
-        // Default: angeschaltet (object == nil → ?? true). User kann in Settings
-        // → Verhalten den Auto-Invert für Bank-Logos deaktivieren.
-        let enabled = UserDefaults.standard.object(forKey: "bankLogoAdaptDarkMode") as? Bool ?? true
-        guard enabled else { return false }
         return darkBrandIDs.contains(brandId)
     }
 

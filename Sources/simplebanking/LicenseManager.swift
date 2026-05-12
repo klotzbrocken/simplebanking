@@ -3,7 +3,7 @@ import Security
 
 // MARK: - LicenseManager
 //
-// Verwaltet die Lizenz-Aktivierung über die Gumroad License-Verify-API.
+// Verwaltet die Lizenz-Aktivierung über die Polar.sh License-Verify-API.
 // Der License-Key wird im Keychain abgelegt; ein 14-Tage-Offline-Grace
 // erlaubt App-Nutzung auch ohne Netzwerk falls die letzte Validation
 // erfolgreich war.
@@ -11,7 +11,9 @@ import Security
 // Singleton + ObservableObject damit SwiftUI-Settings-Sektion + Upsell-
 // Sheet reaktiv darauf reagieren können.
 //
-// Gumroad-API-Doku: https://app.gumroad.com/api#licenses
+// Polar-Doku:
+//   https://docs.polar.sh/features/benefits/license-keys
+//   https://docs.polar.sh/api-reference/customer-portal/license-keys/validate
 
 @MainActor
 final class LicenseManager: ObservableObject {
@@ -37,6 +39,31 @@ final class LicenseManager: ObservableObject {
 
     @Published private(set) var status: Status = .unknown
 
+    /// Berechnet den Start-Status synchron aus dem persistierten Cache.
+    /// Wird vom Init aufgerufen — niemals `.licensed`, weil das eine
+    /// erfolgreiche Server-Revalidation voraussetzt. Innerhalb des
+    /// Grace-Fensters → `.offlineGrace`, sonst → `.unlicensed`.
+    ///
+    /// Why: bug 2026-05-11 — der alte Init setzte `.licensed` sofort, womit
+    /// `isLicensed == true` selbst bei längst abgelaufener Grace blieb, bis
+    /// `revalidate()` async fertig war. Im Fenster konnte `sendMoney()`
+    /// einen Transfer mit dem Transfer-Pair signieren.
+    static func initialStatusFromCache(
+        hasKey: Bool,
+        lastValidatedAt: Date?,
+        now: Date = Date(),
+        gracePeriod: TimeInterval = LicenseConfig.offlineGracePeriod
+    ) -> Status {
+        guard hasKey, let lastValidated = lastValidatedAt else { return .unlicensed }
+        let age = now.timeIntervalSince(lastValidated)
+        // age < 0 = lastValidatedAt in der Zukunft (Clock-Skew, Datums-Reset).
+        // Behandeln wie „abgelaufen", nicht wie „frisch".
+        if age >= 0, age < gracePeriod {
+            return .offlineGrace(lastValidatedAt: lastValidated)
+        }
+        return .unlicensed
+    }
+
     var isLicensed: Bool {
         switch status {
         case .licensed, .offlineGrace: return true
@@ -54,8 +81,17 @@ final class LicenseManager: ObservableObject {
     // MARK: - Keychain & cache keys
 
     private static let kcService = "tech.yaxi.simplebanking"
-    private static let kcAccount = "license.gumroadKey"
+    /// Keychain-Account-Schlüssel für den License-Key. Bewusst neutral
+    /// benannt (war früher `license.gumroadKey`); migrationsfrei, weil das
+    /// Keychain ohnehin gewipt wurde mit dem Polar-Switch.
+    private static let kcAccount = "license.providerKey"
     private static let lastValidatedKey = "license.lastValidatedAt"
+    #if DEBUG
+    /// Gesetzt wenn der Master-Code (Test-Key) aktiviert wurde. Bypassed
+    /// Polar komplett. Nur in DEBUG-Builds — im Release ist die Konstante
+    /// (und damit der ganze Code-Pfad) durch `#if DEBUG` weg-compiliert.
+    private static let masterCodeFlag = "license.masterCodeActive"
+    #endif
 
     private var lastNetworkAttempt: Date?
 
@@ -68,21 +104,34 @@ final class LicenseManager: ObservableObject {
             status = .notConfigured
             return
         }
-        if readKeychain() != nil,
-           let lastValidated = UserDefaults.standard.object(forKey: Self.lastValidatedKey) as? Date {
-            // Cache vorhanden → optimistisch lizenziert annehmen, async re-validate
-            status = .licensed(lastValidatedAt: lastValidated)
+        #if DEBUG
+        // Master-Code-Bypass hat Vorrang. Wenn der Flag gesetzt ist, sind wir
+        // lizenziert, ohne Polar zu kontaktieren. Nur in DEBUG.
+        if isMasterCodeActive {
+            status = .licensed(lastValidatedAt: Date())
+            return
+        }
+        #endif
+        let hasKey = readKeychain() != nil
+        let lastValidated = UserDefaults.standard.object(forKey: Self.lastValidatedKey) as? Date
+        // Sync korrekt anhand des Grace-Fensters — niemals direkt `.licensed`.
+        // `revalidate()` promoviert anschließend bei Server-OK auf `.licensed`.
+        status = Self.initialStatusFromCache(hasKey: hasKey, lastValidatedAt: lastValidated)
+        if hasKey {
             Task { await revalidate() }
-        } else {
-            status = .unlicensed
         }
     }
 
+    #if DEBUG
+    private var isMasterCodeActive: Bool {
+        UserDefaults.standard.bool(forKey: Self.masterCodeFlag)
+    }
+    #endif
+
     // MARK: - Public API
 
-    /// Aktiviert eine Lizenz: Gumroad-Verify-Call mit
-    /// `increment_uses_count=true`. Bei Erfolg wird der Key im Keychain
-    /// abgelegt und der Status auf `licensed` gesetzt.
+    /// Aktiviert eine Lizenz: Polar Validate-Call. Bei Erfolg wird der Key
+    /// im Keychain abgelegt und der Status auf `licensed` gesetzt.
     func activate(licenseKey: String) async throws {
         guard LicenseConfig.isConfigured else {
             throw LicenseError.notConfigured
@@ -91,14 +140,23 @@ final class LicenseManager: ObservableObject {
         guard !trimmed.isEmpty else {
             throw LicenseError.invalid(message: L10n.t("Lizenz-Key fehlt.", "License key is missing."))
         }
-        let response = try await verifyOnGumroad(key: trimmed, incrementUses: true)
+        #if DEBUG
+        // Master-Code überspringt Polar komplett. Nur in DEBUG.
+        if let master = LicenseConfig.masterCode, trimmed == master {
+            UserDefaults.standard.set(true, forKey: Self.masterCodeFlag)
+            status = .licensed(lastValidatedAt: Date())
+            AppLogger.log("license: master code activated (DEBUG only)", category: "License")
+            return
+        }
+        #endif
+        let response = try await verifyOnPolar(key: trimmed)
         try ensureValid(response)
         // Erfolgreich → speichern
         writeKeychain(trimmed)
         let now = Date()
         UserDefaults.standard.set(now, forKey: Self.lastValidatedKey)
         status = .licensed(lastValidatedAt: now)
-        AppLogger.log("license: activated, uses=\(response.uses ?? -1)", category: "License")
+        AppLogger.log("license: activated, status=\(response.status.rawValue) usage=\(response.usage)", category: "License")
     }
 
     /// Re-validiert eine bereits aktivierte Lizenz im Hintergrund.
@@ -109,6 +167,13 @@ final class LicenseManager: ObservableObject {
             status = .notConfigured
             return
         }
+        #if DEBUG
+        // Master-Code skippt Re-Validation. Nur in DEBUG.
+        if isMasterCodeActive {
+            status = .licensed(lastValidatedAt: Date())
+            return
+        }
+        #endif
         guard let key = readKeychain() else {
             status = .unlicensed
             return
@@ -120,7 +185,7 @@ final class LicenseManager: ObservableObject {
         }
         lastNetworkAttempt = Date()
         do {
-            let response = try await verifyOnGumroad(key: key, incrementUses: false)
+            let response = try await verifyOnPolar(key: key)
             try ensureValid(response)
             let now = Date()
             UserDefaults.standard.set(now, forKey: Self.lastValidatedKey)
@@ -159,6 +224,9 @@ final class LicenseManager: ObservableObject {
             kSecAttrAccount: Self.kcAccount
         ] as CFDictionary)
         UserDefaults.standard.removeObject(forKey: Self.lastValidatedKey)
+        #if DEBUG
+        UserDefaults.standard.removeObject(forKey: Self.masterCodeFlag)
+        #endif
     }
 
     private func applyOfflineGrace() {
@@ -172,46 +240,58 @@ final class LicenseManager: ObservableObject {
         }
     }
 
-    private func ensureValid(_ response: GumroadVerifyResponse) throws {
-        guard response.success else {
+    private func ensureValid(_ response: PolarValidateResponse) throws {
+        switch response.status {
+        case .granted:
+            break  // ok
+        case .revoked:
             throw LicenseError.invalid(
-                message: response.message ?? L10n.t("Lizenz ungültig.", "License invalid.")
+                message: L10n.t("Lizenz wurde widerrufen.", "License has been revoked.")
+            )
+        case .disabled:
+            throw LicenseError.invalid(
+                message: L10n.t("Lizenz ist deaktiviert.", "License is disabled.")
             )
         }
-        let purchase = response.purchase
-        if purchase?.licenseDisabled == true {
+        // Hard-Expiry: wenn Polar ein expires_at liefert und das in der
+        // Vergangenheit liegt, ist die Lizenz tot. (Wir konfigurieren
+        // expiry=unendlich, der Check ist also defensiv.)
+        if let expires = response.expiresAt, expires < Date() {
             throw LicenseError.invalid(
-                message: L10n.t("Lizenz wurde deaktiviert.", "License has been disabled.")
-            )
-        }
-        if purchase?.refunded == true {
-            throw LicenseError.invalid(
-                message: L10n.t("Bezahlung wurde zurückerstattet.", "Payment was refunded.")
-            )
-        }
-        if purchase?.chargebacked == true {
-            throw LicenseError.invalid(
-                message: L10n.t("Bezahlung wurde zurückgebucht.", "Payment was charged back.")
+                message: L10n.t("Lizenz ist abgelaufen.", "License has expired.")
             )
         }
     }
 
-    // MARK: - Gumroad HTTP
+    // MARK: - Polar HTTP
 
-    private func verifyOnGumroad(key: String, incrementUses: Bool) async throws -> GumroadVerifyResponse {
-        var components = URLComponents()
-        components.queryItems = [
-            URLQueryItem(name: "product_id", value: LicenseConfig.gumroadProductId),
-            URLQueryItem(name: "license_key", value: key),
-            URLQueryItem(name: "increment_uses_count", value: incrementUses ? "true" : "false"),
-        ]
-        guard let body = components.percentEncodedQuery?.data(using: .utf8) else {
-            throw LicenseError.network(NSError(domain: "License", code: -1))
+    /// POST /v1/customer-portal/license-keys/validate
+    /// Auth: keine — der Endpoint ist customer-facing, key+org_id sind die
+    /// Authentifikation. Body ist JSON.
+    private func verifyOnPolar(key: String) async throws -> PolarValidateResponse {
+        let url = LicenseConfig.apiBaseURL
+            .appendingPathComponent("v1")
+            .appendingPathComponent("customer-portal")
+            .appendingPathComponent("license-keys")
+            .appendingPathComponent("validate")
+
+        struct Body: Encodable {
+            let key: String
+            let organization_id: String
         }
-        var req = URLRequest(url: URL(string: "https://api.gumroad.com/v2/licenses/verify")!)
+        let body = Body(key: key, organization_id: LicenseConfig.polarOrganizationId)
+        let bodyData: Data
+        do {
+            bodyData = try JSONEncoder().encode(body)
+        } catch {
+            throw LicenseError.network(error)
+        }
+
+        var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.httpBody = body
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.httpBody = bodyData
         req.timeoutInterval = 15
 
         let (data, response): (Data, URLResponse)
@@ -223,16 +303,30 @@ final class LicenseManager: ObservableObject {
         guard let http = response as? HTTPURLResponse else {
             throw LicenseError.network(NSError(domain: "License", code: -2))
         }
-        // Gumroad gibt 404 für ungültigen Product-ID, 200 für valid/invalid License
+        // 404 = Key/org-Combination existiert nicht
         if http.statusCode == 404 {
             throw LicenseError.invalid(
-                message: L10n.t("Produkt nicht gefunden — bitte Konfig prüfen.",
-                                "Product not found — please check config.")
+                message: L10n.t("Lizenz-Key nicht gefunden — bitte prüfen.",
+                                "License key not found — please verify.")
             )
+        }
+        // 422 = Validation-Fehler (z.B. Conditions stimmen nicht); Polar
+        // liefert ein detail-Feld zurück
+        if http.statusCode == 422 {
+            let detail = (try? JSONDecoder().decode(PolarErrorResponse.self, from: data))?.detail
+                .map { $0.msg }.joined(separator: " · ")
+            throw LicenseError.invalid(
+                message: detail?.nilIfEmpty ?? L10n.t("Lizenz-Validierung fehlgeschlagen.",
+                                                       "License validation failed.")
+            )
+        }
+        guard (200...299).contains(http.statusCode) else {
+            throw LicenseError.network(NSError(domain: "License", code: http.statusCode,
+                                               userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"]))
         }
         do {
             let decoder = JSONDecoder()
-            return try decoder.decode(GumroadVerifyResponse.self, from: data)
+            return try decoder.decode(PolarValidateResponse.self, from: data)
         } catch {
             throw LicenseError.network(error)
         }
@@ -284,29 +378,56 @@ enum LicenseError: Error {
     case notConfigured
 }
 
-// MARK: - Gumroad response model
+// MARK: - Polar response models
 
-private struct GumroadVerifyResponse: Decodable {
-    let success: Bool
-    let uses: Int?
-    let message: String?
-    let purchase: Purchase?
+/// Subset von Polars 200-Response für `/customer-portal/license-keys/validate`.
+/// Wir lesen nur was wir tatsächlich auswerten — alles andere (customer,
+/// activation, modified_at, …) wird ignoriert.
+private struct PolarValidateResponse: Decodable {
+    let id: String
+    let status: PolarLicenseStatus
+    let usage: Int
+    let validations: Int
+    let lastValidatedAt: Date?
+    let expiresAt: Date?
 
-    struct Purchase: Decodable {
-        let licenseKey: String?
-        let licenseDisabled: Bool?
-        let refunded: Bool?
-        let chargebacked: Bool?
-        let subscriptionCancelledAt: String?
-        let subscriptionFailedAt: String?
+    enum CodingKeys: String, CodingKey {
+        case id, status, usage, validations
+        case lastValidatedAt = "last_validated_at"
+        case expiresAt = "expires_at"
+    }
 
-        enum CodingKeys: String, CodingKey {
-            case licenseKey = "license_key"
-            case licenseDisabled = "license_disabled"
-            case refunded
-            case chargebacked
-            case subscriptionCancelledAt = "subscription_cancelled_at"
-            case subscriptionFailedAt = "subscription_failed_at"
-        }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.status = try c.decode(PolarLicenseStatus.self, forKey: .status)
+        self.usage = try c.decode(Int.self, forKey: .usage)
+        self.validations = try c.decode(Int.self, forKey: .validations)
+        self.lastValidatedAt = try c.decodeIfPresent(String.self, forKey: .lastValidatedAt)
+            .flatMap(Self.iso8601.date(from:))
+        self.expiresAt = try c.decodeIfPresent(String.self, forKey: .expiresAt)
+            .flatMap(Self.iso8601.date(from:))
+    }
+
+    /// ISO8601DateFormatter ist laut Apple-Doku thread-safe, das Strict-
+    /// Concurrency-Model erkennt das aber nicht — daher `nonisolated(unsafe)`.
+    nonisolated(unsafe) private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+}
+
+private enum PolarLicenseStatus: String, Decodable {
+    case granted
+    case revoked
+    case disabled
+}
+
+/// Polars 422-Validation-Error-Format (FastAPI-Style).
+private struct PolarErrorResponse: Decodable {
+    let detail: [Item]
+    struct Item: Decodable {
+        let msg: String
     }
 }

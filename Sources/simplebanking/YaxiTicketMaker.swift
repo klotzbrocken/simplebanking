@@ -16,13 +16,19 @@ enum YaxiTicketMaker {
     /// Issues a signed JWT ticket for the given YAXI service.
     /// - Parameter service: YAXI service name, e.g. "Balances", "Transactions", "Accounts".
     /// - Parameter data: Optional structured payload data (serialised as JSON). Pass nil for null.
-    static func issueTicket(service: String, data: Any? = nil) -> String {
+    /// - Parameter useTransferKey: Wenn `true`, signiert das Ticket mit dem
+    ///   License-gated Transfer-Pair statt dem Default-Pair. Nur für
+    ///   `service == "Transfer"` relevant.
+    static func issueTicket(service: String, data: Any? = nil, useTransferKey: Bool = false) -> String {
         let id = UUID().uuidString.lowercased()
         let now = Int(Date().timeIntervalSince1970)
 
+        let kid = useTransferKey ? Secrets.yaxiTransferKeyId : Secrets.yaxiKeyId
+        let secretB64 = useTransferKey ? Secrets.yaxiTransferSecretB64 : Secrets.yaxiSecretB64
+
         let header: [String: Any] = [
             "alg": "HS256",
-            "kid": Secrets.yaxiKeyId,
+            "kid": kid,
             "typ": "JWT"
         ]
 
@@ -45,7 +51,7 @@ enum YaxiTicketMaker {
         let payloadEncoded = base64URLEncode(payloadJSON)
         let signingInput = "\(headerEncoded).\(payloadEncoded)"
 
-        let secretData = Data(base64Encoded: Secrets.yaxiSecretB64)!
+        let secretData = Data(base64Encoded: secretB64)!
         let key = SymmetricKey(data: secretData)
         let mac = HMAC<SHA256>.authenticationCode(for: Data(signingInput.utf8), using: key)
         let signature = base64URLEncode(Data(mac))
@@ -58,8 +64,16 @@ enum YaxiTicketMaker {
     /// ticket data.") trägt das Ticket-Payload kein Daten-Argument; alle
     /// Empfänger-Details werden direkt beim `client.transfer(details:)`
     /// Aufruf übergeben.
+    ///
+    /// **License-Gating:** signiert mit dem Transfer-Pair, sobald die App
+    /// lizenziert ist (Polar oder REMOVE-FOR-RELEASE Master-Code).
+    /// Ohne Lizenz fällt es auf das Default-Pair zurück — was YAXI-server-
+    /// seitig für `Transfer` ablehnt und damit eine zweite Schutzschicht
+    /// neben dem UI-Gate bildet.
+    @MainActor
     static func issueTransferTicket() -> String {
-        return issueTicket(service: "Transfer", data: nil)
+        let licensed = LicenseManager.shared.isLicensedOrDemo
+        return issueTicket(service: "Transfer", data: nil, useTransferKey: licensed)
     }
 
     /// Convenience: Transactions ticket including account and date range in the payload.

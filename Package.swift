@@ -42,8 +42,6 @@ let package = Package(
             ],
             resources: [
                 .copy("Resources/categories_de.json"),
-                .copy("Resources/Clippy.png"),
-                .copy("Resources/animations.json"),
                 .copy("Resources/bank-logos"),
                 .copy("Resources/merchant-logos"),
                 .copy("Resources/Fonts/SpaceMono-Regular.ttf"),

@@ -10,9 +10,11 @@ private struct TransactionsPanelView: View {
     @ObservedObject private var multibankingStore = MultibankingStore.shared
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
-    @AppStorage("infiniteScrollEnabled") private var infiniteScrollEnabled: Bool = false
-    @AppStorage("confettiEffect") private var confettiEffect: Int = ConfettiEffect.money.rawValue
-    @AppStorage("celebrationStyle") private var celebrationStyle: Int = 1
+    /// Infinite Scroll ist seit v1.5.0 immer aktiv (war früher Toggle).
+    /// Variable bleibt als Konstante, damit die ehemaligen if-Branches
+    /// nicht alle aufgelöst werden müssen — Compiler optimiert das raus.
+    private let infiniteScrollEnabled: Bool = true
+    // Konfetti komplett raus in v1.5.0 — nur Ripple bleibt als Income-Effekt.
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
     @AppStorage("showTransactionCategories") private var showCategories: Bool = false
@@ -28,6 +30,7 @@ private struct TransactionsPanelView: View {
     
     @State private var showScoreSheet = false
     @State private var showFixedCosts = false
+    @State private var showMoneyAge = false
     @State private var freezeActive: Bool = false
     @State private var freezeItems: [FreezeItem] = []
     @State private var freezeExcluded: Set<FreezeCategory> = []
@@ -1030,7 +1033,7 @@ private struct TransactionsPanelView: View {
                     legacyBalanceCard
                 }
             }
-            .rippleEffect(trigger: celebrationStyle == 1 ? vm.rippleTrigger : 0,
+            .rippleEffect(trigger: vm.rippleTrigger,
                           defaultOrigin: CGPoint(x: 190, y: 65))
             .padding(.horizontal, 16)
             .padding(.top, -9)
@@ -1570,6 +1573,16 @@ private struct TransactionsPanelView: View {
 
                     // Mehr ▾
                     Menu {
+                        Button(action: {
+                            NotificationCenter.default.post(
+                                name: Notification.Name("simplebanking.openTransferSheet"),
+                                object: nil)
+                        }) {
+                            Label(L10n.t("Geld senden…", "Send money…"), systemImage: "paperplane")
+                        }
+
+                        Divider()
+
                         if !panelIsWide {
                             Button(action: { if !freezeActive { showScoreSheet = true } }) {
                                 Label(L10n.t("Financial Health", "Financial Health"), systemImage: "square.grid.2x2")
@@ -1583,6 +1596,10 @@ private struct TransactionsPanelView: View {
                             Button(action: { showFixedCosts = true }) {
                                 Label(L10n.t("Fixkosten", "Fixed costs"), systemImage: "repeat.circle")
                             }
+                        }
+
+                        Button(action: { showMoneyAge = true }) {
+                            Label(L10n.t("Money Age", "Money Age"), systemImage: "hourglass")
                         }
 
                         Button(action: { markAllTransactionsRead() }) {
@@ -1649,12 +1666,6 @@ private struct TransactionsPanelView: View {
             .padding(.bottom, 4)
             .background(activePanelBg) // Folgt Freeze-Mode (Blue Soft) statt fix Panel-BG
         }
-        .overlay {
-            if celebrationStyle == 0 {
-                ConfettiOverlayView(trigger: vm.confettiTrigger, effectRawValue: confettiEffect)
-                    .allowsHitTesting(false)
-            }
-        }
         .frame(minWidth: 420, idealWidth: 420, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
         .background { activePanelBg.ignoresSafeArea(.all, edges: .top) } // extends panel-bg into titlebar/toolbar area (theme-aware)
         .tint(Color.themeAccent)
@@ -1694,7 +1705,7 @@ private struct TransactionsPanelView: View {
             } else {
                 vm.loadEnrichmentData(bankId: activeBankId)
             }
-            if celebrationStyle == 1 && UserDefaults.standard.bool(forKey: "rippleAlwaysOn") {
+            if UserDefaults.standard.bool(forKey: "rippleAlwaysOn") {
                 vm.rippleTrigger += 1
             }
             recomputeGreenZone()
@@ -1741,6 +1752,12 @@ private struct TransactionsPanelView: View {
         }
         .onChange(of: showFixedCosts) { isShown in
             if isShown { recomputeFixedCosts() }
+        }
+        .sheet(isPresented: $showMoneyAge) {
+            MoneyAgeSheet(
+                transactions: vm.transactions,
+                onClose: { showMoneyAge = false }
+            )
         }
         .sheet(isPresented: $showAttentionInbox) {
             AttentionInboxView(cards: attentionCards, onViewTransaction: { fingerprint in
@@ -3283,6 +3300,9 @@ final class AccountNavModel: ObservableObject {
 @MainActor final class TransactionsPanel: NSObject, NSWindowDelegate {
     private let panel: NSPanel
     var isVisible: Bool { panel.isVisible }
+    /// Aktuelles Window-Frame — wird vom BalanceBar genutzt, um abhängige
+    /// Sheets (TransferSheet) seitlich neben dem Panel zu positionieren.
+    var frame: NSRect { panel.frame }
     private let vm: TransactionsViewModel
     let accountNav: AccountNavModel
 
@@ -3291,13 +3311,6 @@ final class AccountNavModel: ObservableObject {
     nonisolated static let panelHeight: CGFloat = 620
     private var toolbarDelegate: TransactionsPanelToolbarDelegate?
     private var cancellables: Set<AnyCancellable> = []
-    private let clippy = MediumClippy()
-    private var headerClickTimestamps: [TimeInterval] = []
-    private let clippyHeaderClickWindowSeconds: TimeInterval = 1.8
-    private let clippyRequiredClicks: Int = 5
-    private var autonomousClickTimestamps: [TimeInterval] = []
-    private let clippyAutonomousClickWindowSeconds: TimeInterval = 3.0
-    private let clippyAutonomousRequiredClicks: Int = 8
     private let onSettings: (() -> Void)?
 
     // MARK: - Stay on Top
@@ -3361,16 +3374,6 @@ final class AccountNavModel: ObservableObject {
         panel.delegate = self
         applyWindowLevel()   // restore persisted stay-on-top state
         configureTitlebar()
-        _ = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification,
-            object: panel,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.clippy.hide()
-            }
-        }
-
         let host = NSHostingView(rootView: TransactionsPanelView(
             vm: vm, onRefresh: onRefresh, accountNav: accountNav
         ))
@@ -3392,7 +3395,6 @@ final class AccountNavModel: ObservableObject {
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        clippy.resumeAutonomousModeIfEnabled(on: panel.contentView)
     }
 
     func close() {
@@ -3460,28 +3462,9 @@ final class AccountNavModel: ObservableObject {
         toolbarDelegate = delegate
     }
 
+    // Clippy-Easter-Egg in v1.5.0 entfernt — Header-Click ist jetzt no-op.
     @objc private func onBankHeaderClicked(_ sender: NSClickGestureRecognizer) {
         guard sender.state == .ended else { return }
-        let now = Date().timeIntervalSinceReferenceDate
-
-        // 5 Klicks in 1.8s → Clippy ein/ausblenden
-        headerClickTimestamps.append(now)
-        headerClickTimestamps = headerClickTimestamps.filter { now - $0 <= clippyHeaderClickWindowSeconds }
-        if headerClickTimestamps.count >= clippyRequiredClicks {
-            headerClickTimestamps.removeAll(keepingCapacity: true)
-            guard let host = panel.contentView else { return }
-            clippy.toggle(on: host)
-        }
-
-        // 8 Klicks in 3s → autonomen Modus umschalten
-        autonomousClickTimestamps.append(now)
-        autonomousClickTimestamps = autonomousClickTimestamps.filter { now - $0 <= clippyAutonomousClickWindowSeconds }
-        if autonomousClickTimestamps.count >= clippyAutonomousRequiredClicks {
-            autonomousClickTimestamps.removeAll(keepingCapacity: true)
-            let newMode = !clippy.isAutonomousMode
-            clippy.setAutonomousMode(newMode, on: panel.contentView)
-            clippy.showFeedback(autonomousEnabled: newMode, on: panel.contentView)
-        }
     }
 }
 
