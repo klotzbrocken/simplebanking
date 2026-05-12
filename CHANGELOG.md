@@ -10,7 +10,7 @@
   - SEPA-Validation (IBAN mod-97, 34 Länder), Sicherheits-Limit 100.000 €
   - SCA-Flow (TAN/Browser-Redirect) wie gewohnt direkt mit der Bank — simplebanking sieht keine Bank-Daten
   - Demo-Mode-User können das Feature ohne Lizenz visuell testen (Mock-Sends, kein echter Bank-Call)
-  - Lizenz-Verkauf via Gumroad. Aktivierung in Einstellungen → Über → Lizenz-Sektion. Lizenz-Key per Email nach Kauf.
+  - Lizenz-Verkauf via Polar. Aktivierung in Einstellungen → Über → Lizenz-Sektion. Lizenz-Key per Email nach Kauf.
 - **TransferRecipientStore** — neue lokale Aggregation auf der `transactions`-Tabelle für die Autocomplete-Vorschläge. Slot-scoped, sortiert nach `frequency × max(0.1, 1 − daysSinceLast / 365)`.
 
 ### Geändert

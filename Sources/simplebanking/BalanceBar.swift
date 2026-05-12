@@ -1451,7 +1451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
         // Lizenz-Gate ist nur aktiv wenn LicenseConfig.licensingEnabled=true.
-        // Solange Gumroad-Setup nicht steht, ist „Geld senden" für alle frei.
+        // Solange das Lizenz-System nicht scharf ist, ist „Geld senden" für alle frei.
         if LicenseConfig.licensingEnabled, !LicenseManager.shared.isLicensed {
             showUpsellSheet()
         } else {

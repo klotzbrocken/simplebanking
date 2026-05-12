@@ -26,7 +26,7 @@ final class LicenseManager: ObservableObject {
         /// Noch nicht geprüft (App-Start vor erstem revalidate-Call).
         case unknown
         /// Aktiv, online verifiziert. `lastValidatedAt` zeigt wann
-        /// zuletzt mit Gumroad gesprochen wurde.
+        /// zuletzt mit Polar gesprochen wurde.
         case licensed(lastValidatedAt: Date)
         /// Kein Key gespeichert, oder Key vom Server abgelehnt.
         case unlicensed
@@ -81,9 +81,8 @@ final class LicenseManager: ObservableObject {
     // MARK: - Keychain & cache keys
 
     private static let kcService = "tech.yaxi.simplebanking"
-    /// Keychain-Account-Schlüssel für den License-Key. Bewusst neutral
-    /// benannt (war früher `license.gumroadKey`); migrationsfrei, weil das
-    /// Keychain ohnehin gewipt wurde mit dem Polar-Switch.
+    /// Keychain-Account-Schlüssel für den License-Key. Bewusst provider-neutral
+    /// benannt, damit ein späterer Provider-Wechsel migrationsfrei wäre.
     private static let kcAccount = "license.providerKey"
     private static let lastValidatedKey = "license.lastValidatedAt"
     #if DEBUG
@@ -206,8 +205,8 @@ final class LicenseManager: ObservableObject {
     }
 
     /// Deaktiviert die Lizenz lokal — entfernt den Key aus dem Keychain
-    /// und setzt den Status zurück. Die Gumroad-Seite zählt den Use-Count
-    /// nicht zurück (das müsste der User manuell im Gumroad-Dashboard tun
+    /// und setzt den Status zurück. Die Polar-Seite zählt den Use-Count
+    /// nicht zurück (das müsste der User manuell im Polar-Dashboard tun
     /// oder Du als Verkäufer per Refund/Disable).
     func deactivate() {
         deactivateLocally()
