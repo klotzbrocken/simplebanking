@@ -1778,27 +1778,30 @@ private struct SourcePill: View {
 
     private func pillContent(showChevron: Bool) -> some View {
         HStack(spacing: 6) {
-            Group {
-                if let brand, let img = store.image(for: brand) {
-                    Image(nsImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 14, height: 14)
-                } else {
-                    Image(systemName: "creditcard.fill")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.sbTextSecondary)
-                        .frame(width: 14, height: 14)
-                }
+            // Bank-Logo: NSImage VOR der SwiftUI-Konversion auf 14×14 setzen.
+            // SwiftUI's Menu-Label auf macOS ignoriert .frame/.fixedSize beim
+            // resizable Image und bläht es auf Container-Größe auf — pre-sized
+            // NSImage hat intrinsische 14×14-Size und wird respektiert.
+            if let brand, let img = store.image(for: brand), let sized = sizedLogo(img) {
+                Image(nsImage: sized)
+                    .frame(width: 14, height: 14)
+            } else {
+                Image(systemName: "creditcard.fill")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.sbTextSecondary)
+                    .frame(width: 14, height: 14)
             }
+
             Text(labelFor(slot: slot))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.sbTextPrimary)
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             if showChevron {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(.sbTextSecondary)
+                    .fixedSize()
             }
         }
         .padding(.horizontal, 10)
@@ -1810,6 +1813,14 @@ private struct SourcePill: View {
             Capsule().stroke(Color.sbBorder, lineWidth: 0.5)
         )
         .contentShape(Capsule())
+    }
+
+    /// Kopiert das NSImage und setzt die intrinsische `size` auf 14×14.
+    /// Verhindert die SwiftUI-Menu-Label-Inflation auf macOS.
+    private func sizedLogo(_ src: NSImage) -> NSImage? {
+        guard let copy = src.copy() as? NSImage else { return nil }
+        copy.size = NSSize(width: 14, height: 14)
+        return copy
     }
 
     private func labelFor(slot: BankSlot?) -> String {
