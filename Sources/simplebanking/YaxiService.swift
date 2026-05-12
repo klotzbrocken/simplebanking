@@ -628,7 +628,10 @@ enum YaxiService {
         )
 
         let client = RoutexClient()
-        let ticket = YaxiTicketMaker.issueTicket(service: "Balances")
+        // Mutable — wird im retry-Pfad bei Bedarf neu ausgestellt (Yaxi-Doku:
+        // nach non-RequestError frischer Ticket). Der finale Wert nach dem
+        // inner-catch wird in `scaTicket` eingefroren für die SCA-Closures.
+        var ticket = YaxiTicketMaker.issueTicket(service: "Balances")
 
         AppLogger.log("fetchBalances: slot=\(slotSnapshot.prefix(8)) connId=\(connectionId.prefix(8)) iban=\(iban.isEmpty ? "(auto)" : String(iban.prefix(8))) cd=\(storedCD == nil ? "nil" : "\(storedCD!.count)b")", category: "YaxiService")
 
@@ -643,36 +646,43 @@ enum YaxiService {
                     accounts: accountRefs
                 )
             } catch {
-                // Retry without userId for banks that report "does not support a user id"
+                // YAXI-Doku: nach jedem non-RequestError ist der Service in
+                // "failed state" → "need to start it again, with a new ticket".
+                // Wir holen daher in jedem retry-Branch (außer Network) einen
+                // frischen Ticket. Network-Errors sind explizit ausgenommen.
                 if shouldRetryWithoutUserId(error: error, model: model, userId: userId) {
                     let credsNoUserId = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: storedCD, userId: nil, password: password
                     )
+                    ticket = YaxiTicketMaker.issueTicket(service: "Balances")
+                    let retryTicket = ticket
                     resp = try await client.balances(
                         credentials: credsNoUserId,
                         session: storedSession,
                         recurringConsents: true,
-                        ticket: ticket,
+                        ticket: retryTicket,
                         accounts: accountRefs
                     )
                 } else if isConnectionResetError(error), storedCD != nil {
                     // Consent abgelaufen (Unauthorized / ConsentExpired):
-                    // YAXI-Empfehlung: gleiche Anfrage ohne connectionData wiederholen —
-                    // die Bank erneuert den Consent und liefert neue connectionData zurück.
-                    // MUSS vor dem `storedSession != nil`-Retry kommen, sonst greift
-                    // letzterer mit der schlechten CD und wirft erneut Unauthorized
-                    // (1822-Bug, 2026-05).
-                    AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                    // YAXI-Empfehlung "Restart the service without passing
+                    // connection data" — wir interpretieren das strikt:
+                    // frischer Ticket UND keine alte Session mitschicken,
+                    // da die Session bank-state-gebunden ist und nach einem
+                    // Consent-Reset obsolet sein dürfte (1822/Sparkasse-Bug).
+                    AppLogger.log("fetchBalances: consent expired, restarting without connectionData/session", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: nil, userId: userId, password: password
                     )
+                    ticket = YaxiTicketMaker.issueTicket(service: "Balances")
+                    let retryTicket = ticket
                     resp = try await client.balances(
                         credentials: credsNoCD,
-                        session: storedSession,
+                        session: nil,
                         recurringConsents: true,
-                        ticket: ticket,
+                        ticket: retryTicket,
                         accounts: accountRefs
                     )
                 } else if storedSession != nil {
@@ -682,11 +692,13 @@ enum YaxiService {
                     // dieser Branch greift also nicht für 1822-Unauthorized.
                     AppLogger.log("fetchBalances: error with session, retrying without: \(error)", category: "YaxiService", level: "WARN")
                     await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
+                    ticket = YaxiTicketMaker.issueTicket(service: "Balances")
+                    let retryTicket = ticket
                     resp = try await client.balances(
                         credentials: creds,
                         session: nil,
                         recurringConsents: true,
-                        ticket: ticket,
+                        ticket: retryTicket,
                         accounts: accountRefs
                     )
                 } else if isRequestError(error) {
@@ -704,15 +716,17 @@ enum YaxiService {
                 }
             }
 
+            // SCA-Closures müssen let-bound Capture haben (Sendable).
+            let scaTicket = ticket
             let confirm: @Sendable (ConfirmationContext) async throws -> SCACommon = { ctx in
-                try await toSCACommon(client.confirmBalances(ticket: ticket, context: ctx))
+                try await toSCACommon(client.confirmBalances(ticket: scaTicket, context: ctx))
             }
             let respond: @Sendable (InputContext, String) async throws -> SCACommon = { ctx, r in
-                try await toSCACommon(client.respondBalances(ticket: ticket, context: ctx, response: r))
+                try await toSCACommon(client.respondBalances(ticket: scaTicket, context: ctx, response: r))
             }
 
             guard let outcome = await handleSCA(
-                initial: toSCACommon(resp), client: client, ticket: ticket,
+                initial: toSCACommon(resp), client: client, ticket: scaTicket,
                 confirm: confirm, respond: respond
             ) else {
                 return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
@@ -814,7 +828,8 @@ enum YaxiService {
         )
 
         let client = RoutexClient()
-        let ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
+        // Mutable — retry-Pfade ziehen neuen Ticket (Yaxi-Doku).
+        var ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
 
         AppLogger.log("fetchTransactions from=\(from)", category: "YaxiService")
 
@@ -828,44 +843,53 @@ enum YaxiService {
                     ticket: ticket
                 )
             } catch {
+                // YAXI-Doku: nach jedem non-RequestError ist der Service in
+                // "failed state" → frischer Ticket nötig. Network-Errors
+                // sind explizit ausgenommen.
                 if shouldRetryWithoutUserId(error: error, model: model, userId: userId) {
                     let credsNoUserId = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: storedCD, userId: nil, password: password
                     )
+                    ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
+                    let retryTicket = ticket
                     resp = try await client.transactions(
                         credentials: credsNoUserId,
                         session: storedSession,
                         recurringConsents: true,
-                        ticket: ticket
+                        ticket: retryTicket
                     )
                 } else if isConnectionResetError(error), storedCD != nil {
                     // Consent abgelaufen (Unauthorized / ConsentExpired):
-                    // YAXI-Empfehlung: gleiche Anfrage ohne connectionData wiederholen.
-                    // MUSS vor dem `storedSession != nil`-Retry kommen, sonst greift
-                    // letzterer mit der schlechten CD und wirft erneut Unauthorized
-                    // (1822-Bug, 2026-05).
-                    AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                    // YAXI-Empfehlung "Restart the service without passing
+                    // connection data" — strikt interpretiert: frischer Ticket
+                    // UND keine alte Session (Session ist bank-state-gebunden
+                    // und nach Consent-Reset obsolet, 1822/Sparkasse-Bug).
+                    AppLogger.log("fetchTransactions: consent expired, restarting without connectionData/session", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: nil, userId: userId, password: password
                     )
+                    ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
+                    let retryTicket = ticket
                     resp = try await client.transactions(
                         credentials: credsNoCD,
-                        session: storedSession,
+                        session: nil,
                         recurringConsents: true,
-                        ticket: ticket
+                        ticket: retryTicket
                     )
                 } else if storedSession != nil {
                     // Stale-Session-Retry für Revolut/Open-Banking-Quirks
                     // (UnexpectedError, nicht in isConnectionResetError).
                     AppLogger.log("fetchTransactions: error with session, retrying without: \(error)", category: "YaxiService", level: "WARN")
                     await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
+                    ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
+                    let retryTicket = ticket
                     resp = try await client.transactions(
                         credentials: creds,
                         session: nil,
                         recurringConsents: true,
-                        ticket: ticket
+                        ticket: retryTicket
                     )
                 } else if isRequestError(error) {
                     // Netzwerkfehler: einmal automatisch wiederholen (YAXI-Empfehlung).
@@ -881,15 +905,17 @@ enum YaxiService {
                 }
             }
 
+            // SCA-Closures müssen let-bound Capture haben (Sendable).
+            let scaTicket = ticket
             let confirm: @Sendable (ConfirmationContext) async throws -> SCACommon = { ctx in
-                try await toSCACommon(client.confirmTransactions(ticket: ticket, context: ctx))
+                try await toSCACommon(client.confirmTransactions(ticket: scaTicket, context: ctx))
             }
             let respond: @Sendable (InputContext, String) async throws -> SCACommon = { ctx, r in
-                try await toSCACommon(client.respondTransactions(ticket: ticket, context: ctx, response: r))
+                try await toSCACommon(client.respondTransactions(ticket: scaTicket, context: ctx, response: r))
             }
 
             guard let outcome = await handleSCA(
-                initial: toSCACommon(resp), client: client, ticket: ticket,
+                initial: toSCACommon(resp), client: client, ticket: scaTicket,
                 confirm: confirm, respond: respond
             ) else {
                 return TransactionsResponse(ok: false, transactions: nil, session: nil,
@@ -1207,7 +1233,11 @@ enum YaxiService {
         )
 
         let client = RoutexClient()
-        let ticket = await YaxiTicketMaker.issueTransferTicket()
+        // Mutable, damit retry-Pfade einen frischen Ticket ziehen können
+        // (Yaxi-Doku: nach non-RequestError neuer Ticket nötig). Der finale
+        // Wert nach dem inner-catch wird in `scaTicket` eingefroren und an die
+        // confirm/respond-Closures übergeben.
+        var ticket = await YaxiTicketMaker.issueTransferTicket()
 
         let amountString = NSDecimalNumber(decimal: request.amountEUR).stringValue
         let amount = Routex.Amount(currency: "EUR", amount: Decimal(string: amountString) ?? request.amountEUR)
@@ -1241,11 +1271,13 @@ enum YaxiService {
                     requestedExecutionDate: requestedExecutionDate
                 )
             } catch {
+                // YAXI-Doku: nach non-RequestError frischer Ticket nötig.
                 if shouldRetryWithoutUserId(error: error, model: model, userId: userId) {
                     let credsNoUserId = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: storedCD, userId: nil, password: password
                     )
+                    ticket = await YaxiTicketMaker.issueTransferTicket()
                     resp = try await client.transfer(
                         credentials: credsNoUserId,
                         session: storedSession,
@@ -1258,14 +1290,18 @@ enum YaxiService {
                         requestedExecutionDate: requestedExecutionDate
                     )
                 } else if isConnectionResetError(error), storedCD != nil {
-                    AppLogger.log("sendTransfer: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                    // Yaxi-Empfehlung „Restart the service without passing
+                    // connection data" — strikt: frischer Ticket + keine Session
+                    // (Session ist bank-state-gebunden, nach Consent-Reset obsolet).
+                    AppLogger.log("sendTransfer: consent expired, restarting without connectionData/session", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: nil, userId: userId, password: password
                     )
+                    ticket = await YaxiTicketMaker.issueTransferTicket()
                     resp = try await client.transfer(
                         credentials: credsNoCD,
-                        session: storedSession,
+                        session: nil,
                         recurringConsents: true,
                         ticket: ticket,
                         product: .sepaCreditTransfer,
@@ -1279,15 +1315,18 @@ enum YaxiService {
                 }
             }
 
+            // Einfrieren des aktuellen (ggf. nach retry getauschten) Tickets,
+            // damit die @Sendable-Closures eine let-bound Capture haben.
+            let scaTicket = ticket
             let confirm: @Sendable (ConfirmationContext) async throws -> SCACommon = { ctx in
-                try await toSCACommon(client.confirmTransfer(ticket: ticket, context: ctx))
+                try await toSCACommon(client.confirmTransfer(ticket: scaTicket, context: ctx))
             }
             let respond: @Sendable (InputContext, String) async throws -> SCACommon = { ctx, r in
-                try await toSCACommon(client.respondTransfer(ticket: ticket, context: ctx, response: r))
+                try await toSCACommon(client.respondTransfer(ticket: scaTicket, context: ctx, response: r))
             }
 
             guard let outcome = await handleSCA(
-                initial: toSCACommon(resp), client: client, ticket: ticket,
+                initial: toSCACommon(resp), client: client, ticket: scaTicket,
                 confirm: confirm, respond: respond
             ) else {
                 return TransferOutcome(ok: false, scaRequired: true, error: nil,
