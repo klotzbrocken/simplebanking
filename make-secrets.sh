@@ -80,6 +80,12 @@ enum Secrets {
     /// nur genutzt, wenn LicenseManager.shared.isLicensed (Polar oder Master-Code).
     static let yaxiTransferKeyId: String     = xorDecrypt([$TKEY_ID_BYTES])
     static let yaxiTransferSecretB64: String = xorDecrypt([$TSECRET_BYTES])
+
+    /// Optionaler Master-Code für lokale Dev-Tests (DEBUG-only via LicenseConfig).
+    /// Default \`nil\` = kein Bypass. Wenn Du den Polar-Skip willst, ersetze diese
+    /// Zeile manuell mit \`static let masterCode: String? = "<dein-test-key>"\` —
+    /// diese Datei bleibt gitignored. NICHT Geburtsdatum/Namen nehmen.
+    static let masterCode: String? = nil
 }
 SWIFT
 

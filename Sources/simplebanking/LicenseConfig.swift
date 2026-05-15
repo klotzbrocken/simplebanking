@@ -16,14 +16,30 @@ enum LicenseConfig {
     /// **deaktiviert**: kein Lizenz-Gate vor TransferSheet, kein UpsellSheet,
     /// keine License-Section in den Einstellungen. „Geld senden" ist für alle
     /// frei zugänglich.
-    static let licensingEnabled: Bool = true
+    ///
+    /// Computed statt `static let`, damit (a) der Wert nicht mehr per
+    /// 1-Zeichen-Source-Edit kippt und (b) ein CI-Override per Env-Var
+    /// möglich wird. Echtes DRM ist das nicht — der Source ist public,
+    /// jeder kann diese Funktion in 30 Sekunden auf `return false` patchen.
+    /// Es macht Casual-Piraterie nur eine Idee mühsamer als „Klick, save, build".
+    static var licensingEnabled: Bool {
+        // Konfig fehlt → Gate macht keinen Sinn (Polar-Validate würde 404en).
+        guard isConfigured else { return false }
+        // CI-/Test-Escape-Hatch. Nicht in normales Build-Env packen.
+        if ProcessInfo.processInfo.environment["SIMPLEBANKING_DISABLE_GATE"] == "1" {
+            return false
+        }
+        return true
+    }
 
     /// Universeller Test-Key, der ohne Polar-Call als gültig akzeptiert wird.
-    /// Im Release-Build per `#if DEBUG` komplett aus dem Binary gestrippt —
-    /// `strings simplebanking | grep Maik` liefert leere Ausgabe.
-    /// Im Debug-Build (`swift build` ohne `-c release`) bleibt der Bypass.
+    /// Im Release-Build per `#if DEBUG` komplett aus dem Binary gestrippt.
+    /// Wenn Du den Bypass weiter brauchen willst, setze ihn in der lokalen
+    /// (gitignored) `Secrets.swift` als `static let masterCode: String? = "…"`.
+    /// Die hardcoded Variante wurde entfernt — sie stand im Source und damit
+    /// in der Git-History.
     #if DEBUG
-    static let masterCode: String? = "REDACTED_DEBUG_BYPASS"
+    static var masterCode: String? { Secrets.masterCode }
     #else
     static let masterCode: String? = nil
     #endif
@@ -60,7 +76,50 @@ enum LicenseConfig {
     /// Anzeige-Preis fürs UpsellSheet. Der echte Preis kommt aus Polar
     /// (Stripe-Checkout zeigt den live konfigurierten Wert) — hier nur die
     /// Kommunikation an den User.
-    static let displayPrice: String = "€14"
+    static let displayPrice: String = "€15"
+
+    /// Voucher-Preis für den 1.5.0-„Geld senden"-Launch.
+    /// Wird im Post-Update-Voucher-Sheet als rabattierter Preis neben
+    /// dem gestrichenen `displayPrice` gezeigt.
+    static let voucherDisplayPrice: String = "€10"
+
+    /// Polar-Discount-Code für den 1.5.0-Launch-Voucher. Wird beim
+    /// Öffnen des Checkouts als `discount_code`-Query-Param angehängt,
+    /// so dass der Rabatt automatisch im Checkout greift.
+    static let voucherDiscountCode: String? = "Huhn2026"
+
+    /// Letzter Tag, an dem der Voucher angeboten wird (inklusive).
+    /// Nach diesem Datum wird die Post-Update-Sheet nicht mehr gezeigt
+    /// und `effectiveVoucherPurchaseURL` fällt auf die reguläre URL zurück.
+    static let voucherValidUntil: Date? = {
+        var c = DateComponents()
+        c.year = 2026; c.month = 5; c.day = 31
+        c.hour = 23; c.minute = 59; c.second = 59
+        c.timeZone = TimeZone(identifier: "Europe/Berlin")
+        return Calendar(identifier: .gregorian).date(from: c)
+    }()
+
+    /// True solange ein Discount-Code gesetzt UND `voucherValidUntil` noch
+    /// nicht überschritten ist. Außerhalb des Fensters wird der Voucher-
+    /// Flow versteckt — bestehende User sehen dann das normale UpsellSheet.
+    static var isVoucherActive: Bool {
+        guard voucherDiscountCode?.isEmpty == false else { return false }
+        guard let validUntil = voucherValidUntil else { return true }
+        return Date() <= validUntil
+    }
+
+    /// Effektive Checkout-URL für den Voucher-Flow: hängt
+    /// `?discount_code=<voucherDiscountCode>` an `purchaseURL`, solange
+    /// der Voucher aktiv ist. Sonst Fallback auf `purchaseURL` ohne Param.
+    static var effectiveVoucherPurchaseURL: URL {
+        guard isVoucherActive, let code = voucherDiscountCode,
+              var comps = URLComponents(url: purchaseURL, resolvingAgainstBaseURL: false)
+        else { return purchaseURL }
+        var items = comps.queryItems ?? []
+        items.append(URLQueryItem(name: "discount_code", value: code))
+        comps.queryItems = items
+        return comps.url ?? purchaseURL
+    }
 
     /// Offline-Grace-Period: wie lange darf die App ohne erfolgreiche
     /// Re-Validation als „lizenziert" gelten? Schützt User mit instabiler
