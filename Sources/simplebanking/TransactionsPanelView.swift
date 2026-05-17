@@ -20,6 +20,7 @@ private struct TransactionsPanelView: View {
     @AppStorage("showTransactionCategories") private var showCategories: Bool = false
     @AppStorage("showFilterPills") private var showFilterPills: Bool = false
     @AppStorage("attentionInboxEnabled") private var attentionInboxEnabled: Bool = true
+    @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
@@ -1504,6 +1505,23 @@ private struct TransactionsPanelView: View {
                 Spacer()
 
                 HStack(spacing: 16) {
+                    // simplesend — erster Eintrag im Footer.
+                    // Toggle in Einstellungen → Verhalten („simplesend anzeigen")
+                    // blendet ihn aus; UpsellSheet hat denselben Toggle als Checkbox.
+                    if simplesendVisible {
+                        Button(action: {
+                            NotificationCenter.default.post(
+                                name: Notification.Name("simplebanking.openTransferSheet"),
+                                object: nil)
+                        }) {
+                            Image(systemName: "paperplane")
+                                .font(.system(size: 15))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
+                    }
+
                     // Abos
                     Button(action: { showSubscriptions = true }) {
                         Image(systemName: "list.bullet.rectangle")
@@ -1573,16 +1591,6 @@ private struct TransactionsPanelView: View {
 
                     // Mehr ▾
                     Menu {
-                        Button(action: {
-                            NotificationCenter.default.post(
-                                name: Notification.Name("simplebanking.openTransferSheet"),
-                                object: nil)
-                        }) {
-                            Label(L10n.t("Geld senden…", "Send money…"), systemImage: "paperplane")
-                        }
-
-                        Divider()
-
                         if !panelIsWide {
                             Button(action: { if !freezeActive { showScoreSheet = true } }) {
                                 Label(L10n.t("Financial Health", "Financial Health"), systemImage: "square.grid.2x2")
@@ -2299,7 +2307,6 @@ private struct TransactionsPanelView: View {
                 ?? BankSlot(id: "demo-main", iban: "DE89200400600284202600", displayName: "Klotzbrocken AG", logoId: nil, nickname: "Hauptkonto")
         } else {
             guard let realSlot = multibankingStore.activeSlot else { return }
-            slot = realSlot
             // Load 90 days for recurring/fixed-cost detection — same window as FixedCostsView.
             // vm.transactions only covers fetchDays (default 60) which misses early-month
             // subscriptions and cuts off quarterly patterns entirely.
@@ -2308,6 +2315,14 @@ private struct TransactionsPanelView: View {
                 : [TransactionsDatabase.activeSlotId]
             allTxs = (try? TransactionsDatabase.loadUnifiedTransactions(slots: slotIds, days: 90))
                 ?? vm.transactions
+            // Im Unified-Mode aggregieren wir Tx aus allen Slots — der Header darf
+            // dann nicht den active-slot-displayName/IBAN zeigen (wirkt für User
+            // „willkürlich"). Synthesierter Aggregat-Slot für den Header.
+            let unifiedName = L10n.t("Alle Konten", "All accounts")
+            slot = vm.isUnifiedMode
+                ? BankSlot(id: "unified", iban: "", displayName: unifiedName,
+                           logoId: nil, nickname: unifiedName)
+                : realSlot
         }
 
         let monthTxs = month.filter(allTxs)
