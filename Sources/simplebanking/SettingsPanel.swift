@@ -190,6 +190,7 @@ struct SettingsView: View {
     /// Sendeverzögerung in Sekunden (0=aus, 5/10/20). Wird in TransferSheet
     /// als Countdown ausgespielt; während der Delay kann der User abbrechen.
     @AppStorage("transferDelaySeconds") private var transferDelaySeconds: Int = 5
+    @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("dockModeEnabled") private var dockModeEnabled: Bool = false
     @AppStorage("showBalanceInMenuBar") private var showBalanceInMenuBar: Bool = false
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
@@ -1747,6 +1748,20 @@ struct SettingsView: View {
 
             if FeatureFlags.transferMoneyEnabled {
                 Divider()
+                SettingsToggleRow(
+                    title: t("simplesend anzeigen", "Show simplesend"),
+                    subtitle: t(
+                        "Eigener Paperplane-Button im Footer der Umsatzliste und Eintrag im Statusbar-Kontextmenü. Aus = überall versteckt, kein Hotkey.",
+                        "Dedicated paperplane button in the transactions footer and entry in the status bar context menu. Off = hidden everywhere, no hotkey."
+                    ),
+                    isOn: $simplesendVisible
+                )
+                .onChange(of: simplesendVisible) { _ in
+                    NotificationCenter.default.post(
+                        name: Notification.Name("simplebanking.simplesendVisibilityChanged"),
+                        object: nil
+                    )
+                }
                 transferDelaySection
             }
 
@@ -1949,7 +1964,7 @@ struct SettingsView: View {
     private var transferDelaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             SettingsSectionHeader(
-                title: t("Geld senden", "Send Money"),
+                title: t("simplesend", "simplesend"),
                 icon: "paperplane.fill"
             )
 
@@ -2221,7 +2236,7 @@ struct SettingsView: View {
     private var licenseSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsSectionHeader(
-                title: t("Lizenz: Geld senden", "License: Send Money"),
+                title: t("Lizenz: simplesend", "License: simplesend"),
                 icon: "key.fill"
             )
 

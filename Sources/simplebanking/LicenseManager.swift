@@ -71,6 +71,17 @@ final class LicenseManager: ObservableObject {
         }
     }
 
+    /// True, sobald ein Lizenz-Key im Keychain liegt — unabhängig davon,
+    /// ob er gerade vom Server bestätigt wurde. Genutzt vom Voucher-Trigger,
+    /// um die Race zwischen Init-Status (sync) und revalidate (async) zu
+    /// umgehen: wer schon mal eine Lizenz hatte, soll keinen Voucher mehr sehen.
+    var hasStoredLicenseKey: Bool {
+        #if DEBUG
+        if isMasterCodeActive { return true }
+        #endif
+        return readKeychain() != nil
+    }
+
     /// Demo-Mode-Convenience: in Demo darf TransferSheet ohne Lizenz auf,
     /// damit der User das Feature visuell antesten kann (mock-Sends).
     var isLicensedOrDemo: Bool {

@@ -131,10 +131,29 @@ final class MultibankingStore: ObservableObject {
     }
 
     /// Restores slots that were active before demo mode and persists them.
+    /// Defensiv: wenn der übergebene Backup leer ist ODER Demo-Slot-IDs
+    /// enthält (Indikator für Korruption), reloaden wir lieber sauber aus
+    /// UserDefaults statt das Backup blind zu persistieren.
+    /// Hintergrund-Bug: `applySlotToViewModel` hatte früher in Demo-Mode
+    /// einen Auto-Heal-`updateSlot()`-Call ausgelöst → Demo-Slots landeten
+    /// in UserDefaults und überschrieben echte Banken.
     func restoreDemoSlots(_ previousSlots: [BankSlot], activeIndex previousIndex: Int) {
+        let looksCorrupt = previousSlots.contains { $0.id.hasPrefix("demo-slot-") }
+        if previousSlots.isEmpty || looksCorrupt {
+            reloadFromDisk()
+            return
+        }
         slots = previousSlots
         activeIndex = previousSlots.indices.contains(previousIndex) ? previousIndex : 0
         save()
+    }
+
+    /// Liest die persistierten Slots frisch aus UserDefaults ein. Verwendung:
+    /// als Reset-Pfad nach Demo-Modus, wenn das in-memory Backup nicht mehr
+    /// vertrauenswürdig ist. `injectDemoSlots` schreibt nicht, daher ist
+    /// UserDefaults im Demo-Modus weiterhin die Source-of-Truth für echte Slots.
+    func reloadFromDisk() {
+        load()
     }
 
     func moveSlot(from source: IndexSet, to destination: Int) {

@@ -85,7 +85,19 @@ struct InitialSetupExtensionSheet: View {
 
     @State private var currentStep: Int = 0
     @State private var passwordSetupError: String? = nil
-    private let totalSteps = 5
+
+    /// Wird nur eingeblendet, wenn das Lizenz-System scharf ist, das Feature
+    /// sichtbar ist und der User noch nicht lizenziert ist. Sonst bleibt der
+    /// Wizard bei 5 Schritten.
+    private var shouldShowTransferUpsell: Bool {
+        LicenseConfig.licensingEnabled
+            && FeatureFlags.transferMoneyEnabled
+            && !LicenseManager.shared.isLicensed
+    }
+
+    private var totalSteps: Int {
+        shouldShowTransferUpsell ? 6 : 5
+    }
 
     // Step 1 — Gehaltstag
     @State private var salaryDayPreset: Int = 0   // 0=Anfang, 1=Mitte, 2=Individuell
@@ -161,6 +173,7 @@ struct InitialSetupExtensionSheet: View {
                 case 2: stepPassword
                 case 3: stepDock
                 case 4: stepMCP
+                case 5: stepTransferUpsell
                 default: EmptyView()
                 }
             }
@@ -186,9 +199,7 @@ struct InitialSetupExtensionSheet: View {
             }
 
             Button(action: { commitAndAdvance() }) {
-                Text(currentStep == totalSteps - 1
-                     ? L10n.t("Fertig", "Done")
-                     : L10n.t("Weiter", "Next"))
+                Text(primaryButtonLabel)
                     .font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 8)
@@ -474,6 +485,64 @@ struct InitialSetupExtensionSheet: View {
         }
     }
 
+    private var primaryButtonLabel: String {
+        if currentStep == 5 {
+            return L10n.t("Für \(LicenseConfig.displayPrice) freischalten",
+                          "Unlock for \(LicenseConfig.displayPrice)")
+        }
+        if currentStep == totalSteps - 1 {
+            return L10n.t("Fertig", "Done")
+        }
+        return L10n.t("Weiter", "Next")
+    }
+
+    // MARK: - Step 6: Geld senden Upsell (regulärer Preis)
+
+    private var stepTransferUpsell: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            stepTitle(L10n.t("simplesend freischalten?",
+                             "Unlock simplesend?"))
+            stepDescription(L10n.t(
+                "Mit simplesend kannst du direkt aus simplebanking SEPA-Überweisungen auslösen — Empfänger und IBAN werden aus deinen Buchungen vorgeschlagen. Einmalkauf, kein Abo.",
+                "simplesend lets you initiate SEPA transfers right from simplebanking — recipients and IBAN are suggested from your transactions. One-time purchase, no subscription."
+            ))
+
+            VStack(alignment: .leading, spacing: 10) {
+                upsellBullet(icon: "bolt.fill",
+                             text: L10n.t("SEPA-Überweisung in 2 Klicks aus deinen Buchungen heraus.",
+                                          "SEPA transfer in 2 clicks from your transactions."))
+                upsellBullet(icon: "lock.shield.fill",
+                             text: L10n.t("TAN-Bestätigung wie gewohnt direkt bei deiner Bank.",
+                                          "TAN confirmation directly with your bank."))
+                upsellBullet(icon: "checkmark.seal.fill",
+                             text: L10n.t("Einmalkauf für \(LicenseConfig.displayPrice). Updates innerhalb von 1.x kostenlos.",
+                                          "One-time purchase for \(LicenseConfig.displayPrice). Free updates within 1.x."))
+            }
+
+            Text(L10n.t(
+                "Ein Klick auf Freischalten öffnet die sichere Checkout-Seite im Browser. Du kannst diesen Schritt jederzeit überspringen und später aus dem Menü kaufen.",
+                "Tapping Unlock opens the secure checkout in your browser. You can skip and buy later from the menu."))
+                .font(.system(size: 10.5))
+                .foregroundColor(.sbTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+        }
+    }
+
+    private func upsellBullet(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13))
+                .foregroundColor(.sbBlueStrong)
+                .frame(width: 16)
+            Text(text)
+                .font(.system(size: 12.5))
+                .foregroundColor(.sbTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
     // MARK: - Helpers
 
     private func stepTitle(_ text: String) -> some View {
@@ -505,9 +574,15 @@ struct InitialSetupExtensionSheet: View {
         case 2: commitPassword()
         case 3: commitDock()
         case 4: commitMCP()
+        case 5: commitTransferUpsell()   // öffnet Checkout-URL
         default: break
         }
         advance()
+    }
+
+    private func commitTransferUpsell() {
+        guard LicenseConfig.isConfigured else { return }
+        NSWorkspace.shared.open(LicenseConfig.purchaseURL)
     }
 
     // MARK: - Persistence

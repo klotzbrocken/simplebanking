@@ -228,6 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     @AppStorage("demoMode") private var demoMode: Bool = false
     @AppStorage("demoStyle") private var demoStyle: Int = 0   // 0 = single, 1 = multi
     @AppStorage("demoSeed") private var demoSeed: Int = 123456
+    @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     private var updateChecker: UpdateChecker?
 
     private var isMultiDemo: Bool { demoMode && demoStyle == 1 }
@@ -749,7 +750,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // Persist resolved logo/name back to the slot so it's correct on next launch.
         // This auto-heals existing accounts that were set up before the icon fix.
-        if resolvedLogo != (slot.logoId ?? "") || resolvedName != slot.displayName {
+        // WICHTIG: niemals in Demo-Mode schreiben — sonst landen die ephemeren
+        // Demo-Slots (z.B. „demo-slot-0") in UserDefaults und überschreiben die
+        // echten Slots. Demo-Slots dürfen nur in-memory existieren.
+        if !demoMode,
+           resolvedLogo != (slot.logoId ?? "") || resolvedName != slot.displayName {
             var updated = slot
             updated.displayName = resolvedName
             updated.logoId = resolvedLogo.isEmpty ? nil : resolvedLogo
@@ -1056,14 +1061,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         menu.addItem(refreshItem)
 
-        // ── Geld senden… (Lizenz-Gate + FeatureFlag) ──────────────────────
+        // ── simplesend: Geld senden (Lizenz-Gate + FeatureFlag) ───────────
         // Im Demo-Mode immer sichtbar — auch ohne Tester-Build-Flag,
         // damit das Feature vollständig getestet werden kann.
+        // `simplesendVisible` (User-Toggle in Einstellungen → Verhalten + UpsellSheet)
+        // wird per Notification live aktualisiert: Item bleibt im Menü, aber `isHidden`
+        // schaltet zur Laufzeit. Tag 350 erlaubt das spätere Lookup.
         if FeatureFlags.transferMoneyEnabled || demoMode {
-            let sendMoneyItem = NSMenuItem(title: t("Geld senden…", "Send Money…"),
+            let sendMoneyItem = NSMenuItem(title: t("simplesend: Geld senden", "simplesend: Send Money"),
                                            action: #selector(sendMoney),
                                            keyEquivalent: "n")
+            sendMoneyItem.tag = 350
             sendMoneyItem.target = self
+            sendMoneyItem.isHidden = !simplesendVisible
             if let img = NSImage(systemSymbolName: "arrow.up.right.square",
                                  accessibilityDescription: nil) {
                 img.isTemplate = true
@@ -1393,6 +1403,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.sendMoney()
         }
 
+        // Live-Update: simplesendVisible-Toggle (Einstellungen → Verhalten oder
+        // Checkbox im UpsellSheet) blendet den Statusbar-Menüeintrag sofort
+        // aus/ein, statt einen App-Restart zu erzwingen. Item ist über tag 350
+        // im statusMenu auffindbar.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.simplesendVisibilityChanged"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self,
+                  let item = self.statusMenu?.item(withTag: 350) else { return }
+            item.isHidden = !self.simplesendVisible
+        }
+
         updateChecker = UpdateChecker()
     }
 
@@ -1441,6 +1464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     private var transferWindow: NSWindow?
     private var upsellWindow: NSWindow?
+    private var transferVoucherWindow: NSWindow?
     private var bankDiagnosticsWindow: NSWindow?
 
     @objc private func sendMoney() {
@@ -1480,7 +1504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         )
         let host = NSHostingController(rootView: sheet)
         let window = NSWindow(contentViewController: host)
-        window.title = L10n.t("Geld senden — Lizenz", "Send Money — License")
+        window.title = L10n.t("simplesend — Lizenz", "simplesend — License")
         window.styleMask = [.titled, .closable]
         window.setContentSize(NSSize(width: 460, height: 380))
         window.center()
@@ -1544,7 +1568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             backing: .buffered,
             defer: false
         )
-        panel.title = L10n.t("Geld senden", "Send Money")
+        panel.title = L10n.t("simplesend", "simplesend")
         // Title sichtbar lassen — User wollte den Header in die Titlebar,
         // nicht doppelt im Content.
         panel.titleVisibility = .visible
@@ -1806,6 +1830,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         } else {
             statusItem.button?.title = t("Verbinden…", "Connect…")
             statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
+            // User verlässt Demo ohne je ein echtes Konto eingerichtet zu haben
+            // → den Setup-Wizard direkt anstoßen, damit Menü-Icon, Saldo und
+            // 2FA-Prompt nicht erst nach manuellem Rechtsklick passieren.
+            // `autoStartSetupWizardIfNeeded` ist One-Shot pro Launch und hat
+            // beim Start wegen `demoMode` early-returned — kann jetzt sauber laufen.
+            autoStartSetupWizardIfNeeded()
         }
     }
 
@@ -1820,7 +1850,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func activateMultiDemo() {
-        // Backup current slot state
+        // Backup current slot state. Vor dem Backup defensiv prüfen:
+        // wenn der Store gerade schon Demo-Slots zeigt (z.B. wegen
+        // unsauberem App-Zustand), NICHT überschreiben — sonst persistiert
+        // tearDownMultiDemo später Demo-Daten. Stattdessen frisch von Disk
+        // laden, wo `injectDemoSlots` nichts geschrieben hat.
+        let currentSlots = MultibankingStore.shared.slots
+        let storeLooksDemo = currentSlots.contains { $0.id.hasPrefix("demo-slot-") }
+        if storeLooksDemo {
+            MultibankingStore.shared.reloadFromDisk()
+        }
         demoPreviousSlots = MultibankingStore.shared.slots
         demoPreviousActiveIndex = MultibankingStore.shared.activeIndex
         demoPreviousUnifiedMode = UserDefaults.standard.bool(forKey: "unifiedModeEnabled")
@@ -1886,6 +1925,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             UserDefaults.standard.removeObject(forKey: "simplebanking.cachedBalance.demo-slot-\(i)")
             BankSlotSettingsStore.delete(slotId: "demo-slot-\(i)")
         }
+        // Wenn das in-memory Backup leer/korrupt ist, fällt restoreDemoSlots
+        // intern auf reloadFromDisk() zurück. UserDefaults bleibt die
+        // Source-of-Truth, weil injectDemoSlots nichts persistiert.
         MultibankingStore.shared.restoreDemoSlots(demoPreviousSlots, activeIndex: demoPreviousActiveIndex)
         txVM.unifiedModeEnabled = demoPreviousUnifiedMode
         demoPreviousSlots = []
@@ -2061,6 +2103,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 item.target = self
             }
         }
+    }
+
+    /// Verhindert, dass die App im Dock-Mode (`.regular`) automatisch
+    /// beendet, sobald das letzte Fenster schließt. simplebanking ist
+    /// primär eine Menüleisten-App — Cmd-Q ist der einzige Beenden-Weg.
+    /// Ohne diesen Override würde z.B. das Voucher-Sheet → externe URL
+    /// öffnen → Fenster schließen → App quit auslösen.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
     }
 
     /// macOS ruft das auf, wenn der User das Dock-Icon klickt (nur im Dock-Mode).
@@ -4051,16 +4102,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard !demoMode else { return }
         let existingUser = CredentialsStore.exists()
         guard existingUser else { return }   // Erst-Installation → setup wizard übernimmt
-        guard WhatsNewTrigger.shouldShowOnLaunch(isExistingUser: existingUser) else { return }
-        guard let version = WhatsNewTrigger.currentVersion() else { return }
+
+        let willShowWhatsNew = WhatsNewTrigger.shouldShowOnLaunch(isExistingUser: existingUser)
+            && WhatsNewTrigger.currentVersion() != nil
 
         // Launch-Settle-Delay analog zum Setup-Wizard, damit die Sheet
         // nicht mitten ins Status-Item-Setup fällt.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            WhatsNewTrigger.markShown()
-            let panel = WhatsNewPanel(version: version)
-            panel.runModal()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            if willShowWhatsNew, let version = WhatsNewTrigger.currentVersion() {
+                WhatsNewTrigger.markShown()
+                let panel = WhatsNewPanel(version: version)
+                panel.runModal()
+            }
+            // Direkt nach (oder anstelle von) WhatsNew einmalig den
+            // Launch-Voucher für „Geld senden" anbieten.
+            self.showTransferVoucherIfNeeded(existingUser: existingUser)
         }
+    }
+
+    /// Einmaliger Post-Update-Voucher fürs neue „Geld senden"-Modul.
+    /// Bedingungen:
+    ///  - Demo-Mode aus
+    ///  - bestehende Installation (sonst übernimmt der Setup-Wizard
+    ///    mit seinem regulären Upsell-Schritt)
+    ///  - Licensing-System scharf, Feature sichtbar
+    ///  - keine aktive Lizenz
+    ///  - noch nie gezeigt
+    /// Das „shown"-Flag wird BEVOR die Sheet öffnet gesetzt, damit ein
+    /// schnelles Schließen / Abstürzen keine Wiederholung triggert.
+    private func showTransferVoucherIfNeeded(existingUser: Bool) {
+        guard !demoMode else { return }
+        guard existingUser else { return }
+        guard LicenseConfig.licensingEnabled else { return }
+        guard FeatureFlags.transferMoneyEnabled else { return }
+        guard !LicenseManager.shared.isLicensed else { return }
+        // Race-Schutz: wenn ein Lizenz-Key bereits im Keychain liegt
+        // (oder DEBUG-Masterode aktiv), zeigen wir den Voucher nicht.
+        // `isLicensed` kann beim Launch noch false sein, weil die Polar-
+        // Revalidation async läuft — `hasStoredLicenseKey` ist synchron.
+        guard !LicenseManager.shared.hasStoredLicenseKey else { return }
+        // Voucher-Aktion zeitlich begrenzt — nach dem Ablauf bleibt nur
+        // das reguläre UpsellSheet, das beim Klick auf „Geld senden" kommt.
+        guard LicenseConfig.isVoucherActive else { return }
+
+        let shownKey = "simplebanking.transferVoucher.shown.v1"
+        guard !UserDefaults.standard.bool(forKey: shownKey) else { return }
+        UserDefaults.standard.set(true, forKey: shownKey)
+
+        let sheet = TransferVoucherSheet(
+            onClose: { [weak self] in
+                self?.transferVoucherWindow?.close()
+                self?.transferVoucherWindow = nil
+            },
+            onLater: { [weak self] in
+                self?.transferVoucherWindow?.close()
+                self?.transferVoucherWindow = nil
+            }
+        )
+        let host = NSHostingController(rootView: sheet)
+        let window = NSWindow(contentViewController: host)
+        window.title = L10n.t("Neu: simplesend", "New: simplesend")
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 460, height: 480))
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        transferVoucherWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func autoStartSetupWizardIfNeeded() {
@@ -4283,6 +4393,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     CredentialsStore.activeSlotId = extraSlotId
                     try? CredentialsStore.save(extraCreds, masterPassword: pw)
                 }
+                // Sync: connectionId + credModel-Keys SOFORT setzen, damit ein direkt
+                // nachgelagerter Refresh nicht in „no connectionId yet" rennt.
+                // Async-Teil (SessionStore connectionData + sessions) läuft danach im Task.
+                YaxiService.copyConnectionStateKeys(fromSlotId: primarySlotId, toSlotId: extraSlotId)
                 Task { await YaxiService.copyConnectionState(fromSlotId: primarySlotId, toSlotId: extraSlotId) }
                 YaxiService.activeSlotId = extraSlotId
                 YaxiService.storeDiscoveredIBAN(iban)
@@ -4375,6 +4489,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         CredentialsStore.activeSlotId = extraSlotId
                         try? CredentialsStore.save(extraCreds, masterPassword: pw)
                     }
+                    // Sync: connectionId + credModel-Keys SOFORT setzen, damit ein direkt
+                    // nachgelagerter Refresh nicht in „no connectionId yet" rennt.
+                    // Async-Teil (SessionStore connectionData + sessions) läuft danach im Task.
+                    YaxiService.copyConnectionStateKeys(fromSlotId: "legacy", toSlotId: extraSlotId)
                     Task { await YaxiService.copyConnectionState(fromSlotId: "legacy", toSlotId: extraSlotId) }
                     YaxiService.activeSlotId = extraSlotId
                     YaxiService.storeDiscoveredIBAN(iban)

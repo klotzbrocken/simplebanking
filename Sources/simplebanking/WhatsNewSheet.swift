@@ -259,8 +259,8 @@ enum WhatsNewContent {
         WhatsNewItem(
             icon: "paperplane.fill",
             tint: .sbBlueStrong,
-            title: L10n.t("Geld senden direkt aus der App",
-                          "Send money straight from the app"),
+            title: L10n.t("simplesend — direkt aus simplebanking",
+                          "simplesend — straight from simplebanking"),
             description: L10n.t(
                 "SEPA-Überweisungen mit Vorlagen, Favoriten, Sende-Verzögerung als Sicherheitsnetz und optionaler PDF-Quittung per E-Mail an den Empfänger.",
                 "SEPA transfers with templates, favorites, send-delay as a safety net, and optional PDF receipt by email to the recipient."

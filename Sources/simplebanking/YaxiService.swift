@@ -318,9 +318,42 @@ enum YaxiService {
 
     // MARK: - Public API
 
-    /// Stores the IBAN and resets connection state (mirrors POST /config).
+    /// Copies the FULL connection state from one slot to another. Used when one
+    /// Online-Banking-Login deckt mehrere Konten ab (z.B. DKB Familie) und
+    /// jedes Konto bekommt seinen eigenen Slot, teilt sich aber die YAXI-
+    /// connection. Kopiert BEIDES: UserDefaults-Keys (connectionId, credModel*)
+    /// UND SessionStore (connectionData + sessions). Ohne die UserDefaults-
+    /// Keys hätte der neue Slot `connectionId = nil` und jeder fetchBalances
+    /// würde mit „no connectionId yet" rausfallen.
     static func copyConnectionState(fromSlotId: String, toSlotId: String) async {
+        copyConnectionStateKeys(fromSlotId: fromSlotId, toSlotId: toSlotId)
         await sessionStore.copyConnectionDataAndSessions(fromSlotId: fromSlotId, toSlotId: toSlotId)
+    }
+
+    /// Synchroner Teil von `copyConnectionState`: kopiert die UserDefaults-
+    /// State-Keys (connectionId + credential-model-Flags) zwischen Slots.
+    /// MUSS vor `MultibankingStore.addSlot` + Refresh laufen, sonst rennt
+    /// ein sofort getriggerter fetchBalances in „no connectionId yet" weil
+    /// der async SessionStore-Copy noch nicht durch ist.
+    static func copyConnectionStateKeys(fromSlotId: String, toSlotId: String) {
+        let d = UserDefaults.standard
+        if let v = d.string(forKey: connectionIdKey(for: fromSlotId)), !v.isEmpty {
+            d.set(v, forKey: connectionIdKey(for: toSlotId))
+        }
+        for (srcKey, dstKey) in [
+            (credModelFullKey(for: fromSlotId),   credModelFullKey(for: toSlotId)),
+            (credModelUserIdKey(for: fromSlotId), credModelUserIdKey(for: toSlotId)),
+            (credModelNoneKey(for: fromSlotId),   credModelNoneKey(for: toSlotId)),
+        ] {
+            if d.object(forKey: srcKey) != nil {
+                d.set(d.bool(forKey: srcKey), forKey: dstKey)
+            }
+        }
+        let copied = d.string(forKey: connectionIdKey(for: toSlotId))?.prefix(8) ?? "nil"
+        AppLogger.log(
+            "copyConnectionStateKeys: from=\(fromSlotId.prefix(8)) to=\(toSlotId.prefix(8)) connId=\(copied)",
+            category: "YaxiService"
+        )
     }
 
     static func configureBackend(iban: String) async -> Bool {
@@ -667,11 +700,11 @@ enum YaxiService {
                 } else if isConnectionResetError(error), storedCD != nil {
                     // Consent abgelaufen (Unauthorized / ConsentExpired):
                     // YAXI-Empfehlung "Restart the service without passing
-                    // connection data" — wir interpretieren das strikt:
-                    // frischer Ticket UND keine alte Session mitschicken,
-                    // da die Session bank-state-gebunden ist und nach einem
-                    // Consent-Reset obsolet sein dürfte (1822/Sparkasse-Bug).
-                    AppLogger.log("fetchBalances: consent expired, restarting without connectionData/session", category: "YaxiService", level: "WARN")
+                    // connection data" — frischer Ticket (Doku) + connectionData
+                    // weg. Session behalten: ein Drop führt bei Sparkasse zu
+                    // erzwungenem SCA-Push bei JEDEM Refresh (Regression
+                    // 2026-05-12). Yaxi-Doku verlangt das nicht explizit.
+                    AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: nil, userId: userId, password: password
@@ -680,7 +713,7 @@ enum YaxiService {
                     let retryTicket = ticket
                     resp = try await client.balances(
                         credentials: credsNoCD,
-                        session: nil,
+                        session: storedSession,
                         recurringConsents: true,
                         ticket: retryTicket,
                         accounts: accountRefs
@@ -755,7 +788,10 @@ enum YaxiService {
             if alwaysTrace {
                 await writeTrace(client: client, label: "diag-fetchBalances-ok", ticket: ticket, error: nil)
             }
-            return makeBalancesResponse(result, session: outcome.session, connectionData: outcome.connectionData)
+            return makeBalancesResponse(result,
+                                        session: outcome.session,
+                                        connectionData: outcome.connectionData,
+                                        requestedIban: iban)
 
         } catch {
             await writeTrace(client: client, label: "fetchBalances", ticket: ticket, error: error)
@@ -860,12 +896,10 @@ enum YaxiService {
                         ticket: retryTicket
                     )
                 } else if isConnectionResetError(error), storedCD != nil {
-                    // Consent abgelaufen (Unauthorized / ConsentExpired):
-                    // YAXI-Empfehlung "Restart the service without passing
-                    // connection data" — strikt interpretiert: frischer Ticket
-                    // UND keine alte Session (Session ist bank-state-gebunden
-                    // und nach Consent-Reset obsolet, 1822/Sparkasse-Bug).
-                    AppLogger.log("fetchTransactions: consent expired, restarting without connectionData/session", category: "YaxiService", level: "WARN")
+                    // Consent abgelaufen — frischer Ticket + connectionData
+                    // weg, Session behalten (siehe fetchBalances: Sparkasse-
+                    // Regression bei Session-Drop, 2026-05-12).
+                    AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: nil, userId: userId, password: password
@@ -874,7 +908,7 @@ enum YaxiService {
                     let retryTicket = ticket
                     resp = try await client.transactions(
                         credentials: credsNoCD,
-                        session: nil,
+                        session: storedSession,
                         recurringConsents: true,
                         ticket: retryTicket
                     )
@@ -1291,9 +1325,9 @@ enum YaxiService {
                     )
                 } else if isConnectionResetError(error), storedCD != nil {
                     // Yaxi-Empfehlung „Restart the service without passing
-                    // connection data" — strikt: frischer Ticket + keine Session
-                    // (Session ist bank-state-gebunden, nach Consent-Reset obsolet).
-                    AppLogger.log("sendTransfer: consent expired, restarting without connectionData/session", category: "YaxiService", level: "WARN")
+                    // connection data" — frischer Ticket + connectionData weg,
+                    // Session behalten (Sparkasse-Regression bei Drop, 2026-05-12).
+                    AppLogger.log("sendTransfer: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
                     let credsNoCD = buildCredentials(
                         connectionId: connectionId, model: model,
                         connectionData: nil, userId: userId, password: password
@@ -1301,7 +1335,7 @@ enum YaxiService {
                     ticket = await YaxiTicketMaker.issueTransferTicket()
                     resp = try await client.transfer(
                         credentials: credsNoCD,
-                        session: nil,
+                        session: storedSession,
                         recurringConsents: true,
                         ticket: ticket,
                         product: .sepaCreditTransfer,
@@ -1375,9 +1409,39 @@ enum YaxiService {
     private static func makeBalancesResponse(
         _ result: AuthenticatedBalancesResult,
         session: Session?,
-        connectionData: ConnectionData?
+        connectionData: ConnectionData?,
+        requestedIban: String = ""
     ) -> BalancesResponse {
-        let allBalances = result.toData().data.balances.first?.balances ?? []
+        // YAXI liefert für Banken wie 1822direkt mehrere Account-Einträge zurück
+        // (Girokonto + Tagesgeld + Visa-Karten-Subkonto). `first` ist russisches
+        // Roulette — kann ein Subaccount ohne Booked-Balance treffen.
+        // Per IBAN matchen, Fallback auf first wie bisher.
+        let allEntries = result.toData().data.balances
+        let target = requestedIban
+            .replacingOccurrences(of: " ", with: "")
+            .uppercased()
+
+        let matchedIdx: Int? = {
+            guard !target.isEmpty else { return nil }
+            for (i, e) in allEntries.enumerated() {
+                if case .iban(let id) = e.account.id,
+                   id.replacingOccurrences(of: " ", with: "").uppercased() == target {
+                    return i
+                }
+            }
+            return nil
+        }()
+
+        let allBalances: [Balance]
+        if let idx = matchedIdx {
+            allBalances = allEntries[idx].balances
+        } else if !target.isEmpty, !allEntries.isEmpty {
+            AppLogger.log("makeBalancesResponse: requested IBAN \(target.prefix(8))… not in response (got \(allEntries.count) entries), using first as fallback",
+                          category: "YaxiService", level: "WARN")
+            allBalances = allEntries.first?.balances ?? []
+        } else {
+            allBalances = allEntries.first?.balances ?? []
+        }
 
         // Priority: Booked > Available > Expected (matches canonical YAXI-MoneyMoney
         // reference in `mapping/balance.lua`). `Booked` is the authoritative posted balance.

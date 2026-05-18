@@ -12,7 +12,8 @@ let package = Package(
     products: [
         .executable(name: "simplebanking", targets: ["simplebanking"]),
         .executable(name: "simplebanking-mcp", targets: ["simplebanking-mcp"]),
-        .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"])
+        .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"]),
+        .executable(name: "list-foreign-banks", targets: ["list-foreign-banks"])
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
@@ -66,6 +67,13 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
             path: "Sources/simplebanking-cli"
+        ),
+        .executableTarget(
+            name: "list-foreign-banks",
+            dependencies: [
+                .product(name: "RoutexClient", package: "routex-client-swift")
+            ],
+            path: "Scripts/ListForeignBanks"
         ),
         .testTarget(
             name: "simplebankingTests",

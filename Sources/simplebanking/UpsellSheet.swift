@@ -17,6 +17,8 @@ struct UpsellSheet: View {
     let onClose: () -> Void
     let onOpenSettings: () -> Void
 
+    @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             // Header
@@ -25,10 +27,10 @@ struct UpsellSheet: View {
                     .font(.system(size: 30, weight: .regular))
                     .foregroundColor(.accentColor)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(L10n.t("Geld senden", "Send Money"))
+                    Text(L10n.t("simplesend", "simplesend"))
                         .font(.system(size: 18, weight: .semibold))
-                    Text(L10n.t("Kostenpflichtige Erweiterung",
-                                "Paid extension"))
+                    Text(L10n.t("Senden direkt aus simplebanking",
+                                "Send directly from simplebanking"))
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
@@ -42,18 +44,18 @@ struct UpsellSheet: View {
                 bullet(icon: "bolt.fill",
                        title: L10n.t("Schnelle Eingabe", "Fast input"),
                        text: L10n.t(
-                        "Empfänger oder IBAN tippen — Vorschläge aus Deinen Buchungen mit Default-Betrag und Verwendungszweck.",
-                        "Type recipient or IBAN — suggestions from your transactions with default amount and purpose."))
+                        "Empfänger oder IBAN tippen, Vorschläge aus deinen Buchungen, mit Standard-Betrag und Verwendungszweck.",
+                        "Type recipient or IBAN, suggestions from your transactions, with default amount and purpose."))
                 bullet(icon: "lock.shield.fill",
                        title: L10n.t("Sicher", "Secure"),
                        text: L10n.t(
-                        "TAN-Bestätigung wie gewohnt direkt mit der Bank. simplebanking sieht keine Bank-Daten.",
-                        "TAN confirmation directly with your bank, as usual. simplebanking sees no bank data."))
+                        "Zahlungsauslösung über den lizenzierten Open-Banking-Anbieter YAXI. Du bestätigst jede Überweisung direkt bei deiner Bank per SCA. simplebanking erhält keine Zugangsdaten.",
+                        "Payment initiation via the licensed open-banking provider YAXI. You confirm every transfer directly with your bank via SCA. simplebanking receives no credentials."))
                 bullet(icon: "checkmark.seal.fill",
                        title: L10n.t("Einmal kaufen", "One-time purchase"),
                        text: L10n.t(
-                        "\(LicenseConfig.displayPrice) — keine Abo-Falle. Updates innerhalb von 1.x kostenlos.",
-                        "\(LicenseConfig.displayPrice) — no subscription. Free updates within 1.x."))
+                        "\(LicenseConfig.displayPrice) einmalig, kein Abo.",
+                        "\(LicenseConfig.displayPrice) one-time, no subscription."))
             }
 
             Divider()
@@ -63,8 +65,8 @@ struct UpsellSheet: View {
                 Button(action: openCheckout) {
                     HStack(spacing: 6) {
                         Image(systemName: "cart.fill")
-                        Text(L10n.t("Für \(LicenseConfig.displayPrice) kaufen",
-                                    "Buy for \(LicenseConfig.displayPrice)"))
+                        Text(L10n.t("Für \(LicenseConfig.displayPrice) freischalten",
+                                    "Unlock for \(LicenseConfig.displayPrice)"))
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -79,6 +81,31 @@ struct UpsellSheet: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+            }
+
+            // Opt-Out: simplesend komplett ausblenden. Inverted Binding,
+            // damit das Storage-Flag positiv bleibt (`simplesendVisible`).
+            // .onChange postet die Notification, die BalanceBar live updated.
+            Toggle(isOn: Binding(
+                get: { !simplesendVisible },
+                set: { simplesendVisible = !$0 }
+            )) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.t("simplesend nicht im Footer anzeigen",
+                                "Don't show simplesend in the footer"))
+                        .font(.system(size: 12))
+                    Text(L10n.t("Kann in Einstellungen geändert werden.",
+                                "Can be changed in Settings."))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .toggleStyle(.checkbox)
+            .onChange(of: simplesendVisible) { _ in
+                NotificationCenter.default.post(
+                    name: Notification.Name("simplebanking.simplesendVisibilityChanged"),
+                    object: nil
+                )
             }
 
             // Footer-Link

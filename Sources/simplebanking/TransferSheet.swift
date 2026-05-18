@@ -1541,27 +1541,36 @@ struct TransferSheet: View {
             return
         }
 
-        guard let pw = requestMasterPassword() else {
-            await MainActor.run { phase = .idle }
-            return
-        }
-
-        let creds: StoredCredentials
-        do {
-            creds = try CredentialsStore.load(masterPassword: pw)
-        } catch {
-            await MainActor.run {
-                bodyError = L10n.t("Falsches Master-Passwort.", "Wrong master password.")
-                phase = .idle
+        // Demo-Mode: kein Master-Passwort, keine Credentials — `YaxiService.sendTransfer`
+        // short-circuited zu `.demoSuccess`. PDF/Mail-Quittung läuft normal.
+        let userId: String
+        let password: String
+        if demoMode {
+            userId = ""
+            password = ""
+        } else {
+            guard let pw = requestMasterPassword() else {
+                await MainActor.run { phase = .idle }
+                return
             }
-            return
+            do {
+                let creds = try CredentialsStore.load(masterPassword: pw)
+                userId = creds.userId
+                password = creds.password
+            } catch {
+                await MainActor.run {
+                    bodyError = L10n.t("Falsches Master-Passwort.", "Wrong master password.")
+                    phase = .idle
+                }
+                return
+            }
         }
 
         do {
             let outcome = try await YaxiService.sendTransfer(
                 request: request,
-                userId: creds.userId,
-                password: creds.password,
+                userId: userId,
+                password: password,
                 requestedExecutionDate: scheduledDate
             )
             await MainActor.run {
