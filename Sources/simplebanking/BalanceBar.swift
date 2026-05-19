@@ -884,6 +884,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // automatisch den richtigen Slot.
         }
 
+        // Self-Heal: Slots aus Pre-1.5.0-Setups, die durch den Multi-Account-
+        // Bug ohne connectionId angelegt wurden, von einem gesunden Sibling
+        // im selben Bank-Brand reparieren. Idempotent — wirkt nur wenn was
+        // zu reparieren ist (siehe SlotConnectionHealer-Doku).
+        SlotConnectionHealer.runOnStartup()
+
         // One-time migration: clear ALL corrupted legacy slot state.
         // During early multibanking builds, C24 setup wrote its connectionId, connectionData
         // and session to the legacy (Sparkasse) keys, causing Sparkasse to show C24's balance.
