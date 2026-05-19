@@ -96,7 +96,8 @@ final class DiagnosticSession: ObservableObject {
     func finalize() async {
         MultibankingStore.shared.setActive(index: originalActiveIndex)
         SlotContext.restore(originalSlotContext)
-        await YaxiService.sessionStore.reloadForActiveSlot()
+        // SessionStore-Cache ist seit Refactor 2026-05-19 per-slot lazy —
+        // kein expliziter Reload mehr nötig.
         if !originalLoggerEnabled && AppLogger.isEnabled {
             AppLogger.setEnabled(false)
             AppLogger.log("diagnostic: logger restored to disabled", category: "Diagnostic")
@@ -147,9 +148,12 @@ final class DiagnosticSession: ObservableObject {
             // Session-Daten des vorherigen Slots gegen die Bank des neuen
             // (Cross-Slot-Auth), bzw. Trace-Schreibziele landen im falschen Slot.
             SlotContext.activate(slotId: slot.id)
-            // SessionStore lädt persistierte Sessions/ConnectionData aus dem
-            // neuen Slot in die Actor-Caches.
-            await YaxiService.sessionStore.reloadForActiveSlot()
+            // SessionStore-Cache ist per-slot lazy (Refactor 2026-05-19) —
+            // der nachfolgende fetchBalances/fetchTransactions lädt automatisch
+            // den richtigen Slot. Cache aber sicherheitshalber invalidieren,
+            // falls die Diagnose-Sitzung gerade nach externen Disk-Schreibern
+            // den Slot anspricht.
+            await YaxiService.sessionStore.invalidateCache(slotId: slot.id)
             // Kurzer Tick: SessionStore lauscht auf Slot-Wechsel über Notifications
             // / Combine; wir geben ihm eine Slice Time, sich auf den neuen Slot
             // einzustellen. 100 ms ist konservativ und unmerklich für den User.

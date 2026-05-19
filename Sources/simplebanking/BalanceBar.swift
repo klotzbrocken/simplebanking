@@ -879,10 +879,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if let slot = store.activeSlot {
             SlotContext.activate(slotId: slot.id)
             applySlotToViewModel(slot)
-            // SessionStore.init() always loads the legacy (no-suffix) keys regardless of which
-            // slot was last active. For non-legacy slots this means the wrong session is in memory.
-            // Reload immediately so the first refreshAsync uses the correct slot's session.
-            Task { await YaxiService.sessionStore.reloadForActiveSlot() }
+            // Seit Refactor 2026-05-19 ist SessionStore per-slot lazy cached —
+            // kein explizites Preload mehr nötig, der erste fetchBalances lädt
+            // automatisch den richtigen Slot.
         }
 
         // One-time migration: clear ALL corrupted legacy slot state.
@@ -4208,9 +4207,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Invalidate any in-flight refreshAsync / openTransactionsPanel from the old slot
         slotEpoch += 1
 
-        // Switch active slot in all data layers
+        // Switch active slot in all data layers. SessionStore-Cache ist
+        // per-slot lazy (Refactor 2026-05-19) — der nachfolgende refreshAsync
+        // greift automatisch auf den richtigen Slot-State zu.
         SlotContext.activate(slotId: slot.id)
-        await YaxiService.sessionStore.reloadForActiveSlot()
         store.setActive(index: index)
 
         // Apply the new slot's identity to AppStorage + txVM immediately

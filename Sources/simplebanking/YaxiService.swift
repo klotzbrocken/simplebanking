@@ -92,10 +92,61 @@ enum YaxiService {
             "\(base)\(suffix(for: slotId)).kc3"
         }
 
-        private var balancesSession: Data?
-        private var transactionsSession: Data?
-        private var transferSession: Data?
-        private var storedConnectionData: Data?
+        /// Per-Slot in-memory Cache. Vor Refactor 2026-05-19 gab es vier globale
+        /// Felder (balancesSession etc.), die durch `reloadForActiveSlot()` zwischen
+        /// Slots gewechselt wurden — bei nicht-aktiven Slot-Operationen leakte das
+        /// active-slot-Material in die Bank-Calls (Aileen-Diagnose). Jetzt strikt
+        /// pro slotId isoliert, lazy on first access aus Disk geladen.
+        struct SlotState {
+            var balancesSession: Data?
+            var transactionsSession: Data?
+            var transferSession: Data?
+            var connectionData: Data?
+        }
+        private var slotStates: [String: SlotState] = [:]
+
+        /// Lädt einen Slot lazy beim ersten Zugriff aus der Disk in den Cache.
+        /// Wird vom `actor` automatisch serialisiert — gleichzeitige Reads für
+        /// denselben Slot finden nach dem ersten Load alle den Cache-Hit.
+        private func loadIfNeeded(_ slotId: String) -> SlotState {
+            if let cached = slotStates[slotId] { return cached }
+            var state = SlotState()
+            state.balancesSession     = SessionStore.persistRead("session.balances",     slotId: slotId)
+            state.transactionsSession = SessionStore.persistRead("session.transactions", slotId: slotId)
+            state.transferSession     = SessionStore.persistRead("session.transfer",     slotId: slotId)
+            state.connectionData      = SessionStore.persistRead("connectionData",       slotId: slotId)
+            // Legacy-UserDefaults-Migration (pre-multibanking) nur für den
+            // "legacy"-Slot: damalige Builds schrieben in no-suffix UD-Keys.
+            if slotId == "legacy" {
+                let legB64 = defaults.string(forKey: "simplebanking.yaxi.session")
+                if state.balancesSession == nil {
+                    state.balancesSession = (defaults.string(forKey: "simplebanking.yaxi.session.balances") ?? legB64)
+                        .flatMap { Data(base64Encoded: $0) }
+                }
+                if state.transactionsSession == nil {
+                    state.transactionsSession = (defaults.string(forKey: "simplebanking.yaxi.session.transactions") ?? legB64)
+                        .flatMap { Data(base64Encoded: $0) }
+                }
+                if state.transferSession == nil {
+                    state.transferSession = defaults.string(forKey: "simplebanking.yaxi.session.transfer")
+                        .flatMap { Data(base64Encoded: $0) }
+                }
+                if state.connectionData == nil {
+                    state.connectionData = defaults.string(forKey: "simplebanking.yaxi.connectionData")
+                        .flatMap { Data(base64Encoded: $0) }
+                }
+            }
+            slotStates[slotId] = state
+            return state
+        }
+
+        /// Mutiert den Cache-Eintrag für slotId. Erstellt ihn falls noch nicht
+        /// geladen. Garantiert Konsistenz zwischen Memory und Disk.
+        private func mutateState(_ slotId: String, _ block: (inout SlotState) -> Void) {
+            var state = loadIfNeeded(slotId)
+            block(&state)
+            slotStates[slotId] = state
+        }
 
         // MARK: - Keychain primitives
 
@@ -176,66 +227,65 @@ enum YaxiService {
         // MARK: - Init
 
         init() {
-            // Legacy (no-suffix) slot. Try primary storage first, then UserDefaults migration.
-            let ud = UserDefaults.standard
-            let legB64 = ud.string(forKey: "simplebanking.yaxi.session")
-            balancesSession = SessionStore.persistRead("session.balances", slotId: "legacy")
-                ?? (ud.string(forKey: "simplebanking.yaxi.session.balances") ?? legB64)
-                    .flatMap { Data(base64Encoded: $0) }
-            transactionsSession = SessionStore.persistRead("session.transactions", slotId: "legacy")
-                ?? (ud.string(forKey: "simplebanking.yaxi.session.transactions") ?? legB64)
-                    .flatMap { Data(base64Encoded: $0) }
-            transferSession = SessionStore.persistRead("session.transfer", slotId: "legacy")
-                ?? ud.string(forKey: "simplebanking.yaxi.session.transfer")
-                    .flatMap { Data(base64Encoded: $0) }
-            storedConnectionData = SessionStore.persistRead("connectionData", slotId: "legacy")
-                ?? ud.string(forKey: "simplebanking.yaxi.connectionData")
-                    .flatMap { Data(base64Encoded: $0) }
+            // Lazy: keine eager loads mehr. Slot-State wird beim ersten Zugriff
+            // pro slotId aus der Disk geholt (siehe `loadIfNeeded`).
         }
 
         // MARK: - Public API
 
-        func session(for scope: Scope) -> Data? {
+        /// Slot-explizite Reader. Vor Refactor 2026-05-19 gab es Overloads ohne
+        /// slotId, die das aktive in-memory Feld zurückgaben — was bei Multi-Slot-
+        /// Setups zu Cross-Slot-Leaks führte (Aileen-Diagnose).
+        func session(for scope: Scope, slotId: String) -> Data? {
+            let state = loadIfNeeded(slotId)
             switch scope {
-            case .balances:     return balancesSession
-            case .transactions: return transactionsSession
-            case .transfer:     return transferSession
+            case .balances:     return state.balancesSession
+            case .transactions: return state.transactionsSession
+            case .transfer:     return state.transferSession
             }
         }
 
-        func connectionData() -> Data? { storedConnectionData }
+        func connectionData(slotId: String) -> Data? {
+            loadIfNeeded(slotId).connectionData
+        }
 
         func update(scope: Scope, session: Data?, connectionData: Data?, slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
-            if let s = session {
-                switch scope {
-                case .balances:
-                    balancesSession = s
-                    persistWrite("session.balances", slotId: sid, data: s)
-                case .transactions:
-                    transactionsSession = s
-                    persistWrite("session.transactions", slotId: sid, data: s)
-                case .transfer:
-                    transferSession = s
-                    persistWrite("session.transfer", slotId: sid, data: s)
+            mutateState(sid) { state in
+                if let s = session {
+                    switch scope {
+                    case .balances:     state.balancesSession     = s
+                    case .transactions: state.transactionsSession = s
+                    case .transfer:     state.transferSession     = s
+                    }
+                    let key: String = {
+                        switch scope {
+                        case .balances:     return "session.balances"
+                        case .transactions: return "session.transactions"
+                        case .transfer:     return "session.transfer"
+                        }
+                    }()
+                    persistWrite(key, slotId: sid, data: s)
                 }
-            }
-            if let cd = connectionData {
-                storedConnectionData = cd
-                persistWrite("connectionData", slotId: sid, data: cd)
+                if let cd = connectionData {
+                    state.connectionData = cd
+                    persistWrite("connectionData", slotId: sid, data: cd)
+                }
             }
         }
 
         func updateConnectionData(_ connectionData: Data?, slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
             guard let connectionData else { return }
-            storedConnectionData = connectionData
-            persistWrite("connectionData", slotId: sid, data: connectionData)
+            mutateState(sid) { state in
+                state.connectionData = connectionData
+                persistWrite("connectionData", slotId: sid, data: connectionData)
+            }
         }
 
         func clearAll(slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
-            balancesSession = nil; transactionsSession = nil; transferSession = nil; storedConnectionData = nil
+            slotStates[sid] = SlotState()
             persistDelete("session.balances",    slotId: sid)
             persistDelete("session.transactions", slotId: sid)
             persistDelete("session.transfer",     slotId: sid)
@@ -249,7 +299,11 @@ enum YaxiService {
 
         func clearSessionsOnly(slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
-            balancesSession = nil; transactionsSession = nil; transferSession = nil
+            mutateState(sid) { state in
+                state.balancesSession = nil
+                state.transactionsSession = nil
+                state.transferSession = nil
+            }
             persistDelete("session.balances",    slotId: sid)
             persistDelete("session.transactions", slotId: sid)
             persistDelete("session.transfer",     slotId: sid)
@@ -261,28 +315,18 @@ enum YaxiService {
 
         func clearConnectionDataOnly(slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
-            storedConnectionData = nil
+            mutateState(sid) { $0.connectionData = nil }
             persistDelete("connectionData", slotId: sid)
             defaults.removeObject(forKey: "simplebanking.yaxi.connectionData\(SessionStore.suffix(for: sid))")
         }
 
-        func reloadForActiveSlot() {
-            let sid = YaxiService.activeSlotId
-            let sfx = SessionStore.suffix(for: sid)
-            let legB64 = sfx.isEmpty ? defaults.string(forKey: "simplebanking.yaxi.session") : nil
-            balancesSession = SessionStore.persistRead("session.balances", slotId: sid)
-                ?? (defaults.string(forKey: "simplebanking.yaxi.session.balances\(sfx)") ?? legB64)
-                    .flatMap { Data(base64Encoded: $0) }
-            transactionsSession = SessionStore.persistRead("session.transactions", slotId: sid)
-                ?? (defaults.string(forKey: "simplebanking.yaxi.session.transactions\(sfx)") ?? legB64)
-                    .flatMap { Data(base64Encoded: $0) }
-            transferSession = SessionStore.persistRead("session.transfer", slotId: sid)
-                ?? defaults.string(forKey: "simplebanking.yaxi.session.transfer\(sfx)")
-                    .flatMap { Data(base64Encoded: $0) }
-            storedConnectionData = SessionStore.persistRead("connectionData", slotId: sid)
-                ?? defaults.string(forKey: "simplebanking.yaxi.connectionData\(sfx)")
-                    .flatMap { Data(base64Encoded: $0) }
-            AppLogger.log("reloadForActiveSlot: slot=\(sid.prefix(8)) useKC=\(SessionStore.useKeychain) cd=\(storedConnectionData == nil ? "nil" : "\(storedConnectionData!.count)b") bal=\(balancesSession == nil ? "nil" : "ok")", category: "YaxiService")
+        /// Invalidiert den in-memory Cache für `slotId` — der nächste Read lädt
+        /// frisch aus der Disk. Ersatz für das alte `reloadForActiveSlot()`,
+        /// das nach dem Per-Slot-Refactor obsolet ist (Cache lädt automatisch
+        /// pro slotId). Wird noch von Diagnose- und Slot-Switch-Pfaden genutzt,
+        /// um nach externen Disk-Schreibvorgängen Frische zu garantieren.
+        func invalidateCache(slotId: String) {
+            slotStates.removeValue(forKey: slotId)
         }
 
         func copyConnectionDataAndSessions(fromSlotId: String, toSlotId: String) {
@@ -291,9 +335,13 @@ enum YaxiService {
                     persistWrite(key, slotId: toSlotId, data: data)
                 }
             }
+            // Memory-Cache für target invalidieren — nächster Read lädt frische
+            // Daten von Disk inkl. der gerade kopierten.
+            slotStates.removeValue(forKey: toSlotId)
         }
 
         func clearLegacySessionData() {
+            slotStates["legacy"] = SlotState()
             persistDelete("session.balances",    slotId: "legacy")
             persistDelete("session.transactions", slotId: "legacy")
             persistDelete("session.transfer",     slotId: "legacy")
@@ -303,9 +351,6 @@ enum YaxiService {
             defaults.removeObject(forKey: "simplebanking.yaxi.session.transactions")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.transfer")
             defaults.removeObject(forKey: "simplebanking.yaxi.connectionData")
-            if YaxiService.activeSlotId == "legacy" {
-                balancesSession = nil; transactionsSession = nil; transferSession = nil; storedConnectionData = nil
-            }
             AppLogger.log("clearLegacySessionData: legacy slot cleared", category: "YaxiService")
         }
 
@@ -527,8 +572,8 @@ enum YaxiService {
             throw NSError(domain: "YaxiService", code: -1,
                           userInfo: [NSLocalizedDescriptionKey: "no connectionId for accounts()"])
         }
-        let storedCD = await sessionStore.connectionData()
-        var storedSession = await sessionStore.session(for: .balances)
+        let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
+        var storedSession = await sessionStore.session(for: .balances, slotId: slotSnapshot)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
             connectionData: storedCD, userId: userId, password: password
@@ -653,8 +698,8 @@ enum YaxiService {
             ? []
             : [AccountReference(id: .iban(iban), currency: "EUR")]
 
-        let storedCD = await sessionStore.connectionData()
-        let storedSession = await sessionStore.session(for: .balances)
+        let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
+        let storedSession = await sessionStore.session(for: .balances, slotId: slotSnapshot)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
             connectionData: storedCD, userId: userId, password: password
@@ -855,9 +900,9 @@ enum YaxiService {
                                        connectionData: nil, error: "missing iban",
                                        userMessage: nil, scaRequired: nil)
         }
-        let storedCD = await sessionStore.connectionData()
-        AppLogger.log("fetchTransactions: storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
-        let storedSession = await sessionStore.session(for: .transactions)
+        let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
+        AppLogger.log("fetchTransactions: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
+        let storedSession = await sessionStore.session(for: .transactions, slotId: slotSnapshot)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
             connectionData: storedCD, userId: userId, password: password
@@ -1259,8 +1304,8 @@ enum YaxiService {
                                    userMessage: nil, mayHaveBeenExecuted: false)
         }
 
-        let storedCD = await sessionStore.connectionData()
-        let storedSession = await sessionStore.session(for: .transfer)
+        let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
+        let storedSession = await sessionStore.session(for: .transfer, slotId: slotSnapshot)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
             connectionData: storedCD, userId: userId, password: password
