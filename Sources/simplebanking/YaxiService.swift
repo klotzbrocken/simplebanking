@@ -563,7 +563,13 @@ enum YaxiService {
     }
 
     /// Calls accounts() API with SCA and returns discovered accounts.
-    static func fetchAccounts(userId: String, password: String) async throws -> [Routex.Account] {
+    /// `callSource` steuert ob bei `UnexpectedError` ein User-Report-Prompt
+    /// erscheint (siehe `ErrorReportStore.CallSource`). Default `.normal`.
+    static func fetchAccounts(
+        userId: String,
+        password: String,
+        callSource: ErrorReportStore.CallSource = .normal
+    ) async throws -> [Routex.Account] {
         let slotSnapshot = activeSlotId
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let model = loadCredentialsModel(slotId: slotSnapshot)
@@ -608,14 +614,24 @@ enum YaxiService {
                 AppLogger.log("fetchAccounts: transient error, retrying with fresh ticket: \(error)", category: "YaxiService", level: "WARN")
             }
             ticket = YaxiTicketMaker.issueTicket(service: "Accounts")
-            resp = try await client.accounts(
-                credentials: creds,
-                session: nil,
-                recurringConsents: true,
-                ticket: ticket,
-                fields: [.iban, .displayName, .ownerName, .currency],
-                filter: .ibanNotEq(value: nil)
-            )
+            do {
+                resp = try await client.accounts(
+                    credentials: creds,
+                    session: nil,
+                    recurringConsents: true,
+                    ticket: ticket,
+                    fields: [.iban, .displayName, .ownerName, .currency],
+                    filter: .ibanNotEq(value: nil)
+                )
+            } catch let retryError {
+                // Final failure — capture für „Problem melden"-Flow
+                await captureUnexpectedErrorIfNeeded(
+                    error: retryError, client: client, ticket: ticket,
+                    slotSnapshot: slotSnapshot, callName: "fetchAccounts",
+                    callSource: callSource
+                )
+                throw retryError
+            }
         }
 
         // Snapshot the final ticket value so @Sendable closures capture an immutable copy.
@@ -650,7 +666,12 @@ enum YaxiService {
     /// einen YAXI-Trace via `writeTrace()` — für Diagnose-Probes, die auch
     /// bei Erfolg den vollen HTTP-Roundtrip dokumentieren wollen. Im
     /// normalen Refresh-Pfad (default false) bleibt der Trace nur Error-Pfad.
-    static func fetchBalances(userId: String, password: String, alwaysTrace: Bool = false) async throws -> BalancesResponse {
+    static func fetchBalances(
+        userId: String,
+        password: String,
+        alwaysTrace: Bool = false,
+        callSource: ErrorReportStore.CallSource = .normal
+    ) async throws -> BalancesResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
         // HBCI-Mutex via withSlot — Acquire/Release atomar im Actor, damit
@@ -661,7 +682,8 @@ enum YaxiService {
                 slotSnapshot: slotSnapshot,
                 userId: userId,
                 password: password,
-                alwaysTrace: alwaysTrace
+                alwaysTrace: alwaysTrace,
+                callSource: callSource
             )
         }
         guard let response = result else {
@@ -679,7 +701,8 @@ enum YaxiService {
         slotSnapshot: String,
         userId: String,
         password: String,
-        alwaysTrace: Bool
+        alwaysTrace: Bool,
+        callSource: ErrorReportStore.CallSource
     ) async throws -> BalancesResponse {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let ibanKeySnap = ibanKey(for: slotSnapshot)
@@ -841,6 +864,11 @@ enum YaxiService {
         } catch {
             await writeTrace(client: client, label: "fetchBalances", ticket: ticket, error: error)
             AppLogger.log("fetchBalances error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
+            await captureUnexpectedErrorIfNeeded(
+                error: error, client: client, ticket: ticket,
+                slotSnapshot: slotSnapshot, callName: "fetchBalances",
+                callSource: callSource
+            )
             if isConnectionResetError(error) {
                 AppLogger.log("fetchBalances: clearing ALL state after auth reset", category: "YaxiService")
                 await sessionStore.clearAll(slotId: slotSnapshot)
@@ -854,7 +882,13 @@ enum YaxiService {
         }
     }
 
-    static func fetchTransactions(userId: String, password: String, from: String, alwaysTrace: Bool = false) async throws -> TransactionsResponse {
+    static func fetchTransactions(
+        userId: String,
+        password: String,
+        from: String,
+        alwaysTrace: Bool = false,
+        callSource: ErrorReportStore.CallSource = .normal
+    ) async throws -> TransactionsResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
         // HBCI-Mutex via withSlot (siehe fetchBalances).
@@ -864,7 +898,8 @@ enum YaxiService {
                 userId: userId,
                 password: password,
                 from: from,
-                alwaysTrace: alwaysTrace
+                alwaysTrace: alwaysTrace,
+                callSource: callSource
             )
         }
         guard let response = result else {
@@ -883,7 +918,8 @@ enum YaxiService {
         userId: String,
         password: String,
         from: String,
-        alwaysTrace: Bool
+        alwaysTrace: Bool,
+        callSource: ErrorReportStore.CallSource
     ) async throws -> TransactionsResponse {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let ibanKeySnap = ibanKey(for: slotSnapshot)
@@ -1020,6 +1056,11 @@ enum YaxiService {
         } catch {
             await writeTrace(client: client, label: "fetchTransactions", ticket: ticket, error: error)
             AppLogger.log("fetchTransactions error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
+            await captureUnexpectedErrorIfNeeded(
+                error: error, client: client, ticket: ticket,
+                slotSnapshot: slotSnapshot, callName: "fetchTransactions",
+                callSource: callSource
+            )
             if isConnectionResetError(error) {
                 AppLogger.log("fetchTransactions: clearing ALL state after auth reset", category: "YaxiService")
                 await sessionStore.clearAll(slotId: slotSnapshot)
@@ -2013,6 +2054,114 @@ enum YaxiService {
             AppLogger.log("trace written → \(file.path)", category: "YaxiService")
         } catch let writeError {
             AppLogger.log("trace: file write failed: \(writeError)", category: "YaxiService", level: "WARN")
+        }
+    }
+
+    // MARK: - Error-Report-Capture (für „Problem melden"-Flow)
+
+    /// Schreibt einen Trace ins `reports/`-Verzeichnis — bypassed bewusst den
+    /// `AppLogger.isEnabled`-Gate (`writeTrace` respektiert den noch), weil
+    /// der User durch den expliziten „Problem melden"-Klick später Consent
+    /// gibt. Trace ist YAXI-AGE-encrypted, Klartext-Bank-Daten landen nicht
+    /// im File. Gibt den File-URL zurück oder nil bei Schreib-Fehler.
+    static func writeTraceForReport(
+        client: RoutexClient,
+        ticket: Ticket,
+        callName: String
+    ) async -> URL? {
+        let dir = ErrorReportStore.reportsDirectoryURL
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let ts = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let file = dir.appendingPathComponent("simplebanking-diagnose-\(ts)-\(callName).txt")
+
+        var content = ""
+        if let traceId = client.traceId() {
+            do {
+                let text = try await client.trace(ticket: ticket, traceId: traceId)
+                content = "=== YAXI trace ===\n\(text)\n"
+            } catch let traceError {
+                content = "=== trace() call failed ===\n\(traceError)\n"
+            }
+        } else {
+            content = "=== No traceId available from SDK ===\n"
+        }
+
+        do {
+            try content.write(to: file, atomically: true, encoding: .utf8)
+            return file
+        } catch {
+            AppLogger.log("ErrorReport: trace file write failed: \(error)",
+                          category: "ErrorReport", level: "WARN")
+            return nil
+        }
+    }
+
+    /// Capturet einen `UnexpectedError` für den User-Report-Flow. Skipt
+    /// stillschweigend bei anderen Error-Typen, in Demo-Mode, und bei
+    /// `CallSource`-Quellen die nicht reporten sollen (siehe Doku in
+    /// `ErrorReportStore.CallSource`). Trace-Fetch + Store-Registrierung
+    /// laufen NACH dem bestehenden `writeTrace`/`clearAll`-Pfad — kein
+    /// Eingriff in existierende Recovery-Logik.
+    static func captureUnexpectedErrorIfNeeded(
+        error: Error,
+        client: RoutexClient,
+        ticket: Ticket,
+        slotSnapshot: String,
+        callName: String,
+        callSource: ErrorReportStore.CallSource
+    ) async {
+        // Nur RoutexClientError.UnexpectedError triggert den Report-Flow.
+        guard let routexErr = error as? RoutexClientError else { return }
+        var userMsgFromBank: String? = nil
+        if case .UnexpectedError(let m) = routexErr {
+            userMsgFromBank = m
+        } else {
+            return
+        }
+
+        // CallSource-Filter (Diagnose, CLI, etc. skippen).
+        guard callSource.capturesReports else { return }
+
+        // Demo-Mode skip.
+        if UserDefaults.standard.bool(forKey: "demoMode") { return }
+
+        // 1. Trace ins reports/-Verzeichnis (kann nil sein bei Fail).
+        let attachmentURL = await writeTraceForReport(
+            client: client, ticket: ticket, callName: callName
+        )
+        // Cleanup alter Reports.
+        ErrorReportStore.pruneOldReports()
+
+        // 2. Context capturen (alle non-Main).
+        // SDK traceId() liefert Data? — wir wandeln in Hex für den Report-Context.
+        let traceIdData = client.traceId()
+        let traceId: String? = traceIdData.map { $0.map { String(format: "%02x", $0) }.joined() }
+        let ticketId = JWTTicketDecoder.extractTicketId(from: ticket)
+        let connectionId = UserDefaults.standard.string(forKey: connectionIdKey(for: slotSnapshot))
+        let alertTitle = RoutexErrorMapper.userMessage(for: error).title
+        let createdAt = Date()
+        let userMsgFromBankCopy = userMsgFromBank
+
+        // 3. Hop auf MainActor für Bank-Name + Store-Register.
+        await MainActor.run {
+            let bankName = MultibankingStore.shared.slots
+                .first(where: { $0.id == slotSnapshot })?.displayName
+            let report = ErrorReportStore.PendingErrorReport(
+                id: UUID(),
+                createdAt: createdAt,
+                callName: callName,
+                slotId: slotSnapshot,
+                bankDisplayName: bankName,
+                connectionId: connectionId,
+                traceId: traceId,
+                ticketId: ticketId,
+                userMessageFromBank: userMsgFromBankCopy,
+                attachmentURL: attachmentURL,
+                alertTitle: alertTitle
+            )
+            ErrorReportStore.shared.register(report, source: callSource)
         }
     }
 

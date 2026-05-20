@@ -136,6 +136,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let diagnosticsDeliveryLabel = NSTextField(wrappingLabelWithString: "")
     private let diagnosticsLogPathLabel = NSTextField(labelWithString: "")
     private let diagnosticsOpenFolderButton = NSButton(title: "", target: nil, action: nil)
+    private let reportProblemButton = NSButton(title: "", target: nil, action: nil)
     private weak var searchContinueButton: NSButton?
     private let discoverSpinner = NSProgressIndicator()
     private var autocompletePanel: NSPanel?
@@ -479,6 +480,11 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         diagnosticsOpenFolderButton.bezelStyle = .rounded
         diagnosticsOpenFolderButton.target = self
         diagnosticsOpenFolderButton.action = #selector(onOpenDiagnosticsFolder)
+
+        reportProblemButton.title = L10n.t("Problem melden…", "Report problem…")
+        reportProblemButton.bezelStyle = .rounded
+        reportProblemButton.target = self
+        reportProblemButton.action = #selector(onReportProblem)
 
         discoverSpinner.style = .spinning
         discoverSpinner.controlSize = .small
@@ -2029,11 +2035,21 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             stack.addArrangedSubview(diagnosticsLogPathLabel)
         }
         stack.addArrangedSubview(diagnosticsOpenFolderButton)
+        // „Problem melden"-Button nur wenn ein Pending-Report existiert (= im
+        // Setup-Warmup ist ein UnexpectedError gecaptured worden). User klickt
+        // → NSAlert mit Privacy-Hinweis + Mail-Composer mit Trace-Attachment.
+        if ErrorReportStore.shared.pendingReport != nil {
+            stack.addArrangedSubview(reportProblemButton)
+        }
         return stack
     }
 
     @objc private func onDiagnosticsToggleChanged() {
         diagnosticsLoggingEnabled = diagnosticsToggle.state == .on
+    }
+
+    @objc private func onReportProblem() {
+        ErrorReportStore.shared.presentManually()
     }
 
     @objc private func onOpenDiagnosticsFolder() {

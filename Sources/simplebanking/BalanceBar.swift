@@ -2829,6 +2829,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         balancePopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
+        // Pending Error-Report ggf. nachholen wenn der User das Flyout öffnet
+        // (= User ist explizit in der App). Activation-Notification deckt
+        // App-Re-Focus ab, aber wenn die App schon im Vordergrund war und der
+        // User nur ans Statusbar-Icon klickt, gibt's keine Activation.
+        ErrorReportStore.shared.flushIfPending()
+
         // If auto-hide is enabled, close the flyout after the same delay.
         let flyoutDelay: TimeInterval? = hideIndex == 1 ? 2 : hideIndex == 2 ? 5 : hideIndex == 3 ? 10 : hideIndex == 4 ? 20 : nil
         if let delay = flyoutDelay {
@@ -4762,7 +4768,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             options.onProgress?(.requestingApproval)
             AppLogger.log("Setup step warmup_accounts", category: "Setup")
             let discoveredAccounts = try await runSetupStepWithTimeout(step: "warmup_accounts", timeout: 720, logger: diagnosticsLogger) {
-                try await YaxiService.fetchAccounts(userId: result.userId, password: result.password)
+                try await YaxiService.fetchAccounts(
+                    userId: result.userId, password: result.password,
+                    callSource: .setupWarmup
+                )
             }
             let selectableAccounts = discoveredAccounts.filter { account in
                 let iban = account.iban?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -4800,7 +4809,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 300, logger: diagnosticsLogger) {
                 try await YaxiService.fetchBalances(
                     userId: result.userId,
-                    password: result.password
+                    password: result.password,
+                    callSource: .setupWarmup
                 )
             }
             if !warmupBalances.ok {
@@ -4825,7 +4835,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 try await YaxiService.fetchTransactions(
                     userId: result.userId,
                     password: result.password,
-                    from: warmupFrom
+                    from: warmupFrom,
+                    callSource: .setupWarmup
                 )
             }
 
@@ -4837,13 +4848,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     await YaxiService.clearSessionsKeepingConnectionData()
                 }
                 _ = try await runSetupStepWithTimeout(step: "warmup_balances_retry", timeout: 720, logger: diagnosticsLogger) {
-                    try await YaxiService.fetchBalances(userId: result.userId, password: result.password)
+                    try await YaxiService.fetchBalances(
+                        userId: result.userId, password: result.password,
+                        callSource: .setupWarmup
+                    )
                 }
                 warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions_retry", timeout: 720, logger: diagnosticsLogger) {
                     try await YaxiService.fetchTransactions(
                         userId: result.userId,
                         password: result.password,
-                        from: warmupFrom
+                        from: warmupFrom,
+                        callSource: .setupWarmup
                     )
                 }
             }

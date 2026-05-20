@@ -44,7 +44,8 @@ enum YaxiDeepSyncImporter {
             resp = try await YaxiService.fetchTransactions(
                 userId: creds.userId,
                 password: creds.password,
-                from: from
+                from: from,
+                callSource: .silent
             )
         } catch {
             throw ImportError.fetchFailed(error.localizedDescription)

@@ -1,5 +1,17 @@
 # Changelog — simplebanking
 
+## [Unreleased]
+
+### Neu
+
+- **„Problem melden" bei unerwarteten Bank-Fehlern** — wenn ein Bank-Call mit einem nicht selbst-erklärenden Fehler (`RoutexClientError.UnexpectedError`) abbricht, fragt die App nach: „Möchtest du das melden?". Per Klick öffnet sich der Standard-Mail-Composer mit einer vorbefüllten Mail an `support@simplebanking.de` — verschlüsselte Diagnosedatei automatisch angehängt. Privacy-Hinweis macht transparent, was in der Datei steht (keine Online-Banking-Zugangsdaten). Aus dem Setup-Flow ist der Report über einen „Problem melden…"-Button im Diagnose-Bereich des Setup-Sheets erreichbar.
+  - Throttle: max. 1 Report pro `(connectionId, Bank-Call)` in 30 Min — verhindert dass ein persistenter Bank-Bug die App mit Dialogen flutet.
+  - Capture im Hintergrund: bei Auto-Refresh läuft kein Alert, der Report wird beim nächsten App-Fokus angeboten.
+  - Skip in Demo-Mode, Bank-Diagnose-Session (eigener Mail-Flow), CLI und Background-Importer.
+
+### Behoben
+- Kleinere Konsistenz-Verbesserungen im Setup-Fehler-Pfad (Diagnose-Bereich zeigt jetzt ggf. „Problem melden"-Button neben „Log-Ordner öffnen").
+
 ## [1.5.0] — 2026-05-03
 
 ### Neu

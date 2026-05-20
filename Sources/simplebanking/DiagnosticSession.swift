@@ -221,7 +221,11 @@ final class DiagnosticSession: ObservableObject {
         let balanceStart = Date()
         let balanceResult: ProbeResult
         do {
-            let response = try await YaxiService.fetchBalances(userId: creds.userId, password: creds.password, alwaysTrace: true)
+            let response = try await YaxiService.fetchBalances(
+                userId: creds.userId, password: creds.password,
+                alwaysTrace: true,
+                callSource: .diagnostic
+            )
             let dur = msSince(balanceStart)
             if response.ok {
                 balanceResult = .ok(durationMs: dur)
@@ -264,7 +268,11 @@ final class DiagnosticSession: ObservableObject {
         let txStart = Date()
         let txResult: ProbeResult
         do {
-            let response = try await YaxiService.fetchTransactions(userId: creds.userId, password: creds.password, from: from30d, alwaysTrace: true)
+            let response = try await YaxiService.fetchTransactions(
+                userId: creds.userId, password: creds.password,
+                from: from30d, alwaysTrace: true,
+                callSource: .diagnostic
+            )
             let dur = msSince(txStart)
             if response.ok ?? false {
                 txResult = .ok(durationMs: dur)
