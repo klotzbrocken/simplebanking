@@ -403,7 +403,7 @@ private struct TransactionsPanelView: View {
     /// Returns the slot's display color: custom > generated > fallback gray.
     private func slotDisplayColor(for slot: BankSlot) -> Color {
         if let hex = slot.customColor, let c = Color(hex: hex) { return c }
-        if let logoId = slot.logoId, let hex = GeneratedBankColors.primaryColor(forLogoId: logoId), let c = Color(hex: hex) { return c }
+        if let logoId = slot.logoId, let hex = BankLogoAssets.primaryColor(forLogoId: logoId), let c = Color(hex: hex) { return c }
         return Color.secondary.opacity(0.4)
     }
 

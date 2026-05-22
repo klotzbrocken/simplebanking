@@ -4,6 +4,14 @@
 
 ### Neu
 
+- **Voll-Migration auf YAXI-Bank-Catalog** — Bank-Logos + Brand-Farben kommen jetzt aus dem offiziellen `https://logos.yaxi.tech/banks/catalog.json`-Snapshot (Resources/yaxi-bank-catalog.json). Vorteile:
+  - **172 Banken** statt vorher ~30 (incl. AT/NL/IT/UK: bawag, easybank, raiffeisen-AT, abnamro, rabo, barclays, hsbc, natwest, lloyds, …).
+  - **Strukturierte Brand-Farben** via `primaryColor`/`secondaryColor` aus dem Catalog (ersetzt das frühere SVG-data-Attribut-Parsing in `GeneratedBankColors`).
+  - **Mask-Varianten systematisch** für Dark-Mode-Inversion (ersetzt unsere ad-hoc `data-maskable`-Markierung).
+  - SVGs werden lazy aus dem Catalog ins User-Cache-Verzeichnis extrahiert. Cache wird beim Catalog-Update automatisch invalidiert (SHA-256-Hash-Manifest).
+  - Entfernt: `Resources/bank-logos/*.svg` (113 Files), `GeneratedBankColors.swift`, `scripts/generate-bank-colors.sh`. Build-Script entrümpelt.
+  - Neu: `BankLogoCatalog.swift` + `BankLogoCache.swift` + 19 Regression-Tests.
+
 - **„Problem melden" bei unerwarteten Bank-Fehlern** — wenn ein Bank-Call mit einem nicht selbst-erklärenden Fehler (`RoutexClientError.UnexpectedError`) abbricht, fragt die App nach: „Möchtest du das melden?". Per Klick öffnet sich der Standard-Mail-Composer mit einer vorbefüllten Mail an `support@simplebanking.de` — verschlüsselte Diagnosedatei automatisch angehängt. Privacy-Hinweis macht transparent, was in der Datei steht (keine Online-Banking-Zugangsdaten). Aus dem Setup-Flow ist der Report über einen „Problem melden…"-Button im Diagnose-Bereich des Setup-Sheets erreichbar.
   - Throttle: max. 1 Report pro `(connectionId, Bank-Call)` in 30 Min — verhindert dass ein persistenter Bank-Bug die App mit Dialogen flutet.
   - Capture im Hintergrund: bei Auto-Refresh läuft kein Alert, der Report wird beim nächsten App-Fokus angeboten.

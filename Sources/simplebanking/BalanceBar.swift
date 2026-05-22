@@ -472,7 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if let hex = slot.customColor, let c = Color(hex: hex) {
                 barColor = c
             } else if let logoId = slot.logoId,
-                      let hex = GeneratedBankColors.primaryColor(forLogoId: logoId),
+                      let hex = BankLogoAssets.primaryColor(forLogoId: logoId),
                       let c = Color(hex: hex) {
                 barColor = c
             } else {

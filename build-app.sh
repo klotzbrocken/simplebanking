@@ -15,8 +15,9 @@ if [[ ! -f "$SECRETS_FILE" ]]; then
     exit 1
 fi
 
-# Generiere GeneratedBankColors.swift aus SVG-Metadaten
-bash "$ROOT/scripts/generate-bank-colors.sh"
+# (seit 2026-05-22: Bank-Logos + Brand-Colors kommen aus dem gebundelten
+#  YAXI-Catalog `Resources/yaxi-bank-catalog.json`. Kein `generate-bank-colors`-
+#  Script-Aufruf mehr nötig.)
 
 # Universal binary: separat bauen, dann mit lipo zusammenführen
 swift build -c release --arch arm64

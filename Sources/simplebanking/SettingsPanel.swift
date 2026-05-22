@@ -1126,7 +1126,7 @@ struct SettingsView: View {
                                     if let c = slotColorSelection[slot.id] { return c }
                                     if let hex = slot.customColor, let c = Color(hex: hex) { return c }
                                     if let logoId = slot.logoId,
-                                       let hex = GeneratedBankColors.primaryColor(forLogoId: logoId),
+                                       let hex = BankLogoAssets.primaryColor(forLogoId: logoId),
                                        let c = Color(hex: hex) { return c }
                                     return Color.accentColor
                                 }()

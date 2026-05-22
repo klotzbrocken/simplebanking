@@ -274,9 +274,12 @@ enum BankLogoAssets {
         return nil
     }
 
-    /// Overrides accentColor with the value from GeneratedBankColors if available.
+    /// Überschreibt `accentColor` mit der primary-Brand-Color aus dem YAXI-
+    /// Catalog (= zentrale Quelle seit der Catalog-Migration 2026-05-22).
+    /// Catalog-Farben sind strukturiert (`primaryColor`-Feld) statt aus
+    /// SVG-data-Attributen parsiert.
     private static func withGeneratedColor(_ brand: BankBrand) -> BankBrand {
-        guard let color = GeneratedBankColors.primaryColor(forLogoId: brand.id) else {
+        guard let color = primaryColor(forLogoId: brand.id) else {
             return brand
         }
         return BankBrand(
@@ -286,6 +289,16 @@ enum BankLogoAssets {
             accentColor: color,
             keywords: brand.keywords
         )
+    }
+
+    /// Public-API für Brand-Color-Lookup (ersetzt den alten
+    /// `GeneratedBankColors.primaryColor(forLogoId:)`). Holt sich den Wert
+    /// aus `BankLogoCatalog`. Hex-String mit oder ohne `#`-Präfix.
+    static func primaryColor(forLogoId logoId: String) -> String? {
+        guard let hex = BankLogoCatalog.primaryColor(forLogoId: logoId) else {
+            return nil
+        }
+        return hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
     }
 
     static func find(byLogoID logoID: String) -> BankBrand? {
@@ -352,27 +365,23 @@ enum BankLogoAssets {
     // MARK: - Dark Mode Detection
 
     /// Gibt true zurück wenn das Logo dieser Bank im Dark Mode invertiert werden soll.
-    /// Kriterien: SVG hat `data-maskable="true"` UND lineare Rec.709-Luminanz
-    /// der Brandfarbe < 0.10. Seit v1.5.0 kein User-Toggle mehr — Auto-Invert
-    /// ist immer aktiv (war Default-on).
+    /// Kriterien (seit Catalog-Migration 2026-05-22):
+    /// 1. YAXI-Catalog stellt für diese logoId eine `svg-mask`-Variante bereit
+    ///    (= Bank gibt einen Single-Color-Silhouette-Asset an, „maskable").
+    /// 2. Lineare Rec.709-Luminanz der `primaryColor` < 0.10 (= Brand ist so
+    ///    dunkel, dass es auf Dark-Mode-Hintergrund untergeht).
     static func isDark(brandId: String) -> Bool {
         return darkBrandIDs.contains(brandId)
     }
 
     private static let darkBrandIDs: Set<String> = {
         var result: Set<String> = []
-        // Akzeptiert 6-stelliges Hex (RGB) UND 8-stelliges Hex (RGBA, z.B. „#0949cfff").
-        // Vorher matchte nur 6 → C24 und andere Banken mit Alpha-Komponente fielen durch.
-        let pattern = #"data-primary-color="(#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return result }
         for brand in brands {
-            guard brand.logoURL.isFileURL,
-                  let svg = try? String(contentsOf: brand.logoURL),
-                  svg.contains("data-maskable=\"true\"") else { continue }
-            let ns = svg as NSString
-            guard let match = regex.firstMatch(in: svg, range: NSRange(location: 0, length: ns.length)),
-                  let range = Range(match.range(at: 1), in: svg) else { continue }
-            if isHexColorDark(String(svg[range])) { result.insert(brand.id) }
+            // 1. Maskable?
+            guard BankLogoCache.hasMask(forLogoId: brand.id) else { continue }
+            // 2. Brand-Hauptfarbe dunkel?
+            guard let hex = BankLogoCatalog.primaryColor(forLogoId: brand.id) else { continue }
+            if isHexColorDark(hex) { result.insert(brand.id) }
         }
         return result
     }()
@@ -382,10 +391,19 @@ enum BankLogoAssets {
     /// (sRGB → linear) + Rec.709-Luminanz, sonst überschätzt rot/blau die Helligkeit
     /// und Banken wie Deutsche Bank (#1e2a78) fallen knapp über die Schwelle, obwohl
     /// sie offensichtlich dunkel sind.
-    private static func isHexColorDark(_ hex: String) -> Bool {
+    static func isHexColorDark(_ hex: String) -> Bool {
         let h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
         // 6-stellig RGB oder 8-stellig RGBA — Alpha wird für Luminanz ignoriert.
-        guard (h.count == 6 || h.count == 8), let n = UInt64(h.prefix(6), radix: 16) else { return false }
+        // Auch 3-stellig (Shortcut „#000" = „#000000") akzeptieren.
+        let normalized: String
+        if h.count == 3 {
+            normalized = h.map { "\($0)\($0)" }.joined()
+        } else if h.count == 6 || h.count == 8 {
+            normalized = String(h.prefix(6))
+        } else {
+            return false
+        }
+        guard let n = UInt64(normalized, radix: 16) else { return false }
         let r = sRGBToLinear(Double((n >> 16) & 0xFF) / 255)
         let g = sRGBToLinear(Double((n >> 8)  & 0xFF) / 255)
         let b = sRGBToLinear(Double(n         & 0xFF) / 255)
@@ -398,13 +416,12 @@ enum BankLogoAssets {
         c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
     }
 
-    /// Returns a file URL to a bundled SVG in Resources/bank-logos/, or falls back to a placeholder.
+    /// Returns a file URL to an SVG extracted from the YAXI catalog into the
+    /// user cache directory. Replaces the old `Resources/bank-logos/*.svg`
+    /// bundling — alle Logos werden jetzt aus `yaxi-bank-catalog.json` lazy
+    /// in `~/Library/Caches/<bundle>/bank-logos/` extrahiert.
     private static func bundled(_ name: String) -> URL {
-        if let url = Bundle.main.url(forResource: name, withExtension: "svg", subdirectory: "bank-logos") {
-            return url
-        }
-        // Fallback: should never happen for correctly bundled assets
-        return URL(fileURLWithPath: "/")
+        BankLogoCache.url(forLogoId: name) ?? URL(fileURLWithPath: "/")
     }
 
     private static func wiki(_ filename: String, width: Int = 72) -> URL {

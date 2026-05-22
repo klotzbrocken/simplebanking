@@ -43,7 +43,7 @@ let package = Package(
             ],
             resources: [
                 .copy("Resources/categories_de.json"),
-                .copy("Resources/bank-logos"),
+                .copy("Resources/yaxi-bank-catalog.json"),
                 .copy("Resources/merchant-logos"),
                 .copy("Resources/Fonts/SpaceMono-Regular.ttf"),
                 .copy("Resources/Fonts/SpaceMono-Bold.ttf"),
