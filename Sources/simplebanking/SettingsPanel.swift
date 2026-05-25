@@ -202,6 +202,7 @@ struct SettingsView: View {
     @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
+    @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
@@ -1443,6 +1444,37 @@ struct SettingsView: View {
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
 
+                        // ─── Card 2b: Bankfarben-Tönung (pro Slot) ──────────
+                        if let slotId = selectedSettingsSlotId {
+                            VStack(alignment: .leading, spacing: 10) {
+                                SettingsSectionHeader(
+                                    title: t("Anzeige", "Display"),
+                                    icon: "paintpalette"
+                                )
+                                SettingsRow(
+                                    title: t("Diese Bank in Bankfarbe einfärben",
+                                             "Tint this bank's transaction list"),
+                                    subtitle: t("Aus = neutraler Hintergrund nur für diesen Slot. Globaler Schalter unter Verhalten → Darstellung.",
+                                                "Off = neutral background for this slot only. Global switch under Behavior → Appearance.")
+                                ) {
+                                    Toggle("", isOn: Binding(
+                                        get: { BankTintProvider.slotEnabled(slotId: slotId) },
+                                        set: { newValue in
+                                            UserDefaults.standard.set(
+                                                newValue,
+                                                forKey: BankTintProvider.perSlotKey(slotId)
+                                            )
+                                            NotificationCenter.default.post(name: .bankTintChanged, object: nil)
+                                        }
+                                    ))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                }
+                            }
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
+                        }
+
                         // ─── Card 3: Kontostand-Schwellen (was "Money Mood") ─
                         VStack(alignment: .leading, spacing: 10) {
                             SettingsSectionHeader(
@@ -1923,6 +1955,31 @@ struct SettingsView: View {
                         // in BalanceBar (`.slotSettingsChanged`) wird auch für
                         // Menüleisten-Refresh genutzt.
                         NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+
+            Divider()
+
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Umsatzliste in Bankfarbe einfärben",
+                           "Tint transaction list in bank color"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Sanfter Bankfarben-Hintergrund hilft, die aktive Bank sofort zu erkennen. Im Freeze-Mode greift weiterhin die Freeze-Färbung. Im Aggregiert-Mode aus.",
+                           "Subtle bank color background helps you spot the active bank at a glance. Freeze mode still uses its own coloring. Disabled in unified mode."))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { bankTintEnabled },
+                    set: { newValue in
+                        bankTintEnabled = newValue
+                        NotificationCenter.default.post(name: .bankTintChanged, object: nil)
                     }
                 ))
                 .labelsHidden()
