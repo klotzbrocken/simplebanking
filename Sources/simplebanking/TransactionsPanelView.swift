@@ -22,6 +22,7 @@ private struct TransactionsPanelView: View {
     @AppStorage("attentionInboxEnabled") private var attentionInboxEnabled: Bool = true
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
+    @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
     @AppStorage("demoMode") private var demoMode: Bool = false
@@ -201,7 +202,8 @@ private struct TransactionsPanelView: View {
     }
 
     private var activePanelBg: Color {
-        freezeActive ? .freezePanelBackground : .panelBackground
+        if freezeActive { return .freezePanelBackground }
+        return BankTintProvider.resolveListTint(freezeActive: false) ?? .panelBackground
     }
 
     private var freezeAdjustedBalance: Double? {
@@ -682,7 +684,9 @@ private struct TransactionsPanelView: View {
                         LinearGradient(
                             colors: [freezeActive
                                 ? Color.cyan.opacity(0.18)
-                                : style.gradientBaseColor.opacity(0.10), .clear],
+                                : (BankTintProvider.resolveRowOverlay(freezeActive: false)
+                                   ?? style.gradientBaseColor.opacity(0.10)),
+                                .clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
