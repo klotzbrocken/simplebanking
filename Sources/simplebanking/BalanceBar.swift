@@ -2951,7 +2951,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
                 return AppTheme.color(from: isDark ? "#1F3144" : "#EAF1F8", fallback: .controlBackgroundColor)
             }.cgColor
-            : NSColor.windowBackgroundColor.cgColor
+            : (BankTintProvider.currentTintNSColor()?.cgColor ?? NSColor.windowBackgroundColor.cgColor)
         return (host, hasDots)
     }
 
