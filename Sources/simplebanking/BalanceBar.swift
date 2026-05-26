@@ -1022,6 +1022,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         NotificationCenter.default.addObserver(forName: .creditLimitToggleChanged, object: nil, queue: .main) { [weak self] _ in
             self?.refresh()
         }
+        // Bankfarben-Toggle (global oder pro Slot) ändert die Flyout-Host-
+        // Backing-Layer-Farbe. Beim nächsten makeFlyoutHost zieht der Tint.
+        NotificationCenter.default.addObserver(forName: .bankTintChanged, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshFlyoutIfVisible()
+        }
 
         // Register UserDefaults defaults (only apply when key has no stored value).
         // celebrationStyle in v1.5.0 entfernt — Ripple ist die einzige Variante.

@@ -1702,6 +1702,9 @@ private struct TransactionsPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("TransactionCategoriesChanged"))) { _ in
             vm.objectWillChange.send()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .bankTintChanged)) { _ in
+            vm.objectWillChange.send()
+        }
         .onAppear {
             resetInfiniteWindowIfNeeded()
             if demoMode {
