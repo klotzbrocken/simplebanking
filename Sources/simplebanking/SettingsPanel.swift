@@ -203,6 +203,7 @@ struct SettingsView: View {
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
+    @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
@@ -1984,6 +1985,37 @@ struct SettingsView: View {
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
+            }
+
+            // Intensity-Slider (nur sichtbar wenn Bank-Tint an)
+            if bankTintEnabled {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t("Sättigung", "Saturation"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(t("Wie stark die Bankfarbe durchschlägt. 0 % = nahezu unsichtbar, 100 % = volle Bankfarbe.",
+                               "How strongly the bank color shows through. 0% = nearly invisible, 100% = full bank color."))
+                            .font(ThemeFonts.body(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Slider(
+                        value: Binding(
+                            get: { bankTintIntensity },
+                            set: { newValue in
+                                bankTintIntensity = newValue
+                                NotificationCenter.default.post(name: .bankTintChanged, object: nil)
+                            }
+                        ),
+                        in: 0.0 ... 1.0
+                    )
+                    .frame(width: 160)
+                    Text("\(Int((bankTintIntensity * 100).rounded())) %")
+                        .font(ThemeFonts.body(size: 12).monospacedDigit())
+                        .foregroundColor(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
             }
 
             Divider()

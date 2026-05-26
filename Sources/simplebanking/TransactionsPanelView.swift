@@ -23,6 +23,7 @@ private struct TransactionsPanelView: View {
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
+    @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
     @AppStorage("demoMode") private var demoMode: Bool = false
@@ -2514,6 +2515,13 @@ private struct TransactionRowNew: View {
         logoService.image(for: logoKey)
     }
 
+    /// Row-Hintergrund: Selektion > Freeze-Default (cardBackground) > Bankfarben-Tint > cardBackground.
+    /// freezeModeActive wird durchgereicht, damit Freeze-Modus weiterhin neutrale Rows behält.
+    private var rowFillColor: Color {
+        if isSelected { return Color.accentColor.opacity(0.12) }
+        return BankTintProvider.resolveListTint(freezeActive: freezeModeActive) ?? Color.cardBackground
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -2623,7 +2631,7 @@ private struct TransactionRowNew: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.cardBackground)
+                .fill(rowFillColor)
         )
         // 3px leading color bar for bank attribution in unified mode
         .overlay(alignment: .leading) {

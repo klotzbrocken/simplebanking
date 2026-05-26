@@ -13,8 +13,17 @@ enum BankTintProvider {
 
     // MARK: Keys
     static let globalKey = "transactionListBankTintEnabled"
+    static let intensityKey = "bankTintIntensity"
+    /// Default-Tönungsstärke (30%) wenn kein Slider-Wert gespeichert.
+    static let defaultIntensity: Double = 0.30
     static func perSlotKey(_ slotId: String) -> String {
         "simplebanking.bankTintEnabled.\(slotId)"
+    }
+
+    /// Aktuelle Sättigung 0.0–1.0 (Slider in Settings).
+    static func currentIntensity() -> Double {
+        let stored = UserDefaults.standard.object(forKey: intensityKey) as? Double
+        return max(0.0, min(1.0, stored ?? defaultIntensity))
     }
 
     // MARK: Public API (Production — MainActor-bound)
@@ -97,22 +106,25 @@ enum BankTintProvider {
 
     // MARK: Color-Math (pure)
 
-    /// Soft-Color aus Hex (Light: ~8% Tint, Dark: ~12% Tint — gegen sbBackground gemischt).
+    /// Soft-Color aus Hex — Sättigung über Slider gesteuert (Default 30%).
+    /// Dark-Mode erhält 30% Boost für Lesbarkeit auf dunklem Untergrund.
     static func softColor(fromHex hex: String) -> Color {
         Color(nsColor: softNSColor(fromHex: hex))
     }
 
     static func softNSColor(fromHex hex: String) -> NSColor {
-        NSColor(name: nil) { appearance in
+        let intensity = currentIntensity()
+        return NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
             let base = AppTheme.color(from: hex, fallback: .controlBackgroundColor)
             // sbBackground-Werte aus ThemeSupport: Light #F9F9F9, Dark #171717
             let bg: NSColor = isDark
                 ? NSColor(srgbRed: 0.090, green: 0.090, blue: 0.090, alpha: 1.0)
                 : NSColor(srgbRed: 0.976, green: 0.976, blue: 0.976, alpha: 1.0)
-            // Light: 8% Bank über 92% BG; Dark: 12% Bank über 88% BG.
-            let bankFraction: CGFloat = isDark ? 0.12 : 0.08
-            return bg.blended(withFraction: bankFraction, of: base) ?? base
+            // Slider-Intensity = direkter Blend-Anteil der Bankfarbe.
+            // Dark-Mode bekommt +30% Sichtbarkeits-Boost (capped bei 1.0).
+            let raw = isDark ? min(1.0, intensity * 1.3) : intensity
+            return bg.blended(withFraction: CGFloat(raw), of: base) ?? base
         }
     }
 }
