@@ -27,14 +27,6 @@ enum BankTintProvider {
         return softColor(fromHex: hex)
     }
 
-    /// Mid-Variante mit 18% Opacity, analog zum Cyan-Row-Overlay im Freeze-Mode.
-    @MainActor
-    static func resolveRowOverlay(freezeActive: Bool) -> Color? {
-        guard let hex = activeTintHex(freezeActive: freezeActive) else { return nil }
-        guard let c = Color(hex: hex) else { return nil }
-        return c.opacity(0.18)
-    }
-
     /// NSColor-Bridge der Soft-Variante. Für BalanceBar-Background-Layer (AppKit).
     @MainActor
     static func currentTintNSColor() -> NSColor? {

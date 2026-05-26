@@ -684,9 +684,7 @@ private struct TransactionsPanelView: View {
                         LinearGradient(
                             colors: [freezeActive
                                 ? Color.cyan.opacity(0.18)
-                                : (BankTintProvider.resolveRowOverlay(freezeActive: false)
-                                   ?? style.gradientBaseColor.opacity(0.10)),
-                                .clear],
+                                : style.gradientBaseColor.opacity(0.10), .clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
