@@ -29,6 +29,12 @@ struct TransferSheet: View {
     /// der globale Bank-Switch (Refresh + Slot-Kontext) korrekt durchläuft.
     /// nil = no-op (Single-Bank-Setup).
     var onSwitchSlot: ((Int) -> Void)? = nil
+    /// Optionaler Prefill aus externen Quellen (z.B. MCP-Tool prepare_transfer).
+    /// Wenn gesetzt, werden Form-Felder beim Mount aus der Validated-Request
+    /// belegt und ein Assistant-Badge im Header gezeigt.
+    var prefill: TransferRequest? = nil
+    /// Quelle des Prefills, z.B. "mcp" — bestimmt den Badge-Text.
+    var prefillSource: String? = nil
 
     @ObservedObject private var bankingStore = MultibankingStore.shared
 
@@ -309,6 +315,9 @@ struct TransferSheet: View {
         default:
             VStack(alignment: .leading, spacing: 10) {
                 metaRow
+                if prefill != nil {
+                    assistantBadge
+                }
                 if let candidate = clipboardIbanCandidate, ibanClean.isEmpty {
                     clipboardIbanBanner(candidate: candidate)
                 }
@@ -447,6 +456,41 @@ struct TransferSheet: View {
         }
     }
 
+    // MARK: - Assistant-Badge (Prefill via MCP)
+
+    private var assistantBadge: some View {
+        let sourceLabel: String = {
+            switch prefillSource {
+            case "mcp": return L10n.t("Vom Assistant vorbereitet",
+                                       "Prepared by the assistant")
+            default:    return L10n.t("Vorausgefüllt — bitte prüfen",
+                                       "Pre-filled — please review")
+            }
+        }()
+        return HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.sbBlueStrong)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(sourceLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.primary)
+                Text(L10n.t("Felder vorab geprüft — Bestätigung + SCA wie immer durch dich.",
+                            "Fields pre-validated — confirmation + SCA still up to you."))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.sbBlueSoft)
+        )
+    }
+
     // MARK: - Empfänger
 
     private var empfaengerSection: some View {
@@ -533,11 +577,28 @@ struct TransferSheet: View {
             isActive: !acMatches.isEmpty && nameFocused
         ))
         .onAppear {
-            // Initial-Fokus: Namensfeld
+            applyPrefillIfNeeded()
+            // Initial-Fokus: Namensfeld (außer Prefill da — dann Betrag fokussieren,
+            // damit User Schritt 1 schnell prüft und mit Tab durchgeht).
+            let initialFocus: TransferField = prefill != nil ? .amount : .name
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                nameFocused = true
+                focusField = initialFocus
             }
         }
+    }
+
+    /// Belegt die Form-Felder einmalig aus dem Prefill (z.B. MCP-Draft).
+    /// Idempotent: zweiter Aufruf in derselben Session bleibt no-op (Form-State
+    /// wird vom User schon bearbeitet).
+    @State private var didApplyPrefill: Bool = false
+    private func applyPrefillIfNeeded() {
+        guard let p = prefill, !didApplyPrefill else { return }
+        didApplyPrefill = true
+        name = p.creditorName
+        iban = p.creditorIban
+        ibanTouched = true
+        amountInput = formatAmountForInput(p.amountEUR)
+        if let r = p.remittance { purpose = r }
     }
 
     private var autocompleteList: some View {

@@ -1079,7 +1079,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // schaltet zur Laufzeit. Tag 350 erlaubt das spätere Lookup.
         if FeatureFlags.transferMoneyEnabled || demoMode {
             let sendMoneyItem = NSMenuItem(title: t("simplesend: Geld senden", "simplesend: Send Money"),
-                                           action: #selector(sendMoney),
+                                           action: #selector(sendMoney as () -> Void),
                                            keyEquivalent: "n")
             sendMoneyItem.tag = 350
             sendMoneyItem.target = self
@@ -1405,13 +1405,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // „Geld senden…" aus dem TransactionsPanel-Mehr-Menü öffnen.
         // BalanceBar bleibt der zentrale Eintrittspunkt mit Lizenz-Routing.
         // FeatureFlag-gated, aber Demo-Mode bypassed das Flag (Feature-Test).
+        // userInfo["draft"] = TransferDraft (z.B. vom MCP-Tool prepare_transfer)
+        // → öffnet das Sheet mit vorausgefüllten Feldern + Assistant-Badge.
         NotificationCenter.default.addObserver(
             forName: Notification.Name("simplebanking.openTransferSheet"),
             object: nil, queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
             guard FeatureFlags.transferMoneyEnabled || (self?.demoMode ?? false) else { return }
-            self?.sendMoney()
+            let draft = note.userInfo?[TransferDraftWatcher.draftUserInfoKey] as? TransferDraft
+            self?.sendMoney(draft: draft)
         }
+
+        // Externe Transfer-Drafts (MCP-Tool prepare_transfer) entgegennehmen.
+        TransferDraftWatcher.shared.start()
 
         // Live-Update: simplesendVisible-Toggle (Einstellungen → Verhalten oder
         // Checkbox im UpsellSheet) blendet den Statusbar-Menüeintrag sofort
@@ -1478,18 +1484,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var bankDiagnosticsWindow: NSWindow?
 
     @objc private func sendMoney() {
-        // Demo-Mode: kein Lizenz-Gate, immer Transfer-Sheet öffnen. Sends sind
-        // ohnehin Mock (siehe YaxiService.sendTransfer Demo-Branch).
+        sendMoney(draft: nil)
+    }
+
+    /// Variante mit optionalem Draft (z.B. vom MCP-Tool prepare_transfer).
+    /// Bei gültigem Prefill öffnet das Sheet mit vorausgefüllten Feldern;
+    /// fehlerhafte/unparsbare Drafts werden mit Logger-Hinweis ignoriert
+    /// (Sheet bleibt leer, statt mit Mülldaten zu öffnen).
+    func sendMoney(draft: TransferDraft?) {
+        var prefill: TransferRequest? = nil
+        var prefillSource: String? = nil
+        if let d = draft {
+            do {
+                prefill = try TransferDraftStore.makeRequest(from: d)
+                prefillSource = d.source
+            } catch {
+                AppLogger.log("Transfer-Draft \(d.id) verworfen: \(error)",
+                              category: "Transfer", level: "WARN")
+            }
+        }
         if demoMode {
-            showTransferSheet()
+            showTransferSheet(prefill: prefill, prefillSource: prefillSource)
             return
         }
-        // Lizenz-Gate ist nur aktiv wenn LicenseConfig.licensingEnabled=true.
-        // Solange das Lizenz-System nicht scharf ist, ist „Geld senden" für alle frei.
         if LicenseConfig.licensingEnabled, !LicenseManager.shared.isLicensed {
             showUpsellSheet()
         } else {
-            showTransferSheet()
+            showTransferSheet(prefill: prefill, prefillSource: prefillSource)
         }
     }
 
@@ -1551,11 +1572,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func showTransferSheet() {
+    private func showTransferSheet(prefill: TransferRequest? = nil,
+                                   prefillSource: String? = nil) {
         if let existing = transferWindow, existing.isVisible {
-            existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
+            // Bereits offenes Sheet bekommt keinen nachträglichen Prefill —
+            // sonst würden gerade getippte Werte überschrieben. Stattdessen
+            // schließen und mit Prefill neu öffnen wenn ein Draft da ist.
+            if prefill != nil {
+                existing.close()
+                transferWindow = nil
+            } else {
+                existing.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
         }
         let sheet = TransferSheet(
             requestMasterPassword: { [weak self] in self?.requestMasterPassword() },
@@ -1565,7 +1595,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             },
             onSwitchSlot: { [weak self] idx in
                 Task { await self?.switchToSlot(index: idx) }
-            }
+            },
+            prefill: prefill,
+            prefillSource: prefillSource
         )
 
         // NSPanel mit identischem Chrome wie das TransactionsPanel — damit

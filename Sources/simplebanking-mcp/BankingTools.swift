@@ -52,6 +52,22 @@ struct BankingTools {
                 properties: [
                     "account_id": prop("string", "Filter by account slot ID (optional, returns all accounts if omitted)")
                 ]
+            ),
+            tool(
+                name: "prepare_transfer",
+                description: """
+                Prepares a SEPA credit transfer for the user to review and confirm in the simplebanking app. \
+                This does NOT execute the transfer — it writes a draft file that the app picks up and pre-fills \
+                into its transfer dialog. The user must still click 'Confirm' in the app and complete SCA \
+                (TAN/BestSign) themselves. Returns the draft ID and a hint to open the app.
+                """,
+                properties: [
+                    "creditor_name": prop("string",  "Recipient name (max 70 chars, SEPA-PAIN.001)"),
+                    "creditor_iban": prop("string",  "Recipient IBAN (DE/AT/…); whitespace + case normalized server-side"),
+                    "amount_eur":    prop("number",  "Amount in EUR (>0, max 100,000). Decimal, period as separator."),
+                    "remittance":    prop("string",  "Purpose / Verwendungszweck (max 140 chars, optional)"),
+                    "end_to_end_id": prop("string",  "End-to-end identifier (max 35 chars, optional)")
+                ]
             )
         ]
     }
@@ -80,6 +96,7 @@ struct BankingTools {
         case "get_spending_summary": return getSpendingSummary(args: args)
         case "get_monthly_overview": return getMonthlyOverview(args: args)
         case "get_balance":          return getBalance(args: args)
+        case "prepare_transfer":     return prepareTransfer(args: args)
         default:                     return ("Unknown tool: \(name)", true)
         }
     }
@@ -325,6 +342,145 @@ struct BankingTools {
         }.sorted { ($0["account_id"] as? String ?? "") < ($1["account_id"] as? String ?? "") }
 
         return (jsonString(rows), false)
+    }
+
+    // MARK: - prepare_transfer
+    //
+    // Schreibt einen JSON-Draft in das transfer-drafts/-Verzeichnis. Die App
+    // watcht dieses Verzeichnis und öffnet bei Eintreffen das TransferSheet
+    // mit den vorausgefüllten Feldern. SCA + Send-Delay + Lizenz-Gate laufen
+    // unverändert in der App.
+    //
+    // JSON-Schema MUSS zu Sources/simplebanking/TransferDraftStore.swift
+    // passen (Source of Truth). Schema-Änderungen dort = parallele Anpassung
+    // hier.
+
+    private static func prepareTransfer(args: [String: Any]) -> (String, Bool) {
+        // 1) Required: creditor_name
+        guard let rawName = args["creditor_name"] as? String,
+              !rawName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return (errorJSON("Missing or empty 'creditor_name'."), true)
+        }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name.count <= 70 else {
+            return (errorJSON("creditor_name too long (\(name.count) chars, max 70 per SEPA-PAIN.001)."), true)
+        }
+
+        // 2) Required: creditor_iban — normalize whitespace + uppercase, validate length range only.
+        // Full mod-97 check happens in the app when loading the draft (single source of truth).
+        guard let rawIban = args["creditor_iban"] as? String,
+              !rawIban.isEmpty else {
+            return (errorJSON("Missing 'creditor_iban'."), true)
+        }
+        let iban = rawIban.uppercased().filter { !$0.isWhitespace }
+        guard (15 ... 34).contains(iban.count) else {
+            return (errorJSON("creditor_iban length \(iban.count) outside SEPA range 15…34."), true)
+        }
+        guard iban.allSatisfy({ $0.isLetter || $0.isNumber }) else {
+            return (errorJSON("creditor_iban contains non-alphanumeric characters."), true)
+        }
+
+        // 3) Required: amount_eur — accept number, integer, or string
+        let amountStr: String
+        if let n = args["amount_eur"] as? Double {
+            amountStr = String(format: "%.2f", n)
+        } else if let n = args["amount_eur"] as? Int {
+            amountStr = String(n)
+        } else if let s = args["amount_eur"] as? String, !s.isEmpty {
+            amountStr = s.replacingOccurrences(of: ",", with: ".")
+        } else {
+            return (errorJSON("Missing or invalid 'amount_eur'."), true)
+        }
+        guard let amount = Double(amountStr), amount > 0 else {
+            return (errorJSON("'amount_eur' must be a positive number."), true)
+        }
+        guard amount <= 100_000 else {
+            return (errorJSON("'amount_eur' exceeds safe ceiling of 100,000 EUR."), true)
+        }
+
+        // 4) Optional: remittance + end_to_end_id with length caps
+        var remittance: String? = nil
+        if let r = args["remittance"] as? String {
+            let trimmed = r.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                guard trimmed.count <= 140 else {
+                    return (errorJSON("'remittance' too long (\(trimmed.count) chars, max 140)."), true)
+                }
+                remittance = trimmed
+            }
+        }
+        var endToEndId: String? = nil
+        if let e = args["end_to_end_id"] as? String {
+            let trimmed = e.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                guard trimmed.count <= 35 else {
+                    return (errorJSON("'end_to_end_id' too long (\(trimmed.count) chars, max 35)."), true)
+                }
+                endToEndId = trimmed
+            }
+        }
+
+        // 5) Build draft JSON
+        let id = UUID().uuidString
+        let now = Date()
+        let expires = now.addingTimeInterval(5 * 60) // 5 min TTL — matches TransferDraftStore.ttlSeconds
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var draft: [String: Any] = [
+            "id": id,
+            "createdAt": iso.string(from: now),
+            "expiresAt": iso.string(from: expires),
+            "source": "mcp",
+            "creditorName": name,
+            "creditorIban": iban,
+            "amountEUR": amountStr
+        ]
+        if let r = remittance { draft["remittance"] = r }
+        if let e = endToEndId { draft["endToEndId"] = e }
+
+        // 6) Write to draft dir
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser
+        let dir = homeURL
+            .appendingPathComponent("Library/Application Support/simplebanking/transfer-drafts", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let file = dir.appendingPathComponent("\(id).json")
+            let data = try JSONSerialization.data(withJSONObject: draft, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: file, options: .atomic)
+
+            // Best-effort: bring simplebanking.app to the foreground so the user
+            // sees the prefilled sheet right away. Failure is silent — the file
+            // is still there and the watcher will pick it up next time.
+            _ = try? runProcess("/usr/bin/open", args: ["-a", "simplebanking"])
+
+            let result: [String: Any] = [
+                "draft_id": id,
+                "expires_at": iso.string(from: expires),
+                "ttl_seconds": 300,
+                "creditor_name": name,
+                "creditor_iban": iban,
+                "amount_eur": amountStr,
+                "message": "Draft written. Tell the user to confirm the transfer in the simplebanking app (5 minute window). The app must be running to auto-open the sheet; otherwise it will appear at next launch."
+            ]
+            return (jsonString(result), false)
+        } catch {
+            return (errorJSON("Failed to write draft: \(error.localizedDescription)"), true)
+        }
+    }
+
+    private static func errorJSON(_ msg: String) -> String {
+        return jsonString(["error": msg])
+    }
+
+    @discardableResult
+    private static func runProcess(_ path: String, args: [String]) throws -> Int32 {
+        let task = Process()
+        task.launchPath = path
+        task.arguments = args
+        try task.run()
+        // Don't wait — we don't care about result + don't want to block the response.
+        return 0
     }
 
     // MARK: - Demo Mode
