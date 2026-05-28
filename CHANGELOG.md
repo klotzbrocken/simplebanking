@@ -1,8 +1,16 @@
 # Changelog — simplebanking
 
-## [Unreleased]
+## [Unreleased] (1.6.0)
 
 ### Neu
+
+- **Umsatzliste in Bankfarbe einfärben** — der Hintergrund der Umsatzliste, die einzelnen Buchungen und der BalanceBar-Layer übernehmen jetzt die Primärfarbe der aktiven Bank (z. B. Sparkasse rot, ING orange, Deutsche Bank blau). Macht sofort sichtbar, welcher Slot gerade aktiv ist. Freeze-Modus überschreibt weiterhin mit Cyan/Teal; MoneyMood-Saldo-Farben (Amount-Text, Balance-Card-Gradient) bleiben unangetastet.
+  - Globaler Toggle in Einstellungen → Verhalten → Darstellung (Default an).
+  - **Sättigungs-Slider 0–100 %** zum Feintuning (Default 30 %). Im Dark Mode +30 % interner Sichtbarkeits-Boost.
+  - **Pro-Slot-Override** in Konto-Einstellungen → Anzeige für Banken, deren Farbe zu grell wirkt.
+  - Aggregiert-Mode bekommt keinen Tint (keine einzelne Bank dominant).
+
+- **simplesend via MCP (`prepare_transfer`)** — Claude/MCP-Clients können eine SEPA-Überweisung **vorschlagen**: der MCP-Server validiert die Eingaben (Empfänger-Name, IBAN, Betrag, Verwendungszweck, End-to-End-ID) und schreibt einen Draft. Die App watcht den Draft-Ordner, öffnet das TransferSheet mit den vorausgefüllten Feldern und zeigt ein „Vom Assistant vorbereitet"-Badge. **Bestätigung + SCA bleiben beim User** — Lizenz-Gate, Send-Delay, SCA-Polling, Slot-Race-Schutz und volle IBAN-mod-97-Validierung laufen unverändert. Drafts haben 5-Min-TTL und sind one-shot.
 
 - **Voll-Migration auf YAXI-Bank-Catalog** — Bank-Logos + Brand-Farben kommen jetzt aus dem offiziellen `https://logos.yaxi.tech/banks/catalog.json`-Snapshot (Resources/yaxi-bank-catalog.json). Vorteile:
   - **172 Banken** statt vorher ~30 (incl. AT/NL/IT/UK: bawag, easybank, raiffeisen-AT, abnamro, rabo, barclays, hsbc, natwest, lloyds, …).
