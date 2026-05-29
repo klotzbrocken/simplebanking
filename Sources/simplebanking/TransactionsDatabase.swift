@@ -361,6 +361,34 @@ enum TransactionsDatabase {
             try db.execute(sql: "CREATE INDEX idx_attachments_tx_id ON transaction_attachments(tx_id)")
             try db.execute(sql: "CREATE INDEX idx_attachments_tx_slot ON transaction_attachments(tx_id, slot_id)")
         }
+        migrator.registerMigration("v22_roundup_tables") { db in
+            // 1.6 — "Aufrunden" / Spartopf-Feature. Pro TRX wird optional die Differenz
+            // zum nächsten Vielfachen von stepCents in einen Tages-Pot gelegt. Append-only,
+            // keine FK zu transactions (Re-Importe / Slot-Removes lassen den Pot intakt).
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS roundup_entries (
+                    slot_id      TEXT    NOT NULL,
+                    tx_id        TEXT    NOT NULL,
+                    pot_date     TEXT    NOT NULL,
+                    amount_cents INTEGER NOT NULL,
+                    step_cents   INTEGER NOT NULL,
+                    created_at   TEXT    NOT NULL,
+                    PRIMARY KEY (slot_id, tx_id)
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_roundup_entries_pot ON roundup_entries(slot_id, pot_date)")
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS roundup_pots (
+                    slot_id      TEXT    NOT NULL,
+                    pot_date     TEXT    NOT NULL,
+                    amount_cents INTEGER NOT NULL DEFAULT 0,
+                    entry_count  INTEGER NOT NULL DEFAULT 0,
+                    status       TEXT    NOT NULL DEFAULT 'open',
+                    resolved_at  TEXT,
+                    PRIMARY KEY (slot_id, pot_date)
+                )
+                """)
+        }
         return migrator
     }
 
@@ -425,9 +453,31 @@ enum TransactionsDatabase {
         let now = currentTimestamp()
 
         let slotId = activeSlotId
+
+        // Records vorab bauen, damit der Roundup-Hook nach dem Write (status,
+        // waehrung, betrag, txID, buchungsdatum) ohne zweiten Build-Pass auswerten kann.
+        let records = try transactions.map { try TransactionRecord(transaction: $0, updatedAt: now) }
+
+        // Pre-Query: welche tx_ids sind bereits *als booked* in diesem Slot bekannt?
+        // Pending→Booked-Übergänge bleiben dadurch außerhalb dieser Menge und
+        // triggern den Roundup-Hook unten genau einmal pro TRX.
+        let alreadyBookedIds: Set<String> = try {
+            let txIds = records.map(\.txID)
+            guard !txIds.isEmpty else { return Set<String>() }
+            let placeholders = txIds.map { _ in "?" }.joined(separator: ",")
+            var args: [DatabaseValueConvertible] = [slotId]
+            args.append(contentsOf: txIds)
+            return try queue.read { db in
+                let ids = try String.fetchAll(db, sql: """
+                    SELECT tx_id FROM transactions
+                     WHERE slot_id = ? AND tx_id IN (\(placeholders)) AND status = 'booked'
+                    """, arguments: StatementArguments(args))
+                return Set(ids)
+            }
+        }()
+
         try queue.write { db in
-            for transaction in transactions {
-                let record = try TransactionRecord(transaction: transaction, updatedAt: now)
+            for record in records {
                 try db.execute(
                     sql: """
                         INSERT INTO transactions (
@@ -500,6 +550,45 @@ enum TransactionsDatabase {
                     """,
                 arguments: [slotId, now]
             )
+        }
+
+        // Roundup-Hook: nach commit, separat geschrieben (RoundupStore öffnet eigene
+        // queue.write — kein nested transaction). Nur newly-booked EUR-Ausgaben:
+        //   - status == "booked" (Pending wird übersprungen)
+        //   - waehrung == "EUR" (FX wird übersprungen)
+        //   - betrag < 0 (Income wird übersprungen)
+        //   - txId war nicht bereits als booked bekannt (verhindert Doppel-Buchungen
+        //     auf Refresh-Loop; RoundupStore.record ist zusätzlich idempotent via PK).
+        let settings = BankSlotSettingsStore.load(slotId: slotId)
+        if settings.roundupEnabled, settings.roundupStepCents > 0 {
+            let stepCents = settings.roundupStepCents
+            for record in records where
+                !alreadyBookedIds.contains(record.txID) &&
+                record.status == "booked" &&
+                record.waehrung == "EUR" &&
+                record.betrag < 0
+            {
+                let cents = RoundupCalculator.roundupCents(
+                    amount: Decimal(record.betrag),
+                    stepCents: stepCents
+                )
+                guard cents > 0 else { continue }
+                do {
+                    try RoundupStore.record(
+                        slotId: slotId,
+                        txId: record.txID,
+                        potDate: record.buchungsdatum,
+                        amountCents: cents,
+                        stepCents: stepCents,
+                        bankId: bankId
+                    )
+                } catch {
+                    AppLogger.log(
+                        "Roundup record failed for tx=\(record.txID): \(error.localizedDescription)",
+                        category: "Roundup", level: "ERROR"
+                    )
+                }
+            }
         }
     }
 
@@ -1090,7 +1179,7 @@ enum TransactionsDatabase {
 
     // MARK: - Helpers
 
-    private static func makeQueue(bankId: String = "primary") throws -> DatabaseQueue {
+    static func makeQueue(bankId: String = "primary") throws -> DatabaseQueue {
         let path = try databaseURL(bankId: bankId).path
         var configuration = Configuration()
         configuration.prepareDatabase { db in

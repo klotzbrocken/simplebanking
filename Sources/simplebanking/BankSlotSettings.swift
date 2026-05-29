@@ -24,6 +24,16 @@ struct BankSlotSettings: Codable {
     /// 365-Tage-Import auch wirklich 365 Tage in der Liste angezeigt werden. nil = kein Import.
     var lastImportedDays: Int?
 
+    // MARK: - Aufrunden / Spartopf (1.6)
+    /// Master-Toggle. Default off — User muss aktiv aufdrehen.
+    var roundupEnabled: Bool = false
+    /// Schrittweite in Cents: 100 = 1 €, 200 = 2 €, 500 = 5 €, 1000 = 10 €.
+    var roundupStepCents: Int = 100
+    /// Optionaler Ziel-Sparkonto-Name fürs TransferSheet-Prefill.
+    var savingsAccountName: String?
+    /// Optionale Ziel-IBAN — wenn leer, fragt das Auszahl-Modal danach bevor TransferSheet öffnet.
+    var savingsAccountIban: String?
+
     /// Read-Range für UI-Listen, CSV-Export, Kategorisierung etc. — alles, was lokale DB-Daten
     /// liest (nicht Bank-Fetches). `max(fetchDays, lastImportedDays ?? 0)`. Auto-Sync und
     /// Bank-Fetches nutzen weiterhin `fetchDays` direkt (90-Cap).
@@ -94,6 +104,10 @@ struct BankSlotSettings: Codable {
         salaryDayPreset              = (try? c.decodeIfPresent(Int.self, forKey: .salaryDayPreset)) ?? 2
         creditLimitIncluded          = (try? c.decodeIfPresent(Bool.self, forKey: .creditLimitIncluded)) ?? false
         lastImportedDays             = try? c.decodeIfPresent(Int.self, forKey: .lastImportedDays)
+        roundupEnabled               = (try? c.decodeIfPresent(Bool.self, forKey: .roundupEnabled)) ?? false
+        roundupStepCents             = (try? c.decodeIfPresent(Int.self, forKey: .roundupStepCents)) ?? 100
+        savingsAccountName           = try? c.decodeIfPresent(String.self, forKey: .savingsAccountName)
+        savingsAccountIban           = try? c.decodeIfPresent(String.self, forKey: .savingsAccountIban)
     }
 }
 
