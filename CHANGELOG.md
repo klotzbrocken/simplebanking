@@ -4,6 +4,14 @@
 
 ### Neu
 
+- **Aufrunden / Spartopf** — pro Buchung wird die Differenz zum nächsten glatten Betrag (1 €, 2 €, 5 € oder 10 €, Schrittweite per Slot wählbar) im Hintergrund in einen virtuellen Tages-Spartopf gelegt. Income, exakte Boundary-Beträge und Non-EUR-TRX werden übersprungen; gerechnet wird ausschließlich bei `status=booked` (keine Doppelzählungen bei Pending→Booked-Übergängen). Pro Slot eigener Topf, idempotent gegen Re-Fetches.
+  - **End-of-Day-Prompt**: beim ersten App-Open nach lokaler Mitternacht (oder vor jedem Flyout-Open / nach jedem erfolgreichen Refresh) öffnet sich für offene Töpfe ein Modal mit drei Optionen: **Verwerfen**, **Virtuell behalten** (sammelt sich pro Slot in einer Summe) oder **Auf Sparkonto übertragen** (öffnet das TransferSheet mit Sparkonto-Prefill und „Vom Aufrunden vorbereitet"-Badge — SCA + Bestätigung wie immer durch den User).
+  - **Snooze** im Modal: 1 h / 24 h / „Nie mehr heute" (pro Slot+Tag, persistent in UserDefaults).
+  - **Settings → Konto-Einstellungen → Aufrunden** (Card 2c): globaler Toggle pro Slot, Schrittweite-Picker, Sparkonto-Name + IBAN mit Live-mod-97-Validation, Read-only-Anzeige der virtuell gesparten Gesamtsumme inklusive „Auszahlen…"-Button (markiert die Pots optimistisch als überwiesen und öffnet TransferSheet mit dem Gesamtbetrag).
+  - **Fallback bei fehlender IBAN**: wenn der User „Auf Sparkonto übertragen" wählt aber noch keine Sparkonto-IBAN in den Settings hinterlegt hat, erscheint eine Inline-Eingabe direkt im Modal — die IBAN wird beim Bestätigen automatisch in den Slot-Settings persistiert.
+  - Demo-Mode voll funktionsfähig (lokales Bookkeeping ohne Bank-Calls); nur die TransferSheet-Auszahlung läuft durch den bestehenden simplesend-Lizenz-Gate.
+  - Neue SQLite-Tabellen `roundup_entries` (append-only Ledger, idempotent via `(slot_id, tx_id)`-PK) und `roundup_pots` (Tages-Aggregat mit Status open|pending|discarded|kept_virtual|transferred). Migration v22, keine Foreign-Keys — Re-Importe / Slot-Removes lassen den Pot intakt.
+
 - **Umsatzliste in Bankfarbe einfärben** — der Hintergrund der Umsatzliste, die einzelnen Buchungen und der BalanceBar-Layer übernehmen jetzt die Primärfarbe der aktiven Bank (z. B. Sparkasse rot, ING orange, Deutsche Bank blau). Macht sofort sichtbar, welcher Slot gerade aktiv ist. Freeze-Modus überschreibt weiterhin mit Cyan/Teal; MoneyMood-Saldo-Farben (Amount-Text, Balance-Card-Gradient) bleiben unangetastet.
   - Globaler Toggle in Einstellungen → Verhalten → Darstellung (Default an).
   - **Sättigungs-Slider 0–100 %** zum Feintuning (Default 30 %). Im Dark Mode +30 % interner Sichtbarkeits-Boost.
