@@ -127,6 +127,29 @@ enum RoundupStore {
         }
     }
 
+    /// Hebt `open` Pots eines Slots vor `cutoffDate` auf `pending` an — markiert sie
+    /// als „User muss noch entscheiden". Idempotent: bereits `pending` oder final
+    /// Pots bleiben unverändert. Setzt kein `resolved_at`.
+    @discardableResult
+    static func markStalePending(
+        slotId: String,
+        before cutoffDate: String,
+        bankId: String = "primary"
+    ) throws -> Int {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        return try queue.write { db in
+            try db.execute(sql: """
+                UPDATE roundup_pots
+                   SET status = 'pending'
+                 WHERE slot_id = ?
+                   AND pot_date < ?
+                   AND status = 'open'
+                   AND amount_cents > 0
+                """, arguments: [slotId, cutoffDate])
+            return db.changesCount
+        }
+    }
+
     /// Setzt den Status. Bereits final-resolved Pots (discarded/keptVirtual/transferred)
     /// werden NICHT überschrieben — re-runs sind no-op (Log-Warnung wenn der Ziel-Status
     /// abweicht).
@@ -158,6 +181,30 @@ enum RoundupStore {
                    SET status = ?, resolved_at = ?
                  WHERE slot_id = ? AND pot_date = ?
                 """, arguments: [status.rawValue, resolvedAt, slotId, potDate])
+        }
+    }
+
+    /// Markiert alle `keptVirtual`-Pots des Slots als `transferred`. Idempotent.
+    /// Aufgerufen optimistisch beim „Auszahlen…"-Klick in Settings — wenn der
+    /// User das TransferSheet abbricht, bleiben sie auf `transferred` (User hatte
+    /// die Intention; Bookkeeping wird nicht nochmal angeboten).
+    @discardableResult
+    static func markVirtualSavingsTransferred(
+        slotId: String,
+        bankId: String = "primary"
+    ) throws -> Int {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        let now = isoFormatter.string(from: Date())
+        return try queue.write { db in
+            try db.execute(sql: """
+                UPDATE roundup_pots
+                   SET status = ?, resolved_at = ?
+                 WHERE slot_id = ? AND status = ?
+                """, arguments: [
+                    PotStatus.transferred.rawValue, now,
+                    slotId, PotStatus.keptVirtual.rawValue
+                ])
+            return db.changesCount
         }
     }
 

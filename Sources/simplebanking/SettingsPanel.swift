@@ -283,6 +283,10 @@ struct SettingsView: View {
     // Konten-Tab: per-Konto-Einstellungen
     @State private var selectedSettingsSlotId: String? = nil
     @State private var currentSlotSettings: BankSlotSettings = BankSlotSettings()
+    /// Aktuelle virtuelle Sparsumme des selektierten Slots in Cent. Wird via
+    /// `refreshVirtualSavings()` aktualisiert (loadSlotSettings, Slot-Switch,
+    /// nach Auszahl-Notification).
+    @State private var virtualSavingsCents: Int = 0
     @State private var detectedSalary: Int = 0
     // Sicherheits-Tab: Passwort deaktivieren
     @State private var showDisablePasswordSheet: Bool = false
@@ -611,7 +615,17 @@ struct SettingsView: View {
         if let id = selectedSettingsSlotId {
             currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
             autoDetectSalaryForDisplay(slotId: id)
+            refreshVirtualSavings()
         }
+    }
+
+    private func refreshVirtualSavings() {
+        guard let id = selectedSettingsSlotId else {
+            virtualSavingsCents = 0
+            return
+        }
+        let bankId = (UserDefaults.standard.bool(forKey: "demoMode")) ? "demo" : "primary"
+        virtualSavingsCents = (try? RoundupStore.virtualSavingsTotal(slotId: id, bankId: bankId)) ?? 0
     }
 
     private func autoDetectSalaryForDisplay(slotId: String) {
@@ -644,6 +658,28 @@ struct SettingsView: View {
         guard let id = selectedSettingsSlotId else { return }
         BankSlotSettingsStore.save(currentSlotSettings, slotId: id)
         NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
+    }
+
+    private func formatCents(_ cents: Int) -> String {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        let euros = Double(cents) / 100.0
+        return (f.string(from: NSNumber(value: euros)) ?? "0,00") + " €"
+    }
+
+    /// Postet eine Auszahl-Anfrage an BalanceBar. Settings UI bleibt offen;
+    /// BalanceBar markiert die kept_virtual-Pots optimistisch transferred,
+    /// baut den TransferRequest und öffnet TransferSheet mit "roundup"-Prefill.
+    private func requestRoundupPayout() {
+        guard let id = selectedSettingsSlotId else { return }
+        NotificationCenter.default.post(
+            name: Notification.Name("simplebanking.roundupPayoutRequested"),
+            object: nil,
+            userInfo: ["slotId": id]
+        )
     }
 
     @ViewBuilder
@@ -1261,6 +1297,7 @@ struct SettingsView: View {
                             if let id {
                                 currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
                                 autoDetectSalaryForDisplay(slotId: id)
+                                refreshVirtualSavings()
                             }
                         }
                     }
@@ -1476,6 +1513,128 @@ struct SettingsView: View {
                             .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
                         }
 
+                        // ─── Card 2c: Aufrunden / Spartopf (pro Slot) ───────
+                        if selectedSettingsSlotId != nil {
+                            VStack(alignment: .leading, spacing: 10) {
+                                SettingsSectionHeader(
+                                    title: t("Aufrunden", "Round-up"),
+                                    icon: "centsign.circle.fill"
+                                )
+                                Text(t("Pro Ausgabe wandert die Differenz zum nächsten glatten Betrag in einen virtuellen Spartopf. Am Tagesende fragt die App, was damit passieren soll.",
+                                       "Each expense rounds up to the next clean amount; the difference flows into a virtual savings pot. At day's end the app asks what to do with it."))
+                                    .font(ThemeFonts.body(size: 11))
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                SettingsRow(title: t("Aufrunden aktivieren", "Enable round-up")) {
+                                    Toggle("", isOn: Binding(
+                                        get: { currentSlotSettings.roundupEnabled },
+                                        set: { newValue in
+                                            currentSlotSettings.roundupEnabled = newValue
+                                            saveCurrentSlotSettings()
+                                        }
+                                    ))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                }
+
+                                if currentSlotSettings.roundupEnabled {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text(t("Schrittweite", "Step size"))
+                                            .font(ThemeFonts.body(size: 12))
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 185, alignment: .leading)
+                                        Picker("", selection: Binding(
+                                            get: { currentSlotSettings.roundupStepCents },
+                                            set: { newValue in
+                                                currentSlotSettings.roundupStepCents = newValue
+                                                saveCurrentSlotSettings()
+                                            }
+                                        )) {
+                                            Text("1 €").tag(100)
+                                            Text("2 €").tag(200)
+                                            Text("5 €").tag(500)
+                                            Text("10 €").tag(1000)
+                                        }
+                                        .pickerStyle(.segmented)
+                                        .labelsHidden()
+                                    }
+
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text(t("Sparkonto-Name", "Savings account name"))
+                                            .font(ThemeFonts.body(size: 12))
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 185, alignment: .leading)
+                                        TextField(t("z.B. Tagesgeld DKB", "e.g. DKB Savings"), text: Binding(
+                                            get: { currentSlotSettings.savingsAccountName ?? "" },
+                                            set: { newValue in
+                                                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                currentSlotSettings.savingsAccountName = trimmed.isEmpty ? nil : trimmed
+                                                saveCurrentSlotSettings()
+                                            }
+                                        ))
+                                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                            Text(t("Sparkonto-IBAN", "Savings IBAN"))
+                                                .font(ThemeFonts.body(size: 12))
+                                                .foregroundColor(.secondary)
+                                                .frame(width: 185, alignment: .leading)
+                                            TextField("DE...", text: Binding(
+                                                get: { currentSlotSettings.savingsAccountIban ?? "" },
+                                                set: { newValue in
+                                                    let normalized = TransferRequest.normalizeIban(newValue)
+                                                    currentSlotSettings.savingsAccountIban = normalized.isEmpty ? nil : normalized
+                                                    saveCurrentSlotSettings()
+                                                }
+                                            ))
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                        }
+                                        if let iban = currentSlotSettings.savingsAccountIban, !iban.isEmpty {
+                                            let isValid = (try? TransferRequest.validateIban(iban)) != nil
+                                            HStack(spacing: 4) {
+                                                Image(systemName: isValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                                Text(isValid
+                                                    ? t("IBAN gültig", "IBAN valid")
+                                                    : t("IBAN ungültig", "Invalid IBAN"))
+                                            }
+                                            .font(ThemeFonts.body(size: 11))
+                                            .foregroundColor(isValid ? .green : .orange)
+                                            .padding(.leading, 193)
+                                        }
+                                    }
+
+                                    // Virtuell gespart — Auszahl-Button.
+                                    if virtualSavingsCents > 0 {
+                                        Divider().padding(.vertical, 4)
+                                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(t("Virtuell gespart", "Saved virtually"))
+                                                    .font(ThemeFonts.body(size: 12, weight: .medium))
+                                                Text(formatCents(virtualSavingsCents))
+                                                    .font(ThemeFonts.body(size: 18, weight: .semibold))
+                                                    .monospacedDigit()
+                                            }
+                                            Spacer()
+                                            Button(action: requestRoundupPayout) {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "arrow.up.right.square.fill")
+                                                    Text(t("Auszahlen…", "Pay out…"))
+                                                }
+                                            }
+                                            .controlSize(.regular)
+                                            .disabled(currentSlotSettings.savingsAccountIban == nil
+                                                      || (currentSlotSettings.savingsAccountIban ?? "").isEmpty)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
+                        }
+
                         // ─── Card 3: Kontostand-Schwellen (was "Money Mood") ─
                         VStack(alignment: .leading, spacing: 10) {
                             SettingsSectionHeader(
@@ -1646,6 +1805,9 @@ struct SettingsView: View {
         .onAppear { loadSlotSettings() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             if selectedSettingsSlotId != nil { autoDetectSalaryForDisplay(slotId: selectedSettingsSlotId!) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("simplebanking.virtualSavingsChanged"))) { _ in
+            refreshVirtualSavings()
         }
     }
 
@@ -3181,7 +3343,7 @@ struct SettingsView: View {
 
 // Subtle gray for settings section cards — lighter than panelBackground (0.92),
 // not pure white. Matches macOS grouped-form card feel.
-private extension Color {
+extension Color {
     static let settingsCard = Color(NSColor(name: nil) { app in
         app.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
             ? NSColor(white: 0.22, alpha: 1)

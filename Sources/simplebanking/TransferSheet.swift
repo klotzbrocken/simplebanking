@@ -463,6 +463,8 @@ struct TransferSheet: View {
             switch prefillSource {
             case "mcp": return L10n.t("Vom Assistant vorbereitet",
                                        "Prepared by the assistant")
+            case "roundup": return L10n.t("Vom Aufrunden vorbereitet — Sparkonto-Übertrag",
+                                           "Prepared from round-up — savings transfer")
             default:    return L10n.t("Vorausgefüllt — bitte prüfen",
                                        "Pre-filled — please review")
             }

@@ -1433,6 +1433,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
 
         updateChecker = UpdateChecker()
+
+        // Aufrunden-Trigger: Observer für RoundupDayWatcher-Prompts +
+        // ersten Check beim App-Start.
+        NotificationCenter.default.addObserver(
+            forName: .roundupPromptRequired,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let slotId = note.userInfo?["slotId"] as? String,
+                  let potDate = note.userInfo?["potDate"] as? String else { return }
+            Task { @MainActor in
+                self?.openRoundupPanel(slotId: slotId, potDate: potDate)
+            }
+        }
+        // Auszahl-Anfrage aus Settings → TransferSheet mit „roundup"-Prefill.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.roundupPayoutRequested"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let slotId = note.userInfo?["slotId"] as? String else { return }
+            Task { @MainActor in
+                self?.handleRoundupPayoutRequest(slotId: slotId)
+            }
+        }
+        RoundupDayWatcher.shared.checkAndPromptIfNeeded(bankId: demoMode ? "demo" : "primary")
+    }
+
+    private func handleRoundupPayoutRequest(slotId: String) {
+        let bankId = demoMode ? "demo" : "primary"
+        let totalCents = (try? RoundupStore.virtualSavingsTotal(slotId: slotId, bankId: bankId)) ?? 0
+        guard totalCents > 0 else { return }
+
+        let settings = BankSlotSettingsStore.load(slotId: slotId)
+        guard let iban = settings.savingsAccountIban, !iban.isEmpty else {
+            AppLogger.log("Roundup-Auszahlung ohne IBAN — Settings sollten Button disabled haben.",
+                          category: "Roundup", level: "WARN")
+            return
+        }
+        let name = settings.savingsAccountName ?? L10n.t("Sparkonto", "Savings")
+        let amount = Decimal(totalCents) / 100
+
+        do {
+            let request = try TransferRequest(
+                creditorName: name,
+                creditorIban: iban,
+                amountEUR: amount,
+                remittance: L10n.t("Aufgerundet — virtuelle Summe", "Round-up — virtual total")
+            )
+            // Optimistisch markieren — User hatte Intention, TransferSheet darf
+            // er auch abbrechen, aber wir bieten den Topf nicht erneut an.
+            _ = try? RoundupStore.markVirtualSavingsTransferred(slotId: slotId, bankId: bankId)
+            NotificationCenter.default.post(
+                name: Notification.Name("simplebanking.virtualSavingsChanged"), object: nil
+            )
+            showTransferSheet(prefill: request, prefillSource: "roundup")
+        } catch {
+            AppLogger.log("Roundup-Auszahlung TransferRequest-Build fehlgeschlagen: \(error.localizedDescription)",
+                          category: "Roundup", level: "ERROR")
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -1482,6 +1542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var upsellWindow: NSWindow?
     private var transferVoucherWindow: NSWindow?
     private var bankDiagnosticsWindow: NSWindow?
+    private var roundupWindow: NSWindow?
 
     @objc private func sendMoney() {
         sendMoney(draft: nil)
@@ -1671,6 +1732,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         positionTransferWindow(panel)
         transferWindow = panel
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Aufrunden / Spartopf
+
+    func openRoundupPanel(slotId: String, potDate: String) {
+        if let existing = roundupWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        guard let pot = try? RoundupStore.pot(slotId: slotId, potDate: potDate) else {
+            AppLogger.log("openRoundupPanel: no pot for \(slotId)/\(potDate)",
+                          category: "Roundup", level: "WARN")
+            return
+        }
+        let settings = BankSlotSettingsStore.load(slotId: slotId)
+        let sheet = RoundupSheet(
+            slotId: slotId,
+            potDate: potDate,
+            pot: pot,
+            savingsAccountName: settings.savingsAccountName,
+            savingsAccountIban: settings.savingsAccountIban,
+            onClose: { [weak self] in
+                self?.roundupWindow?.close()
+                self?.roundupWindow = nil
+            },
+            onTransfer: { [weak self] request in
+                self?.roundupWindow?.close()
+                self?.roundupWindow = nil
+                self?.showTransferSheet(prefill: request, prefillSource: "roundup")
+            }
+        )
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 480),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = L10n.t("Aufrunden", "Round-up")
+        panel.titleVisibility = .visible
+        panel.titlebarAppearsTransparent = true
+        panel.backgroundColor = NSColor(name: nil) { appearance in
+            let theme = ThemeManager.shared.currentTheme
+            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+                ? theme.panelDarkColor
+                : theme.panelLightColor
+        }
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.fullScreenNone, .managed]
+
+        let host = NSHostingView(rootView: sheet)
+        host.translatesAutoresizingMaskIntoConstraints = false
+        let content = NSView()
+        content.addSubview(host)
+        panel.contentView = content
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            host.topAnchor.constraint(equalTo: content.topAnchor),
+            host.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        ])
+        panel.isReleasedWhenClosed = false
+        panel.center()
+        roundupWindow = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -2850,6 +2979,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
 
+        // Aufrunden-Trigger: vor jedem Flyout-Open checken, ob ein Pot
+        // angefragt werden muss.
+        RoundupDayWatcher.shared.checkAndPromptIfNeeded(bankId: demoMode ? "demo" : "primary")
+
         let popover = balancePopover ?? NSPopover()
         popover.behavior = .semitransient
         popover.animates = true
@@ -3377,7 +3510,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
         isHBCICallInFlight = true
-        defer { isHBCICallInFlight = false }
+        defer {
+            isHBCICallInFlight = false
+            // Aufrunden-Trigger: nach jedem Refresh (auch bei Fehler) prüfen,
+            // ob frische upserts neue Pots erzeugt haben.
+            RoundupDayWatcher.shared.checkAndPromptIfNeeded(bankId: demoMode ? "demo" : "primary")
+        }
 
         let epochAtStart = slotEpoch
         // Demo-Modus: Keine echten API-Calls

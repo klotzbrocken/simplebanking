@@ -169,6 +169,76 @@ final class RoundupStoreTests: XCTestCase {
 
     // MARK: - virtualSavingsTotal
 
+    // MARK: - markStalePending
+
+    func test_markStalePending_movesOnlyOldOpenPots() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "s", txId: "tx-2", potDate: "2026-05-26",
+                                amountCents: 60, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "s", txId: "tx-3", potDate: "2026-05-27",
+                                amountCents: 70, stepCents: 100, bankId: testBankId)
+
+        let changed = try RoundupStore.markStalePending(slotId: "s", before: "2026-05-27", bankId: testBankId)
+        XCTAssertEqual(changed, 2, "Zwei alte Pots werden pending; der heutige bleibt open.")
+
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-25", bankId: testBankId)?.status, .pending)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-26", bankId: testBankId)?.status, .pending)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-27", bankId: testBankId)?.status, .open)
+    }
+
+    func test_markStalePending_skipsAlreadyFinalAndSetsNoResolvedAt() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.resolve(slotId: "s", potDate: "2026-05-25", status: .discarded, bankId: testBankId)
+
+        let changed = try RoundupStore.markStalePending(slotId: "s", before: "2026-05-27", bankId: testBankId)
+        XCTAssertEqual(changed, 0)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-25", bankId: testBankId)?.status, .discarded)
+    }
+
+    func test_markStalePending_idempotent() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        XCTAssertEqual(try RoundupStore.markStalePending(slotId: "s", before: "2026-05-27", bankId: testBankId), 1)
+        XCTAssertEqual(try RoundupStore.markStalePending(slotId: "s", before: "2026-05-27", bankId: testBankId), 0)
+        XCTAssertNil(try RoundupStore.pot(slotId: "s", potDate: "2026-05-25", bankId: testBankId)?.resolvedAt,
+                     "markStalePending darf kein resolved_at setzen (User hat noch nicht entschieden).")
+    }
+
+    // MARK: - markVirtualSavingsTransferred
+
+    func test_markVirtualSavingsTransferred_flipsKeptVirtualToTransferred() throws {
+        try RoundupStore.record(slotId: "a", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.resolve(slotId: "a", potDate: "2026-05-25", status: .keptVirtual, bankId: testBankId)
+        try RoundupStore.record(slotId: "a", txId: "tx-2", potDate: "2026-05-26",
+                                amountCents: 70, stepCents: 100, bankId: testBankId)
+        try RoundupStore.resolve(slotId: "a", potDate: "2026-05-26", status: .keptVirtual, bankId: testBankId)
+        // Anderer Slot bleibt unangetastet
+        try RoundupStore.record(slotId: "other", txId: "tx-3", potDate: "2026-05-26",
+                                amountCents: 200, stepCents: 100, bankId: testBankId)
+        try RoundupStore.resolve(slotId: "other", potDate: "2026-05-26", status: .keptVirtual, bankId: testBankId)
+
+        let n = try RoundupStore.markVirtualSavingsTransferred(slotId: "a", bankId: testBankId)
+        XCTAssertEqual(n, 2)
+
+        XCTAssertEqual(try RoundupStore.virtualSavingsTotal(slotId: "a", bankId: testBankId), 0)
+        XCTAssertEqual(try RoundupStore.virtualSavingsTotal(slotId: "other", bankId: testBankId), 200)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "a", potDate: "2026-05-25", bankId: testBankId)?.status, .transferred)
+        XCTAssertNotNil(try RoundupStore.pot(slotId: "a", potDate: "2026-05-25", bankId: testBankId)?.resolvedAt)
+    }
+
+    func test_markVirtualSavingsTransferred_idempotent() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.resolve(slotId: "s", potDate: "2026-05-25", status: .keptVirtual, bankId: testBankId)
+        XCTAssertEqual(try RoundupStore.markVirtualSavingsTransferred(slotId: "s", bankId: testBankId), 1)
+        XCTAssertEqual(try RoundupStore.markVirtualSavingsTransferred(slotId: "s", bankId: testBankId), 0)
+    }
+
+    // MARK: - virtualSavingsTotal
+
     func test_virtualSavingsTotal_sumsOnlyKeptVirtual() throws {
         // Slot A: 3 Pots, 2 davon keptVirtual
         try RoundupStore.record(slotId: "a", txId: "tx-1", potDate: "2026-05-25",
