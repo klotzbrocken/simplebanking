@@ -4,6 +4,16 @@
 
 ### Neu
 
+- **Aufrunden-Ansicht** — neuer Sicht-Modus im Umsatzpanel, der den **Freeze-Modus ersetzt**. Aktivierung über den Centsign-Toggle (ehem. Schneeflocken-Icon) im Filter-Header, nur sichtbar wenn Aufrunden in den Slot-Einstellungen aktiviert ist und kein Aggregat-Mode aktiv ist. Beim Einschalten:
+  - **Beträge in der Liste werden aufgerundet** angezeigt (z. B. -3,47 € → -5,00 € bei 5 €-Step). Original-Beträge bleiben in Detail-Sheets/Reports unverändert.
+  - **Unter dem Kontostand** erscheint zweizeilig „Virtuell gespart X €" + „Heute +Y €".
+  - **Mint/Sage-Hintergrund** überschreibt Bank-Tönung als visueller Mode-Indikator (Bank-Tint kehrt beim Ausschalten zurück).
+  - **Sticky-Banner oben** mit Heute-Pot + Inline-Step-Picker (1/2/5/10 € — Wechsel persistiert sofort in Slot-Settings und re-rendert Liste live).
+  - **Greenring + Dispo-Ring bleiben auf echten Werten** — die Lens ist nur eine Sicht-Schicht, keine Daten-Mutation.
+  - **Auto-Off** bei Slot-Switch, bei Wechsel in den Aggregat-Mode, und wenn Aufrunden in Settings deaktiviert wird.
+
+- **Freeze-Modus entfernt** — der „Was-wäre-wenn"-Freeze-Stack (FreezeAnalyzer/FreezeOverlay, Cyan/Teal-Tönung, fiktiver Kontostand-Header, Snowflake-Toggle) ist nicht mehr im Code. Die Aufrunden-Ansicht ist der konzeptionelle Nachfolger: konkrete reale Ersparnis statt theoretischer Abo-Pausierung.
+
 - **Aufrunden / Spartopf** — pro Buchung wird die Differenz zum nächsten glatten Betrag (1 €, 2 €, 5 € oder 10 €, Schrittweite per Slot wählbar) im Hintergrund in einen virtuellen Tages-Spartopf gelegt. Income, exakte Boundary-Beträge und Non-EUR-TRX werden übersprungen; gerechnet wird ausschließlich bei `status=booked` (keine Doppelzählungen bei Pending→Booked-Übergängen). Pro Slot eigener Topf, idempotent gegen Re-Fetches.
   - **End-of-Day-Prompt**: beim ersten App-Open nach lokaler Mitternacht (oder vor jedem Flyout-Open / nach jedem erfolgreichen Refresh) öffnet sich für offene Töpfe ein Modal mit drei Optionen: **Verwerfen**, **Virtuell behalten** (sammelt sich pro Slot in einer Summe) oder **Auf Sparkonto übertragen** (öffnet das TransferSheet mit Sparkonto-Prefill und „Vom Aufrunden vorbereitet"-Badge — SCA + Bestätigung wie immer durch den User).
   - **Snooze** im Modal: 1 h / 24 h / „Nie mehr heute" (pro Slot+Tag, persistent in UserDefaults).
