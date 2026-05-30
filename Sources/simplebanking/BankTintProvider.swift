@@ -29,26 +29,26 @@ enum BankTintProvider {
     // MARK: Public API (Production — MainActor-bound)
 
     /// Soft-Variante der Bank-Primärfarbe als Panel-Background-Tint.
-    /// Gibt nil zurück wenn deaktiviert, Freeze aktiv, Unified-Mode oder Bank unbekannt.
+    /// Gibt nil zurück wenn deaktiviert, Aufrunden-View aktiv, Unified-Mode oder Bank unbekannt.
     @MainActor
-    static func resolveListTint(freezeActive: Bool) -> Color? {
-        guard let hex = activeTintHex(freezeActive: freezeActive) else { return nil }
+    static func resolveListTint(roundupViewActive: Bool) -> Color? {
+        guard let hex = activeTintHex(roundupViewActive: roundupViewActive) else { return nil }
         return softColor(fromHex: hex)
     }
 
     /// NSColor-Bridge der Soft-Variante. Für BalanceBar-Background-Layer (AppKit).
     @MainActor
     static func currentTintNSColor() -> NSColor? {
-        guard let hex = activeTintHex(freezeActive: false) else { return nil }
+        guard let hex = activeTintHex(roundupViewActive: false) else { return nil }
         return softNSColor(fromHex: hex)
     }
 
     /// Liefert den Hex der aktiven Bank-Tönung oder nil.
     @MainActor
-    static func activeTintHex(freezeActive: Bool) -> String? {
+    static func activeTintHex(roundupViewActive: Bool) -> String? {
         let store = MultibankingStore.shared
         return resolveHex(
-            freezeActive: freezeActive,
+            roundupViewActive: roundupViewActive,
             globalEnabled: globalEnabled(),
             unifiedActive: isUnifiedActive(),
             activeSlot: store.activeSlot,
@@ -59,16 +59,15 @@ enum BankTintProvider {
     // MARK: Pure Resolver (kein State-Zugriff — alles via Parameter, voll testbar)
 
     /// Pure-Funktion: berechnet die zu nutzende Bankfarbe als Hex-String, oder nil.
-    /// Vor jedem Aufruf werden globalEnabled / unifiedActive / slotOverrideEnabled
-    /// aus den jeweiligen Sources gelesen und übergeben — keine Singletons hier.
+    /// Aufrunden-View hat Priorität — wenn aktiv, immer nil (Mint-Tönung übernimmt).
     static func resolveHex(
-        freezeActive: Bool,
+        roundupViewActive: Bool,
         globalEnabled: Bool,
         unifiedActive: Bool,
         activeSlot: BankSlot?,
         slotOverrideEnabled: Bool
     ) -> String? {
-        if freezeActive { return nil }
+        if roundupViewActive { return nil }
         if !globalEnabled { return nil }
         if unifiedActive { return nil }
         guard let slot = activeSlot else { return nil }

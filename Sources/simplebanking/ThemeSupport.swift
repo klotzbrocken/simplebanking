@@ -353,11 +353,20 @@ extension Color {
         })
     }
 
-    /// Cooler panel background used in Freeze mode — Blue Soft aus der Color Harmony Palette.
-    static var freezePanelBackground: Color {
+    /// Mint-Hintergrund für die Aufrunden-Ansicht — überschreibt Bank-Tint
+    /// wenn der View-Mode aktiv ist (Phase B-3).
+    static var roundupPanelBackground: Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
-            return AppTheme.color(from: isDark ? "#1F3144" : "#EAF1F8", fallback: .controlBackgroundColor)
+            return AppTheme.color(from: isDark ? "#1F3A2C" : "#E6F3EB", fallback: .controlBackgroundColor)
+        })
+    }
+
+    /// Akzentfarbe für Aufrunden-Toggle / Banner-Texte / Icon (mint-tinged green).
+    static var roundupAccent: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            return AppTheme.color(from: isDark ? "#8FD3A8" : "#2F8B5A", fallback: .systemGreen)
         })
     }
 

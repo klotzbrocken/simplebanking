@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Tab (shared between SubscriptionsView and FreezeAnalyzer)
+// MARK: - Tab (subscription category buckets used by SubscriptionDetector + SubscriptionsView)
 
 enum SubscriptionTab: String, CaseIterable {
     case abos             = "Abos"
@@ -63,7 +63,7 @@ struct SubscriptionCandidate: Identifiable {
 
 enum SubscriptionDetector {
 
-    // Shared fitness keywords (used by defaultTab and FreezeAnalyzer)
+    // Shared fitness keywords (used by defaultTab)
     static let fitnessKeywords = [
         "mcfit", "clever fit", "cleverfit", "urban sports", "fitx", "fitness first",
         "kieser", "yoga", "pilates", "holmes place", "john reed",

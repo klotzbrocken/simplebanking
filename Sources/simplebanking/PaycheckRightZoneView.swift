@@ -13,7 +13,6 @@ struct GreenZoneRing: View {
     var showDispo: Bool = true    // false = hide dispo-mode rendering
 
     @State private var displayedFraction: Double = 0
-    @ObservedObject private var freezeState = FreezeState.shared
 
     private var isDispoMode: Bool { showDispo && (balance ?? 0) < 0 }
 
@@ -25,10 +24,7 @@ struct GreenZoneRing: View {
 
     private func ringColor(for f: Double) -> Color {
         // Color Harmony Palette — diskrete semantische Bands statt Continuous Hue.
-        // Freeze nutzt Blue (info/analyse), Dispo nutzt Red (urgent), sonst Red→Orange→Green nach Threshold.
-        if freezeState.isActive {
-            return .sbBlueStrong
-        }
+        // Dispo nutzt Red (urgent), sonst Red→Orange→Green nach Threshold.
         guard !isDispoMode else { return .sbRedStrong }
         if f < 0.34 { return .sbRedStrong }
         if f < 0.67 { return .sbOrangeStrong }

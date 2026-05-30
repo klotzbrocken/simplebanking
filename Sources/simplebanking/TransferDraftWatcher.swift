@@ -66,6 +66,16 @@ final class TransferDraftWatcher {
         let drafts = TransferDraftStore.loadAll()
         guard let newest = drafts.first else { return }
 
+        // User-Toggle „MCP-Drafts annehmen" (Default aus — opt-in). Wenn aus:
+        // alle Drafts verwerfen und kein Sheet öffnen — verhindert dass ein im
+        // Hintergrund laufender MCP-Client (z.B. Claude.app) ungewollt
+        // TransferSheets öffnet.
+        let mcpDraftsEnabled = (UserDefaults.standard.object(forKey: "mcpDraftsEnabled") as? Bool) ?? false
+        guard mcpDraftsEnabled else {
+            for d in drafts { TransferDraftStore.consume(id: d.id) }
+            return
+        }
+
         // One-shot: löschen sofort, bevor Notification gepostet wird.
         // Sonst könnte ein nachfolgender vnode-Event denselben Draft nochmal
         // einliefern, während BalanceBar das Sheet schon aufmacht.

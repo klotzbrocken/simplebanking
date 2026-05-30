@@ -1434,64 +1434,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         updateChecker = UpdateChecker()
 
-        // Aufrunden-Trigger: Observer für RoundupDayWatcher-Prompts +
-        // ersten Check beim App-Start.
+        // Aufrunden: Banner-Button öffnet den Choice-Sheet (Picker mit
+        // Heute/Gestern/Vorgestern/Monat + Abbrechen/Jetzt sparen).
         NotificationCenter.default.addObserver(
-            forName: .roundupPromptRequired,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            guard let slotId = note.userInfo?["slotId"] as? String,
-                  let potDate = note.userInfo?["potDate"] as? String else { return }
-            Task { @MainActor in
-                self?.openRoundupPanel(slotId: slotId, potDate: potDate)
-            }
-        }
-        // Auszahl-Anfrage aus Settings → TransferSheet mit „roundup"-Prefill.
-        NotificationCenter.default.addObserver(
-            forName: Notification.Name("simplebanking.roundupPayoutRequested"),
+            forName: Notification.Name("simplebanking.roundupOpenChoiceSheet"),
             object: nil,
             queue: .main
         ) { [weak self] note in
             guard let slotId = note.userInfo?["slotId"] as? String else { return }
             Task { @MainActor in
-                self?.handleRoundupPayoutRequest(slotId: slotId)
+                self?.openRoundupChoicePanel(slotId: slotId)
             }
-        }
-        RoundupDayWatcher.shared.checkAndPromptIfNeeded(bankId: demoMode ? "demo" : "primary")
-    }
-
-    private func handleRoundupPayoutRequest(slotId: String) {
-        let bankId = demoMode ? "demo" : "primary"
-        let totalCents = (try? RoundupStore.virtualSavingsTotal(slotId: slotId, bankId: bankId)) ?? 0
-        guard totalCents > 0 else { return }
-
-        let settings = BankSlotSettingsStore.load(slotId: slotId)
-        guard let iban = settings.savingsAccountIban, !iban.isEmpty else {
-            AppLogger.log("Roundup-Auszahlung ohne IBAN — Settings sollten Button disabled haben.",
-                          category: "Roundup", level: "WARN")
-            return
-        }
-        let name = settings.savingsAccountName ?? L10n.t("Sparkonto", "Savings")
-        let amount = Decimal(totalCents) / 100
-
-        do {
-            let request = try TransferRequest(
-                creditorName: name,
-                creditorIban: iban,
-                amountEUR: amount,
-                remittance: L10n.t("Aufgerundet — virtuelle Summe", "Round-up — virtual total")
-            )
-            // Optimistisch markieren — User hatte Intention, TransferSheet darf
-            // er auch abbrechen, aber wir bieten den Topf nicht erneut an.
-            _ = try? RoundupStore.markVirtualSavingsTransferred(slotId: slotId, bankId: bankId)
-            NotificationCenter.default.post(
-                name: Notification.Name("simplebanking.virtualSavingsChanged"), object: nil
-            )
-            showTransferSheet(prefill: request, prefillSource: "roundup")
-        } catch {
-            AppLogger.log("Roundup-Auszahlung TransferRequest-Build fehlgeschlagen: \(error.localizedDescription)",
-                          category: "Roundup", level: "ERROR")
         }
     }
 
@@ -1738,37 +1691,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     // MARK: - Aufrunden / Spartopf
 
-    func openRoundupPanel(slotId: String, potDate: String) {
+    func openRoundupChoicePanel(slotId: String) {
         if let existing = roundupWindow, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        guard let pot = try? RoundupStore.pot(slotId: slotId, potDate: potDate) else {
-            AppLogger.log("openRoundupPanel: no pot for \(slotId)/\(potDate)",
-                          category: "Roundup", level: "WARN")
-            return
-        }
-        let settings = BankSlotSettingsStore.load(slotId: slotId)
-        let sheet = RoundupSheet(
+
+        let bankIdForSheet = demoMode ? "demo" : "primary"
+        let sheet = RoundupChoiceSheet(
             slotId: slotId,
-            potDate: potDate,
-            pot: pot,
-            savingsAccountName: settings.savingsAccountName,
-            savingsAccountIban: settings.savingsAccountIban,
-            onClose: { [weak self] in
+            bankId: bankIdForSheet,
+            onCancel: { [weak self] in
                 self?.roundupWindow?.close()
                 self?.roundupWindow = nil
             },
-            onTransfer: { [weak self] request in
-                self?.roundupWindow?.close()
-                self?.roundupWindow = nil
-                self?.showTransferSheet(prefill: request, prefillSource: "roundup")
+            onTransfer: { [weak self] amountCents, rangeLabel in
+                guard let self else { return }
+                self.roundupWindow?.close()
+                self.roundupWindow = nil
+                guard amountCents > 0 else { return }
+                self.openTransferSheetForRoundupChoice(slotId: slotId, amountCents: amountCents, rangeLabel: rangeLabel)
             }
         )
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 530),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -1802,6 +1750,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         roundupWindow = panel
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openTransferSheetForRoundupChoice(slotId: String, amountCents: Int, rangeLabel: String) {
+        let settings = BankSlotSettingsStore.load(slotId: slotId)
+        let creditorName = settings.savingsAccountName ?? L10n.t("Sparkonto", "Savings")
+        let creditorIban = settings.savingsAccountIban ?? ""
+        let amount = Decimal(amountCents) / 100
+
+        do {
+            let request = try TransferRequest(
+                creditorName: creditorName,
+                creditorIban: creditorIban,
+                amountEUR: amount,
+                remittance: L10n.t("Aufgerundet (\(rangeLabel))", "Round-up (\(rangeLabel))")
+            )
+            showTransferSheet(prefill: request, prefillSource: "roundup")
+        } catch {
+            AppLogger.log("Roundup-Choice TransferRequest fehlgeschlagen: \(error.localizedDescription)",
+                          category: "Roundup", level: "ERROR")
+        }
     }
 
     /// Positioniert das Transfer-Window: wenn das Umsatzfenster offen ist,
@@ -2979,10 +2947,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
 
-        // Aufrunden-Trigger: vor jedem Flyout-Open checken, ob ein Pot
-        // angefragt werden muss.
-        RoundupDayWatcher.shared.checkAndPromptIfNeeded(bankId: demoMode ? "demo" : "primary")
-
         let popover = balancePopover ?? NSPopover()
         popover.behavior = .semitransient
         popover.animates = true
@@ -3116,12 +3080,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
         let host = NSHostingController(rootView: rootView)
         host.view.wantsLayer = true
-        host.view.layer?.backgroundColor = FreezeState.shared.isActive
-            ? NSColor(name: nil) { appearance in
-                let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
-                return AppTheme.color(from: isDark ? "#1F3144" : "#EAF1F8", fallback: .controlBackgroundColor)
-            }.cgColor
-            : (BankTintProvider.currentTintNSColor()?.cgColor ?? NSColor.windowBackgroundColor.cgColor)
+        host.view.layer?.backgroundColor = BankTintProvider.currentTintNSColor()?.cgColor
+            ?? NSColor.windowBackgroundColor.cgColor
         return (host, hasDots)
     }
 
@@ -3510,12 +3470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
         isHBCICallInFlight = true
-        defer {
-            isHBCICallInFlight = false
-            // Aufrunden-Trigger: nach jedem Refresh (auch bei Fehler) prüfen,
-            // ob frische upserts neue Pots erzeugt haben.
-            RoundupDayWatcher.shared.checkAndPromptIfNeeded(bankId: demoMode ? "demo" : "primary")
-        }
+        defer { isHBCICallInFlight = false }
 
         let epochAtStart = slotEpoch
         // Demo-Modus: Keine echten API-Calls
@@ -5264,7 +5219,6 @@ private struct StatusBalanceFlyoutCardView: View {
     var dispoLimit: Int = 0               // overdraft limit in € for dispo-mode ring
     @AppStorage("greenZoneRingEnabled") private var greenZoneRingEnabled: Bool = true
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
-    @ObservedObject private var freezeState = FreezeState.shared
     // Dot indicators — all slots regardless of mode
     var allSlots: [FlyoutSlotItem]? = nil
     var activeSlotIndex: Int = 0
@@ -5284,19 +5238,6 @@ private struct StatusBalanceFlyoutCardView: View {
 
     private var hasDots: Bool { (allSlots?.count ?? 0) > 1 }
 
-    private static let freezeFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.numberStyle = .currency
-        f.currencyCode = "EUR"
-        f.maximumFractionDigits = 0
-        return f
-    }()
-
-    private func freezeBalanceText(_ value: Double) -> String {
-        Self.freezeFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value)) €"
-    }
-
     private static let leftToPayFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.locale = Locale(identifier: "de_DE")
@@ -5313,22 +5254,47 @@ private struct StatusBalanceFlyoutCardView: View {
     }
 
     @AppStorage("balanceSubtitleStyle.flyout") private var flyoutSubtitleStyle: Int = 0
+    @AppStorage("roundupSubtitleStyle.flyout") private var flyoutRoundupSubtitleStyle: Int = 0
+
+    @ObservedObject private var roundupView = RoundupViewState.shared
 
     @ViewBuilder
     private var leftToPaySubtitle: some View {
-        // Unified-Mode: leftToPay ist pro-Slot aggregiert → Sub-Metrics würden gegen
-        // einen einzelnen Gehaltstag rechnen und wären fachlich inkonsistent.
-        BalanceSubtitleSwitch(
-            balance: balanceValue,
-            leftToPayAmount: leftToPayAmount,
-            salaryDay: salaryDay,
-            salaryToleranceBefore: salaryToleranceBefore,
-            salaryToleranceAfter: salaryToleranceAfter,
-            style: $flyoutSubtitleStyle,
-            forceClassic: isUnifiedMode,
-            compact: true
-        )
+        if roundupView.isActive {
+            RoundupSubtitleSwitch(
+                todayCents: roundupView.todayPotCents,
+                yesterdayCents: roundupView.yesterdayPotCents,
+                dayBeforeYesterdayCents: roundupView.dayBeforeYesterdayPotCents,
+                monthToDateCents: roundupView.monthToDateCents,
+                style: $flyoutRoundupSubtitleStyle,
+                compact: true
+            )
+        } else {
+            // Unified-Mode: leftToPay ist pro-Slot aggregiert → Sub-Metrics würden gegen
+            // einen einzelnen Gehaltstag rechnen und wären fachlich inkonsistent.
+            BalanceSubtitleSwitch(
+                balance: balanceValue,
+                leftToPayAmount: leftToPayAmount,
+                salaryDay: salaryDay,
+                salaryToleranceBefore: salaryToleranceBefore,
+                salaryToleranceAfter: salaryToleranceAfter,
+                style: $flyoutSubtitleStyle,
+                forceClassic: isUnifiedMode,
+                compact: true
+            )
+        }
     }
+
+    private func formatRoundupEuros(_ cents: Int) -> String {
+        let euros = Double(cents) / 100.0
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return (f.string(from: NSNumber(value: euros)) ?? "0,00") + " €"
+    }
+
 
     var body: some View {
         VStack(spacing: 0) {
@@ -5386,7 +5352,7 @@ private struct StatusBalanceFlyoutCardView: View {
             }
         }
         .frame(width: 348, height: hasDots ? 192 : 170)
-        .background(freezeState.isActive ? Color.freezePanelBackground : Color.panelBackground)
+        .background(roundupView.isActive ? Color.roundupPanelBackground : Color.panelBackground)
         .preferredColorScheme(forcedColorScheme)
         .onHover { hovering in onHoverChanged?(hovering) }
     }
@@ -5531,15 +5497,9 @@ private struct StatusBalanceFlyoutCardView: View {
                         .font(.system(size: 16))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                if freezeState.isActive {
-                    Text(L10n.t("fiktiver Kontostand", "fictional balance"))
-                        .font(.system(size: 14))
-                        .foregroundColor(.cyan.opacity(0.8))
-                } else {
-                    Text(formatBankHeader(date: balanceFetchedAt))
-                        .font(.system(size: 14))
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
-                }
+                Text(formatBankHeader(date: balanceFetchedAt))
+                    .font(.system(size: 14))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
                 if emojiEnabled, let emoji = BalanceSignal.emoji(for: level) {
                     Text(emoji).font(.system(size: 16))
@@ -5548,30 +5508,15 @@ private struct StatusBalanceFlyoutCardView: View {
 
             HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    // Real balance is always the primary 30pt number. Freeze projection
-                    // moves to a subtitle below — a what-if should not look like the truth.
                     Text(displayBalance)
                         .font(.system(size: 30, weight: .bold, design: .default))
                         .foregroundColor(style.amountColor)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
 
-                    if freezeState.isActive && freezeState.monthlyAmount > 0 {
-                        let freezeBalance = (balanceValue ?? 0) + freezeState.monthlyAmount
-                        Text(L10n.t(
-                            "~\(freezeBalanceText(freezeBalance)) wenn nichts abgeht",
-                            "~\(freezeBalanceText(freezeBalance)) if nothing is charged"
-                        ))
-                        .font(.system(size: 14))
-                        .foregroundColor(.cyan.opacity(0.9))
-                        .lineLimit(1)
-                    } else {
-                        leftToPaySubtitle
-                    }
+                    leftToPaySubtitle
                 }
                 Spacer()
                 if greenZoneRingEnabled {
-                    // GreenRing always reflects the real balance — the freeze projection
-                    // is side-information, not a new truth about your position.
                     GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit, showDispo: greenZoneShowDispo)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
                 }
@@ -5586,9 +5531,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [freezeState.isActive
-                                ? Color.cyan.opacity(0.12)
-                                : style.gradientBaseColor.opacity(0.10), .clear],
+                            colors: [style.gradientBaseColor.opacity(0.10), .clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )

@@ -34,11 +34,8 @@ private struct TransactionsPanelView: View {
     @State private var showScoreSheet = false
     @State private var showFixedCosts = false
     @State private var showMoneyAge = false
-    @State private var freezeActive: Bool = false
-    @State private var freezeItems: [FreezeItem] = []
-    @State private var freezeExcluded: Set<FreezeCategory> = []
-    @ObservedObject private var freezeState = FreezeState.shared
     @State private var fixedCostPayments: [RecurringPayment] = []
+    @ObservedObject private var roundupView = RoundupViewState.shared
     @State private var showAttentionInbox = false
     @State private var attentionCards: [AttentionCard] = []
     @State private var inboxGeneration: Int = 0
@@ -155,21 +152,47 @@ private struct TransactionsPanelView: View {
     }()
 
     @AppStorage("balanceSubtitleStyle.panel") private var panelSubtitleStyle: Int = 0
+    @AppStorage("roundupSubtitleStyle.panel") private var roundupSubtitleStyle: Int = 0
 
     @ViewBuilder
     private var leftToPaySubtitle: some View {
-        // Im Unified-Mode ist leftToPay pro-Slot aggregiert (jeder Slot mit eigenem
-        // Gehaltstag). Sub-Metrics würden diese Summe gegen EINEN Gehaltstag
-        // rechnen → fachlich falsch. Deshalb im Unified-Mode Classic erzwingen.
-        BalanceSubtitleSwitch(
-            balance: AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance),
-            leftToPayAmount: vm.leftToPayAmount,
-            salaryDay: activeSlotSettings.effectiveSalaryDay,
-            salaryToleranceBefore: activeSlotSettings.salaryDayToleranceBefore,
-            salaryToleranceAfter: activeSlotSettings.salaryDayToleranceAfter,
-            style: $panelSubtitleStyle,
-            forceClassic: vm.isUnifiedMode
+        if roundupView.isActive {
+            roundupSavingsSubtitle
+        } else {
+            // Im Unified-Mode ist leftToPay pro-Slot aggregiert (jeder Slot mit eigenem
+            // Gehaltstag). Sub-Metrics würden diese Summe gegen EINEN Gehaltstag
+            // rechnen → fachlich falsch. Deshalb im Unified-Mode Classic erzwingen.
+            BalanceSubtitleSwitch(
+                balance: AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance),
+                leftToPayAmount: vm.leftToPayAmount,
+                salaryDay: activeSlotSettings.effectiveSalaryDay,
+                salaryToleranceBefore: activeSlotSettings.salaryDayToleranceBefore,
+                salaryToleranceAfter: activeSlotSettings.salaryDayToleranceAfter,
+                style: $panelSubtitleStyle,
+                forceClassic: vm.isUnifiedMode
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var roundupSavingsSubtitle: some View {
+        RoundupSubtitleSwitch(
+            todayCents: roundupView.todayPotCents,
+            yesterdayCents: roundupView.yesterdayPotCents,
+            dayBeforeYesterdayCents: roundupView.dayBeforeYesterdayPotCents,
+            monthToDateCents: roundupView.monthToDateCents,
+            style: $roundupSubtitleStyle
         )
+    }
+
+    private func formatRoundupEuros(_ cents: Int) -> String {
+        let euros = Double(cents) / 100.0
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return (f.string(from: NSNumber(value: euros)) ?? "0,00") + " €"
     }
 
     private var colorScheme: ColorScheme? {
@@ -203,29 +226,8 @@ private struct TransactionsPanelView: View {
     }
 
     private var activePanelBg: Color {
-        if freezeActive { return .freezePanelBackground }
-        return BankTintProvider.resolveListTint(freezeActive: false) ?? .panelBackground
-    }
-
-    private var freezeAdjustedBalance: Double? {
-        guard let b = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance) else { return nil }
-        return freezeActive ? b + freezeState.monthlyAmount : b
-    }
-
-    private var freezeAdjustedGreenZoneFraction: Double {
-        guard freezeActive, let adj = freezeAdjustedBalance else { return greenZoneFraction }
-        let s = activeSlotSettings
-        let reference: Int
-        if s.salaryAmount > 0 {
-            reference = s.salaryAmount
-        } else {
-            let detected = SalaryProgressCalculator.detectedIncome(
-                salaryDay: s.effectiveSalaryDay,
-                tolerance: s.salaryDayTolerance,
-                transactions: vm.transactions)
-            reference = detected > 0 ? Int(detected.rounded()) : s.balanceSignalMediumUpperBound
-        }
-        return SalaryProgressCalculator.greenZoneFraction(balance: adj, mediumThreshold: reference)
+        if roundupView.isActive { return .roundupPanelBackground }
+        return BankTintProvider.resolveListTint(roundupViewActive: false) ?? .panelBackground
     }
 
     /// Green-zone fraction: cached, recomputed when balance or transaction count changes.
@@ -554,8 +556,7 @@ private struct TransactionsPanelView: View {
                 HStack(alignment: .center, spacing: 0) {
                     leftContent
                     if ringVisible {
-                        // GreenRing reflects the real balance — freeze projection is
-                        // side-information, not a new truth.
+                        // GreenRing reflects the real balance.
                         let parsed = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
                         GreenZoneRing(fraction: greenZoneFraction,
                                       balance: parsed,
@@ -612,40 +613,21 @@ private struct TransactionsPanelView: View {
                         .font(.system(size: 16))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                if freezeActive {
-                    Text(L10n.t("fiktiver Kontostand", "fictional balance"))
-                        .font(.system(size: 13))
-                        .foregroundColor(.cyan.opacity(0.8))
-                } else {
-                    Text(formatBankHeader(
-                        nickname: vm.connectedBankNickname,
-                        bankName: vm.connectedBankDisplayName,
-                        date: vm.currentBalanceFetchedAt
-                    ))
-                        .font(.system(size: 13))
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
-                }
+                Text(formatBankHeader(
+                    nickname: vm.connectedBankNickname,
+                    bankName: vm.connectedBankDisplayName,
+                    date: vm.currentBalanceFetchedAt
+                ))
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
 
-            // Real balance is always the primary 32pt number. Freeze projection
-            // moves to a subtitle below — a what-if should not look like the truth.
             Text(displayBalance)
                 .font(.system(size: 32, weight: .bold, design: .default))
                 .foregroundColor(style.amountColor)
 
-            if freezeActive && freezeState.monthlyAmount > 0 {
-                let freezeBalanceStr = formatBalance((parsedBalance ?? 0) + freezeState.monthlyAmount, currency: "EUR")
-                Text(L10n.t(
-                    "~\(freezeBalanceStr) wenn nichts abgeht",
-                    "~\(freezeBalanceStr) if nothing is charged"
-                ))
-                .font(.system(size: 14))
-                .foregroundColor(.cyan.opacity(0.9))
-                .lineLimit(1)
-            } else {
-                leftToPaySubtitle
-            }
+            leftToPaySubtitle
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -665,8 +647,6 @@ private struct TransactionsPanelView: View {
                 )
                 .transition(.opacity)
             } else if ringVisible {
-                // GreenRing reflects the real balance — freeze projection is
-                // side-information, not a new truth.
                 GreenZoneRing(fraction: greenZoneFraction,
                               balance: parsedBalance,
                               dispoLimit: activeSlotSettings.dispoLimit)
@@ -683,9 +663,7 @@ private struct TransactionsPanelView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [freezeActive
-                                ? Color.cyan.opacity(0.18)
-                                : style.gradientBaseColor.opacity(0.10), .clear],
+                            colors: [style.gradientBaseColor.opacity(0.10), .clear],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -796,7 +774,15 @@ private struct TransactionsPanelView: View {
     }
 
     private func amountDouble(_ t: TransactionsResponse.Transaction) -> Double {
-        t.parsedAmount
+        let raw = t.parsedAmount
+        guard roundupView.isActive else { return raw }
+        let currency = t.amount?.currency ?? "EUR"
+        let lensed = RoundupCalculator.displayedAmount(
+            originalAmount: Decimal(raw),
+            currency: currency,
+            stepCents: roundupView.stepCents
+        )
+        return NSDecimalNumber(decimal: lensed).doubleValue
     }
 
     private func amountText(_ t: TransactionsResponse.Transaction) -> String {
@@ -1052,7 +1038,6 @@ private struct TransactionsPanelView: View {
                         let color = slotDisplayColor(for: slot)
                         Button {
                             guard !isActive else { return }
-                            if freezeActive { deactivateFreeze() }
                             if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
                             accountNav.onSwitchToIndex?(idx)
                         } label: {
@@ -1069,7 +1054,6 @@ private struct TransactionsPanelView: View {
                     let unifiedActive = vm.unifiedModeEnabled
                     Button {
                         guard !unifiedActive else { return }
-                        if freezeActive { deactivateFreeze() }
                         vm.unifiedModeEnabled = true
                     } label: {
                         Capsule()
@@ -1134,13 +1118,21 @@ private struct TransactionsPanelView: View {
                       ? L10n.t("Kategorien ausblenden", "Hide categories")
                       : L10n.t("Kategorien anzeigen", "Show categories"))
                 if !vm.isUnifiedMode {
-                    Button(action: { toggleFreeze() }) {
-                        Image(systemName: "thermometer.snowflake")
+                    let roundupEnabled = activeSlotSettings.roundupEnabled
+                    Button(action: { toggleRoundupView() }) {
+                        Image(systemName: roundupView.isActive ? "centsign.circle.fill" : "centsign.circle")
                             .font(.system(size: 15))
-                            .foregroundColor(freezeActive ? .cyan : .secondary)
+                            .foregroundColor(roundupView.isActive
+                                ? Color.roundupAccent
+                                : (roundupEnabled ? .secondary : .secondary.opacity(0.4)))
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("Freeze — pausierbare Ausgaben anzeigen", "Freeze — show pausable expenses"))
+                    .disabled(!roundupEnabled)
+                    .help(roundupEnabled
+                        ? L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen",
+                                 "Round-up view — show amounts rounded up")
+                        : L10n.t("Erst in Einstellungen → Konten → Aufrunden aktivieren",
+                                 "First enable round-up in Settings → Accounts"))
                 }
             }
             .padding(.horizontal, 16)
@@ -1255,14 +1247,12 @@ private struct TransactionsPanelView: View {
                 .padding(.bottom, 8)
             }
             
-            // Freeze Overlay (sticky banner)
-            if freezeActive {
-                FreezeOverlay(items: freezeItems, excludedCategories: $freezeExcluded) {
-                    deactivateFreeze()
-                }
-                .onChange(of: freezeExcluded) { _ in
-                    updateFreezeState()
-                }
+            if roundupView.isActive, let activeSlot = multibankingStore.activeSlot {
+                RoundupOverlay(
+                    slotId: activeSlot.id,
+                    bankId: activeBankId,
+                    onClose: { roundupView.deactivate() }
+                )
             }
 
             // Transactions List (grouped by date) with pull-to-refresh indicator
@@ -1318,8 +1308,6 @@ private struct TransactionsPanelView: View {
                                 let resolution = MerchantResolver.resolve(transaction: t)
                                 let rowSlotColor: Color? = vm.isUnifiedMode ? slotColor(for: t) : nil
                                 let isTransfer = vm.isUnifiedMode && vm.internalTransferIDs.contains(txID)
-                                let isFrozen = freezeActive && FreezeAnalyzer.isFrozen(
-                                    transaction: t, items: freezeItems, excludedCategories: freezeExcluded)
                                 let txIsUnread = enrichment?.isUnread ?? false
                                 let txHasReminder = enrichment?.reminderId != nil
                                 let txReminderId = enrichment?.reminderId
@@ -1357,18 +1345,16 @@ private struct TransactionsPanelView: View {
                                             name: recipientName(t),
                                             normalizedMerchant: resolution.normalizedMerchant,
                                             amount: amountText(t),
-                                            amountColor: isFrozen ? .cyan : amountColor(t),
+                                            amountColor: amountColor(t),
                                             matchBadges: vm.searchMatchBadges(for: t),
                                             userNote: enrichment?.note,
                                             attachmentCount: enrichment?.attachmentCount ?? 0,
                                             bankId: activeBankId,
                                             onEnrichmentChanged: { vm.loadEnrichmentData(bankId: activeBankId) },
                                             isWide: panelIsWide,
-                                            slotColor: isFrozen ? .cyan : rowSlotColor,
+                                            slotColor: rowSlotColor,
                                             isInternalTransfer: isTransfer,
                                             showCategories: showCategories,
-                                            isFrozen: isFrozen,
-                                            freezeModeActive: freezeActive,
                                             isUnread: txIsUnread,
                                             hasReminder: txHasReminder,
                                             reminderId: txReminderId,
@@ -1413,17 +1399,6 @@ private struct TransactionsPanelView: View {
                                              ? highlightBounce : 1.0)
                                 .zIndex(highlightedTxStableId == t.stableIdentifier ? 1 : 0)
                                 .animation(.easeOut(duration: 0.3), value: highlightedTxStableId)
-                                .contextMenu {
-                                    if isFrozen {
-                                        Button(L10n.t("Kategorie ausschließen", "Exclude category")) {
-                                            let key = FreezeAnalyzer.merchantKey(for: t)
-                                            if let item = freezeItems.first(where: { $0.id == key }) {
-                                                freezeExcluded.insert(item.category)
-                                                updateFreezeState()
-                                            }
-                                        }
-                                    }
-                                }
                                 .onAppear {
                                     loadMoreTransactionsIfNeeded(current: t)
                                 }
@@ -1566,13 +1541,12 @@ private struct TransactionsPanelView: View {
                     // Wenn Fenster maximiert: Financial Health, Kalender, Fixkosten als
                     // eigenständige Icon-Buttons. Sonst bleiben sie im „Mehr ▾"-Menü unten.
                     if panelIsWide {
-                        Button(action: { if !freezeActive { showScoreSheet = true } }) {
+                        Button(action: { showScoreSheet = true }) {
                             Image(systemName: "square.grid.2x2")
                                 .font(.system(size: 14))
-                                .foregroundColor(freezeActive ? .secondary.opacity(0.4) : .secondary)
+                                .foregroundColor(.secondary)
                         }
                         .buttonStyle(PlainButtonStyle())
-                        .disabled(freezeActive)
                         .help(L10n.t("Financial Health", "Financial Health"))
 
                         Button(action: { showCalendar.toggle() }) {
@@ -1595,10 +1569,9 @@ private struct TransactionsPanelView: View {
                     // Mehr ▾
                     Menu {
                         if !panelIsWide {
-                            Button(action: { if !freezeActive { showScoreSheet = true } }) {
+                            Button(action: { showScoreSheet = true }) {
                                 Label(L10n.t("Financial Health", "Financial Health"), systemImage: "square.grid.2x2")
                             }
-                            .disabled(freezeActive)
 
                             Button(action: { showCalendar.toggle() }) {
                                 Label(L10n.t("Kalender", "Calendar"), systemImage: "calendar.badge.clock")
@@ -1675,7 +1648,7 @@ private struct TransactionsPanelView: View {
             .padding(.horizontal, 20)
             .padding(.top, 28)
             .padding(.bottom, 4)
-            .background(activePanelBg) // Folgt Freeze-Mode (Blue Soft) statt fix Panel-BG
+            .background(activePanelBg)
         }
         .frame(minWidth: 420, idealWidth: 420, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
         .background { activePanelBg.ignoresSafeArea(.all, edges: .top) } // extends panel-bg into titlebar/toolbar area (theme-aware)
@@ -1732,18 +1705,25 @@ private struct TransactionsPanelView: View {
         .onChange(of: vm.transactions.count) { _ in
             recomputeGreenZone()
             recomputeAttentionInbox()
+            if roundupView.isActive {
+                roundupView.setTransactions(vm.transactions)
+            }
         }
         .onChange(of: infiniteScrollEnabled) { _ in
             resetInfiniteWindowIfNeeded()
         }
         .onChange(of: vm.unifiedModeEnabled) { newValue in
-            // Freeze ist nur per-slot sinnvoll — beim Wechsel in Unified deaktivieren.
-            if newValue, freezeActive { deactivateFreeze() }
+            // Aufrunden-View ist nur per-slot sinnvoll — beim Wechsel in Unified deaktivieren.
+            if newValue, roundupView.isActive { roundupView.deactivate() }
             // Only refresh when switching INTO unified mode.
             // Switching OUT (to a specific slot) is handled by switchToSlot() — no double refresh.
             if newValue {
                 Task { await onRefresh() }
             }
+        }
+        .onChange(of: multibankingStore.activeIndex) { _ in
+            // Slot-Switch: View-Mode auto-aus (Roundup ist slot-spezifisch).
+            if roundupView.isActive { roundupView.deactivate() }
         }
         .onChange(of: vm.filteredTransactions.count) { _ in
             if infiniteScrollEnabled {
@@ -1986,7 +1966,6 @@ private struct TransactionsPanelView: View {
 
     private func switchToNextSlot() {
         let store = multibankingStore
-        if freezeActive { deactivateFreeze() }
 
         if vm.unifiedModeEnabled {
             vm.unifiedModeEnabled = false
@@ -2004,7 +1983,6 @@ private struct TransactionsPanelView: View {
 
     private func switchToPrevSlot() {
         let store = multibankingStore
-        if freezeActive { deactivateFreeze() }
 
         if vm.unifiedModeEnabled {
             // Unified → last individual slot
@@ -2021,44 +1999,14 @@ private struct TransactionsPanelView: View {
         }
     }
 
-    // MARK: - Freeze
+    // MARK: - Roundup View Toggle
 
-    private func toggleFreeze() {
-        if freezeActive {
-            deactivateFreeze()
-        } else {
-            freezeItems = FreezeAnalyzer.analyze(
-                transactions: vm.transactions,
-                excludedKeys: Set(subscriptionExcludedRaw.components(separatedBy: "\n").filter { !$0.isEmpty }),
-                tabOverrides: {
-                    var result: [String: SubscriptionTab] = [:]
-                    for line in subscriptionOverridesRaw.components(separatedBy: "\n") where !line.isEmpty {
-                        guard let sep = line.lastIndex(of: "§") else { continue }
-                        let key = String(line[..<sep])
-                        let raw = String(line[line.index(after: sep)...])
-                        if let tab = SubscriptionTab(rawValue: raw) { result[key] = tab }
-                    }
-                    return result
-                }()
-            )
-            freezeExcluded = [.sparen]
-            freezeActive = true
-            updateFreezeState()
+    private func toggleRoundupView() {
+        if roundupView.isActive {
+            roundupView.deactivate()
+        } else if let slotId = multibankingStore.activeSlot?.id {
+            roundupView.activate(slotId: slotId, bankId: activeBankId, transactions: vm.transactions)
         }
-    }
-
-    private func deactivateFreeze() {
-        freezeActive = false
-        freezeItems = []
-        freezeExcluded = []
-        FreezeState.shared.isActive = false
-        FreezeState.shared.monthlyAmount = 0
-    }
-
-    private func updateFreezeState() {
-        let total = FreezeAnalyzer.monthlyTotal(items: freezeItems, excludedCategories: freezeExcluded)
-        FreezeState.shared.isActive = freezeActive
-        FreezeState.shared.monthlyAmount = total
     }
 
     // MARK: - Swipe Flag Helpers
@@ -2478,8 +2426,6 @@ private struct TransactionRowNew: View {
     var slotColor: Color? = nil
     var isInternalTransfer: Bool = false
     var showCategories: Bool = false
-    var isFrozen: Bool = false
-    var freezeModeActive: Bool = false
     var isUnread: Bool = false
     var hasReminder: Bool = false
     var reminderId: String? = nil
@@ -2515,11 +2461,13 @@ private struct TransactionRowNew: View {
         logoService.image(for: logoKey)
     }
 
-    /// Row-Hintergrund: Selektion > Freeze-Default (cardBackground) > Bankfarben-Tint > cardBackground.
-    /// freezeModeActive wird durchgereicht, damit Freeze-Modus weiterhin neutrale Rows behält.
+    /// Row-Hintergrund: Selektion > Bankfarben-Tint > cardBackground. Im Aufrunden-View
+    /// (Mint-Modus) wird der Bank-Tint unterdrückt — der Mint-Hintergrund des Panels
+    /// übernimmt die visuelle Mode-Signalisierung.
     private var rowFillColor: Color {
         if isSelected { return Color.accentColor.opacity(0.12) }
-        return BankTintProvider.resolveListTint(freezeActive: freezeModeActive) ?? Color.cardBackground
+        let roundupActive = RoundupViewState.shared.isActive
+        return BankTintProvider.resolveListTint(roundupViewActive: roundupActive) ?? Color.cardBackground
     }
 
     var body: some View {
@@ -2568,11 +2516,6 @@ private struct TransactionRowNew: View {
                 }
                 // Enrichment indicators (monochrome)
                 HStack(spacing: 4) {
-                    if isFrozen {
-                        Image(systemName: "snowflake")
-                            .font(.system(size: 10))
-                            .foregroundColor(.cyan)
-                    }
                     if attachmentCount > 0 {
                         Image(systemName: "paperclip")
                             .font(.system(size: 10))

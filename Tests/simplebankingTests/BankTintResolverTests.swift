@@ -24,24 +24,24 @@ final class BankTintResolverTests: XCTestCase {
         displayName: "Test-Custom", logoId: nil, customColor: "AABBCC"
     )
 
-    // MARK: Priorität: Freeze gewinnt immer
+    // MARK: Priorität: Aufrunden-Mode gewinnt immer
 
-    func test_freezeActive_returnsNil_regardlessOfState() {
+    func test_roundupViewActive_returnsNil_regardlessOfState() {
         let result = BankTintProvider.resolveHex(
-            freezeActive: true,
+            roundupViewActive: true,
             globalEnabled: true,
             unifiedActive: false,
             activeSlot: sparkasse,
             slotOverrideEnabled: true
         )
-        XCTAssertNil(result, "Freeze hat Vorrang — Bank-Tint muss verstummen.")
+        XCTAssertNil(result, "Aufrunden-Modus hat Vorrang — Bank-Tint muss verstummen (Mint übernimmt).")
     }
 
     // MARK: Global-Toggle
 
     func test_globalDisabled_returnsNil() {
         let result = BankTintProvider.resolveHex(
-            freezeActive: false,
+            roundupViewActive: false,
             globalEnabled: false,
             unifiedActive: false,
             activeSlot: sparkasse,
@@ -52,7 +52,7 @@ final class BankTintResolverTests: XCTestCase {
 
     func test_globalEnabledDefaultBranch_returnsTint() {
         let result = BankTintProvider.resolveHex(
-            freezeActive: false,
+            roundupViewActive: false,
             globalEnabled: true,
             unifiedActive: false,
             activeSlot: sparkasse,
@@ -65,7 +65,7 @@ final class BankTintResolverTests: XCTestCase {
 
     func test_unifiedActive_returnsNil() {
         let result = BankTintProvider.resolveHex(
-            freezeActive: false,
+            roundupViewActive: false,
             globalEnabled: true,
             unifiedActive: true,
             activeSlot: sparkasse,
@@ -78,7 +78,7 @@ final class BankTintResolverTests: XCTestCase {
 
     func test_slotOverrideOff_returnsNil() {
         let result = BankTintProvider.resolveHex(
-            freezeActive: false,
+            roundupViewActive: false,
             globalEnabled: true,
             unifiedActive: false,
             activeSlot: sparkasse,
@@ -91,7 +91,7 @@ final class BankTintResolverTests: XCTestCase {
 
     func test_noActiveSlot_returnsNil() {
         let result = BankTintProvider.resolveHex(
-            freezeActive: false,
+            roundupViewActive: false,
             globalEnabled: true,
             unifiedActive: false,
             activeSlot: nil,
@@ -102,7 +102,7 @@ final class BankTintResolverTests: XCTestCase {
 
     func test_unknownBankNoCustom_returnsNil() {
         let result = BankTintProvider.resolveHex(
-            freezeActive: false,
+            roundupViewActive: false,
             globalEnabled: true,
             unifiedActive: false,
             activeSlot: unknownBank,

@@ -208,6 +208,24 @@ enum RoundupStore {
         }
     }
 
+    /// Summe aller Pot-Beiträge des laufenden Monats (status-agnostisch — zeigt
+    /// die echte Roundup-Aktivität, auch wenn Pots inzwischen verworfen oder
+    /// ausgezahlt wurden). Cutoff ist `monthStartDate` (lokaler Monatsanfang).
+    static func monthToDateRoundupTotal(
+        slotId: String,
+        monthStartDate: String,
+        bankId: String = "primary"
+    ) throws -> Int {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        return try queue.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COALESCE(SUM(amount_cents), 0)
+                  FROM roundup_pots
+                 WHERE slot_id = ? AND pot_date >= ?
+                """, arguments: [slotId, monthStartDate]) ?? 0
+        }
+    }
+
     /// Summe aller `keptVirtual`-Pots für den Slot (Cent).
     static func virtualSavingsTotal(
         slotId: String,

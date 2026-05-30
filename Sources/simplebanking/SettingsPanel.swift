@@ -191,6 +191,7 @@ struct SettingsView: View {
     /// als Countdown ausgespielt; während der Delay kann der User abbrechen.
     @AppStorage("transferDelaySeconds") private var transferDelaySeconds: Int = 5
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
+    @AppStorage("mcpDraftsEnabled") private var mcpDraftsEnabled: Bool = false
     @AppStorage("dockModeEnabled") private var dockModeEnabled: Bool = false
     @AppStorage("showBalanceInMenuBar") private var showBalanceInMenuBar: Bool = false
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
@@ -283,10 +284,6 @@ struct SettingsView: View {
     // Konten-Tab: per-Konto-Einstellungen
     @State private var selectedSettingsSlotId: String? = nil
     @State private var currentSlotSettings: BankSlotSettings = BankSlotSettings()
-    /// Aktuelle virtuelle Sparsumme des selektierten Slots in Cent. Wird via
-    /// `refreshVirtualSavings()` aktualisiert (loadSlotSettings, Slot-Switch,
-    /// nach Auszahl-Notification).
-    @State private var virtualSavingsCents: Int = 0
     @State private var detectedSalary: Int = 0
     // Sicherheits-Tab: Passwort deaktivieren
     @State private var showDisablePasswordSheet: Bool = false
@@ -609,23 +606,13 @@ struct SettingsView: View {
     // MARK: - Slot Settings
 
     private func loadSlotSettings() {
-        if selectedSettingsSlotId == nil {
-            selectedSettingsSlotId = multibankingStore.slots.first?.id
-        }
+        // Default: „Allgemein"-Sub-Tab (selectedSettingsSlotId == nil). Wenn
+        // bereits ein Slot ausgewählt war (durch eine frühere Session), Settings
+        // dafür laden.
         if let id = selectedSettingsSlotId {
             currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
             autoDetectSalaryForDisplay(slotId: id)
-            refreshVirtualSavings()
         }
-    }
-
-    private func refreshVirtualSavings() {
-        guard let id = selectedSettingsSlotId else {
-            virtualSavingsCents = 0
-            return
-        }
-        let bankId = (UserDefaults.standard.bool(forKey: "demoMode")) ? "demo" : "primary"
-        virtualSavingsCents = (try? RoundupStore.virtualSavingsTotal(slotId: id, bankId: bankId)) ?? 0
     }
 
     private func autoDetectSalaryForDisplay(slotId: String) {
@@ -658,28 +645,6 @@ struct SettingsView: View {
         guard let id = selectedSettingsSlotId else { return }
         BankSlotSettingsStore.save(currentSlotSettings, slotId: id)
         NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
-    }
-
-    private func formatCents(_ cents: Int) -> String {
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.numberStyle = .decimal
-        f.minimumFractionDigits = 2
-        f.maximumFractionDigits = 2
-        let euros = Double(cents) / 100.0
-        return (f.string(from: NSNumber(value: euros)) ?? "0,00") + " €"
-    }
-
-    /// Postet eine Auszahl-Anfrage an BalanceBar. Settings UI bleibt offen;
-    /// BalanceBar markiert die kept_virtual-Pots optimistisch transferred,
-    /// baut den TransferRequest und öffnet TransferSheet mit "roundup"-Prefill.
-    private func requestRoundupPayout() {
-        guard let id = selectedSettingsSlotId else { return }
-        NotificationCenter.default.post(
-            name: Notification.Name("simplebanking.roundupPayoutRequested"),
-            object: nil,
-            userInfo: ["slotId": id]
-        )
     }
 
     @ViewBuilder
@@ -1075,6 +1040,82 @@ struct SettingsView: View {
     private var accountsSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
 
+            accountsSubTabBar
+
+            if selectedSettingsSlotId == nil {
+                accountsGeneralSection
+            } else if let slot = multibankingStore.slots.first(where: { $0.id == selectedSettingsSlotId }) {
+                accountsPerSlotSection(slot: slot)
+            }
+        }
+        .onAppear { loadSlotSettings() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            if let id = selectedSettingsSlotId { autoDetectSalaryForDisplay(slotId: id) }
+        }
+    }
+
+    // Pill-style Sub-Tabs: „Allgemein" + ein Tab pro Slot. Horizontal scrollbar
+    // wenn viele Konten konfiguriert sind.
+    @ViewBuilder
+    private var accountsSubTabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                accountsSubTabPill(
+                    label: t("Allgemein", "General"),
+                    icon: "gearshape",
+                    selected: selectedSettingsSlotId == nil,
+                    action: { selectedSettingsSlotId = nil }
+                )
+                ForEach(multibankingStore.slots) { slot in
+                    let displayLabel = slot.nickname
+                        ?? (slot.displayName.isEmpty ? String(slot.iban.suffix(8)) : slot.displayName)
+                    accountsSubTabPill(
+                        label: displayLabel,
+                        icon: "building.columns",
+                        selected: selectedSettingsSlotId == slot.id,
+                        action: {
+                            selectedSettingsSlotId = slot.id
+                            currentSlotSettings = BankSlotSettingsStore.load(slotId: slot.id)
+                            autoDetectSalaryForDisplay(slotId: slot.id)
+                        }
+                    )
+                }
+            }
+            .padding(.horizontal, 1)
+            .padding(.vertical, 1)
+        }
+    }
+
+    private func accountsSubTabPill(label: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                Text(label)
+                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(selected ? Color.accentColor.opacity(0.18) : Color.gray.opacity(0.06))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(selected ? Color.accentColor.opacity(0.65) : Color.gray.opacity(0.18),
+                            lineWidth: selected ? 1 : 0.5)
+            )
+            .foregroundColor(selected ? .accentColor : .secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Accounts: „Allgemein"-Section (Konten-Liste + globaler Refresh-Intervall)
+
+    private var accountsGeneralSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+
             // --- Verbundene Konten ---
             VStack(alignment: .leading, spacing: 8) {
                 SettingsSectionHeader(title: t("Verbundene Konten", "Connected Accounts"), icon: "building.columns")
@@ -1269,42 +1310,16 @@ struct SettingsView: View {
                 )
                 .padding(.trailing, 14)
             }
+        }
+    }
 
-            Divider()
+    // MARK: - Accounts: Per-Slot-Section (Cards für einen einzelnen Slot)
 
-            // --- Per-Konto-Einstellungen ---
-            if !multibankingStore.slots.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    SettingsSectionHeader(title: t("Konto-Einstellungen", "Account Settings"), icon: "slider.horizontal.3")
-                    Text(t("Jede Einstellung gilt individuell für das ausgewählte Konto.", "Each setting applies individually to the selected account."))
-                        .font(ThemeFonts.body(size: 12)).foregroundColor(.secondary)
+    private func accountsPerSlotSection(slot: BankSlot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
 
-                    // Account picker
-                    HStack {
-                        Text(t("Konto", "Account"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Spacer()
-                        AccountMenuPicker(
-                            items: multibankingStore.slots.map { slot in
-                                (title: slot.nickname ?? (slot.displayName.isEmpty ? slot.iban.suffix(8).description : slot.displayName),
-                                 value: Optional(slot.id))
-                            },
-                            selection: $selectedSettingsSlotId,
-                            width: _settingsGehaltsPickerWidth
-                        )
-                        .padding(.trailing, 14)
-                        .onChange(of: selectedSettingsSlotId) { id in
-                            if let id {
-                                currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
-                                autoDetectSalaryForDisplay(slotId: id)
-                                refreshVirtualSavings()
-                            }
-                        }
-                    }
-
-                    if selectedSettingsSlotId != nil {
-                        // ─── Card 1: Stammdaten ────────────────────────────
-                        VStack(alignment: .leading, spacing: 14) {
+            // ─── Card 1: Stammdaten ────────────────────────────
+            VStack(alignment: .leading, spacing: 14) {
                             SettingsSectionHeader(
                                 title: t("Stammdaten", "Basics"),
                                 icon: "slider.horizontal.3"
@@ -1606,29 +1621,6 @@ struct SettingsView: View {
                                         }
                                     }
 
-                                    // Virtuell gespart — Auszahl-Button.
-                                    if virtualSavingsCents > 0 {
-                                        Divider().padding(.vertical, 4)
-                                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(t("Virtuell gespart", "Saved virtually"))
-                                                    .font(ThemeFonts.body(size: 12, weight: .medium))
-                                                Text(formatCents(virtualSavingsCents))
-                                                    .font(ThemeFonts.body(size: 18, weight: .semibold))
-                                                    .monospacedDigit()
-                                            }
-                                            Spacer()
-                                            Button(action: requestRoundupPayout) {
-                                                HStack(spacing: 4) {
-                                                    Image(systemName: "arrow.up.right.square.fill")
-                                                    Text(t("Auszahlen…", "Pay out…"))
-                                                }
-                                            }
-                                            .controlSize(.regular)
-                                            .disabled(currentSlotSettings.savingsAccountIban == nil
-                                                      || (currentSlotSettings.savingsAccountIban ?? "").isEmpty)
-                                        }
-                                    }
                                 }
                             }
                             .padding(12)
@@ -1795,19 +1787,9 @@ struct SettingsView: View {
                                 veryGoodLB: currentSlotSettings.balanceSignalVeryGoodLowerBound
                             )
                             .padding(.top, 6)
-                        }
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
-                    }
-                }
             }
-        }
-        .onAppear { loadSlotSettings() }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            if selectedSettingsSlotId != nil { autoDetectSalaryForDisplay(slotId: selectedSettingsSlotId!) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("simplebanking.virtualSavingsChanged"))) { _ in
-            refreshVirtualSavings()
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
         }
     }
 
@@ -2131,8 +2113,8 @@ struct SettingsView: View {
                     Text(t("Umsatzliste in Bankfarbe einfärben",
                            "Tint transaction list in bank color"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Sanfter Bankfarben-Hintergrund hilft, die aktive Bank sofort zu erkennen. Im Freeze-Mode greift weiterhin die Freeze-Färbung. Im Aggregiert-Mode aus.",
-                           "Subtle bank color background helps you spot the active bank at a glance. Freeze mode still uses its own coloring. Disabled in unified mode."))
+                    Text(t("Sanfter Bankfarben-Hintergrund hilft, die aktive Bank sofort zu erkennen. Im Aufrunden-Modus greift die Mint-Färbung. Im Aggregiert-Mode aus.",
+                           "Subtle bank color background helps you spot the active bank at a glance. Round-up view uses its own mint tint. Disabled in unified mode."))
                         .font(ThemeFonts.body(size: 11))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -3140,6 +3122,17 @@ struct SettingsView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(mcpSetupState != .idle)
             }
+
+            Divider().padding(.vertical, 4)
+
+            SettingsToggleRow(
+                title: t("`prepare_transfer`-Drafts annehmen", "Accept `prepare_transfer` drafts"),
+                subtitle: t(
+                    "MCP-Clients (z.B. Claude) können einen Überweisungs-Draft schreiben — die App öffnet dann automatisch TransferSheet mit Prefill. Aus = Drafts werden verworfen.",
+                    "MCP clients (e.g. Claude) can write a transfer draft — the app then auto-opens TransferSheet with prefill. Off = drafts are discarded."
+                ),
+                isOn: $mcpDraftsEnabled
+            )
         }
     }
 
