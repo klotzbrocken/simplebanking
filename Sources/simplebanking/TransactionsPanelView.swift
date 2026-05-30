@@ -24,6 +24,7 @@ private struct TransactionsPanelView: View {
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
+    @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.soft.rawValue
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
     @AppStorage("demoMode") private var demoMode: Bool = false
@@ -227,7 +228,24 @@ private struct TransactionsPanelView: View {
 
     private var activePanelBg: Color {
         if roundupView.isActive { return .roundupPanelBackground }
-        return BankTintProvider.resolveListTint(roundupViewActive: false) ?? .panelBackground
+        let style = BankTintStyle(rawValue: bankTintStyleRaw) ?? .soft
+        switch style {
+        case .soft, .cardOnPanel:
+            return BankTintProvider.resolveListTint(roundupViewActive: false) ?? .panelBackground
+        case .sidebar:
+            return .panelBackground
+        }
+    }
+
+    /// Voll-saturierte Bank-Color für Sidebar-Streifen (A) und Border (D).
+    /// Nil im Aufrunden-Modus, im Unified-Mode oder wenn Bank-Tint deaktiviert.
+    private var bankAccentForOverlay: Color? {
+        guard !roundupView.isActive else { return nil }
+        return BankTintProvider.currentBankAccentColor()
+    }
+
+    private var currentTintStyle: BankTintStyle {
+        BankTintStyle(rawValue: bankTintStyleRaw) ?? .soft
     }
 
     /// Green-zone fraction: cached, recomputed when balance or transaction count changes.
@@ -1822,6 +1840,15 @@ private struct TransactionsPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(activePanelBg)
+        .overlay(alignment: .leading) {
+            if currentTintStyle == .sidebar, let color = bankAccentForOverlay {
+                // 4 px Streifen am linken Panel-Rand.
+                Rectangle()
+                    .fill(color)
+                    .frame(width: 4)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private func triggerPullRefresh() async {
@@ -2461,13 +2488,33 @@ private struct TransactionRowNew: View {
         logoService.image(for: logoKey)
     }
 
-    /// Row-Hintergrund: Selektion > Bankfarben-Tint > cardBackground. Im Aufrunden-View
+    /// Row-Hintergrund: Selektion > Bank-Tint-Style > cardBackground. Im Aufrunden-View
     /// (Mint-Modus) wird der Bank-Tint unterdrückt — der Mint-Hintergrund des Panels
     /// übernimmt die visuelle Mode-Signalisierung.
+    ///
+    /// Tint-Style-spezifisch (nur ausserhalb Roundup-View):
+    /// • soft        → Bank-Soft-Tint (Bestandsverhalten)
+    /// • cardOnPanel → cardBackground (weiße Card schwebt auf Bank-getöntem Panel)
+    /// • sidebar     → cardBackground (Bank-Akzent nur als 4 px Streifen am Panel)
     private var rowFillColor: Color {
         if isSelected { return Color.accentColor.opacity(0.12) }
-        let roundupActive = RoundupViewState.shared.isActive
-        return BankTintProvider.resolveListTint(roundupViewActive: roundupActive) ?? Color.cardBackground
+        if RoundupViewState.shared.isActive {
+            return BankTintProvider.resolveListTint(roundupViewActive: true) ?? Color.cardBackground
+        }
+        switch BankTintStyle.current {
+        case .soft:
+            return BankTintProvider.resolveListTint(roundupViewActive: false) ?? Color.cardBackground
+        case .cardOnPanel, .sidebar:
+            return Color.cardBackground
+        }
+    }
+
+    /// Card-Shadow nur im `.cardOnPanel`-Style sichtbar — gibt den Rows
+    /// den schwebenden Look auf Bank-Soft-Panel.
+    private var rowShadowRadius: CGFloat {
+        guard !RoundupViewState.shared.isActive,
+              BankTintStyle.current == .cardOnPanel else { return 0 }
+        return 2
     }
 
     var body: some View {
@@ -2575,6 +2622,8 @@ private struct TransactionRowNew: View {
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(rowFillColor)
+                .shadow(color: Color.black.opacity(rowShadowRadius > 0 ? 0.08 : 0),
+                        radius: rowShadowRadius, x: 0, y: 1)
         )
         // 3px leading color bar for bank attribution in unified mode
         .overlay(alignment: .leading) {
@@ -3656,13 +3705,37 @@ private struct FilterMenuButton: NSViewRepresentable {
 // MARK: - Color from hex
 
 extension Color {
-    /// Initialize from a 6-digit hex string (without #), e.g. "ee0000".
+    /// Initialize from a hex string. Accepts 6 chars ("RRGGBB"), 8 chars
+    /// ("RRGGBBAA" — alpha suffix), or 3 chars ("RGB" → expanded). Optional
+    /// `#` prefix. Falls back to nil for any other format.
+    ///
+    /// 8-char-Variante wichtig für den YAXI-Bank-Catalog: dort stehen Farben
+    /// oft als `#0949cfff` (z.B. C24 Bank) inkl. Alpha-Suffix.
     init?(hex: String) {
         let h = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-        guard h.count == 6, let value = UInt64(h, radix: 16) else { return nil }
+        let rgbHex: String
+        let alpha: Double
+        switch h.count {
+        case 3:
+            rgbHex = h.map { "\($0)\($0)" }.joined()
+            alpha = 1.0
+        case 6:
+            rgbHex = h
+            alpha = 1.0
+        case 8:
+            rgbHex = String(h.prefix(6))
+            if let a = UInt8(h.suffix(2), radix: 16) {
+                alpha = Double(a) / 255.0
+            } else {
+                alpha = 1.0
+            }
+        default:
+            return nil
+        }
+        guard let value = UInt64(rgbHex, radix: 16) else { return nil }
         let r = Double((value >> 16) & 0xFF) / 255
         let g = Double((value >> 8) & 0xFF) / 255
         let b = Double(value & 0xFF) / 255
-        self.init(red: r, green: g, blue: b)
+        self.init(red: r, green: g, blue: b, opacity: alpha)
     }
 }

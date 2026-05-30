@@ -9,6 +9,31 @@ import AppKit
 // Priorität: Freeze > globalToggle > UnifiedMode > slotOverride > slot.customColor > logoId
 // MoneyMood (Amount-Farben, PaycheckRing) wird bewusst NICHT angefasst.
 
+// MARK: - BankTintStyle
+//
+// Drei visuelle Render-Strategien für die Bank-Tönung. Default ist `.soft`
+// (= Bestandsverhalten). User kann in Settings → Konten → Allgemein wechseln.
+//
+//  • `soft`        — Bank-Hex × Intensität als Panel-Fill (heute)
+//  • `sidebar`     — neutraler Body, 4 px Bank-Color-Streifen am linken Rand
+//  • `cardOnPanel` — Panel in Bank-Soft, TRX-Rows als weiße Cards mit Shadow
+
+enum BankTintStyle: String, CaseIterable, Identifiable, Sendable {
+    case soft
+    case sidebar
+    case cardOnPanel
+
+    var id: String { rawValue }
+
+    static let storageKey = "simplebanking.bankTint.style"
+
+    /// Liest den User-Default. Default `.soft`.
+    static var current: BankTintStyle {
+        let raw = UserDefaults.standard.string(forKey: storageKey) ?? BankTintStyle.soft.rawValue
+        return BankTintStyle(rawValue: raw) ?? .soft
+    }
+}
+
 enum BankTintProvider {
 
     // MARK: Keys
@@ -41,6 +66,15 @@ enum BankTintProvider {
     static func currentTintNSColor() -> NSColor? {
         guard let hex = activeTintHex(roundupViewActive: false) else { return nil }
         return softNSColor(fromHex: hex)
+    }
+
+    /// Voll-saturierte Bank-Akzentfarbe für Sidebar-/Border-Render. Respektiert
+    /// dieselben Toggles wie `activeTintHex` (globalEnabled, slot-Override,
+    /// nicht Unified). Anders als `resolveListTint`: keine Soft-Mischung.
+    @MainActor
+    static func currentBankAccentColor() -> Color? {
+        guard let hex = activeTintHex(roundupViewActive: false) else { return nil }
+        return Color(hex: hex)
     }
 
     /// Liefert den Hex der aktiven Bank-Tönung oder nil.

@@ -205,6 +205,7 @@ struct SettingsView: View {
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
+    @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.soft.rawValue
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
@@ -1309,6 +1310,36 @@ struct SettingsView: View {
                     width: _settingsGehaltsPickerWidth
                 )
                 .padding(.trailing, 14)
+            }
+
+            Divider()
+
+            // --- Bankfarben-Stil ---
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t("Bankfarben-Stil", "Bank tint style"))
+                        .font(ThemeFonts.body(size: 13, weight: .medium))
+                    Text(t("Wie soll die Bankfarbe in der Umsatzliste sichtbar gemacht werden? Wirkt nur wenn der globale Bankfarben-Toggle (Verhalten → Darstellung) aktiv ist.",
+                           "How should the bank color appear in the transaction list? Active only when the global bank-tint toggle (Behavior → Appearance) is on."))
+                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Picker("", selection: Binding(
+                    get: { bankTintStyleRaw },
+                    set: { newValue in
+                        bankTintStyleRaw = newValue
+                        NotificationCenter.default.post(name: .bankTintChanged, object: nil)
+                    }
+                )) {
+                    Text(t("Sanft", "Soft")).tag(BankTintStyle.soft.rawValue)
+                    Text(t("Streifen", "Stripe")).tag(BankTintStyle.sidebar.rawValue)
+                    Text(t("Karten", "Cards")).tag(BankTintStyle.cardOnPanel.rawValue)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(!bankTintEnabled)
+                .opacity(bankTintEnabled ? 1.0 : 0.4)
             }
         }
     }
