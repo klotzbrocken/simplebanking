@@ -153,47 +153,23 @@ private struct TransactionsPanelView: View {
     }()
 
     @AppStorage("balanceSubtitleStyle.panel") private var panelSubtitleStyle: Int = 0
-    @AppStorage("roundupSubtitleStyle.panel") private var roundupSubtitleStyle: Int = 0
 
     @ViewBuilder
     private var leftToPaySubtitle: some View {
-        if roundupView.isActive {
-            roundupSavingsSubtitle
-        } else {
-            // Im Unified-Mode ist leftToPay pro-Slot aggregiert (jeder Slot mit eigenem
-            // Gehaltstag). Sub-Metrics würden diese Summe gegen EINEN Gehaltstag
-            // rechnen → fachlich falsch. Deshalb im Unified-Mode Classic erzwingen.
-            BalanceSubtitleSwitch(
-                balance: AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance),
-                leftToPayAmount: vm.leftToPayAmount,
-                salaryDay: activeSlotSettings.effectiveSalaryDay,
-                salaryToleranceBefore: activeSlotSettings.salaryDayToleranceBefore,
-                salaryToleranceAfter: activeSlotSettings.salaryDayToleranceAfter,
-                style: $panelSubtitleStyle,
-                forceClassic: vm.isUnifiedMode
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var roundupSavingsSubtitle: some View {
-        RoundupSubtitleSwitch(
-            todayCents: roundupView.todayPotCents,
-            yesterdayCents: roundupView.yesterdayPotCents,
-            dayBeforeYesterdayCents: roundupView.dayBeforeYesterdayPotCents,
-            monthToDateCents: roundupView.monthToDateCents,
-            style: $roundupSubtitleStyle
+        // Im Unified-Mode ist leftToPay pro-Slot aggregiert (jeder Slot mit eigenem
+        // Gehaltstag). Sub-Metrics würden diese Summe gegen EINEN Gehaltstag
+        // rechnen → fachlich falsch. Deshalb im Unified-Mode Classic erzwingen.
+        // Im Aufrunden-Modus wird die ganze Balance-Card durch RoundupSavingsCard
+        // ersetzt — dieser Subtitle läuft dann gar nicht.
+        BalanceSubtitleSwitch(
+            balance: AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance),
+            leftToPayAmount: vm.leftToPayAmount,
+            salaryDay: activeSlotSettings.effectiveSalaryDay,
+            salaryToleranceBefore: activeSlotSettings.salaryDayToleranceBefore,
+            salaryToleranceAfter: activeSlotSettings.salaryDayToleranceAfter,
+            style: $panelSubtitleStyle,
+            forceClassic: vm.isUnifiedMode
         )
-    }
-
-    private func formatRoundupEuros(_ cents: Int) -> String {
-        let euros = Double(cents) / 100.0
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.numberStyle = .decimal
-        f.minimumFractionDigits = 2
-        f.maximumFractionDigits = 2
-        return (f.string(from: NSNumber(value: euros)) ?? "0,00") + " €"
     }
 
     private var colorScheme: ColorScheme? {
@@ -1033,7 +1009,9 @@ private struct TransactionsPanelView: View {
         VStack(spacing: 0) {
             // Balance Card
             Group {
-                if vm.isUnifiedMode {
+                if roundupView.isActive {
+                    RoundupSavingsCard(compact: false)
+                } else if vm.isUnifiedMode {
                     unifiedBalanceCard
                 } else if isDefaultTheme {
                     defaultThemeBalanceCard

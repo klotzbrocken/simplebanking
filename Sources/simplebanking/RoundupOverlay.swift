@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Sticky-Banner oben am TransactionsPanel im Aufrunden-Modus.
-/// Zeigt den aktiven Mode mit Step-Picker inline + Direkt-Übertrag-Button,
-/// Schnell-Off (✕). Mint/Sage-Tönung als Mode-Indikator. Die heutige Pot-
-/// Summe steht im BalanceBar-Subtitle — hier nicht redundant wiederholt.
+/// Zeigt den aktiven Mode mit Step-Pills inline + Direkt-Übertrag-Button.
+/// Mint/Sage-Tönung als Mode-Indikator. Schließen über den ¢-Toggle im
+/// Filter-Header oder per Klick auf die aktive Step-Pile (Toggle).
 struct RoundupOverlay: View {
 
     let slotId: String
@@ -12,24 +12,29 @@ struct RoundupOverlay: View {
 
     let onClose: () -> Void
 
+    /// Step-Optionen — von subtil (10 ct = 1. Nachkommastelle) bis aggressiv
+    /// (10 € = Zehner-Sprung). Default 1 € liegt in der Mitte und ist
+    /// Industry-Standard (Bank of America „Keep the Change", Acorns).
+    static let stepOptions: [(label: String, cents: Int)] = [
+        ("10 ct", 10),
+        ("50 ct", 50),
+        ("1 €",   100),
+        ("2 €",   200),
+        ("5 €",   500),
+        ("10 €",  1000)
+    ]
+
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "centsign.circle.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color.roundupAccent)
-                Text(L10n.t("Aufrunden aktiv", "Round-up active"))
+                Text(L10n.t("Aufrunden um:", "Round up to:"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.primary)
-                Spacer(minLength: 8)
-                stepPicker
-                Button(action: onClose) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(L10n.t("Aufrunden-Ansicht schließen", "Close round-up view"))
+                stepPills
+                Spacer(minLength: 0)
             }
 
             payoutButton
@@ -48,17 +53,15 @@ struct RoundupOverlay: View {
     private var payoutButton: some View {
         Button(action: openChoiceSheet) {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.up.right.square.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(L10n.t("Jetzt sparen — Betrag wählen",
-                            "Save now — choose amount"))
+                Text(L10n.t("Aufgerundeten Betrag zur Seite legen",
+                            "Set aside round-up amount"))
                     .font(.system(size: 12, weight: .medium))
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 10, weight: .semibold))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 6)
@@ -79,30 +82,41 @@ struct RoundupOverlay: View {
         )
     }
 
-    private var stepPicker: some View {
-        Picker("", selection: Binding(
-            get: { state.stepCents },
-            set: { newValue in
-                state.applyStepChange(slotId: slotId, bankId: bankId, stepCents: newValue)
+    /// Custom HStack mit Toggle-Verhalten: Klick auf inaktive Pile aktiviert sie,
+    /// Klick auf bereits aktive Pile deaktiviert den ganzen Aufrunden-Mode.
+    private var stepPills: some View {
+        HStack(spacing: 4) {
+            ForEach(Self.stepOptions, id: \.cents) { option in
+                stepPill(label: option.label, cents: option.cents)
             }
-        )) {
-            Text("1 €").tag(100)
-            Text("2 €").tag(200)
-            Text("5 €").tag(500)
-            Text("10 €").tag(1000)
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: 180)
     }
 
-    private func formatEuros(_ cents: Int) -> String {
-        let euros = Double(cents) / 100.0
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.numberStyle = .decimal
-        f.minimumFractionDigits = 2
-        f.maximumFractionDigits = 2
-        return (f.string(from: NSNumber(value: euros)) ?? "0,00") + " €"
+    private func stepPill(label: String, cents: Int) -> some View {
+        let selected = state.stepCents == cents
+        return Button(action: {
+            if selected {
+                // Toggle: aktive Pile → Mode deaktivieren.
+                onClose()
+            } else {
+                state.applyStepChange(slotId: slotId, bankId: bankId, stepCents: cents)
+            }
+        }) {
+            Text(label)
+                .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                .foregroundColor(selected ? .white : Color.roundupAccent)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(selected ? Color.roundupAccent : Color.roundupAccent.opacity(0.10))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(selected
+            ? L10n.t("Klick: Aufrunden-Modus beenden",
+                     "Click: leave round-up mode")
+            : L10n.t("Schrittweite \(label) wählen",
+                     "Set step \(label)"))
     }
 }

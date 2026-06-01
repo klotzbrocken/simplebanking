@@ -56,6 +56,91 @@ enum RoundupCalculator {
         return sum
     }
 
+    /// Zählt aufeinanderfolgende Tage rückwärts ab heute, an denen eine echte
+    /// Outgoing-Überweisung an die Sparkonto-IBAN in Höhe des aufgerundeten
+    /// Tagesbetrags (±5 ct Toleranz) gebucht wurde.
+    ///
+    /// Streak zählt nur belohnt-konsistentes Verhalten — der hypothetische
+    /// Aufrundungs-Beitrag muss tatsächlich überwiesen worden sein, sonst 0.
+    ///
+    /// • Heute keine Match-TRX → 0 (Anzeige im UI ausgeblendet)
+    /// • Heute Match, gestern Match → 2
+    /// • Tag dazwischen mit Beitrag aber ohne Match-TRX → Bruch
+    /// • Tag dazwischen ohne Beitrag (kein Einkauf) → Bruch (konservativ)
+    static func liveStreakDays(
+        transactions: [TransactionsResponse.Transaction],
+        savingsIban: String,
+        today: Date = Date(),
+        stepCents: Int
+    ) -> Int {
+        let normalizedSavings = savingsIban.uppercased().filter { !$0.isWhitespace }
+        guard !normalizedSavings.isEmpty, stepCents > 0 else { return 0 }
+
+        // Outgoing-TRX-Cents pro Tag, gefiltert auf Sparkonto-IBAN-Empfänger.
+        // Gleichzeitig „Regular-Expenses" extrahieren (alle TRX die NICHT an
+        // das Sparkonto gingen) — die liefern den Aufrunden-Tagesbetrag.
+        var outgoingPerDay: [String: [Int]] = [:]
+        var regularTxs: [TransactionsResponse.Transaction] = []
+        regularTxs.reserveCapacity(transactions.count)
+        for tx in transactions {
+            let creditorIban = (tx.creditor?.iban ?? "").uppercased().filter { !$0.isWhitespace }
+            let isSavingsTransfer = !creditorIban.isEmpty && creditorIban == normalizedSavings
+            if isSavingsTransfer {
+                guard let booking = tx.bookingDate else { continue }
+                guard tx.status == "booked" else { continue }
+                let currency = (tx.amount?.currency ?? "EUR").uppercased()
+                guard currency == "EUR" else { continue }
+                let raw = tx.parsedAmount
+                guard raw < 0 else { continue }
+                let absScaled = Decimal(abs(raw)) * 100
+                var rounded = Decimal()
+                var src = absScaled
+                NSDecimalRound(&rounded, &src, 0, .plain)
+                outgoingPerDay[booking, default: []].append(NSDecimalNumber(decimal: rounded).intValue)
+            } else {
+                regularTxs.append(tx)
+            }
+        }
+        guard !outgoingPerDay.isEmpty else { return 0 }
+
+        let cal = Calendar(identifier: .gregorian)
+        let f = streakDateFormatter
+        var cursor = cal.startOfDay(for: today)
+        var count = 0
+
+        while true {
+            let dayStr = f.string(from: cursor)
+            let outgoing = outgoingPerDay[dayStr] ?? []
+            guard !outgoing.isEmpty else { break }
+
+            let dayRoundup = liveRoundupCents(
+                transactions: regularTxs,
+                bookingDateFrom: dayStr,
+                bookingDateTo: dayStr,
+                stepCents: stepCents
+            )
+            guard dayRoundup > 0 else { break }
+
+            let hasMatch = outgoing.contains { abs($0 - dayRoundup) <= 5 }
+            guard hasMatch else { break }
+
+            count += 1
+            guard let prev = cal.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = prev
+            if count >= 10_000 { break }
+        }
+        return count
+    }
+
+    nonisolated(unsafe) private static let streakDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     /// View-Lens für die Aufrunden-Ansicht: liefert den anzuzeigenden Betrag.
     /// Bei EUR-Ausgaben das nächste Vielfache von `stepCents` (mit negativem Vorzeichen);
     /// sonst (Income, Non-EUR, Boundary, ungültige Step) der Original-Betrag unverändert.

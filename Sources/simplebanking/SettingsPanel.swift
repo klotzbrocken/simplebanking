@@ -1597,10 +1597,9 @@ struct SettingsView: View {
                                                 saveCurrentSlotSettings()
                                             }
                                         )) {
-                                            Text("1 €").tag(100)
-                                            Text("2 €").tag(200)
-                                            Text("5 €").tag(500)
-                                            Text("10 €").tag(1000)
+                                            ForEach(RoundupOverlay.stepOptions, id: \.cents) { option in
+                                                Text(option.label).tag(option.cents)
+                                            }
                                         }
                                         .pickerStyle(.segmented)
                                         .labelsHidden()

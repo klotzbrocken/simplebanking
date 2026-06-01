@@ -1706,17 +1706,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 self?.roundupWindow?.close()
                 self?.roundupWindow = nil
             },
-            onTransfer: { [weak self] amountCents, rangeLabel in
+            onTransfer: { [weak self] amountCents, rangeLabel, recipientName, recipientIban in
                 guard let self else { return }
                 self.roundupWindow?.close()
                 self.roundupWindow = nil
                 guard amountCents > 0 else { return }
-                self.openTransferSheetForRoundupChoice(slotId: slotId, amountCents: amountCents, rangeLabel: rangeLabel)
+                self.openTransferSheetForRoundupChoice(
+                    amountCents: amountCents,
+                    rangeLabel: rangeLabel,
+                    recipientName: recipientName,
+                    recipientIban: recipientIban
+                )
             }
         )
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 530),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 600),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -1752,16 +1757,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func openTransferSheetForRoundupChoice(slotId: String, amountCents: Int, rangeLabel: String) {
-        let settings = BankSlotSettingsStore.load(slotId: slotId)
-        let creditorName = settings.savingsAccountName ?? L10n.t("Sparkonto", "Savings")
-        let creditorIban = settings.savingsAccountIban ?? ""
+    private func openTransferSheetForRoundupChoice(
+        amountCents: Int,
+        rangeLabel: String,
+        recipientName: String,
+        recipientIban: String
+    ) {
         let amount = Decimal(amountCents) / 100
-
         do {
             let request = try TransferRequest(
-                creditorName: creditorName,
-                creditorIban: creditorIban,
+                creditorName: recipientName,
+                creditorIban: recipientIban,
                 amountEUR: amount,
                 remittance: L10n.t("Aufgerundet (\(rangeLabel))", "Round-up (\(rangeLabel))")
             )
@@ -5254,52 +5260,34 @@ private struct StatusBalanceFlyoutCardView: View {
     }
 
     @AppStorage("balanceSubtitleStyle.flyout") private var flyoutSubtitleStyle: Int = 0
-    @AppStorage("roundupSubtitleStyle.flyout") private var flyoutRoundupSubtitleStyle: Int = 0
 
     @ObservedObject private var roundupView = RoundupViewState.shared
 
     @ViewBuilder
     private var leftToPaySubtitle: some View {
-        if roundupView.isActive {
-            RoundupSubtitleSwitch(
-                todayCents: roundupView.todayPotCents,
-                yesterdayCents: roundupView.yesterdayPotCents,
-                dayBeforeYesterdayCents: roundupView.dayBeforeYesterdayPotCents,
-                monthToDateCents: roundupView.monthToDateCents,
-                style: $flyoutRoundupSubtitleStyle,
-                compact: true
-            )
-        } else {
-            // Unified-Mode: leftToPay ist pro-Slot aggregiert → Sub-Metrics würden gegen
-            // einen einzelnen Gehaltstag rechnen und wären fachlich inkonsistent.
-            BalanceSubtitleSwitch(
-                balance: balanceValue,
-                leftToPayAmount: leftToPayAmount,
-                salaryDay: salaryDay,
-                salaryToleranceBefore: salaryToleranceBefore,
-                salaryToleranceAfter: salaryToleranceAfter,
-                style: $flyoutSubtitleStyle,
-                forceClassic: isUnifiedMode,
-                compact: true
-            )
-        }
-    }
-
-    private func formatRoundupEuros(_ cents: Int) -> String {
-        let euros = Double(cents) / 100.0
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.numberStyle = .decimal
-        f.minimumFractionDigits = 2
-        f.maximumFractionDigits = 2
-        return (f.string(from: NSNumber(value: euros)) ?? "0,00") + " €"
+        // Im Aufrunden-Modus wird die ganze Flyout-Card durch RoundupSavingsCard
+        // ersetzt — dieser Subtitle läuft dann gar nicht.
+        // Unified-Mode: leftToPay ist pro-Slot aggregiert → Sub-Metrics würden gegen
+        // einen einzelnen Gehaltstag rechnen und wären fachlich inkonsistent.
+        BalanceSubtitleSwitch(
+            balance: balanceValue,
+            leftToPayAmount: leftToPayAmount,
+            salaryDay: salaryDay,
+            salaryToleranceBefore: salaryToleranceBefore,
+            salaryToleranceAfter: salaryToleranceAfter,
+            style: $flyoutSubtitleStyle,
+            forceClassic: isUnifiedMode,
+            compact: true
+        )
     }
 
 
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                if unifiedSlots != nil {
+                if roundupView.isActive {
+                    RoundupSavingsCard(compact: true)
+                } else if unifiedSlots != nil {
                     unifiedCard
                 } else if isDefaultTheme {
                     defaultThemeCard

@@ -221,6 +221,119 @@ final class RoundupCalculatorTests: XCTestCase {
         )
     }
 
+    // MARK: - liveStreakDays
+
+    private static let SAVINGS_IBAN = "DE83460500010001808336"
+
+    private func date(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        var comp = DateComponents()
+        comp.year = y; comp.month = m; comp.day = d; comp.hour = 12
+        return Calendar(identifier: .gregorian).date(from: comp)!
+    }
+
+    /// Helper für eine Outgoing-TRX an Sparkonto-IBAN mit explizitem creditor.
+    private func makeSavingsTx(date: String, amount: String) -> TransactionsResponse.Transaction {
+        let amt = TransactionsResponse.Amount(currency: "EUR", amount: amount)
+        let party = TransactionsResponse.Party(name: "Sparkonto", iban: Self.SAVINGS_IBAN, bic: nil)
+        return TransactionsResponse.Transaction(
+            bookingDate: date, valueDate: date, status: "booked",
+            endToEndId: "savings-\(date)-\(amount)", amount: amt,
+            creditor: party, debtor: nil,
+            remittanceInformation: nil, additionalInformation: nil, purposeCode: nil
+        )
+    }
+
+    func test_liveStreakDays_noSavingsTx_returnsZero() {
+        // Nur Aufrundungs-Beiträge, keine Überweisung an Sparkonto → 0.
+        let txs = [
+            makeTx(date: "2026-06-01", amount: "-3.47"),
+            makeTx(date: "2026-05-31", amount: "-3.47")
+        ]
+        let n = RoundupCalculator.liveStreakDays(
+            transactions: txs,
+            savingsIban: Self.SAVINGS_IBAN,
+            today: date(2026, 6, 1),
+            stepCents: 100
+        )
+        XCTAssertEqual(n, 0, "Aufrundungs-Beiträge allein zählen nicht — Überweisung fehlt.")
+    }
+
+    func test_liveStreakDays_matchingSavingsTx_counts() {
+        // -3,47 € → 53ct roundup. Outgoing an Sparkonto = 0,53 €.
+        let txs = [
+            makeTx(date: "2026-06-01", amount: "-3.47"),
+            makeSavingsTx(date: "2026-06-01", amount: "-0.53"),
+            makeTx(date: "2026-05-31", amount: "-3.47"),
+            makeSavingsTx(date: "2026-05-31", amount: "-0.53")
+        ]
+        let n = RoundupCalculator.liveStreakDays(
+            transactions: txs,
+            savingsIban: Self.SAVINGS_IBAN,
+            today: date(2026, 6, 1),
+            stepCents: 100
+        )
+        XCTAssertEqual(n, 2)
+    }
+
+    func test_liveStreakDays_amountMismatchBreaksStreak() {
+        // Heute matched, gestern hat Overshoot (1 €) → Bruch.
+        let txs = [
+            makeTx(date: "2026-06-01", amount: "-3.47"),
+            makeSavingsTx(date: "2026-06-01", amount: "-0.53"),
+            makeTx(date: "2026-05-31", amount: "-3.47"),
+            makeSavingsTx(date: "2026-05-31", amount: "-1.00")  // != 0.53 → kein match
+        ]
+        let n = RoundupCalculator.liveStreakDays(
+            transactions: txs,
+            savingsIban: Self.SAVINGS_IBAN,
+            today: date(2026, 6, 1),
+            stepCents: 100
+        )
+        XCTAssertEqual(n, 1, "Heute zählt, 31.05. mismatch → Bruch nach 1.")
+    }
+
+    func test_liveStreakDays_toleranceFiveCent() {
+        // Outgoing 0,55 € statt 0,53 € → 2ct Abweichung, innerhalb 5ct Toleranz.
+        let txs = [
+            makeTx(date: "2026-06-01", amount: "-3.47"),
+            makeSavingsTx(date: "2026-06-01", amount: "-0.55")
+        ]
+        let n = RoundupCalculator.liveStreakDays(
+            transactions: txs,
+            savingsIban: Self.SAVINGS_IBAN,
+            today: date(2026, 6, 1),
+            stepCents: 100
+        )
+        XCTAssertEqual(n, 1, "2ct Abweichung liegt innerhalb der 5ct Toleranz.")
+    }
+
+    func test_liveStreakDays_todayNoMatch_returnsZero() {
+        // Heute keine Sparkonto-TRX, gestern matched. Streak = 0 (heute fehlt).
+        let txs = [
+            makeTx(date: "2026-06-01", amount: "-3.47"),
+            makeTx(date: "2026-05-31", amount: "-3.47"),
+            makeSavingsTx(date: "2026-05-31", amount: "-0.53")
+        ]
+        let n = RoundupCalculator.liveStreakDays(
+            transactions: txs,
+            savingsIban: Self.SAVINGS_IBAN,
+            today: date(2026, 6, 1),
+            stepCents: 100
+        )
+        XCTAssertEqual(n, 0, "Heute ohne match → Streak = 0.")
+    }
+
+    func test_liveStreakDays_emptySavingsIban_returnsZero() {
+        let txs = [makeTx(date: "2026-06-01", amount: "-3.47")]
+        let n = RoundupCalculator.liveStreakDays(
+            transactions: txs,
+            savingsIban: "",
+            today: date(2026, 6, 1),
+            stepCents: 100
+        )
+        XCTAssertEqual(n, 0)
+    }
+
     func test_liveRoundupCents_monthRange_sumsAcrossDays() {
         let txs = [
             makeTx(date: "2026-05-01", amount: "-3.47"),   // 53

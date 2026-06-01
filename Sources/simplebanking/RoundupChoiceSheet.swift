@@ -1,19 +1,18 @@
 import SwiftUI
 import AppKit
 
-/// Auswahl-Dialog für den Banner-„Jetzt sparen"-Button.
+/// Auswahl-Dialog für den Banner-„Aufgerundeten Betrag zur Seite legen"-Button.
 ///
 /// UX-Aufbau (top → bottom):
-/// 1. Header — Icon + Title + Untertitel
-/// 2. Schrittweite — Segmented Picker (1/2/5/10 €), persistiert sofort in
-///    BankSlotSettings; Beträge im Zeitraum-Grid recompute live.
-/// 3. Zeitraum — 2×2-Grid mit Karten (Label oben, Betrag groß) und
-///    Highlight-State für die Auswahl. Karten mit 0 € bleiben klickbar,
-///    aber visuell zurückgenommen.
-/// 4. Empfänger-Vorschau — kompakte Zeile mit Name + maskierter IBAN
-///    (oder Hinweis wenn Settings unvollständig).
+/// 1. Header — Icon + Title + ausführlicher Untertitel (was passiert nach „Jetzt sparen")
+/// 2. Schrittweite — Segmented Picker (10ct/50ct/1€/2€/5€/10€), persistiert sofort
+///    in BankSlotSettings; Beträge im Zeitraum-Grid recompute live.
+/// 3. Zeitraum — 2×2-Grid mit Karten (Label oben, Betrag groß) und Highlight.
+/// 4. Empfänger-Editor — Name + IBAN editierbar (Default aus Settings; User
+///    kann für diese Auszahlung einen anderen Empfänger eingeben). IBAN
+///    wird live über `TransferRequest.validateIban` geprüft.
 /// 5. Action-Bar — Abbrechen (links), „Jetzt sparen — X,XX €" (rechts,
-///    prominent, disabled bei 0 € oder fehlender IBAN).
+///    prominent, disabled bei 0 € oder ungültiger IBAN).
 struct RoundupChoiceSheet: View {
 
     enum TimeRange: Int, CaseIterable {
@@ -25,10 +24,13 @@ struct RoundupChoiceSheet: View {
     @ObservedObject private var state = RoundupViewState.shared
 
     let onCancel: () -> Void
-    /// `(amountCents, rangeLabel)` — Caller baut den TransferRequest.
-    let onTransfer: (Int, String) -> Void
+    /// `(amountCents, rangeLabel, recipientName, recipientIban)` — Caller baut den TransferRequest.
+    let onTransfer: (Int, String, String, String) -> Void
 
     @State private var selectedRange: TimeRange = .today
+    @State private var recipientName: String = ""
+    @State private var recipientIban: String = ""
+    @State private var didInitFromSettings: Bool = false
 
     // MARK: - Computed inputs
 
@@ -53,21 +55,17 @@ struct RoundupChoiceSheet: View {
     private var selectedCents: Int { cents(for: selectedRange) }
     private var selectedLabel: String { label(for: selectedRange) }
 
-    private var savingsName: String {
-        BankSlotSettingsStore.load(slotId: slotId).savingsAccountName ?? L10n.t("Sparkonto", "Savings")
+    private var trimmedName: String {
+        recipientName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    private var savingsIban: String {
-        BankSlotSettingsStore.load(slotId: slotId).savingsAccountIban ?? ""
+    private var normalizedIban: String {
+        TransferRequest.normalizeIban(recipientIban)
     }
-
-    private var maskedIban: String {
-        let iban = savingsIban
-        guard iban.count > 12 else { return iban }
-        return "\(iban.prefix(8))…\(iban.suffix(4))"
+    private var ibanIsValid: Bool {
+        (try? TransferRequest.validateIban(normalizedIban)) != nil
     }
-
     private var canTransfer: Bool {
-        selectedCents > 0 && !savingsIban.isEmpty
+        selectedCents > 0 && !trimmedName.isEmpty && ibanIsValid
     }
 
     // MARK: - Formatter
@@ -89,17 +87,24 @@ struct RoundupChoiceSheet: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             header
             stepSection
             rangeSection
-            recipientPreview
+            recipientEditor
             Spacer(minLength: 0)
             actionBar
         }
         .padding(20)
-        .frame(width: 440, height: 530)
+        .frame(width: 460, height: 600)
         .background(Color.panelBackground)
+        .onAppear {
+            guard !didInitFromSettings else { return }
+            didInitFromSettings = true
+            let settings = BankSlotSettingsStore.load(slotId: slotId)
+            recipientName = settings.savingsAccountName ?? ""
+            recipientIban = settings.savingsAccountIban ?? ""
+        }
     }
 
     // MARK: - Header
@@ -114,13 +119,16 @@ struct RoundupChoiceSheet: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(Color.roundupAccent)
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(L10n.t("Aufrunden", "Round-up"))
                     .font(.system(size: 16, weight: .semibold))
-                Text(L10n.t("Wähle Schrittweite und Zeitraum, dann übertrage.",
-                            "Pick step size and period, then transfer."))
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                Text(L10n.t(
+                    "Wähle Schrittweite und Zeitraum. Nach Klick auf 'Jetzt sparen' öffnet sich das Überweisungsfenster mit Betrag und Empfänger vorausgefüllt — du bestätigst es wie immer manuell (PIN/SCA bleiben bei dir).",
+                    "Pick step size and period. After clicking 'Save now' the transfer sheet opens with amount and recipient pre-filled — you confirm it manually as always (PIN/SCA stays with you)."
+                ))
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
@@ -140,10 +148,9 @@ struct RoundupChoiceSheet: View {
                 get: { state.stepCents },
                 set: { state.applyStepChange(slotId: slotId, bankId: bankId, stepCents: $0) }
             )) {
-                Text("1 €").tag(100)
-                Text("2 €").tag(200)
-                Text("5 €").tag(500)
-                Text("10 €").tag(1000)
+                ForEach(RoundupOverlay.stepOptions, id: \.cents) { option in
+                    Text(option.label).tag(option.cents)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -206,40 +213,51 @@ struct RoundupChoiceSheet: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Recipient preview
+    // MARK: - Recipient editor
 
-    private var recipientPreview: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.right.circle.fill")
-                .font(.system(size: 16))
-                .foregroundColor(Color(NSColor.tertiaryLabelColor))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.t("Empfänger", "Recipient"))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-                if savingsIban.isEmpty {
-                    Text(L10n.t("Erst Sparkonto in Einstellungen hinterlegen",
-                                "First add savings account in Settings"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.orange)
-                } else {
-                    Text("\(savingsName) · \(maskedIban)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+    private var recipientEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.t("Empfänger", "Recipient"))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            VStack(spacing: 6) {
+                TextField(L10n.t("Name (z.B. Tagesgeld DKB)", "Name (e.g. DKB Savings)"),
+                          text: $recipientName)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .font(.system(size: 12))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    TextField("DE...", text: Binding(
+                        get: { recipientIban },
+                        set: { recipientIban = TransferRequest.normalizeIban($0) }
+                    ))
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .font(.system(size: 12, design: .monospaced))
+
+                    if !recipientIban.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: ibanIsValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            Text(ibanIsValid
+                                ? L10n.t("IBAN gültig", "IBAN valid")
+                                : L10n.t("IBAN ungültig — bitte prüfen", "Invalid IBAN — please check"))
+                        }
+                        .font(.system(size: 10))
+                        .foregroundColor(ibanIsValid ? .green : .orange)
+                    }
                 }
             }
-            Spacer(minLength: 0)
+
+            Text(L10n.t(
+                "Default aus den Slot-Einstellungen — du kannst hier für diese Überweisung einen anderen Empfänger eingeben.",
+                "Default is taken from slot settings — you can enter a different recipient just for this transfer."
+            ))
+            .font(.system(size: 10))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.gray.opacity(0.06))
-        )
     }
 
     // MARK: - Actions
@@ -252,17 +270,17 @@ struct RoundupChoiceSheet: View {
 
             Spacer()
 
-            Button(action: { onTransfer(selectedCents, selectedLabel) }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.right.square.fill")
-                    if selectedCents > 0 {
-                        Text(L10n.t("Jetzt sparen · \(formatEuros(selectedCents))",
-                                    "Save now · \(formatEuros(selectedCents))"))
-                    } else {
-                        Text(L10n.t("Jetzt sparen", "Save now"))
-                    }
+            Button(action: {
+                onTransfer(selectedCents, selectedLabel, trimmedName, normalizedIban)
+            }) {
+                if selectedCents > 0 {
+                    Text(L10n.t("Jetzt sparen · \(formatEuros(selectedCents))",
+                                "Save now · \(formatEuros(selectedCents))"))
+                        .frame(minWidth: 150)
+                } else {
+                    Text(L10n.t("Jetzt sparen", "Save now"))
+                        .frame(minWidth: 150)
                 }
-                .frame(minWidth: 150)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -273,8 +291,9 @@ struct RoundupChoiceSheet: View {
                          "Opens the transfer sheet with recipient and amount pre-filled.")
                 : (selectedCents == 0
                     ? L10n.t("Wähle einen Zeitraum mit Betrag > 0.", "Pick a period with amount > 0.")
-                    : L10n.t("Hinterlege erst eine Sparkonto-IBAN in den Einstellungen.",
-                             "First set the savings IBAN in Settings.")))
+                    : (trimmedName.isEmpty
+                        ? L10n.t("Empfänger-Name fehlt.", "Recipient name missing.")
+                        : L10n.t("IBAN ist ungültig oder leer.", "IBAN is invalid or empty."))))
         }
     }
 }

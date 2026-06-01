@@ -28,8 +28,12 @@ final class RoundupViewState: ObservableObject {
     @Published var yesterdayPotCents: Int = 0
     @Published var dayBeforeYesterdayPotCents: Int = 0
     @Published var monthToDateCents: Int = 0
+    /// Aufeinanderfolgende Tage mit Aufrunden-Beitrag, rückwärts vom letzten
+    /// Beitrags-Tag. Bei step-Wechsel + neuer TRX-Push neu berechnet.
+    @Published var streakDays: Int = 0
 
     private var cachedTransactions: [TransactionsResponse.Transaction] = []
+    private var lastSlotId: String?
 
     /// Aktiviert den View-Mode für den Slot, lädt Step + führt Live-Berechnung
     /// der Tageswerte aus der TRX-Liste durch.
@@ -37,6 +41,7 @@ final class RoundupViewState: ObservableObject {
         let settings = BankSlotSettingsStore.load(slotId: slotId)
         guard settings.roundupEnabled else { return }
         cachedTransactions = transactions
+        lastSlotId = slotId
         stepCents = settings.roundupStepCents
         recomputeLiveValues()
         isActive = true
@@ -48,7 +53,9 @@ final class RoundupViewState: ObservableObject {
         yesterdayPotCents = 0
         dayBeforeYesterdayPotCents = 0
         monthToDateCents = 0
+        streakDays = 0
         cachedTransactions = []
+        lastSlotId = nil
     }
 
     /// Push neue TRX-Liste vom Caller (z.B. nach Refresh/Filter-Change).
@@ -66,6 +73,7 @@ final class RoundupViewState: ObservableObject {
         settings.roundupStepCents = stepCents
         BankSlotSettingsStore.save(settings, slotId: slotId)
         self.stepCents = stepCents
+        lastSlotId = slotId
         recomputeLiveValues()
         NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
     }
@@ -76,6 +84,7 @@ final class RoundupViewState: ObservableObject {
         guard stepCents > 0 else {
             todayPotCents = 0; yesterdayPotCents = 0
             dayBeforeYesterdayPotCents = 0; monthToDateCents = 0
+            streakDays = 0
             return
         }
         let cal = Calendar.current
@@ -96,6 +105,16 @@ final class RoundupViewState: ObservableObject {
         )
         monthToDateCents = RoundupCalculator.liveRoundupCents(
             transactions: cachedTransactions, bookingDateFrom: monthStart, bookingDateTo: today, stepCents: stepCents
+        )
+        let savingsIban: String = {
+            guard let slotId = lastSlotId else { return "" }
+            return BankSlotSettingsStore.load(slotId: slotId).savingsAccountIban ?? ""
+        }()
+        streakDays = RoundupCalculator.liveStreakDays(
+            transactions: cachedTransactions,
+            savingsIban: savingsIban,
+            today: Date(),
+            stepCents: stepCents
         )
     }
 
