@@ -35,6 +35,10 @@ struct TransferSheet: View {
     var prefill: TransferRequest? = nil
     /// Quelle des Prefills, z.B. "mcp" — bestimmt den Badge-Text.
     var prefillSource: String? = nil
+    /// Optionaler Callback bei erfolgreich ausgeführter Überweisung (`outcome.ok`).
+    /// Wird z.B. vom Aufrunden-Flow genutzt, um die ausgezahlten Pots zu finalisieren.
+    /// Greift NICHT bei `.mayHaveBeenExecuted` oder `.failed`.
+    var onTransferSucceeded: ((TransferRequest) -> Void)? = nil
 
     @ObservedObject private var bankingStore = MultibankingStore.shared
 
@@ -1640,6 +1644,7 @@ struct TransferSheet: View {
                 if outcome.ok {
                     phase = .sent
                     triggerRecipientEmailIfRequested(request: request)
+                    onTransferSucceeded?(request)
                 } else if outcome.mayHaveBeenExecuted {
                     phase = .mayHaveBeenExecuted(outcome.error ?? "")
                 } else {

@@ -208,6 +208,54 @@ enum RoundupStore {
         }
     }
 
+    /// Markiert alle noch offenen (`open`/`pending`) Pots eines Slots im Datums-
+    /// Range `[from, to]` (inklusive) als `transferred`. Aufgerufen nach einer
+    /// erfolgreichen Aufrunden-Auszahlung — finalisiert exakt die Tage, die der
+    /// gewählte Zeitraum abgedeckt hat (alle erfassten Pots, unabhängig davon ob
+    /// der User den Betrag im TransferSheet noch geändert hat). Idempotent: bereits
+    /// finale Pots (discarded/keptVirtual/transferred) bleiben unangetastet.
+    @discardableResult
+    static func markRangeTransferred(
+        slotId: String,
+        from: String,
+        to: String,
+        bankId: String = "primary"
+    ) throws -> Int {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        let now = isoFormatter.string(from: Date())
+        return try queue.write { db in
+            try db.execute(sql: """
+                UPDATE roundup_pots
+                   SET status = ?, resolved_at = ?
+                 WHERE slot_id = ?
+                   AND pot_date >= ?
+                   AND pot_date <= ?
+                   AND status IN ('open', 'pending')
+                """, arguments: [
+                    PotStatus.transferred.rawValue, now,
+                    slotId, from, to
+                ])
+            return db.changesCount
+        }
+    }
+
+    /// Pot-Daten (`pot_date`) eines Slots, die bereits als `transferred` finalisiert
+    /// wurden. Wird von der Live-Anzeige genutzt, um ausgezahlte Tage aus dem
+    /// Payout-Betrag auszublenden (verhindert Doppelüberweisung).
+    static func transferredPotDates(
+        slotId: String,
+        bankId: String = "primary"
+    ) throws -> Set<String> {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        return try queue.read { db in
+            let dates = try String.fetchAll(db, sql: """
+                SELECT pot_date FROM roundup_pots
+                 WHERE slot_id = ? AND status = ?
+                """, arguments: [slotId, PotStatus.transferred.rawValue])
+            return Set(dates)
+        }
+    }
+
     /// Summe aller Pot-Beiträge des laufenden Monats (status-agnostisch — zeigt
     /// die echte Roundup-Aktivität, auch wenn Pots inzwischen verworfen oder
     /// ausgezahlt wurden). Cutoff ist `monthStartDate` (lokaler Monatsanfang).

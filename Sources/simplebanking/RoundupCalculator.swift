@@ -35,11 +35,17 @@ enum RoundupCalculator {
     /// Für die Live-Sicht im Aufrunden-Modus — der aktuelle `stepCents` aus dem
     /// Banner-Picker wird auf die historischen TRX angewendet, sodass User
     /// hypothetisch sehen können wie viel mit anderem Step gespart wäre.
+    ///
+    /// `excludingDates` blendet bereits ausgezahlte Tage (status `transferred`) aus —
+    /// so kann der Payout-Betrag im Auswahl-Dialog nicht erneut Tage enthalten, die
+    /// schon überwiesen wurden (verhindert Doppelüberweisung). Default leer = volle
+    /// hypothetische Sicht (für die motivational Savings-Card).
     static func liveRoundupCents(
         transactions: [TransactionsResponse.Transaction],
         bookingDateFrom: String,
         bookingDateTo: String,
-        stepCents: Int
+        stepCents: Int,
+        excludingDates: Set<String> = []
     ) -> Int {
         guard stepCents > 0 else { return 0 }
         var sum = 0
@@ -47,6 +53,7 @@ enum RoundupCalculator {
             guard let booking = tx.bookingDate,
                   booking >= bookingDateFrom,
                   booking <= bookingDateTo else { continue }
+            if excludingDates.contains(booking) { continue }
             guard tx.status == "booked" else { continue }
             let currency = (tx.amount?.currency ?? "EUR").uppercased()
             guard currency == "EUR" else { continue }

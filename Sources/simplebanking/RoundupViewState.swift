@@ -28,12 +28,29 @@ final class RoundupViewState: ObservableObject {
     @Published var yesterdayPotCents: Int = 0
     @Published var dayBeforeYesterdayPotCents: Int = 0
     @Published var monthToDateCents: Int = 0
+    /// Payout-Varianten der Tageswerte: identisch zu den `*PotCents`, aber bereits
+    /// als `transferred` finalisierte Tage werden ausgeblendet. Der Auswahl-Dialog
+    /// (RoundupChoiceSheet) liest diese — so kann ein bereits ausgezahlter Tag nicht
+    /// erneut überwiesen werden. Die `*PotCents` oben bleiben die volle hypothetische
+    /// Sicht für die motivational Savings-Card.
+    @Published var todayPayoutCents: Int = 0
+    @Published var yesterdayPayoutCents: Int = 0
+    @Published var dayBeforePayoutCents: Int = 0
+    @Published var monthToDatePayoutCents: Int = 0
     /// Aufeinanderfolgende Tage mit Aufrunden-Beitrag, rückwärts vom letzten
     /// Beitrags-Tag. Bei step-Wechsel + neuer TRX-Push neu berechnet.
     @Published var streakDays: Int = 0
 
     private var cachedTransactions: [TransactionsResponse.Transaction] = []
     private var lastSlotId: String?
+    private var lastBankId: String = "primary"
+
+    /// ISO-Datums-Strings des letzten Recompute — vom Dialog genutzt, um den
+    /// gewählten Zeitraum auf einen Finalisierungs-Range `[from, to]` zu mappen.
+    private(set) var todayDate: String = ""
+    private(set) var yesterdayDate: String = ""
+    private(set) var dayBeforeDate: String = ""
+    private(set) var monthStartDate: String = ""
 
     /// Aktiviert den View-Mode für den Slot, lädt Step + führt Live-Berechnung
     /// der Tageswerte aus der TRX-Liste durch.
@@ -42,6 +59,7 @@ final class RoundupViewState: ObservableObject {
         guard settings.roundupEnabled else { return }
         cachedTransactions = transactions
         lastSlotId = slotId
+        lastBankId = bankId
         stepCents = settings.roundupStepCents
         recomputeLiveValues()
         isActive = true
@@ -53,6 +71,10 @@ final class RoundupViewState: ObservableObject {
         yesterdayPotCents = 0
         dayBeforeYesterdayPotCents = 0
         monthToDateCents = 0
+        todayPayoutCents = 0
+        yesterdayPayoutCents = 0
+        dayBeforePayoutCents = 0
+        monthToDatePayoutCents = 0
         streakDays = 0
         cachedTransactions = []
         lastSlotId = nil
@@ -78,12 +100,33 @@ final class RoundupViewState: ObservableObject {
         NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
     }
 
+    /// Mappt einen Dialog-Zeitraum auf den Finalisierungs-Range `[from, to]`
+    /// (inklusive). Nutzt die beim letzten Recompute gespeicherten Datums-Strings.
+    func dateRange(for range: RoundupChoiceSheet.TimeRange) -> (from: String, to: String) {
+        switch range {
+        case .today: return (todayDate, todayDate)
+        case .yesterday: return (yesterdayDate, yesterdayDate)
+        case .dayBeforeYesterday: return (dayBeforeDate, dayBeforeDate)
+        case .monthToDate: return (monthStartDate, todayDate)
+        }
+    }
+
+    /// Nach einer erfolgreichen Auszahlung gerufen — lädt die `transferred`-Tage
+    /// neu und blendet sie aus den Payout-Werten aus, sodass derselbe Betrag nicht
+    /// erneut überwiesen werden kann.
+    func refreshAfterPayout() {
+        guard isActive else { return }
+        recomputeLiveValues()
+    }
+
     // MARK: - Private compute
 
     private func recomputeLiveValues() {
         guard stepCents > 0 else {
             todayPotCents = 0; yesterdayPotCents = 0
             dayBeforeYesterdayPotCents = 0; monthToDateCents = 0
+            todayPayoutCents = 0; yesterdayPayoutCents = 0
+            dayBeforePayoutCents = 0; monthToDatePayoutCents = 0
             streakDays = 0
             return
         }
@@ -93,6 +136,14 @@ final class RoundupViewState: ObservableObject {
         let yesterday = Self.isoDateFormatter.string(from: cal.date(byAdding: .day, value: -1, to: startOfToday) ?? startOfToday)
         let dayBefore = Self.isoDateFormatter.string(from: cal.date(byAdding: .day, value: -2, to: startOfToday) ?? startOfToday)
         let monthStart = Self.isoDateFormatter.string(from: cal.date(from: cal.dateComponents([.year, .month], from: startOfToday)) ?? startOfToday)
+        todayDate = today; yesterdayDate = yesterday
+        dayBeforeDate = dayBefore; monthStartDate = monthStart
+
+        // Bereits ausgezahlte Tage — werden aus den Payout-Werten ausgeblendet.
+        let transferredDates: Set<String> = {
+            guard let slotId = lastSlotId else { return [] }
+            return (try? RoundupStore.transferredPotDates(slotId: slotId, bankId: lastBankId)) ?? []
+        }()
 
         todayPotCents = RoundupCalculator.liveRoundupCents(
             transactions: cachedTransactions, bookingDateFrom: today, bookingDateTo: today, stepCents: stepCents
@@ -106,6 +157,20 @@ final class RoundupViewState: ObservableObject {
         monthToDateCents = RoundupCalculator.liveRoundupCents(
             transactions: cachedTransactions, bookingDateFrom: monthStart, bookingDateTo: today, stepCents: stepCents
         )
+
+        todayPayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: today, bookingDateTo: today, stepCents: stepCents, excludingDates: transferredDates
+        )
+        yesterdayPayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: yesterday, bookingDateTo: yesterday, stepCents: stepCents, excludingDates: transferredDates
+        )
+        dayBeforePayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: dayBefore, bookingDateTo: dayBefore, stepCents: stepCents, excludingDates: transferredDates
+        )
+        monthToDatePayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: monthStart, bookingDateTo: today, stepCents: stepCents, excludingDates: transferredDates
+        )
+
         let savingsIban: String = {
             guard let slotId = lastSlotId else { return "" }
             return BankSlotSettingsStore.load(slotId: slotId).savingsAccountIban ?? ""

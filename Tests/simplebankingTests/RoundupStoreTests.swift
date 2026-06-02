@@ -262,4 +262,79 @@ final class RoundupStoreTests: XCTestCase {
         XCTAssertEqual(try RoundupStore.virtualSavingsTotal(slotId: "b", bankId: testBankId), 200)
         XCTAssertEqual(try RoundupStore.virtualSavingsTotal(slotId: "empty-slot", bankId: testBankId), 0)
     }
+
+    // MARK: - markRangeTransferred (P1 Auszahlungs-Finalisierung)
+
+    func test_markRangeTransferred_flipsOpenAndPendingInRange() throws {
+        // 3 Tage open + 1 außerhalb des Range
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "s", txId: "tx-2", potDate: "2026-05-26",
+                                amountCents: 60, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "s", txId: "tx-3", potDate: "2026-05-27",
+                                amountCents: 70, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "s", txId: "tx-4", potDate: "2026-05-28",
+                                amountCents: 80, stepCents: 100, bankId: testBankId)
+        // 2026-05-26 vorab auf pending — muss ebenfalls finalisiert werden
+        try RoundupStore.markStalePending(slotId: "s", before: "2026-05-27", bankId: testBankId)
+
+        let n = try RoundupStore.markRangeTransferred(slotId: "s", from: "2026-05-25", to: "2026-05-27", bankId: testBankId)
+        XCTAssertEqual(n, 3)
+
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-25", bankId: testBankId)?.status, .transferred)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-26", bankId: testBankId)?.status, .transferred)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-27", bankId: testBankId)?.status, .transferred)
+        // außerhalb des Range bleibt offen
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-28", bankId: testBankId)?.status, .open)
+        XCTAssertNotNil(try RoundupStore.pot(slotId: "s", potDate: "2026-05-25", bankId: testBankId)?.resolvedAt)
+    }
+
+    func test_markRangeTransferred_singleDay_idempotent() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        XCTAssertEqual(try RoundupStore.markRangeTransferred(slotId: "s", from: "2026-05-25", to: "2026-05-25", bankId: testBankId), 1)
+        // zweiter Lauf trifft keine open/pending mehr
+        XCTAssertEqual(try RoundupStore.markRangeTransferred(slotId: "s", from: "2026-05-25", to: "2026-05-25", bankId: testBankId), 0)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-25", bankId: testBankId)?.status, .transferred)
+    }
+
+    func test_markRangeTransferred_doesNotTouchFinalPots() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.resolve(slotId: "s", potDate: "2026-05-25", status: .discarded, bankId: testBankId)
+        XCTAssertEqual(try RoundupStore.markRangeTransferred(slotId: "s", from: "2026-05-24", to: "2026-05-26", bankId: testBankId), 0)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "s", potDate: "2026-05-25", bankId: testBankId)?.status, .discarded)
+    }
+
+    func test_markRangeTransferred_scopedToSlot() throws {
+        try RoundupStore.record(slotId: "a", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "b", txId: "tx-2", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.markRangeTransferred(slotId: "a", from: "2026-05-25", to: "2026-05-25", bankId: testBankId)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "a", potDate: "2026-05-25", bankId: testBankId)?.status, .transferred)
+        XCTAssertEqual(try RoundupStore.pot(slotId: "b", potDate: "2026-05-25", bankId: testBankId)?.status, .open)
+    }
+
+    // MARK: - transferredPotDates
+
+    func test_transferredPotDates_returnsOnlyTransferred() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "s", txId: "tx-2", potDate: "2026-05-26",
+                                amountCents: 60, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "s", txId: "tx-3", potDate: "2026-05-27",
+                                amountCents: 70, stepCents: 100, bankId: testBankId)
+        try RoundupStore.markRangeTransferred(slotId: "s", from: "2026-05-25", to: "2026-05-26", bankId: testBankId)
+
+        let dates = try RoundupStore.transferredPotDates(slotId: "s", bankId: testBankId)
+        XCTAssertEqual(dates, ["2026-05-25", "2026-05-26"])
+    }
+
+    func test_transferredPotDates_emptyWhenNone() throws {
+        try RoundupStore.record(slotId: "s", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        XCTAssertTrue(try RoundupStore.transferredPotDates(slotId: "s", bankId: testBankId).isEmpty)
+    }
+
 }

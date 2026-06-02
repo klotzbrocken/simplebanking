@@ -345,4 +345,44 @@ final class RoundupCalculatorTests: XCTestCase {
             228
         )
     }
+
+    // MARK: - excludingDates (P1: bereits ausgezahlte Tage ausblenden)
+
+    func test_liveRoundupCents_excludesTransferredDays() {
+        let txs = [
+            makeTx(date: "2026-05-01", amount: "-3.47"),   // 53
+            makeTx(date: "2026-05-15", amount: "-7.20"),   // 80
+            makeTx(date: "2026-05-30", amount: "-1.05"),   // 95
+        ]
+        // 2026-05-15 bereits ausgezahlt → fällt aus der Summe (228 - 80 = 148)
+        XCTAssertEqual(
+            RoundupCalculator.liveRoundupCents(
+                transactions: txs, bookingDateFrom: "2026-05-01", bookingDateTo: "2026-05-31",
+                stepCents: 100, excludingDates: ["2026-05-15"]
+            ),
+            148
+        )
+    }
+
+    func test_liveRoundupCents_emptyExclusion_matchesDefault() {
+        let txs = [makeTx(date: "2026-05-30", amount: "-3.47")]
+        XCTAssertEqual(
+            RoundupCalculator.liveRoundupCents(
+                transactions: txs, bookingDateFrom: "2026-05-30", bookingDateTo: "2026-05-30",
+                stepCents: 100, excludingDates: []
+            ),
+            53
+        )
+    }
+
+    func test_liveRoundupCents_allDaysExcluded_returnsZero() {
+        let txs = [makeTx(date: "2026-05-30", amount: "-3.47")]
+        XCTAssertEqual(
+            RoundupCalculator.liveRoundupCents(
+                transactions: txs, bookingDateFrom: "2026-05-30", bookingDateTo: "2026-05-30",
+                stepCents: 100, excludingDates: ["2026-05-30"]
+            ),
+            0
+        )
+    }
 }

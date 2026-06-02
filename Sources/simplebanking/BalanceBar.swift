@@ -1587,7 +1587,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func showTransferSheet(prefill: TransferRequest? = nil,
-                                   prefillSource: String? = nil) {
+                                   prefillSource: String? = nil,
+                                   onTransferSucceeded: ((TransferRequest) -> Void)? = nil) {
         if let existing = transferWindow, existing.isVisible {
             // Bereits offenes Sheet bekommt keinen nachträglichen Prefill —
             // sonst würden gerade getippte Werte überschrieben. Stattdessen
@@ -1611,7 +1612,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 Task { await self?.switchToSlot(index: idx) }
             },
             prefill: prefill,
-            prefillSource: prefillSource
+            prefillSource: prefillSource,
+            onTransferSucceeded: onTransferSucceeded
         )
 
         // NSPanel mit identischem Chrome wie das TransactionsPanel — damit
@@ -1706,16 +1708,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 self?.roundupWindow?.close()
                 self?.roundupWindow = nil
             },
-            onTransfer: { [weak self] amountCents, rangeLabel, recipientName, recipientIban in
+            onTransfer: { [weak self] amountCents, rangeLabel, recipientName, recipientIban, fromDate, toDate in
                 guard let self else { return }
                 self.roundupWindow?.close()
                 self.roundupWindow = nil
                 guard amountCents > 0 else { return }
                 self.openTransferSheetForRoundupChoice(
+                    slotId: slotId,
                     amountCents: amountCents,
                     rangeLabel: rangeLabel,
                     recipientName: recipientName,
-                    recipientIban: recipientIban
+                    recipientIban: recipientIban,
+                    fromDate: fromDate,
+                    toDate: toDate
                 )
             }
         )
@@ -1758,12 +1763,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func openTransferSheetForRoundupChoice(
+        slotId: String,
         amountCents: Int,
         rangeLabel: String,
         recipientName: String,
-        recipientIban: String
+        recipientIban: String,
+        fromDate: String,
+        toDate: String
     ) {
         let amount = Decimal(amountCents) / 100
+        let bankId = demoMode ? "demo" : "primary"
         do {
             let request = try TransferRequest(
                 creditorName: recipientName,
@@ -1771,7 +1780,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 amountEUR: amount,
                 remittance: L10n.t("Aufgerundet (\(rangeLabel))", "Round-up (\(rangeLabel))")
             )
-            showTransferSheet(prefill: request, prefillSource: "roundup")
+            showTransferSheet(prefill: request, prefillSource: "roundup") { _ in
+                // Erst nach erfolgreicher Ausführung: alle erfassten Pots im
+                // gewählten Zeitraum als `transferred` finalisieren, damit derselbe
+                // Betrag nicht erneut überwiesen werden kann.
+                do {
+                    try RoundupStore.markRangeTransferred(
+                        slotId: slotId, from: fromDate, to: toDate, bankId: bankId
+                    )
+                } catch {
+                    AppLogger.log("Roundup-Finalisierung fehlgeschlagen (slot=\(slotId), \(fromDate)…\(toDate)): \(error.localizedDescription)",
+                                  category: "Roundup", level: "ERROR")
+                }
+                RoundupViewState.shared.refreshAfterPayout()
+            }
         } catch {
             AppLogger.log("Roundup-Choice TransferRequest fehlgeschlagen: \(error.localizedDescription)",
                           category: "Roundup", level: "ERROR")

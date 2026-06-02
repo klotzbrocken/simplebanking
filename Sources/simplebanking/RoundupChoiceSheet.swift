@@ -24,8 +24,9 @@ struct RoundupChoiceSheet: View {
     @ObservedObject private var state = RoundupViewState.shared
 
     let onCancel: () -> Void
-    /// `(amountCents, rangeLabel, recipientName, recipientIban)` — Caller baut den TransferRequest.
-    let onTransfer: (Int, String, String, String) -> Void
+    /// `(amountCents, rangeLabel, recipientName, recipientIban, fromDate, toDate)` — Caller baut
+    /// den TransferRequest und finalisiert nach Erfolg die Pots im Range `[fromDate, toDate]`.
+    let onTransfer: (Int, String, String, String, String, String) -> Void
 
     @State private var selectedRange: TimeRange = .today
     @State private var recipientName: String = ""
@@ -35,11 +36,13 @@ struct RoundupChoiceSheet: View {
     // MARK: - Computed inputs
 
     private func cents(for r: TimeRange) -> Int {
+        // Payout-Werte: bereits ausgezahlte Tage sind ausgeblendet, damit derselbe
+        // Betrag nicht erneut überwiesen werden kann.
         switch r {
-        case .today: return state.todayPotCents
-        case .yesterday: return state.yesterdayPotCents
-        case .dayBeforeYesterday: return state.dayBeforeYesterdayPotCents
-        case .monthToDate: return state.monthToDateCents
+        case .today: return state.todayPayoutCents
+        case .yesterday: return state.yesterdayPayoutCents
+        case .dayBeforeYesterday: return state.dayBeforePayoutCents
+        case .monthToDate: return state.monthToDatePayoutCents
         }
     }
 
@@ -271,7 +274,8 @@ struct RoundupChoiceSheet: View {
             Spacer()
 
             Button(action: {
-                onTransfer(selectedCents, selectedLabel, trimmedName, normalizedIban)
+                let range = state.dateRange(for: selectedRange)
+                onTransfer(selectedCents, selectedLabel, trimmedName, normalizedIban, range.from, range.to)
             }) {
                 if selectedCents > 0 {
                     Text(L10n.t("Jetzt sparen · \(formatEuros(selectedCents))",
