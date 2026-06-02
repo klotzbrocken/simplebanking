@@ -177,6 +177,25 @@ final class TransactionsDatabaseTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - Slot-Löschung räumt Roundup-Tabellen (P2)
+
+    func test_deleteTransactions_wipesRoundupTablesForSlot() throws {
+        try TransactionsDatabase.migrate(bankId: testBankId)
+        // Pots für zwei Slots anlegen
+        try RoundupStore.record(slotId: "slot-a", txId: "tx-1", potDate: "2026-04-01",
+                                amountCents: 53, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "slot-b", txId: "tx-2", potDate: "2026-04-01",
+                                amountCents: 77, stepCents: 100, bankId: testBankId)
+
+        try TransactionsDatabase.deleteTransactions(forSlotId: "slot-a", bankId: testBankId)
+
+        // slot-a: Roundup-Daten weg
+        XCTAssertNil(try RoundupStore.pot(slotId: "slot-a", potDate: "2026-04-01", bankId: testBankId))
+        XCTAssertTrue(try RoundupStore.transferredPotDates(slotId: "slot-a", bankId: testBankId).isEmpty)
+        // slot-b: unberührt
+        XCTAssertEqual(try RoundupStore.pot(slotId: "slot-b", potDate: "2026-04-01", bankId: testBankId)?.amountCents, 77)
+    }
+
     private func makeTx(endToEndId: String, merchant: String, amount: Double)
         -> TransactionsResponse.Transaction
     {

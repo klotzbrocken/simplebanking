@@ -256,6 +256,20 @@ enum RoundupStore {
         }
     }
 
+    /// Entfernt alle Roundup-Daten (Entries + Pots) eines Slots. Aufgerufen beim
+    /// Entfernen eines Kontos — v22 nutzt bewusst keine FK zu `transactions`, daher
+    /// müssen diese Tabellen separat bereinigt werden.
+    static func deleteForSlot(
+        slotId: String,
+        bankId: String = "primary"
+    ) throws {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        try queue.write { db in
+            try db.execute(sql: "DELETE FROM roundup_entries WHERE slot_id = ?", arguments: [slotId])
+            try db.execute(sql: "DELETE FROM roundup_pots WHERE slot_id = ?", arguments: [slotId])
+        }
+    }
+
     /// Summe aller Pot-Beiträge des laufenden Monats (status-agnostisch — zeigt
     /// die echte Roundup-Aktivität, auch wenn Pots inzwischen verworfen oder
     /// ausgezahlt wurden). Cutoff ist `monthStartDate` (lokaler Monatsanfang).

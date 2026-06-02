@@ -1129,6 +1129,10 @@ enum TransactionsDatabase {
             }
             try db.execute(sql: "DELETE FROM transactions WHERE slot_id = ?", arguments: [slotId])
         }
+        // v22 Roundup-Tabellen haben bewusst keine FK zu `transactions` — sie müssen
+        // beim Entfernen eines Kontos separat bereinigt werden, sonst bleiben
+        // Aufrundungsbeträge + Slot-ID im lokalen Cache zurück.
+        try? RoundupStore.deleteForSlot(slotId: slotId, bankId: bankId)
         // Delete attachment files on disk (new slot-scoped path).
         for txId in txIds {
             if let dir = try? attachmentsDirectory(txID: txId, slotId: slotId, bankId: bankId),

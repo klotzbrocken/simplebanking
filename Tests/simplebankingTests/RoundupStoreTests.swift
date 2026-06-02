@@ -337,4 +337,21 @@ final class RoundupStoreTests: XCTestCase {
         XCTAssertTrue(try RoundupStore.transferredPotDates(slotId: "s", bankId: testBankId).isEmpty)
     }
 
+    // MARK: - deleteForSlot (P2 Slot-Löschung)
+
+    func test_deleteForSlot_removesEntriesAndPots() throws {
+        try RoundupStore.record(slotId: "a", txId: "tx-1", potDate: "2026-05-25",
+                                amountCents: 50, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "a", txId: "tx-2", potDate: "2026-05-26",
+                                amountCents: 60, stepCents: 100, bankId: testBankId)
+        try RoundupStore.record(slotId: "b", txId: "tx-3", potDate: "2026-05-25",
+                                amountCents: 70, stepCents: 100, bankId: testBankId)
+
+        try RoundupStore.deleteForSlot(slotId: "a", bankId: testBankId)
+
+        XCTAssertNil(try RoundupStore.pot(slotId: "a", potDate: "2026-05-25", bankId: testBankId))
+        XCTAssertNil(try RoundupStore.pot(slotId: "a", potDate: "2026-05-26", bankId: testBankId))
+        // anderer Slot bleibt unberührt
+        XCTAssertEqual(try RoundupStore.pot(slotId: "b", potDate: "2026-05-25", bankId: testBankId)?.amountCents, 70)
+    }
 }
