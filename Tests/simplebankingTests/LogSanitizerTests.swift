@@ -32,6 +32,23 @@ final class LogSanitizerTests: XCTestCase {
         XCTAssertFalse(output.lowercased().contains("de89370400440532013000"))
     }
 
+    func test_redacts_groupedIBAN_withSpaces() {
+        // Gruppierte Form wie in Banktexten / YAXI-Traces — muss ebenfalls redacted werden.
+        let input = "Empfänger DE89 3704 0044 0532 0130 00 überwiesen"
+        let output = LogSanitizer.redact(input)
+        XCTAssertFalse(output.contains("DE89 3704 0044 0532 0130 00"),
+            "Gruppierte IBAN muss redacted werden")
+        XCTAssertFalse(output.contains("0532 0130"))
+        XCTAssertTrue(output.contains("<redacted-iban>"))
+    }
+
+    func test_redacts_groupedIBAN_caseInsensitive() {
+        let input = "iban de89 3704 0044 0532 0130 00 end"
+        let output = LogSanitizer.redact(input)
+        XCTAssertFalse(output.lowercased().contains("3704 0044"))
+        XCTAssertTrue(output.contains("<redacted-iban>"))
+    }
+
     // MARK: - Credential key=value
 
     func test_redacts_userIdKeyValue() {

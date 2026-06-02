@@ -46,6 +46,7 @@
 ### Behoben
 - **Aufrunden konnte denselben Betrag mehrfach überweisen** — der Auszahlungsdialog las Live-Werte aus der Umsatzliste und markierte nie einen Topf als überwiesen. Jetzt werden nach erfolgreicher Überweisung alle erfassten Pots im gewählten Zeitraum als `transferred` finalisiert und bereits ausgezahlte Tage aus dem Payout-Betrag ausgeblendet. Die hypothetische Savings-Card bleibt unverändert.
 - **Slot-Löschung ließ Aufrundungsdaten zurück** — beim Entfernen eines Kontos werden `roundup_entries` und `roundup_pots` jetzt mit bereinigt (v22 nutzt bewusst keine Foreign-Keys).
+- **Log-Sanitizer erkennt jetzt gruppierte IBANs** — die Redaction griff nur bei durchgeschriebenen IBANs; gruppierte Formen wie `DE89 3704 0044 0532 0130 00` aus Banktexten/Traces werden jetzt ebenfalls ersetzt.
 - Kleinere Konsistenz-Verbesserungen im Setup-Fehler-Pfad (Diagnose-Bereich zeigt jetzt ggf. „Problem melden"-Button neben „Log-Ordner öffnen").
 
 ## [1.5.0] — 2026-05-03

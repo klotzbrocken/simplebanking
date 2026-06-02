@@ -41,10 +41,14 @@ enum LogSanitizer {
     }
 
     private static let patterns: [Rule] = [
-        // IBAN: 2 Buchstaben + 13-30 alphanumerische Zeichen.
-        // Konservativ: matches DE89..., AT12..., FR12..., etc.
+        // IBAN: 2 Buchstaben + 2 Prüfziffern + 11-30 alphanumerische Zeichen.
+        // Konservativ: matches DE89..., AT12..., FR12..., etc. — sowohl
+        // durchgeschrieben (DE89370400440532013000) als auch gruppiert mit
+        // einzelnen Leerzeichen (DE89 3704 0044 0532 0130 00), wie es Banktexte
+        // und YAXI-Traces oft liefern. Das optionale Space pro Zeichen erlaubt
+        // beliebige Gruppierung; `\b` hält die Grenzen sauber.
         Rule(
-            regex: compiled(#"(?i)\b[A-Z]{2}[0-9]{2}[0-9A-Z]{11,30}\b"#),
+            regex: compiled(#"(?i)\b[A-Z]{2}[0-9]{2}(?:[ ]?[0-9A-Z]){11,30}\b"#),
             replacement: "<redacted-iban>"
         ),
 
