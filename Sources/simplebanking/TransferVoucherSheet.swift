@@ -83,8 +83,8 @@ struct TransferVoucherSheet: View {
                        text: L10n.t("SEPA-Überweisung in 2 Klicks — Empfänger und Betrag aus deinen Buchungen vorgeschlagen.",
                                     "SEPA transfer in 2 clicks — recipient and amount suggested from your transactions."))
                 bullet(icon: "lock.shield.fill",
-                       text: L10n.t("TAN wie gewohnt direkt bei deiner Bank. simplebanking sieht keine Bank-Daten.",
-                                    "TAN confirmation directly with your bank. simplebanking sees no bank data."))
+                       text: L10n.t("Kein simplebanking-Cloudkonto — Zugangsdaten bleiben lokal im Keychain. Zahlungsauslösung über YAXI, TAN/SCA bestätigst du direkt bei deiner Bank.",
+                                    "No simplebanking cloud account — credentials stay local in your Keychain. Payment initiation via YAXI; you confirm TAN/SCA directly with your bank."))
                 bullet(icon: "checkmark.seal.fill",
                        text: L10n.t("Einmalkauf — keine Abo-Falle. Updates innerhalb von 1.x kostenlos.",
                                     "One-time purchase — no subscription. Free updates within 1.x."))
