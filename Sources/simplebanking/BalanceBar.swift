@@ -806,6 +806,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     private let txVM = TransactionsViewModel()
     private var txPanel: TransactionsPanel?
+    private var dashboardPanel: DashboardPanel?
     private var statusMenu: NSMenu?
     private var balancePopover: NSPopover?
     /// Vollbild-Dim-Overlays (1 pro Screen) + zentriertes Flyout-Fenster für
@@ -955,6 +956,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             print("[DB] Migration failed: \(error.localizedDescription)")
             AppLogger.log("DB migration failed: \(error.localizedDescription)", category: "DB", level: "ERROR")
         }
+        // Fold legacy recurring-correction keys into the unified RecurringAssignments store (once).
+        RecurringAssignments.migrateLegacyIfNeeded()
         TransactionCategorizer.preload()
         Task.detached {
             do {
@@ -1281,6 +1284,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             await self?.openTransactionsPanel()
         }, onSettings: { [weak self] in
             self?.showSettings()
+        }, onOpenDashboard: { [weak self] tab in
+            self?.openDashboard(tab: tab)
         })
         updateTxPanelAccountNav()
         settingsPanel = SettingsPanel()
@@ -3011,6 +3016,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// Verfügbarer Saldo für die Flyout-Sub-Zeile: gebuchter (bereits dispo-bereinigter) Saldo
+    /// abzüglich vorgemerkter Lastschriften (ohne vorgemerkte Eingänge). Gibt `nil` zurück, wenn
+    /// es keine vorgemerkten Lastschriften gibt (→ keine Sub-Zeile) oder im Unified-Mode
+    /// (Currency-Mix wäre fachlich inkonsistent).
+    private func computeFlyoutAvailableBalance(isUnified: Bool) -> Double? {
+        guard !isUnified, let booked = lastBalance else { return nil }
+        guard AvailableBalance.pendingDebitSum(txVM.transactions) < -0.005 else { return nil }
+        return AvailableBalance.compute(adjustedBooked: booked, pendingTx: txVM.transactions)
+    }
+
     /// Baut den Flyout-Host samt aller State-Injection. Wird vom Popover-
     /// und vom Centered-Hold-Pfad benutzt — `onDoubleTap` ist Caller-spezifisch
     /// (Popover closed via performClose, Centered via hideCenteredFlyout).
@@ -3104,6 +3119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         rootView.greenZoneFraction = computeGreenZoneFraction()
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
+        rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
         let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
         let host = NSHostingController(rootView: rootView)
@@ -3421,6 +3437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.rippleTrigger = flyoutRippleTrigger
         rootView.greenZoneFraction = computeGreenZoneFraction()
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
+        rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
         let hasDots = store.slots.count > 1 && (!demoMode || isMultiDemo)
         let newSize = NSSize(width: 348, height: hasDots ? 192 : 170)
@@ -5115,6 +5132,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         settingsPanel?.show()
     }
 
+    /// Öffnet das einheitliche Dashboard am gewünschten Tab (löst die fünf Einzel-Sheets ab).
+    private func openDashboard(tab: DashboardTab) {
+        if dashboardPanel == nil { dashboardPanel = DashboardPanel() }
+        dashboardPanel?.show(tab: tab, transactions: txVM.transactions, balance: lastBalance ?? 0)
+    }
+
     @objc private func checkForUpdates() {
         NSApp.activate(ignoringOtherApps: true)
         updateChecker?.checkForUpdates()
@@ -5257,6 +5280,9 @@ private struct StatusBalanceFlyoutCardView: View {
     var salaryDay: Int = 1                 // effective salary day for sub-metrics
     var salaryToleranceBefore: Int = 0     // darf N Tage früher kommen (z.B. 4)
     var salaryToleranceAfter: Int = 0      // darf N Tage später kommen (z.B. 1)
+    /// "Verfügbar"-Wert (gebucht + vorgemerkte Ausgaben). Nur gesetzt, wenn er vom gebuchten
+    /// Saldo abweicht (es also vorgemerkte Lastschriften gibt) — sonst `nil` → keine Sub-Zeile.
+    var availableBalance: Double? = nil
 
     @Environment(\.colorScheme) private var environmentColorScheme
 
@@ -5279,6 +5305,33 @@ private struct StatusBalanceFlyoutCardView: View {
         let formatted = Self.leftToPayFormatter.string(from: NSNumber(value: amount))
             ?? "\(Int(amount)) €"
         return L10n.t("Noch offen: \(formatted)", "Still to pay: \(formatted)")
+    }
+
+    /// "Verfügbar: 1.184,56 €" — nur wenn `availableBalance` gesetzt ist (= es gibt vorgemerkte
+    /// Ausgaben). Bewusst eine eigene, ruhige Mini-Zeile statt eines neuen Subtitle-Toggle-Modes.
+    private var availableBalanceLine: String? {
+        guard let avail = availableBalance else { return nil }
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .currency
+        f.currencyCode = (currency?.isEmpty == false) ? currency! : "EUR"
+        f.maximumFractionDigits = 2
+        let formatted = f.string(from: NSNumber(value: avail)) ?? String(format: "%.2f €", avail)
+        return L10n.t("Nach Vormerkungen: \(formatted)", "After pending: \(formatted)")
+    }
+
+    @ViewBuilder
+    private var availableBalanceSubline: some View {
+        if let line = availableBalanceLine {
+            Text(line)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundColor(Color(NSColor.tertiaryLabelColor))
+                .lineLimit(1)
+                .help(L10n.t(
+                    "Gebuchter Saldo abzüglich vorgemerkter Ausgaben (ohne vorgemerkte Eingänge).",
+                    "Booked balance minus pending debits (pending credits excluded)."
+                ))
+        }
     }
 
     @AppStorage("balanceSubtitleStyle.flyout") private var flyoutSubtitleStyle: Int = 0
@@ -5424,6 +5477,7 @@ private struct StatusBalanceFlyoutCardView: View {
                         .minimumScaleFactor(0.7)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
                     leftToPaySubtitle
+                    availableBalanceSubline
                 }
                 Spacer()
                 // Mini account bars — same 72pt height as GreenZoneRing
@@ -5524,6 +5578,7 @@ private struct StatusBalanceFlyoutCardView: View {
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
 
                     leftToPaySubtitle
+                    availableBalanceSubline
                 }
                 Spacer()
                 if greenZoneRingEnabled {

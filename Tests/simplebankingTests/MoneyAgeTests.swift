@@ -18,6 +18,18 @@ final class MoneyAgeTests: XCTestCase {
         XCTAssertEqual(result.band, .unknown)
     }
 
+    func test_minMaxDays_acrossWindow() {
+        let entries = [
+            entry(daysOffset: 0, amount: 1000),
+            entry(daysOffset: 5, amount: -10),
+            entry(daysOffset: 20, amount: -10),
+        ]
+        let r = MoneyAge.calculate(entries: entries)
+        XCTAssertEqual(r.minDays, 5, accuracy: 0.001)
+        XCTAssertEqual(r.maxDays, 20, accuracy: 0.001)
+        XCTAssertEqual(r.averageDays, 12.5, accuracy: 0.001)
+    }
+
     func test_onlyInflows_returnsUnknown() {
         let entries = [
             entry(daysOffset: 0, amount: 1000),

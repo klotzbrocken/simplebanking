@@ -131,13 +131,13 @@ enum FixedCostsAnalyzer {
             }
         }
 
-        // Filter out merchants the user has explicitly excluded.
-        // Reading directly from UserDefaults so HealthScorer + Report also respect it.
-        let excludedRaw = UserDefaults.standard.string(forKey: "fixedCosts.excluded") ?? ""
-        let excluded = Set(excludedRaw.components(separatedBy: "\n").filter { !$0.isEmpty })
+        // Filter out merchants the user has excluded. Reads the UNIFIED RecurringAssignments store
+        // (shared with SubscriptionsView) so an exclusion made anywhere applies everywhere —
+        // HealthScorer, SimpleReport, AttentionInbox + the Abo-UI all honor the same corrections.
+        let excluded = RecurringAssignments.current().excludedCanonicalKeys()
 
         return recurring
-            .filter { excluded.isEmpty || !excluded.contains($0.groupKey) }
+            .filter { excluded.isEmpty || !excluded.contains(RecurringAssignments.canonicalKey($0.groupKey)) }
             .sorted { $0.averageAmount > $1.averageAmount }
     }
     
@@ -645,30 +645,34 @@ struct FixedCostsView: View {
     @State private var animProgress: Double = 0
     @State private var sonstigeExpanded = false
     @State private var excludedExpanded = false
-    // "fixedCosts.excluded" is the canonical key — also read by FixedCostsAnalyzer.analyze()
-    // so exclusions propagate to the Health Score and simple.report automatically.
-    @AppStorage("fixedCosts.excluded") private var excludedRaw: String = ""
+    // Unified correction store (shared with SubscriptionsView + FixedCostsAnalyzer.analyze) so an
+    // exclusion here applies everywhere — Health Score, SimpleReport, Abo-Liste, Kalender.
+    @AppStorage(RecurringAssignments.storageKey) private var assignmentsRaw: String = ""
 
     // MARK: Exclusion set helpers
 
-    private var excludedSet: Set<String> {
-        Set(excludedRaw.components(separatedBy: "\n").filter { !$0.isEmpty })
+    private var assignments: RecurringAssignments { RecurringAssignments.decode(assignmentsRaw) }
+
+    /// Excluded canonical keys (merchant bases), shared across the app.
+    private var excludedSet: Set<String> { assignments.excludedCanonicalKeys() }
+
+    private func exclude(_ key: String) {
+        assignmentsRaw = assignments.setting(key) { a in
+            a.state = .excluded
+            a.tab = nil
+        }.jsonString
     }
 
-    private func exclude(_ merchant: String) {
-        var s = excludedSet
-        s.insert(merchant)
-        excludedRaw = s.joined(separator: "\n")
-    }
-
-    private func include(_ merchant: String) {
-        var s = excludedSet
-        s.remove(merchant)
-        excludedRaw = s.joined(separator: "\n")
+    private func include(_ key: String) {
+        assignmentsRaw = assignments.setting(key) { a in a.state = .neutral }.jsonString
     }
 
     private func resetExcluded() {
-        excludedRaw = ""
+        var a = assignments
+        for k in a.excludedCanonicalKeys() {
+            a = a.setting(k) { $0.state = .neutral }
+        }
+        assignmentsRaw = a.jsonString
     }
 
     // MARK: Derived data (all excluding user-excluded)
@@ -676,7 +680,7 @@ struct FixedCostsView: View {
     private var visiblePayments: [RecurringPayment] {
         // analyze() already filters exclusions, but guard here too for
         // immediate visual feedback when user excludes within the open sheet.
-        payments.filter { !excludedSet.contains($0.groupKey) }
+        payments.filter { !assignments.isExcluded($0.groupKey) }
     }
 
     private func monthlyAmount(_ p: RecurringPayment) -> Double {
@@ -862,7 +866,7 @@ struct FixedCostsView: View {
                                 }
                                 .padding(.horizontal, 12)
                                 ForEach(excludedSet.sorted(), id: \.self) { key in
-                                    let displayName = key.contains("|") ? String(key.split(separator: "|").first ?? Substring(key)) : key
+                                    let displayName = key.isEmpty ? key : key.prefix(1).uppercased() + key.dropFirst()
                                     HStack {
                                         Text(displayName)
                                             .font(.system(size: 12))

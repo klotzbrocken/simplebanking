@@ -1,9 +1,30 @@
 import SwiftUI
 
+/// Anzeige-Modus des Kalenders.
+/// • `.spending` — klassische Ausgaben-/Einnahmen-Heatmap (Standalone-Sheet im Umsatzpanel).
+/// • `.subscriptions` — Abo-Fokus: Monats-Abo-Summe + Klassifizierung im Header, erwartete
+///   Abbuchungen als schraffierte Forecast-Tage in der Zukunft. Eingebettet in SubscriptionsView.
+enum CalendarMode {
+    case spending
+    case subscriptions
+}
+
 struct CalendarHeatmapView: View {
 
     @AppStorage("demoMode") private var demoMode: Bool = false
     @AppStorage("demoSeed") private var demoSeed: Int = 123456
+
+    /// Modus — steuert Header, Forecast und Zukunfts-Navigation.
+    var mode: CalendarMode = .spending
+    /// Abo-Buchungen für den `.subscriptions`-Modus — vergangene (`isForecast == false`) UND
+    /// projizierte (`isForecast == true`). Wird von außen aus DENSELBEN Candidates gebaut, die auch
+    /// die Liste zeigt → Kalender und Liste sind deckungsgleich. Im `.spending`-Modus ungenutzt.
+    var subscriptionCharges: [UpcomingCharge] = []
+    /// Ø Monatskosten aller Abos — nur für die Monats-Klassifizierung im Header.
+    var subscriptionAvgMonthly: Double = 0
+    /// `true`, wenn die View in einen Container eingebettet ist (kein eigener Schließen-Button,
+    /// keine feste Fenstergröße).
+    var embedded: Bool = false
 
     @StateObject private var logoStore = SubscriptionLogoStore.shared
 
@@ -20,6 +41,7 @@ struct CalendarHeatmapView: View {
     @State private var showDaySheet = false
     @State private var sheetDay: Int = 0
     @State private var sheetDayData: DayData = DayData()
+    @State private var sheetForecast: [UpcomingCharge] = []
 
     @Environment(\.dismiss) private var dismiss
 
@@ -138,6 +160,70 @@ struct CalendarHeatmapView: View {
         return result
     }
 
+    // MARK: - Subscriptions (subscriptions mode)
+
+    /// Abo-Buchungen, die in den angezeigten Monat fallen (vergangen + projiziert).
+    private var monthCharges: [UpcomingCharge] {
+        guard mode == .subscriptions else { return [] }
+        let monthKey = displayedMonthKey
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone.current
+        fmt.dateFormat = "yyyy-MM"
+        return subscriptionCharges.filter { fmt.string(from: $0.date) == monthKey }
+    }
+
+    /// Tag → Abo-Buchungen dieses Tages.
+    private var chargesByDay: [Int: [UpcomingCharge]] {
+        var result: [Int: [UpcomingCharge]] = [:]
+        let cal = Calendar(identifier: .gregorian)
+        for c in monthCharges {
+            let day = cal.component(.day, from: c.date)
+            result[day, default: []].append(c)
+        }
+        return result
+    }
+
+    /// Summe der Abo-Kosten in diesem Monat (absolut).
+    private var monthSubscriptionTotal: Double {
+        monthCharges.reduce(0) { $0 + abs($1.amount) }
+    }
+
+    /// Klassifizierung des Monats vs. dem Ø-Monatsbudget aller Abos: „Günstiger / Regulärer / Teurer Monat".
+    private var monthClassification: (text: String, color: Color)? {
+        guard mode == .subscriptions, monthSubscriptionTotal > 0 else { return nil }
+        guard subscriptionAvgMonthly > 0 else { return (L10n.t("Regulärer Monat", "Regular month"), .sbNeutralStrong) }
+        let ratio = monthSubscriptionTotal / subscriptionAvgMonthly
+        if ratio > 1.15 { return (L10n.t("Teurer Monat", "Heavy month"), .expenseRed) }
+        if ratio < 0.85 { return (L10n.t("Günstiger Monat", "Light month"), .incomeGreen) }
+        return (L10n.t("Regulärer Monat", "Regular month"), .sbNeutralStrong)
+    }
+
+    /// Eindeutige Händler eines Tages (für Icon-Reihe), Reihenfolge stabil.
+    private func uniqueMerchants(_ charges: [UpcomingCharge]) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for c in charges where !seen.contains(c.merchant) {
+            seen.insert(c.merchant); out.append(c.merchant)
+        }
+        return out
+    }
+
+    /// Forecast-Horizont: aktueller Monat + 12 Monate (für Zukunfts-Navigation im Abo-Modus).
+    private var forecastHorizonMonth: Date {
+        gregorian.date(byAdding: .month, value: 12, to: currentMonthStart) ?? currentMonthStart
+    }
+
+    private var isAtForecastHorizon: Bool {
+        gregorian.isDate(displayedMonth, equalTo: forecastHorizonMonth, toGranularity: .month)
+            || displayedMonth >= forecastHorizonMonth
+    }
+
+    /// Vorwärts-Navigation gesperrt? Im Abo-Modus bis zum Forecast-Horizont erlaubt, sonst am aktuellen Monat.
+    private var forwardDisabled: Bool {
+        mode == .subscriptions ? isAtForecastHorizon : isCurrentMonth
+    }
+
     // MARK: - Summary helpers
 
     /// Label für die Summary-Card: Tagesname wenn Tag gewählt, sonst Monatsname
@@ -173,44 +259,74 @@ struct CalendarHeatmapView: View {
 
     private let weekdayLabels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
+    // MARK: - Month picker
+
+    /// Auswählbare Monate für das Sprung-Menü: 13 Monate zurück bis aktueller Monat
+    /// (bzw. bis Forecast-Horizont im Abo-Modus), neueste zuerst.
+    private var selectableMonths: [Date] {
+        let cal = gregorian
+        let start = cal.date(byAdding: .month, value: -13, to: currentMonthStart) ?? currentMonthStart
+        let end = (mode == .subscriptions) ? forecastHorizonMonth : currentMonthStart
+        var months: [Date] = []
+        var d = start
+        var safety = 0
+        while d <= end {
+            months.append(d)
+            guard let n = cal.date(byAdding: .month, value: 1, to: d) else { break }
+            d = n; safety += 1; if safety > 60 { break }
+        }
+        return months.reversed()
+    }
+
+    private func monthLabel(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMMM yyyy"
+        fmt.locale = Locale(identifier: "de_DE")
+        return fmt.string(from: date)
+    }
+
     // MARK: - Body
+
+    /// Monats-Menu + Vor/Zurück-Pfeile (Trailing für den Geldfluss-Kopf bzw. Inline im Abo-Modus).
+    @ViewBuilder private var monthNav: some View {
+        HStack(spacing: 10) {
+            Menu {
+                ForEach(selectableMonths, id: \.self) { m in
+                    Button(monthLabel(m)) { displayedMonth = m; selectedDay = nil }
+                }
+            } label: { MenuTriggerLabel(text: monthTitle) }
+            .menuStyle(.borderlessButton).fixedSize()
+
+            Button { navigateMonth(-1) } label: { Image(systemName: "chevron.left").font(.system(size: 13, weight: .medium)) }
+                .buttonStyle(.plain)
+            Button { navigateMonth(1) } label: { Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)) }
+                .buttonStyle(.plain)
+                .disabled(forwardDisabled).opacity(forwardDisabled ? 0.3 : 1)
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Navigation (kein Monatstitel — steht in der Kachel) ─────
-            HStack {
-                Spacer()
-                HStack(spacing: 12) {
-                    Button { navigateMonth(-1) } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .buttonStyle(PlainButtonStyle())
+            // ── Kopf ───────────────────────────────────────────
+            if mode == .spending {
+                TabHeader("Geldfluss", subtitle: "Ausgaben & Eingänge pro Tag") { monthNav }
+                Divider()
+            } else {
+                HStack { Spacer(); monthNav }
+                    .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
+            }
 
-                    Button { navigateMonth(1) } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .disabled(isCurrentMonth)
-                    .opacity(isCurrentMonth ? 0.3 : 1)
-
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+            // ── Summary Card (Balance-Card-Stil) ─────────────────────────
+            Group {
+                if mode == .subscriptions {
+                    subscriptionsSummaryPanel
+                } else {
+                    summaryPanel
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-
-            // ── Summary Card (Balance-Card-Stil) ─────────────────────────
-            summaryPanel
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+            .padding(.top, mode == .spending ? 12 : 0)
+            .padding(.bottom, 12)
 
             // ── Kalender-Block (Wochentage + Grid) mit Rahmen ───────────
             VStack(spacing: 0) {
@@ -235,10 +351,12 @@ struct CalendarHeatmapView: View {
                 ProgressView().controlSize(.regular).padding()
                 Spacer()
             } else {
-                let data     = dataByDay
+                let subMode  = (mode == .subscriptions)
+                let data     = subMode ? [:] : dataByDay
                 let maxExp   = maxDayExpense
                 let maxInc   = maxDayIncome
-                let abos     = abosByDay
+                let abos     = subMode ? [:] : abosByDay
+                let charges  = subMode ? chargesByDay : [:]
                 let offset   = firstWeekdayOffset
                 let days     = daysInMonth
 
@@ -272,21 +390,42 @@ struct CalendarHeatmapView: View {
                                     return expenseDom ? expenseColor(intensity: expIntensity)
                                                       : incomeColor(intensity: incIntensity)
                                 }()
+                                let dayAbos = abos[day] ?? []
+                                let dayCharges = charges[day] ?? []
+                                let hasSub = subMode && !dayCharges.isEmpty
+                                let isForecastDay = hasSub && dayCharges.allSatisfy { $0.isForecast }
+                                let subMerchants = subMode ? uniqueMerchants(dayCharges) : []
+                                let active = subMode ? hasSub : hasTx
+
                                 let bgColor: Color = {
                                     if isSelected { return Color.accentColor.opacity(0.15) }
+                                    if isForecastDay { return Color.sbNeutralSoft.opacity(0.6) }
+                                    if subMode {
+                                        return hasSub ? Color.sbNeutralSoft.opacity(0.35)
+                                                      : Color(NSColor.quaternaryLabelColor).opacity(0.06)
+                                    }
                                     if !hasTx     { return Color(NSColor.quaternaryLabelColor).opacity(0.06) }
                                     return heatColor.opacity(0.18)
                                 }()
 
-                                let dayAbos = abos[day] ?? []
-
                                 VStack(spacing: 3) {
                                     Text("\(day)")
                                         .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(hasTx ? .primary : Color(NSColor.secondaryLabelColor))
+                                        .foregroundColor(active ? .primary : Color(NSColor.secondaryLabelColor))
                                         .padding(.top, 4)
 
-                                    if !dayAbos.isEmpty {
+                                    if subMode {
+                                        if hasSub {
+                                            HStack(spacing: 3) {
+                                                ForEach(subMerchants.prefix(3), id: \.self) { name in
+                                                    aboIcon(name: name)
+                                                }
+                                            }
+                                            .opacity(isForecastDay ? 0.85 : 1)
+                                        } else {
+                                            Color.clear.frame(height: 22)
+                                        }
+                                    } else if !dayAbos.isEmpty {
                                         HStack(spacing: 3) {
                                             ForEach(dayAbos.prefix(3), id: \.self) { name in
                                                 aboIcon(name: name)
@@ -299,7 +438,7 @@ struct CalendarHeatmapView: View {
                                     Spacer(minLength: 0)
 
                                     Rectangle()
-                                        .fill(hasTx ? heatColor : Color.clear)
+                                        .fill(subMode ? Color.clear : (hasTx ? heatColor : Color.clear))
                                         .frame(height: 3)
                                         .cornerRadius(1.5)
                                         .padding(.bottom, 3)
@@ -311,22 +450,48 @@ struct CalendarHeatmapView: View {
                                     RoundedRectangle(cornerRadius: 6)
                                         .fill(bgColor)
                                         .overlay(
+                                            Group {
+                                                if isForecastDay {
+                                                    DiagonalHatch(spacing: 5)
+                                                        .stroke(Color.sbOrangeStrong.opacity(0.22), lineWidth: 1)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                                }
+                                            }
+                                        )
+                                        .overlay(
                                             RoundedRectangle(cornerRadius: 6)
                                                 .strokeBorder(
-                                                    isSelected ? Color.accentColor.opacity(0.4) : Color.clear,
-                                                    lineWidth: 1
+                                                    isSelected ? Color.accentColor.opacity(0.4)
+                                                        : (isForecastDay ? Color.sbOrangeStrong.opacity(0.35) : Color.clear),
+                                                    style: StrokeStyle(lineWidth: 1, dash: isForecastDay ? [3, 2] : [])
                                                 )
                                         )
                                 )
+                                .overlay(alignment: .topTrailing) {
+                                    if isForecastDay {
+                                        Image(systemName: "clock.arrow.circlepath")
+                                            .font(.system(size: 8, weight: .semibold))
+                                            .foregroundColor(Color.sbOrangeStrong)
+                                            .padding(3)
+                                    }
+                                }
                                 .onTapGesture(count: 2) {
-                                    if let d = dayData {
+                                    if subMode {
+                                        if hasSub {
+                                            sheetDay      = day
+                                            sheetDayData  = DayData()
+                                            sheetForecast = dayCharges
+                                            showDaySheet  = true
+                                        }
+                                    } else if let d = dayData {
                                         sheetDay     = day
                                         sheetDayData = d
+                                        sheetForecast = []
                                         showDaySheet = true
                                     }
                                 }
                                 .onTapGesture(count: 1) {
-                                    if dayData != nil {
+                                    if active {
                                         selectedDay = (selectedDay == day) ? nil : day
                                     }
                                 }
@@ -349,14 +514,16 @@ struct CalendarHeatmapView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
         }
-        .frame(width: 420, height: 620)
+        .frame(width: embedded ? nil : 420, height: embedded ? nil : 620)
+        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .background(Color.panelBackground)
         .onAppear { loadFromDatabase() }
         .sheet(isPresented: $showDaySheet) {
             CalendarDaySheet(
                 day: sheetDay,
                 month: displayedMonth,
-                records: sheetDayData.records
+                records: sheetDayData.records,
+                forecast: sheetForecast
             )
         }
     }
@@ -412,6 +579,46 @@ struct CalendarHeatmapView: View {
                 )
         )
         .animation(.easeInOut(duration: 0.15), value: selectedDay)
+    }
+
+    // MARK: - Subscriptions Summary Panel (Monats-Abo-Summe + Klassifizierung)
+
+    private var subscriptionsSummaryPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(monthTitle)
+                .font(.system(size: 14))
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
+
+            // New-York-Serif für die Premium-Anmutung (wie der Saldo im Flyout)
+            Text(monthSubscriptionTotal > 0 ? "-\(formatAmount(monthSubscriptionTotal))" : formatAmount(0))
+                .font(.system(size: 32, weight: .bold, design: .serif))
+                .foregroundColor(monthSubscriptionTotal > 0 ? Color.expenseRed : Color(NSColor.tertiaryLabelColor))
+                .monospacedDigit()
+
+            if let cls = monthClassification {
+                Text(cls.text)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(cls.color)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(cls.color.opacity(0.14)))
+            } else {
+                Text(L10n.t("Keine wiederkehrenden Abbuchungen erkannt",
+                            "No recurring charges detected"))
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(NSColor.tertiaryLabelColor))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Abo Icon
@@ -487,11 +694,15 @@ struct CalendarHeatmapView: View {
     }
 
     private func preloadAboLogos() {
-        let allNames = Set(abosByDay.values.flatMap { $0 })
-        logoStore.preloadInitial(displayNames: Array(allNames))
+        let names: Set<String> = (mode == .subscriptions)
+            ? Set(subscriptionCharges.map { $0.merchant })
+            : Set(abosByDay.values.flatMap { $0 })
+        logoStore.preloadInitial(displayNames: Array(names))
     }
 
     private func jumpToLatestWithDataIfNeeded() {
+        // Im Abo-Modus auf dem aktuellen Monat bleiben (zeigt laufende + erwartete Abbuchungen).
+        guard mode != .subscriptions else { return }
         guard !hasAutoNavigated else { return }
         let origin = currentMonthStart
         for i in 0...12 {
@@ -520,8 +731,15 @@ private struct CalendarDaySheet: View {
     let day: Int
     let month: Date
     let records: [TransactionRecord]
+    var forecast: [UpcomingCharge] = []
 
     @Environment(\.dismiss) private var dismiss
+
+    private var isForecast: Bool { records.isEmpty && !forecast.isEmpty }
+
+    private var anyForecast: Bool { forecast.contains { $0.isForecast } }
+
+    private var forecastTotal: Double { forecast.reduce(0) { $0 + abs($1.amount) } }
 
     private var dayTitle: String {
         var comps = Calendar.current.dateComponents([.year, .month], from: month)
@@ -550,32 +768,78 @@ private struct CalendarDaySheet: View {
 
             Divider()
 
+            if isForecast {
+                HStack(spacing: 6) {
+                    Image(systemName: anyForecast ? "clock.arrow.circlepath" : "checkmark.circle")
+                        .font(.system(size: 12))
+                        .foregroundColor(anyForecast ? Color.sbOrangeStrong : .secondary)
+                    Text(anyForecast
+                         ? L10n.t("Vorgemerkt — basiert auf erkannten Abos · erwartet \(formatAmount(-forecastTotal))",
+                                  "Forecast — based on detected subscriptions · expected \(formatAmount(-forecastTotal))")
+                         : L10n.t("Abo-Abbuchungen · \(formatAmount(-forecastTotal))",
+                                  "Subscription charges · \(formatAmount(-forecastTotal))"))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+            }
+
             ScrollView {
                 VStack(spacing: 8) {
-                    ForEach(records, id: \.txID) { rec in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(rec.empfaenger ?? rec.absender ?? "(unbekannt)")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .lineLimit(1)
-                                if let vwz = rec.verwendungszweck, !vwz.isEmpty {
-                                    Text(vwz)
+                    if isForecast {
+                        ForEach(forecast) { charge in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(charge.merchant)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .lineLimit(1)
+                                    Text(charge.isForecast
+                                         ? L10n.t("\(charge.frequency.rawValue) · vorgemerkt", "\(charge.frequency.rawValue) · forecast")
+                                         : charge.frequency.rawValue)
                                         .font(.system(size: 11))
                                         .foregroundColor(.secondary)
-                                        .lineLimit(2)
                                 }
+                                Spacer()
+                                Text(formatAmount(charge.amount))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(charge.isForecast ? Color.sbOrangeStrong : Color.expenseRed)
                             }
-                            Spacer()
-                            Text(formatAmount(rec.betrag))
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(rec.betrag < 0 ? .expenseRed : .incomeGreen)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(charge.isForecast ? Color.sbNeutralSoft.opacity(0.5)
+                                                            : Color(NSColor.quaternaryLabelColor).opacity(0.08))
+                            )
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color(NSColor.quaternaryLabelColor).opacity(0.08))
-                        )
+                    } else {
+                        ForEach(records, id: \.txID) { rec in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(rec.empfaenger ?? rec.absender ?? "(unbekannt)")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .lineLimit(1)
+                                    if let vwz = rec.verwendungszweck, !vwz.isEmpty {
+                                        Text(vwz)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                }
+                                Spacer()
+                                Text(formatAmount(rec.betrag))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(rec.betrag < 0 ? .expenseRed : .incomeGreen)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(NSColor.quaternaryLabelColor).opacity(0.08))
+                            )
+                        }
                     }
                 }
                 .padding(12)
@@ -594,5 +858,23 @@ private struct CalendarDaySheet: View {
         fmt.maximumFractionDigits = 2
         let formatted = fmt.string(from: NSNumber(value: absVal)) ?? String(format: "%.2f", absVal)
         return (value >= 0 ? "+" : "-") + formatted + " €"
+    }
+}
+
+// MARK: - Diagonal Hatch (Forecast-Tage)
+
+/// Diagonale Schraffur für „vorgemerkte" Forecast-Tage im Kalender.
+private struct DiagonalHatch: Shape {
+    var spacing: CGFloat = 5
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        var x = -rect.height
+        while x < rect.width {
+            p.move(to: CGPoint(x: x, y: rect.height))
+            p.addLine(to: CGPoint(x: x + rect.height, y: 0))
+            x += spacing
+        }
+        return p
     }
 }

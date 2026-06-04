@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 final class MMIViewModel: ObservableObject {
 
-    @Published var period: MMIPeriod = .quarter {
+    @Published var period: MMIPeriod = .max {
         didSet { resetPlan() }
     }
     @Published var planMode: Bool = false {
@@ -28,7 +28,7 @@ final class MMIViewModel: ObservableObject {
             expenses: planExpenses,
             savings:  planSavings,
             balance:  planBalance,
-            period:   period
+            periodMonths: period.monthsSpan()
         )
     }
 
@@ -39,7 +39,8 @@ final class MMIViewModel: ObservableObject {
     // MARK: Load
 
     func load(transactions: [TransactionsResponse.Transaction], balance: Double) {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -period.days, to: Date()) ?? Date()
+        let now = Date()
+        let cutoff = period.cutoffDate(asOf: now)
         let recent = transactions.filter { txDate($0) >= cutoff }
 
         let income   = recent.filter { $0.mmiKind == .income  }.reduce(0.0) { $0 + $1.parsedAmount }
@@ -54,7 +55,7 @@ final class MMIViewModel: ObservableObject {
             expenses: expenses,
             savings:  savings,
             balance:  balance,
-            period:   period
+            periodMonths: period.monthsSpan(asOf: now)
         )
         resetPlan()
     }

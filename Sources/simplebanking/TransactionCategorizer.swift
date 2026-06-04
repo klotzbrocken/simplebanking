@@ -141,6 +141,12 @@ enum TransactionCategorizer {
             return override
         }
 
+        // Reusable user assignment rules win over the stored/auto category (explicit intent),
+        // but not over the per-transaction override above.
+        if let ruleCategory = AssignmentRules.firstCategory(for: transaction) {
+            return ruleCategory
+        }
+
         if let storedCategory = transaction.category,
            let parsedStored = TransactionCategory.from(displayName: storedCategory) {
             return parsedStored
@@ -181,6 +187,14 @@ enum TransactionCategorizer {
         // activeSlot-Override auf gleichfingerprint Tx in anderen Slots.
         if let override = overrideCategory(txID: txID, slotId: slotId) {
             return override
+        }
+
+        if let ruleCategory = AssignmentRules.firstCategory(for: RuleInput(
+            amount: amount, empfaenger: empfaenger, absender: absender,
+            verwendungszweck: verwendungszweck, additionalInformation: additionalInformation,
+            endToEndId: nil, merchant: effectiveMerchant ?? ""
+        )) {
+            return ruleCategory
         }
 
         return classify(

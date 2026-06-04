@@ -64,6 +64,8 @@ struct TransactionDetailView: View {
     @State private var isApplyingCategoryChange: Bool = false
     @State private var categoryEditStatus: String = ""
     @State private var categorySelectionReady: Bool = false
+    @State private var ruleStatus: String = ""
+    @State private var showRulesManager: Bool = false
     // Enrichment state
     @State private var noteText: String = ""
     @State private var isSavingNote: Bool = false
@@ -335,6 +337,56 @@ struct TransactionDetailView: View {
         case .verwendungszweck:  return "Verwendungszweck"
         case .endToEndId:        return "End-to-End-ID"
         }
+    }
+
+    // MARK: - Zuordnung & Regeln (Kategorie-Regel + wiederkehrend markieren)
+
+    /// Erstellt eine wiederverwendbare Kategorie-Regel aus dem (bereits vorbefüllten) Muster + Scope
+    /// und der aktuell gewählten Kategorie.
+    private func saveCategoryRule() {
+        let pattern = rulePatternInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pattern.isEmpty else {
+            ruleStatus = "Bitte ein Suchmuster angeben."
+            return
+        }
+        let field: RuleField = {
+            switch rulePatternScope {
+            case .empfaenger:       return .empfaenger
+            case .verwendungszweck: return .verwendungszweck
+            case .endToEndId:       return .endToEndId
+            case .searchText:       return .searchText
+            }
+        }()
+        let cond = RuleCondition(field: field, op: .contains, value: pattern)
+        AssignmentRules.add(AssignmentRules.make(conditions: [cond], setCategory: selectedCategory, recurring: nil))
+        ruleStatus = "Regel: \(pattern) → \(selectedCategory.displayName)"
+    }
+
+    /// Kanonischer Recurring-Key dieser Buchung (gleiche Merchant-Basis wie beide Engines).
+    private var recurringKey: String { FixedCostsAnalyzer.merchantName(for: transaction) }
+
+    private func markRecurring(_ tab: SubscriptionTab) {
+        RecurringAssignments.current().setting(recurringKey) { a in
+            a.tab = tab.rawValue
+            if a.state != .excluded { a.state = .confirmed }
+        }.save()
+        ruleStatus = "Als \(tab.rawValue) markiert."
+    }
+
+    private func excludeRecurring() {
+        RecurringAssignments.current().setting(recurringKey) { a in
+            a.state = .excluded
+            a.tab = nil
+        }.save()
+        ruleStatus = "Als kein Abo/Fixkost ausgeschlossen."
+    }
+
+    private func clearRecurringMark() {
+        RecurringAssignments.current().setting(recurringKey) { a in
+            a.state = .neutral
+            a.tab = nil
+        }.save()
+        ruleStatus = "Markierung entfernt."
     }
 
     private func removeSingleOverride() {
@@ -707,6 +759,48 @@ struct TransactionDetailView: View {
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
+                        Text("Zuordnung & Regeln")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.secondary)
+
+                        HStack(spacing: 8) {
+                            Button("Kategorie-Regel erstellen") { saveCategoryRule() }
+                                .buttonStyle(.bordered)
+                                .help("Wiederverwendbare Regel: \(rulePatternInput) zu \(selectedCategory.displayName)")
+
+                            Menu("Als wiederkehrend markieren") {
+                                Button("Abo") { markRecurring(.abos) }
+                                Button("Vertrag") { markRecurring(.vertraege) }
+                                Button("Sparen") { markRecurring(.sparen) }
+                                Button("Verbindlichkeit") { markRecurring(.verbindlichkeiten) }
+                                Divider()
+                                Button("Kein Abo / ausschließen", role: .destructive) { excludeRecurring() }
+                                Button("Markierung entfernen") { clearRecurringMark() }
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
+
+                            Spacer()
+
+                            Button("Regeln verwalten…") { showRulesManager = true }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 12))
+                                .foregroundColor(.sbBlueMid)
+                        }
+
+                        if !ruleStatus.isEmpty {
+                            Text(ruleStatus)
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.cardBackground)
+                    )
+
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("Angezeigter Empfänger")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.secondary)
@@ -963,6 +1057,9 @@ struct TransactionDetailView: View {
                 },
                 onCancel: { showReminderPicker = false }
             )
+        }
+        .sheet(isPresented: $showRulesManager) {
+            RulesManagerView(transactions: [transaction])
         }
     }
 

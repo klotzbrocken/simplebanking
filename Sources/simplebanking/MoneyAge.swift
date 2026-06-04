@@ -34,6 +34,11 @@ struct Result: Equatable {
         /// Dispokredit oder Daten-Lücken am Anfang des Zeitraums.
     let uncoveredExpenses: Int
     let band: Band
+        /// Jüngste/älteste Einzel-Ausgabe im Fenster (Tage).
+    var minDays: Double = 0
+    var maxDays: Double = 0
+        /// Durchschnitt des vorherigen Fensters (für Trend) — `nil` wenn zu wenig Historie.
+    var previousAverageDays: Double? = nil
     }
 
 enum Band: String, Equatable {
@@ -119,12 +124,18 @@ static func calculate(
             )
         }
         let avg = window.reduce(0, +) / Double(window.count)
+        let n = max(1, windowSize)
+        let prevWindow = Array(perExpenseAges.dropLast(window.count).suffix(n))
+        let previousAvg = prevWindow.isEmpty ? nil : prevWindow.reduce(0, +) / Double(prevWindow.count)
         return Result(
             averageDays: avg,
             sampleSize: window.count,
             totalExpenses: totalExpenses,
             uncoveredExpenses: uncovered,
-            band: Band.from(days: avg)
+            band: Band.from(days: avg),
+            minDays: window.min() ?? 0,
+            maxDays: window.max() ?? 0,
+            previousAverageDays: previousAvg
         )
     }
 

@@ -6,6 +6,8 @@ private struct TransactionsPanelView: View {
     @ObservedObject var vm: TransactionsViewModel
     let onRefresh: () async -> Void
     @ObservedObject var accountNav: AccountNavModel
+    /// Öffnet das einheitliche Dashboard am gewünschten Tab (löst die Einzel-Sheets ab).
+    var onOpenDashboard: ((DashboardTab) -> Void)? = nil
     @ObservedObject private var logoStore = BankLogoStore.shared
     @ObservedObject private var multibankingStore = MultibankingStore.shared
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
@@ -32,10 +34,6 @@ private struct TransactionsPanelView: View {
     @AppStorage("subscriptions.tabOverrides")  private var subscriptionOverridesRaw: String = ""
     @Environment(\.colorScheme) private var environmentColorScheme
     
-    @State private var showScoreSheet = false
-    @State private var showFixedCosts = false
-    @State private var showMoneyAge = false
-    @State private var fixedCostPayments: [RecurringPayment] = []
     @ObservedObject private var roundupView = RoundupViewState.shared
     @State private var showAttentionInbox = false
     @State private var attentionCards: [AttentionCard] = []
@@ -45,8 +43,6 @@ private struct TransactionsPanelView: View {
     /// direkt wieder angezeigt werden. Invalidiert sich automatisch bei neuen Tx
     /// oder Reminder-Änderungen, weil sich der Hash ändert.
     @State private var attentionCacheSignature: String?
-    @State private var showSubscriptions = false
-    @State private var showCalendar = false
     @State private var selectedTxID: String? = nil
     @State private var activeSwipedTxID: String? = nil
     @State private var reminderPickerTxID: String? = nil
@@ -252,26 +248,6 @@ private struct TransactionsPanelView: View {
         greenZoneFractionCached = SalaryProgressCalculator.greenZoneFraction(
             balance: balance,
             mediumThreshold: effectiveRef)
-    }
-
-    /// Load transaction history for FixedCosts analysis.
-    /// In demo mode: loads from transactions-demo.db (365 days, all 3 demo slots).
-    /// In real mode: loads 90 days from transactions.db so that subscriptions charging
-    /// early in the month always have 2+ occurrences.
-    private func recomputeFixedCosts() {
-        if demoMode {
-            let demoSlots = ["demo-main", "demo-daily", "demo-bills"]
-            let extended = try? TransactionsDatabase.loadUnifiedTransactions(slots: demoSlots, days: 365, bankId: "demo")
-            let txs = (extended?.isEmpty == false) ? extended! : vm.transactions
-            fixedCostPayments = FixedCostsAnalyzer.analyze(transactions: txs)
-        } else {
-            let slots: [String]? = vm.isUnifiedMode
-                ? MultibankingStore.shared.slots.map { $0.id }
-                : [TransactionsDatabase.activeSlotId]
-            let extended = (try? TransactionsDatabase.loadUnifiedTransactions(slots: slots, days: 90))
-                ?? vm.transactions
-            fixedCostPayments = FixedCostsAnalyzer.analyze(transactions: extended)
-        }
     }
 
     // MARK: - Attention Inbox snooze (persists until midnight next day)
@@ -1497,7 +1473,7 @@ private struct TransactionsPanelView: View {
                     }
 
                     // Abos
-                    Button(action: { showSubscriptions = true }) {
+                    Button(action: { onOpenDashboard?(.subscriptions) }) {
                         Image(systemName: "list.bullet.rectangle")
                             .font(.system(size: 15))
                             .foregroundColor(.secondary)
@@ -1537,7 +1513,7 @@ private struct TransactionsPanelView: View {
                     // Wenn Fenster maximiert: Financial Health, Kalender, Fixkosten als
                     // eigenständige Icon-Buttons. Sonst bleiben sie im „Mehr ▾"-Menü unten.
                     if panelIsWide {
-                        Button(action: { showScoreSheet = true }) {
+                        Button(action: { onOpenDashboard?(.overview) }) {
                             Image(systemName: "square.grid.2x2")
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
@@ -1545,7 +1521,7 @@ private struct TransactionsPanelView: View {
                         .buttonStyle(PlainButtonStyle())
                         .help(L10n.t("Financial Health", "Financial Health"))
 
-                        Button(action: { showCalendar.toggle() }) {
+                        Button(action: { onOpenDashboard?(.calendar) }) {
                             Image(systemName: "calendar.badge.clock")
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
@@ -1553,7 +1529,7 @@ private struct TransactionsPanelView: View {
                         .buttonStyle(PlainButtonStyle())
                         .help(L10n.t("Kalender", "Calendar"))
 
-                        Button(action: { showFixedCosts = true }) {
+                        Button(action: { onOpenDashboard?(.subscriptions) }) {
                             Image(systemName: "repeat.circle")
                                 .font(.system(size: 14))
                                 .foregroundColor(.secondary)
@@ -1565,20 +1541,20 @@ private struct TransactionsPanelView: View {
                     // Mehr ▾
                     Menu {
                         if !panelIsWide {
-                            Button(action: { showScoreSheet = true }) {
+                            Button(action: { onOpenDashboard?(.overview) }) {
                                 Label(L10n.t("Financial Health", "Financial Health"), systemImage: "square.grid.2x2")
                             }
 
-                            Button(action: { showCalendar.toggle() }) {
+                            Button(action: { onOpenDashboard?(.calendar) }) {
                                 Label(L10n.t("Kalender", "Calendar"), systemImage: "calendar.badge.clock")
                             }
 
-                            Button(action: { showFixedCosts = true }) {
+                            Button(action: { onOpenDashboard?(.subscriptions) }) {
                                 Label(L10n.t("Fixkosten", "Fixed costs"), systemImage: "repeat.circle")
                             }
                         }
 
-                        Button(action: { showMoneyAge = true }) {
+                        Button(action: { onOpenDashboard?(.moneyAge) }) {
                             Label(L10n.t("Money Age", "Money Age"), systemImage: "hourglass")
                         }
 
@@ -1733,22 +1709,6 @@ private struct TransactionsPanelView: View {
                 isInfiniteLoadingMore = false
             }
         }
-        .sheet(isPresented: $showScoreSheet) {
-            let balance = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance) ?? 0
-            FinancialHealthScoreView(transactions: vm.transactions, balance: balance)
-        }
-        .sheet(isPresented: $showFixedCosts) {
-            FixedCostsView(payments: fixedCostPayments)
-        }
-        .onChange(of: showFixedCosts) { isShown in
-            if isShown { recomputeFixedCosts() }
-        }
-        .sheet(isPresented: $showMoneyAge) {
-            MoneyAgeSheet(
-                transactions: vm.transactions,
-                onClose: { showMoneyAge = false }
-            )
-        }
         .sheet(isPresented: $showAttentionInbox) {
             AttentionInboxView(cards: attentionCards, onViewTransaction: { fingerprint in
                 showAttentionInbox = false
@@ -1768,12 +1728,6 @@ private struct TransactionsPanelView: View {
 
         .onChange(of: showAttentionInbox) { isShown in
             if isShown { recomputeAttentionInbox() }
-        }
-        .sheet(isPresented: $showSubscriptions) {
-            SubscriptionsView(transactions: vm.transactions)
-        }
-        .sheet(isPresented: $showCalendar) {
-            CalendarHeatmapView()
         }
         .sheet(isPresented: $showChatSheet) {
             ChatOverlaySheet(
@@ -3310,6 +3264,7 @@ final class AccountNavModel: ObservableObject {
     private var toolbarDelegate: TransactionsPanelToolbarDelegate?
     private var cancellables: Set<AnyCancellable> = []
     private let onSettings: (() -> Void)?
+    private let onOpenDashboard: ((DashboardTab) -> Void)?
 
     // MARK: - Stay on Top
 
@@ -3332,9 +3287,11 @@ final class AccountNavModel: ObservableObject {
         toolbarDelegate?.refreshPinButton()
     }
 
-    init(vm: TransactionsViewModel, onRefresh: @escaping () async -> Void = {}, onSettings: (() -> Void)? = nil) {
+    init(vm: TransactionsViewModel, onRefresh: @escaping () async -> Void = {}, onSettings: (() -> Void)? = nil,
+         onOpenDashboard: ((DashboardTab) -> Void)? = nil) {
         self.vm = vm
         self.onSettings = onSettings
+        self.onOpenDashboard = onOpenDashboard
         self.accountNav = AccountNavModel()
         panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 620),
@@ -3373,7 +3330,7 @@ final class AccountNavModel: ObservableObject {
         applyWindowLevel()   // restore persisted stay-on-top state
         configureTitlebar()
         let host = NSHostingView(rootView: TransactionsPanelView(
-            vm: vm, onRefresh: onRefresh, accountNav: accountNav
+            vm: vm, onRefresh: onRefresh, accountNav: accountNav, onOpenDashboard: onOpenDashboard
         ))
         host.translatesAutoresizingMaskIntoConstraints = false
 

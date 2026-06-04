@@ -12,20 +12,42 @@ enum MMIColors {
 
 // MARK: - Period
 
-enum MMIPeriod: Int, CaseIterable, Identifiable {
-    case month = 1, quarter = 3, year = 12
+enum MMIPeriod: String, CaseIterable, Identifiable {
+    case month, quarter, max
 
-    var id: Int { rawValue }
+    var id: String { rawValue }
 
     var label: String {
         switch self {
         case .month:   return "Dieser Monat"
         case .quarter: return "3 Monate"
-        case .year:    return "12 Monate"
+        case .max:     return "Max"
         }
     }
 
-    var days: Int { rawValue * 30 }
+    /// Untergrenze des betrachteten Zeitraums. `.max` = Anfang des aktuellen Kalenderjahres
+    /// (1. Jan) — gedeckelt auf „dieses Jahr", weil weiter zurück ohnehin keine Daten vorliegen.
+    func cutoffDate(asOf now: Date = Date(), calendar: Calendar = .current) -> Date {
+        switch self {
+        case .month:
+            return calendar.date(byAdding: .month, value: -1, to: now) ?? now
+        case .quarter:
+            return calendar.date(byAdding: .month, value: -3, to: now) ?? now
+        case .max:
+            let comps = calendar.dateComponents([.year], from: now)
+            return calendar.date(from: comps) ?? now
+        }
+    }
+
+    /// Anzahl Monate, über die für Puffer-/Burn-Rechnung normiert wird.
+    /// `.max` = Monate seit Jahresbeginn (Januar → 1 … Dezember → 12).
+    func monthsSpan(asOf now: Date = Date(), calendar: Calendar = .current) -> Double {
+        switch self {
+        case .month:   return 1
+        case .quarter: return 3
+        case .max:     return Double(calendar.component(.month, from: now))
+        }
+    }
 }
 
 // MARK: - Transaction Classification
@@ -78,7 +100,7 @@ struct MMIComponents {
     let expenses: Double
     let savings:  Double    // Abflüsse zu Spar-/Vorsorgekonten
     let balance:  Double    // Aktueller Kontostand (Girokonto)
-    let period:   MMIPeriod
+    let periodMonths: Double  // Monate, über die der Burn normiert wird (period.monthsSpan)
 
     /// Sparrate: kann negativ sein (wenn Ausgaben > Einkommen),
     /// wird aber auf [-1, 1] geclampt damit die Kennzahl semantisch haltbar bleibt.
@@ -98,7 +120,7 @@ struct MMIComponents {
 
     /// Reichweite des Kontostands in Monaten gegen den durchschnittlichen Burn.
     var bufferMonths: Double {
-        let monthlyExp = expenses / Double(period.rawValue)
+        let monthlyExp = expenses / max(periodMonths, 1)
         guard monthlyExp > 0 else { return balance > 0 ? .infinity : 0 }
         return max(balance / monthlyExp, 0)
     }
@@ -149,7 +171,7 @@ struct MMIComponents {
         return (expenses / total, savings / total, liquid / total)
     }
 
-    static let zero = MMIComponents(income: 0, expenses: 0, savings: 0, balance: 0, period: .quarter)
+    static let zero = MMIComponents(income: 0, expenses: 0, savings: 0, balance: 0, periodMonths: 3)
 }
 
 // MARK: - Rating

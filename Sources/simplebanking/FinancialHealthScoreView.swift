@@ -6,6 +6,7 @@ import SwiftUI
 struct FinancialHealthScoreView: View {
     let transactions: [TransactionsResponse.Transaction]
     let balance: Double
+    var embedded: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var vm = MMIViewModel()
@@ -17,172 +18,67 @@ struct FinancialHealthScoreView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // MARK: Header (pinned outside ScrollView)
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Financial Health")
-                        .font(.system(size: 24, weight: .bold))
-                    Text("Money Mass Index (MMI)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal)
-            .padding(.top, 24)
-            .padding(.bottom, 12)
-
-        ScrollView {
-            VStack(spacing: 24) {
-
-                // MARK: Period Picker
-                Picker("Zeitraum", selection: $vm.period) {
+            // MARK: Einheitlicher Kopf mit Zeitraum-Steuerung rechts
+            TabHeader("Financial Health", subtitle: "Money Mass Index (MMI)") {
+                Picker("", selection: $vm.period) {
                     ForEach(MMIPeriod.allCases) { p in Text(p.label).tag(p) }
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal)
+                .labelsHidden()
+                .frame(width: 230)
                 .onChange(of: vm.period) { _ in
                     vm.load(transactions: transactions, balance: balance)
                     resetAnimation()
                 }
-
-                // MARK: Ring
-                MMIRingView(
-                    components: vm.displayed,
-                    size: 220,
-                    lineWidth: 22,
-                    animProgress: animProgress
-                )
-                .padding(.vertical, 6)
-
-                // MARK: Legende / Info-Rows
-                VStack(alignment: .leading, spacing: 16) {
-                    MMIInfoRow(
-                        color: Self.expenseColor,
-                        title: "Ausgegeben",
-                        text: "Summe aller Ausgaben im Zeitraum.",
-                        value: formatCurrency(vm.displayed.expenses)
-                    )
-                    MMIInfoRow(
-                        color: Self.savingsColor,
-                        title: "Geparkt",
-                        text: "Erkannte Abflüsse zu Spar- und Vorsorgekonten.",
-                        value: formatCurrency(vm.displayed.savings)
-                    )
-                    MMIInfoRow(
-                        color: Self.liquidColor,
-                        title: "Liquide",
-                        text: String(format: "Kontostand — entspricht %.1f Monaten Ausgaben.", vm.displayed.bufferMonths),
-                        value: formatCurrency(vm.displayed.balance)
-                    )
-                }
-                .padding(.horizontal)
-
-                // MARK: Score-Kacheln
-                Divider()
-                    .background(Color.secondary.opacity(0.3))
-                    .padding(.horizontal)
-
-                HStack(spacing: 12) {
-                    MMIStatBox(
-                        title: "Score",
-                        value: String(format: "%.2f", vm.displayed.score * animProgress),
-                        color: vm.displayed.rating.color
-                    )
-                    MMIStatBox(
-                        title: "Sparrate",
-                        value: String(format: "%+.0f%%", vm.displayed.savingsRate * 100 * animProgress),
-                        color: vm.displayed.savingsRate >= 0 ? .sbBlueStrong : .sbRedStrong
-                    )
-                    MMIStatBox(
-                        title: "Puffer",
-                        value: String(format: "%.1f Mon.", vm.displayed.bufferMonths),
-                        color: Self.liquidColor
-                    )
-                }
-                .padding(.horizontal)
-
-                // MARK: Plan-Modus
-                Divider()
-                    .background(Color.secondary.opacity(0.3))
-                    .padding(.horizontal)
-
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Image(systemName: "slider.horizontal.3")
-                            .foregroundColor(.sbBlueStrong)
-                        Text("Plan-Modus")
-                            .font(.system(size: 18, weight: .bold))
-                        Spacer()
-                        Toggle("", isOn: $vm.planMode)
-                            .toggleStyle(.switch)
-                            .labelsHidden()
-                    }
-
-                    if vm.planMode {
-                        VStack(spacing: 14) {
-                            MMIDarkSlider(
-                                label: "Einkommen",
-                                color: Self.liquidColor,
-                                value: $vm.planIncome,
-                                range: 0...max(5000, vm.real.income * 2),
-                                diff: vm.displayed.income - vm.real.income
-                            )
-                            MMIDarkSlider(
-                                label: "Ausgaben",
-                                color: Self.expenseColor,
-                                value: $vm.planExpenses,
-                                range: 0...max(2000, vm.real.expenses * 2),
-                                diff: vm.displayed.expenses - vm.real.expenses
-                            )
-                            MMIDarkSlider(
-                                label: "Geparkt",
-                                color: Self.savingsColor,
-                                value: $vm.planSavings,
-                                range: 0...max(1000, max(vm.real.income, vm.real.savings) * 1.5),
-                                diff: vm.displayed.savings - vm.real.savings
-                            )
-                            MMIDarkSlider(
-                                label: "Liquide",
-                                color: Self.liquidColor,
-                                value: $vm.planBalance,
-                                range: min(vm.real.balance, 0)...max(5000, max(vm.real.balance, 0) * 3),
-                                diff: vm.displayed.balance - vm.real.balance
-                            )
-
-                            // Score-Diff
-                            HStack(spacing: 16) {
-                                diffKpi(label: "Score",   diff: vm.scoreDiff,
-                                        format: { String(format: "%+.2f", $0) })
-                                diffKpi(label: "Sparrate", diff: vm.savingsRateDiff,
-                                        format: { String(format: "%+.0f%%", $0 * 100) })
-                            }
-                        }
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .padding(.horizontal)
-                .animation(.easeInOut(duration: 0.22), value: vm.planMode)
-
-                // MARK: Disclaimer
-                Text("Zeitraum: \(vm.period.label) · Sparbewegungen = erkannte Abflüsse zu Spar-/Vorsorgekonten · Kontostand ≠ Notfallreserve")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-
-                Spacer(minLength: 20)
             }
-            .padding(.top, 12)
+            Divider()
+
+        // Drei Gruppen über die volle Höhe verteilt (space-evenly), kein Scrollen.
+        VStack(spacing: 0) {
+            Spacer(minLength: 8)
+
+            // Ring + Score/Sparrate/Puffer nebeneinander
+            HStack(alignment: .center, spacing: 28) {
+                Spacer(minLength: 0)
+                MMIRingView(components: vm.displayed, size: 248, lineWidth: 24, animProgress: animProgress)
+                VStack(alignment: .leading, spacing: 18) {
+                    compactStat("Score", String(format: "%.2f", vm.displayed.score * animProgress), vm.displayed.rating.color)
+                    compactStat("Sparrate", String(format: "%+.0f %%", vm.displayed.savingsRate * 100 * animProgress),
+                                vm.displayed.savingsRate >= 0 ? .sbBlueStrong : .sbRedStrong)
+                    compactStat("Puffer", String(format: "%.1f Mon.", vm.displayed.bufferMonths), Self.liquidColor)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal)
+
+            Spacer(minLength: 16)
+
+            // Ausgaben / Geparkt / Liquide als Karten-Band
+            HStack(alignment: .top, spacing: 12) {
+                metricColumn(color: Self.expenseColor, title: "Ausgegeben",
+                             value: formatCurrency(vm.displayed.expenses),
+                             desc: "Summe aller Ausgaben im Zeitraum.")
+                metricColumn(color: Self.savingsColor, title: "Geparkt",
+                             value: formatCurrency(vm.displayed.savings),
+                             desc: "Abflüsse zu Spar-/Vorsorgekonten.")
+                metricColumn(color: Self.liquidColor, title: "Liquide",
+                             value: formatCurrency(vm.displayed.balance),
+                             desc: String(format: "Kontostand — %.1f Mon. Ausgaben.", vm.displayed.bufferMonths))
+            }
+            .padding(.horizontal)
+
+            Spacer(minLength: 16)
+
+            Text("Zeitraum: \(vm.period.label) · Sparbewegungen = erkannte Abflüsse zu Spar-/Vorsorgekonten · Kontostand ≠ Notfallreserve")
+                .font(.caption2).foregroundColor(.secondary).multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            Spacer(minLength: 8)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 420, height: 680)
+        .frame(width: embedded ? nil : 420, height: embedded ? nil : 680)
+        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .background(Color.sbBackground.edgesIgnoringSafeArea(.all))
         .onAppear {
             vm.load(transactions: transactions, balance: balance)
@@ -209,6 +105,28 @@ struct FinancialHealthScoreView: View {
         f.maximumFractionDigits = 0
         return f
     }()
+
+    private func compactStat(_ title: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(value).font(.system(size: 22, weight: .bold)).foregroundColor(color).monospacedDigit()
+            Text(title).font(.system(size: 12.5)).foregroundColor(.secondary)
+        }
+    }
+
+    private func metricColumn(color: Color, title: String, value: String, desc: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundColor(color).lineLimit(1)
+            }
+            Text(value).font(.system(size: 21, weight: .bold)).foregroundColor(color).monospacedDigit()
+            Text(desc).font(.system(size: 11)).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .accentCard(color)
+    }
 
     private func formatCurrency(_ value: Double) -> String {
         Self.currencyFormatter.string(from: NSNumber(value: value)) ?? "\(Int(value)) €"

@@ -9,7 +9,8 @@ import SwiftUI
 struct MoneyAgeSheet: View {
 
     let transactions: [TransactionsResponse.Transaction]
-    let onClose: () -> Void
+    var onClose: () -> Void = {}
+    var embedded: Bool = false
 
     @State private var windowSize: Int = 10
 
@@ -20,53 +21,84 @@ struct MoneyAgeSheet: View {
         )
     }
 
+    private var windowLabel: String { L10n.t("letzte \(windowSize)", "last \(windowSize)") }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            header
-            mainNumber
-            bandLabel
-            statsRow
-            explainer
-            Spacer(minLength: 0)
-            footer
+        VStack(spacing: 0) {
+            TabHeader(L10n.t("Money Age", "Money Age"),
+                      subtitle: L10n.t("Wie alt ist das Geld, das du ausgibst?", "How old is the money you spend?")) {
+                Menu {
+                    ForEach([10, 25, 50], id: \.self) { n in
+                        Button { windowSize = n } label: { menuCheckItem(L10n.t("letzte \(n)", "last \(n)"), selected: windowSize == n) }
+                    }
+                } label: { MenuTriggerLabel(text: windowLabel) }
+                .menuStyle(.borderlessButton).fixedSize()
+            }
+            Divider()
+            // Volle Höhe vertikal verteilt, kein Scrollen: Intro · Hero · Stat-Karten · Deckung · Erklärung.
+            VStack(alignment: .leading, spacing: 0) {
+                intro
+                Spacer(minLength: 14)
+                heroCard
+                if result.band != .unknown {
+                    Spacer(minLength: 14)
+                    statCardsRow
+                    Spacer(minLength: 14)
+                    coverageCard
+                }
+                Spacer(minLength: 14)
+                explainer
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .padding(20)
         }
-        .padding(24)
-        .frame(width: 460, height: 480)
+        .frame(width: embedded ? nil : 460, height: embedded ? nil : 560)
+        .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
+        .background(Color.panelBackground)
     }
 
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(L10n.t("Money Age", "Money Age"))
-                    .font(.system(size: 18, weight: .semibold))
-                Text(L10n.t(
-                    "Durchschnittliches Alter des Geldes, das du gerade ausgibst.",
-                    "Average age of the money you're currently spending."
-                ))
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-            }
-            Spacer()
-            Picker("", selection: $windowSize) {
-                Text(L10n.t("letzte 10", "last 10")).tag(10)
-                Text(L10n.t("letzte 25", "last 25")).tag(25)
-                Text(L10n.t("letzte 50", "last 50")).tag(50)
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .fixedSize()
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(L10n.t(
+                "Wie alt ist das Geld im Schnitt, das du gerade ausgibst — also wie viele Tage zwischen Eingang und Ausgabe liegen?",
+                "How old, on average, is the money you're currently spending — i.e. how many days pass between inflow and spending?"
+            ))
+            .font(.system(size: 13))
+            Text(L10n.t(
+                "Hoher Wert = Puffer: du lebst aus Rücklagen statt vom Geld von gestern. Niedriger Wert = von der Hand in den Mund. Gut, um zu sehen, ob du dir Luft erarbeitet hast.",
+                "High value = buffer: you live off reserves, not yesterday's income. Low value = paycheck to paycheck. Good for seeing whether you've built breathing room."
+            ))
+            .font(.system(size: 12)).foregroundColor(.secondary)
         }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.sbBlueSoft.opacity(0.5)))
+    }
+
+    // MARK: Hero-Karte
+
+    private var heroCard: some View {
+        HStack(alignment: .center, spacing: 20) {
+            mainNumber
+            VStack(alignment: .leading, spacing: 10) {
+                bandLabel
+                if result.band != .unknown { bandGauge }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .dashboardCard()
     }
 
     private var mainNumber: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if result.band == .unknown {
                 Text("—")
-                    .font(.system(size: 56, weight: .bold).monospacedDigit())
+                    .font(.system(size: 60, weight: .bold).monospacedDigit())
                     .foregroundColor(.secondary)
             } else {
                 Text(String(format: "%.0f", result.averageDays))
-                    .font(.system(size: 56, weight: .bold).monospacedDigit())
+                    .font(.system(size: 60, weight: .bold).monospacedDigit())
                     .foregroundColor(bandColor)
                 Text(L10n.t("Tage", "days"))
                     .font(.system(size: 18, weight: .medium))
@@ -86,33 +118,124 @@ struct MoneyAgeSheet: View {
         }
     }
 
-    private var statsRow: some View {
-        HStack(spacing: 24) {
-            statTile(
-                value: "\(result.sampleSize)",
-                label: L10n.t("Ausgaben im Fenster", "expenses in window")
+    // MARK: 3 Stat-Karten (Spannweite · Trend · nicht gedeckt)
+
+    private var statCardsRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            statCard(
+                value: "\(Int(result.minDays.rounded()))–\(Int(result.maxDays.rounded()))",
+                label: L10n.t("Spannweite (Tage)", "Range (days)"),
+                color: .primary
             )
-            statTile(
-                value: "\(result.totalExpenses)",
-                label: L10n.t("Ausgaben gesamt", "total expenses")
-            )
-            statTile(
+            trendCard
+            statCard(
                 value: "\(result.uncoveredExpenses)",
-                label: L10n.t("davon nicht gedeckt", "of which uncovered"),
-                emphasized: result.uncoveredExpenses > 0
+                label: L10n.t("nicht gedeckt", "uncovered"),
+                color: result.uncoveredExpenses > 0 ? .sbOrangeStrong : .primary
             )
         }
     }
 
-    private func statTile(value: String, label: String, emphasized: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private func statCard(value: String, label: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
             Text(value)
-                .font(.system(size: 20, weight: .semibold).monospacedDigit())
-                .foregroundColor(emphasized ? .sbOrangeStrong : .primary)
+                .font(.system(size: 21, weight: .bold).monospacedDigit())
+                .foregroundColor(color)
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .dashboardCard()
+    }
+
+    private var trendCard: some View {
+        let delta = result.previousAverageDays.map { result.averageDays - $0 }
+        return VStack(alignment: .leading, spacing: 3) {
+            if let d = delta {
+                HStack(spacing: 4) {
+                    Image(systemName: d <= 0 ? "arrow.down.right" : "arrow.up.right")
+                    Text(String(format: "%+.0f", d))
+                }
+                .font(.system(size: 21, weight: .bold).monospacedDigit())
+                .foregroundColor(d <= 0 ? .sbGreenStrong : .sbOrangeStrong)
+            } else {
+                Text("—").font(.system(size: 21, weight: .bold)).foregroundColor(.secondary)
+            }
+            Text(L10n.t("Trend vs. vorher", "Trend vs. previous"))
+                .font(.system(size: 11)).foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .dashboardCard()
+    }
+
+    // MARK: Band-Skala (Gauge)
+
+    private var bandGauge: some View {
+        let maxScale: Double = 90
+        let frac = min(1.0, max(0.0, result.averageDays / maxScale))
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.t("Einordnung", "Where it sits"))
+                .font(.system(size: 11)).foregroundColor(.secondary)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    HStack(spacing: 0) {
+                        Rectangle().fill(Color.sbRedStrong.opacity(0.5)).frame(width: geo.size.width * (15.0/maxScale))
+                        Rectangle().fill(Color.sbOrangeStrong.opacity(0.5)).frame(width: geo.size.width * (15.0/maxScale))
+                        Rectangle().fill(Color.sbGreenStrong.opacity(0.5)).frame(width: geo.size.width * (30.0/maxScale))
+                        Rectangle().fill(Color.sbBlueStrong.opacity(0.5))
+                    }
+                    .frame(height: 8)
+                    .clipShape(Capsule())
+
+                    Capsule().fill(Color.primary)
+                        .frame(width: 3, height: 16)
+                        .offset(x: max(0, geo.size.width * frac - 1.5))
+                }
+            }
+            .frame(height: 16)
+            HStack {
+                Text(L10n.t("frisch", "fresh")).font(.system(size: 9)).foregroundColor(.secondary)
+                Spacer()
+                Text(L10n.t("alt (60+ Tage)", "old (60+ days)")).font(.system(size: 9)).foregroundColor(.secondary)
+            }
+        }
+    }
+
+    // MARK: Deckungs-Karte
+
+    private var coverageCard: some View {
+        let total = max(1, result.totalExpenses)
+        let coveredFrac = Double(total - result.uncoveredExpenses) / Double(total)
+        let pct = Int((coveredFrac * 100).rounded())
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(L10n.t("Deckung", "Coverage"))
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text("\(pct) %")
+                    .font(.system(size: 17, weight: .bold).monospacedDigit())
+                    .foregroundColor(.sbGreenStrong)
+            }
+            GeometryReader { geo in
+                HStack(spacing: 0) {
+                    Rectangle().fill(Color.sbGreenStrong.opacity(0.6)).frame(width: geo.size.width * coveredFrac)
+                    Rectangle().fill(Color.sbOrangeStrong.opacity(0.5))
+                }
+                .clipShape(Capsule())
+            }
+            .frame(height: 8)
+            Text(L10n.t(
+                "\(result.sampleSize) von \(result.totalExpenses) Ausgaben im Fenster · durch frühere Eingänge gedeckt",
+                "\(result.sampleSize) of \(result.totalExpenses) expenses in window · covered by earlier inflows"
+            ))
+            .font(.system(size: 11)).foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .dashboardCard()
     }
 
     private var explainer: some View {
@@ -123,14 +246,6 @@ struct MoneyAgeSheet: View {
         .font(.system(size: 11))
         .foregroundColor(.secondary)
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var footer: some View {
-        HStack {
-            Spacer()
-            Button(L10n.t("Schließen", "Close")) { onClose() }
-                .keyboardShortcut(.cancelAction)
-        }
     }
 
     private var bandColor: Color {
