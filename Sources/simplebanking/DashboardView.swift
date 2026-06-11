@@ -39,13 +39,28 @@ final class DashboardModel: ObservableObject {
     @Published var tab: DashboardTab
     @Published var transactions: [TransactionsResponse.Transaction]
     @Published var balance: Double
+    /// Bank-Kontext DIESES Snapshots. Der Header liest den Slot aus dem Model —
+    /// nicht live aus `MultibankingStore` — damit Logo/Name, Saldo und Transaktionen
+    /// IMMER zum selben Konto gehören (sonst zeigt das offene Dashboard nach einem
+    /// Slot-Wechsel Bank B im Kopf, rechnet aber weiter mit Bank A).
+    @Published var slot: BankSlot?
 
     init(tab: DashboardTab = .overview,
          transactions: [TransactionsResponse.Transaction] = [],
-         balance: Double = 0) {
+         balance: Double = 0,
+         slot: BankSlot? = nil) {
         self.tab = tab
         self.transactions = transactions
         self.balance = balance
+        self.slot = slot
+    }
+
+    /// Setzt Bank-Kontext + Daten ATOMAR (ein Objekt-Update). Nutzung beim Öffnen
+    /// und bei jedem Slot-Wechsel, solange das Panel offen ist.
+    func apply(transactions: [TransactionsResponse.Transaction], balance: Double, slot: BankSlot?) {
+        self.transactions = transactions
+        self.balance = balance
+        self.slot = slot
     }
 }
 
@@ -53,7 +68,6 @@ final class DashboardModel: ObservableObject {
 /// Kalender, Abos, Geld-Alter) with one tabbed window.
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
-    @ObservedObject private var multibankingStore = MultibankingStore.shared
 
     private func bankLogo(for slot: BankSlot) -> NSImage? {
         let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: nil, iban: nil)
@@ -64,8 +78,9 @@ struct DashboardView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
-                // Aktive Bank — Logo + Name vor den Tabs.
-                if let slot = multibankingStore.activeSlot {
+                // Aktive Bank — Logo + Name vor den Tabs. Quelle = Model-Snapshot (atomar
+                // mit Saldo/Transaktionen), NICHT der Live-Store.
+                if let slot = model.slot {
                     HStack(spacing: 6) {
                         if let logo = bankLogo(for: slot) {
                             Image(nsImage: logo).resizable().scaledToFit()
@@ -116,7 +131,9 @@ struct DashboardView: View {
                 case .subscriptions:
                     SubscriptionsView(transactions: model.transactions, embedded: true)
                 case .calendar:
-                    CalendarHeatmapView(mode: .spending, embedded: true)
+                    CalendarHeatmapView(mode: .spending, embedded: true,
+                                        injectedTransactions: model.transactions)
+                        .id(model.slot?.id ?? "—")   // Re-Init bei Slot-Wechsel → frischer Snapshot
                 case .moneyAge:
                     MoneyAgeSheet(transactions: model.transactions, embedded: true)
                 case .rules:

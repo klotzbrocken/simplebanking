@@ -63,15 +63,24 @@ final class DashboardPanel: NSObject, NSWindowDelegate {
     }
 
     /// Open (or re-focus) the dashboard at `tab`, refreshing the data snapshot.
-    func show(tab: DashboardTab, transactions: [TransactionsResponse.Transaction], balance: Double) {
-        model.transactions = transactions
-        model.balance = balance
+    func show(tab: DashboardTab,
+              transactions: [TransactionsResponse.Transaction],
+              balance: Double,
+              slot: BankSlot?) {
+        model.apply(transactions: transactions, balance: balance, slot: slot)
         model.tab = tab
         if !panel.isVisible {
             clampAndCenterToScreen()
         }
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Aktualisiert den Daten-/Bank-Snapshot eines bereits geöffneten Dashboards
+    /// (z.B. nach einem Slot-Wechsel) — Bank, Saldo und Transaktionen atomar.
+    func refresh(transactions: [TransactionsResponse.Transaction], balance: Double, slot: BankSlot?) {
+        guard panel.isVisible else { return }
+        model.apply(transactions: transactions, balance: balance, slot: slot)
     }
 
     /// Feste Größe (auf die sichtbare Bildschirmfläche gedeckelt, falls Display kleiner) + zentriert.

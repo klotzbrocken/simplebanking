@@ -4720,6 +4720,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             txVM.resetPaging()
         }
 
+        // Offenes Dashboard sofort auf den neuen Slot umstellen (cached Snapshot).
+        refreshDashboardIfOpen()
+
         guard !Task.isCancelled else { return }
 
         // Wait for any in-flight HBCI call to finish before refreshing for the new slot.
@@ -4738,6 +4741,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // Update flyout card in-place with new balance + nav arrows (without closing)
         refreshFlyoutIfVisible()
+
+        // Offenes Dashboard mit den frischen Netzwerk-Daten des neuen Slots nachziehen.
+        refreshDashboardIfOpen()
 
         // If the transactions panel is already open, reload live transactions for the new slot
         if txPanel?.isVisible == true {
@@ -5430,7 +5436,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Öffnet das einheitliche Dashboard am gewünschten Tab (löst die fünf Einzel-Sheets ab).
     private func openDashboard(tab: DashboardTab) {
         if dashboardPanel == nil { dashboardPanel = DashboardPanel() }
-        dashboardPanel?.show(tab: tab, transactions: txVM.transactions, balance: lastBalance ?? 0)
+        dashboardPanel?.show(tab: tab,
+                             transactions: txVM.transactions,
+                             balance: lastBalance ?? 0,
+                             slot: MultibankingStore.shared.activeSlot)
+    }
+
+    /// Spiegelt den aktuellen Slot-Snapshot (Bank + Saldo + Transaktionen) in ein
+    /// bereits offenes Dashboard — no-op, wenn keins offen ist. Wird beim Slot-Wechsel
+    /// gerufen, damit das Dashboard nicht Bank B zeigt, aber Bank A auswertet.
+    private func refreshDashboardIfOpen() {
+        dashboardPanel?.refresh(transactions: txVM.transactions,
+                                balance: lastBalance ?? 0,
+                                slot: MultibankingStore.shared.activeSlot)
     }
 
     @objc private func checkForUpdates() {
@@ -5661,6 +5679,13 @@ private struct StatusBalanceFlyoutCardView: View {
         quickSendAvailable && !roundupView.isActive && unifiedSlots == nil
     }
 
+    /// Hartgrenze für Quick-Send = Saldo + Dispo-Rahmen (gleiche Logik wie `TransferSheet`).
+    /// `nil` wenn der Saldo unbekannt ist → keine Sperre.
+    private var quickSendAvailableLimit: Decimal? {
+        guard let b = balanceValue else { return nil }
+        return Decimal(b) + Decimal(dispoLimit)
+    }
+
     /// Höhe des oberen Karten-Bereichs (Saldo-Card + ggf. Konto-Dots). Konstant —
     /// unabhängig davon, ob der Quick-Send-Drawer offen ist. Entspricht der
     /// Basis-Höhe, die der Host (BalanceBar.flyoutContentSize) als Popover-Größe
@@ -5806,6 +5831,7 @@ private struct StatusBalanceFlyoutCardView: View {
             if quickSendActive {
                 QuickSendDrawerView(
                     performSend: quickSendPerform,
+                    availableLimit: quickSendAvailableLimit,
                     onClose: {
                         // Wird nur nach erfolgreichem Versand gerufen (Bestätigung
                         // stand schon ~1,5 s). Drawer einklappen + ganzes Flyout zu.

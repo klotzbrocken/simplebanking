@@ -19,6 +19,9 @@ struct QuickSendDrawerView: View {
 
     /// Sendet die Überweisung. Rückgabe = Bank-Outcome. Wird vom Host gesetzt.
     var performSend: (@MainActor (TransferRequest) async -> TransferOutcome)? = nil
+    /// Saldo + Dispo-Rahmen des aktiven Slots. Überweisungen darüber werden blockiert
+    /// (dieselbe Hartgrenze wie in der großen `TransferSheet`). `nil` = unbekannt → keine Sperre.
+    var availableLimit: Decimal? = nil
     /// Schließt den Drawer (Host fährt die Popover-Höhe zurück).
     var onClose: (() -> Void)? = nil
     /// „+“ im Vorlagen-Bereich → springt in die Einstellungen (Vorlagen-Editor).
@@ -31,10 +34,16 @@ struct QuickSendDrawerView: View {
     @State private var amountInput: String = ""
     @State private var purpose: String = ""
     @State private var phase: Phase = .idle
+    /// Der in der Confirm-Stufe geprüfte, fertig gebaute Request (rebuild-frei beim Senden).
+    @State private var pendingRequest: TransferRequest? = nil
+
+    /// Läuft gerade ein realer Versand (aus der Confirm-Stufe heraus)?
+    @State private var isSending = false
 
     enum Phase: Equatable {
         case idle
-        case sending
+        /// Zusammenfassung vor dem realen Versand: Name · gekürzte IBAN · Betrag.
+        case confirm(amount: String, name: String, iban: String)
         case sent(amount: String, name: String)
         case failed(String)
     }
@@ -44,7 +53,14 @@ struct QuickSendDrawerView: View {
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var ibanValid: Bool { QuickSendFormatting.isValidIban(ibanText) }
     private var amount: Decimal? { QuickSendFormatting.amountDecimal(amountInput) }
-    private var canSubmit: Bool { !trimmedName.isEmpty && ibanValid && (amount ?? 0) > 0 }
+    /// `true` wenn der Betrag den verfügbaren Rahmen (Saldo+Dispo) übersteigt.
+    private var amountExceedsLimit: Bool {
+        guard let amount, let limit = availableLimit else { return false }
+        return amount > limit
+    }
+    private var canSubmit: Bool {
+        !trimmedName.isEmpty && ibanValid && (amount ?? 0) > 0 && !amountExceedsLimit
+    }
 
     // MARK: Body
 
@@ -53,6 +69,8 @@ struct QuickSendDrawerView: View {
             Divider().overlay(Color.sbBorder)
             Group {
                 switch phase {
+                case .confirm(let amt, let nm, let ib):
+                    confirmRow(amount: amt, name: nm, iban: ib)
                 case .sent(let amt, let nm):
                     sentRow(amount: amt, name: nm)
                 case .failed(let msg):
@@ -99,7 +117,7 @@ struct QuickSendDrawerView: View {
                 }
                 .padding(.horizontal, 9)
                 .frame(width: 122, height: 30)
-                .background(fieldBackground())
+                .background(fieldBackground(border: amountExceedsLimit ? .sbRedStrong : .sbBorder))
             }
 
             // Reihe 2: IBAN + grüner Haken
@@ -194,16 +212,13 @@ struct QuickSendDrawerView: View {
     }
 
     private var sendButton: some View {
-        Button { submit() } label: {
+        // Führt NICHT direkt zum Versand, sondern zur Bestätigungs-Stufe (`review`).
+        Button { review() } label: {
             HStack(spacing: 5) {
-                if phase == .sending {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "paperplane")
-                        .font(.system(size: 12, weight: .semibold))
-                }
-                Text(L10n.t("Senden", "Send"))
+                Text(L10n.t("Weiter", "Next"))
                     .font(.system(size: 12, weight: .semibold))
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
             }
             .padding(.horizontal, 14)
             .frame(height: 30)
@@ -214,7 +229,69 @@ struct QuickSendDrawerView: View {
             .foregroundColor(canSubmit ? .white : .sbTextSecondary)
         }
         .buttonStyle(.plain)
-        .disabled(!canSubmit || phase == .sending)
+        .disabled(!canSubmit)
+    }
+
+    // MARK: Confirm-Stufe
+
+    private func confirmRow(amount: String, name: String, iban: String) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(L10n.t("Wirklich senden?", "Send for real?"))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.sbTextPrimary)
+            VStack(spacing: 5) {
+                confirmLine(label: L10n.t("An", "To"), value: name)
+                confirmLine(label: "IBAN", value: iban, mono: true)
+                confirmLine(label: L10n.t("Betrag", "Amount"), value: amount, strong: true)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity)
+            .background(fieldBackground())
+            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                Button { phase = .idle } label: {
+                    Text(L10n.t("Zurück", "Back"))
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(height: 30).padding(.horizontal, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7).fill(Color.sbSurfaceSoft)
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.sbBorder, lineWidth: 1))
+                        )
+                        .foregroundColor(.sbTextPrimary)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSending)
+                Spacer(minLength: 0)
+                Button { performConfirmedSend() } label: {
+                    HStack(spacing: 5) {
+                        if isSending {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "paperplane.fill").font(.system(size: 12, weight: .semibold))
+                        }
+                        Text(L10n.t("Jetzt senden", "Send now")).font(.system(size: 12, weight: .semibold))
+                    }
+                    .frame(height: 30).padding(.horizontal, 14)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.sbRedStrong))
+                    .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSending)
+            }
+        }
+    }
+
+    private func confirmLine(label: String, value: String, mono: Bool = false, strong: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.system(size: 11)).foregroundColor(.sbTextSecondary)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.system(size: strong ? 13 : 12,
+                              weight: strong ? .bold : .medium,
+                              design: mono ? .monospaced : .default))
+                .foregroundColor(.sbTextPrimary)
+                .lineLimit(1)
+        }
     }
 
     // MARK: Result states
@@ -273,7 +350,8 @@ struct QuickSendDrawerView: View {
         purpose = fav.purpose
     }
 
-    private func submit() {
+    /// Schritt 1: Eingabe validieren + in die Bestätigungs-Stufe wechseln (KEIN Versand).
+    private func review() {
         guard canSubmit, let amt = amount else { return }
         let request: TransferRequest
         do {
@@ -287,13 +365,25 @@ struct QuickSendDrawerView: View {
             phase = .failed((error as? TransferRequestError)?.localizedHint ?? error.localizedDescription)
             return
         }
-        let amountDisplay = QuickSendFormatting.displayEUR(amt)
-        let recipient = trimmedName
-        phase = .sending
+        pendingRequest = request
+        phase = .confirm(
+            amount: QuickSendFormatting.displayEUR(amt),
+            name: trimmedName,
+            iban: QuickSendFormatting.maskedIban(ibanText)
+        )
+    }
+
+    /// Schritt 2: erst hier wird real überwiesen — ausgelöst durch „Jetzt senden".
+    private func performConfirmedSend() {
+        guard let request = pendingRequest, !isSending else { return }
+        let amountDisplay = QuickSendFormatting.displayEUR(request.amountEUR)
+        let recipient = request.creditorName
+        isSending = true
         Task { @MainActor in
             let outcome = await performSend?(request)
                 ?? TransferOutcome(ok: false, scaRequired: false, error: "no-handler",
                                    userMessage: nil, mayHaveBeenExecuted: false)
+            isSending = false
             if outcome.ok {
                 phase = .sent(amount: amountDisplay, name: recipient)
                 try? await Task.sleep(nanoseconds: 1_500_000_000)

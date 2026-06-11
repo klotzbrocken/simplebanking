@@ -154,12 +154,13 @@ struct MoneyAgeSheet: View {
         let delta = result.previousAverageDays.map { result.averageDays - $0 }
         return VStack(alignment: .leading, spacing: 3) {
             if let d = delta {
+                // Höheres Geldalter = größerer Puffer = positiv → steigend grün/▲, fallend orange/▼.
                 HStack(spacing: 4) {
-                    Image(systemName: d <= 0 ? "arrow.down.right" : "arrow.up.right")
+                    Image(systemName: d > 0 ? "arrow.up.right" : (d < 0 ? "arrow.down.right" : "arrow.right"))
                     Text(String(format: "%+.0f", d))
                 }
                 .font(.system(size: 21, weight: .bold).monospacedDigit())
-                .foregroundColor(d <= 0 ? .sbGreenStrong : .sbOrangeStrong)
+                .foregroundColor(d >= 0 ? .sbGreenStrong : .sbOrangeStrong)
             } else {
                 Text("—").font(.system(size: 21, weight: .bold)).foregroundColor(.secondary)
             }
@@ -208,7 +209,8 @@ struct MoneyAgeSheet: View {
 
     private var coverageCard: some View {
         let total = max(1, result.totalExpenses)
-        let coveredFrac = Double(total - result.uncoveredExpenses) / Double(total)
+        let coveredCount = max(0, result.totalExpenses - result.uncoveredExpenses)
+        let coveredFrac = Double(coveredCount) / Double(total)
         let pct = Int((coveredFrac * 100).rounded())
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
@@ -228,8 +230,8 @@ struct MoneyAgeSheet: View {
             }
             .frame(height: 8)
             Text(L10n.t(
-                "\(result.sampleSize) von \(result.totalExpenses) Ausgaben im Fenster · durch frühere Eingänge gedeckt",
-                "\(result.sampleSize) of \(result.totalExpenses) expenses in window · covered by earlier inflows"
+                "\(coveredCount) von \(result.totalExpenses) Ausgaben durch frühere Eingänge gedeckt",
+                "\(coveredCount) of \(result.totalExpenses) expenses covered by earlier inflows"
             ))
             .font(.system(size: 11)).foregroundColor(.secondary)
             .fixedSize(horizontal: false, vertical: true)

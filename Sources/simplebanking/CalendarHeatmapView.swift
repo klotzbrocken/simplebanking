@@ -25,6 +25,10 @@ struct CalendarHeatmapView: View {
     /// `true`, wenn die View in einen Container eingebettet ist (kein eigener Schließen-Button,
     /// keine feste Fenstergröße).
     var embedded: Bool = false
+    /// Wenn gesetzt (Dashboard-Einbettung), nutzt der Kalender DIESEN Snapshot statt selbst aus
+    /// der aktiven DB zu laden — so zeigen Kalender und die übrigen Dashboard-Tabs immer dasselbe
+    /// Konto (sonst driftet der Kalender im Unified-Modus / nach Slot-Wechsel auseinander).
+    var injectedTransactions: [TransactionsResponse.Transaction]? = nil
 
     @StateObject private var logoStore = SubscriptionLogoStore.shared
 
@@ -729,6 +733,18 @@ struct CalendarHeatmapView: View {
     }
 
     private func loadFromDatabase() {
+        // Dashboard-Einbettung: DENSELBEN Snapshot wie die übrigen Tabs verwenden,
+        // statt eigenständig aus der aktiven DB zu laden.
+        if let injected = injectedTransactions {
+            let now = ISO8601DateFormatter().string(from: Date())
+            let converted = injected.compactMap { try? TransactionRecord(transaction: $0, updatedAt: now) }
+            records = converted
+            recurringTxIDs = Self.computeRecurringTxIDs(from: converted)
+            isLoading = false
+            jumpToLatestWithDataIfNeeded()
+            preloadAboLogos()
+            return
+        }
         Task {
             if demoMode {
                 var seed = UInt64(truncatingIfNeeded: demoSeed)

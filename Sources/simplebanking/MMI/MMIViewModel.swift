@@ -38,18 +38,52 @@ final class MMIViewModel: ObservableObject {
 
     // MARK: Load
 
+    /// Monoton wachsendes Token — nur das Ergebnis des jüngsten `load()` wird angewendet.
+    private var loadGeneration = 0
+
     func load(transactions: [TransactionsResponse.Transaction], balance: Double) {
+        loadGeneration &+= 1
+        let gen = loadGeneration
+        let snapshotPeriod = period
+        // Die Abo-Erkennung (`SubscriptionDetector.detect`) kann bei langer Historie /
+        // Unified-Mode teuer sein — daher OFF-MAIN rechnen und das Ergebnis nur anwenden,
+        // wenn kein neueres `load()` dazwischenkam (Generation-Token).
+        Task.detached(priority: .userInitiated) {
+            let components = Self.computeComponents(
+                transactions: transactions, balance: balance, period: snapshotPeriod)
+            await MainActor.run { [weak self] in
+                guard let self, gen == self.loadGeneration else { return }
+                self.real = components
+                self.resetPlan()
+            }
+        }
+    }
+
+    /// Reine Berechnung der MMI-Komponenten — bewusst `nonisolated`, damit sie außerhalb
+    /// des MainActors laufen kann. Keine UI-/Store-Zugriffe (nur Werttypen + UserDefaults).
+    nonisolated static func computeComponents(
+        transactions: [TransactionsResponse.Transaction],
+        balance: Double,
+        period: MMIPeriod
+    ) -> MMIComponents {
         let now = Date()
         let cutoff = period.cutoffDate(asOf: now)
+        // Eigener Formatter pro Aufruf (DateFormatter ist nicht thread-safe für parallele Nutzung).
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        func txDate(_ tx: TransactionsResponse.Transaction) -> Date {
+            guard let s = tx.bookingDate ?? tx.valueDate else { return .distantPast }
+            return fmt.date(from: String(s.prefix(10))) ?? .distantPast
+        }
         let recent = transactions.filter { txDate($0) >= cutoff }
 
         // Dieselbe "Sparen"-Definition wie in Abos & Verträge: wiederkehrende Posten,
-        // die (auto via defaultTab ODER per User-Verschiebung) im `.sparen`-Tab
-        // liegen, zählen als Sparen statt Ausgabe — z.B. die als Altersvorsorge
-        // geführte Eigentumswohnung. So sind MMI und Abos konsistent.
-        let savingsTagged = Self.savingsTaggedFingerprints(in: transactions)
+        // die (auto via defaultTab ODER per User-Verschiebung) im `.sparen`-Tab liegen,
+        // zählen als Sparen statt Ausgabe. So sind MMI und Abos konsistent.
+        let savingsTagged = savingsTaggedKeys(in: transactions)
         func isTaggedSavings(_ tx: TransactionsResponse.Transaction) -> Bool {
-            savingsTagged.contains(TransactionRecord.fingerprint(for: tx))
+            savingsTagged.contains(savingsKey(for: tx))
         }
 
         let income   = recent.filter { $0.mmiKind == .income  }.reduce(0.0) { $0 + $1.parsedAmount }
@@ -61,14 +95,13 @@ final class MMIViewModel: ObservableObject {
                 .reduce(0.0) { $0 + abs($1.parsedAmount) }
             : 0
 
-        real = MMIComponents(
+        return MMIComponents(
             income:   income,
             expenses: expenses,
             savings:  savings,
             balance:  balance,
             periodMonths: period.monthsSpan(asOf: now)
         )
-        resetPlan()
     }
 
     func resetPlan() {
@@ -78,10 +111,19 @@ final class MMIViewModel: ObservableObject {
         planBalance  = real.balance
     }
 
-    /// Fingerprints aller Transaktionen, die zu einem wiederkehrenden Posten im
+    /// Slot-skalierter Schlüssel `(slotId, fingerprint)`. Im Unified-Modus tragen die
+    /// Transaktionen ihre `slotId`; sonst fällt er auf den aktiven Slot zurück (analog
+    /// zum Categorizer-Override-Lookup). Verhindert, dass eine Sparbuchung aus Slot A
+    /// eine identische Buchung in Slot B fälschlich als Sparen markiert.
+    nonisolated static func savingsKey(for tx: TransactionsResponse.Transaction) -> String {
+        let slotId = tx.slotId ?? TransactionsDatabase.activeSlotId
+        return "\(slotId)|\(TransactionRecord.fingerprint(for: tx))"
+    }
+
+    /// Slot-skalierte Schlüssel aller Transaktionen, die zu einem wiederkehrenden Posten im
     /// `.sparen`-Tab gehören (gleiche Klassifizierung wie Abos & Verträge:
     /// `effectiveTab = User-Override ?? candidate.defaultTab`).
-    private static func savingsTaggedFingerprints(
+    private nonisolated static func savingsTaggedKeys(
         in transactions: [TransactionsResponse.Transaction]
     ) -> Set<String> {
         let candidates = SubscriptionDetector.detect(in: transactions)
@@ -92,23 +134,10 @@ final class MMIViewModel: ObservableObject {
                 .flatMap { SubscriptionTab(rawValue: $0) } ?? c.defaultTab
             guard tab == .sparen else { continue }
             for tx in c.matchedTransactions {
-                set.insert(TransactionRecord.fingerprint(for: tx))
+                set.insert(savingsKey(for: tx))
             }
         }
         return set
     }
 
-    // MARK: Helpers
-
-    private let isoFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
-    private func txDate(_ tx: TransactionsResponse.Transaction) -> Date {
-        guard let s = tx.bookingDate ?? tx.valueDate else { return .distantPast }
-        return isoFmt.date(from: String(s.prefix(10))) ?? .distantPast
-    }
 }

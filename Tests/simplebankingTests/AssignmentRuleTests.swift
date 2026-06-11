@@ -111,7 +111,16 @@ final class AssignmentRuleTests: XCTestCase {
         let r = rule([cond(.interval, .equals, PaymentFrequency.monthly.rawValue)])
         XCTAssertTrue(r.matches(t, cadence: .monthly))
         XCTAssertFalse(r.matches(t, cadence: .quarterly))
-        XCTAssertTrue(r.matches(t, cadence: nil))   // ohne Kontext non-blocking
+        // P1-Fix: ohne Cadence ist die Intervallbedingung NICHT erfüllt (sonst matcht
+        // eine „monatlich → X"-Regel im Live-Categorizer praktisch jede Buchung).
+        XCTAssertFalse(r.matches(t, cadence: nil))
+    }
+
+    func test_intervalOnlyRule_doesNotCategorizeWithoutCadence() {
+        // firstCategory ruft ohne Cadence auf → Intervall-Regel darf NICHT greifen.
+        let t = tx(creditor: "Irgendwer", amount: -3.50)
+        let r = rule([cond(.interval, .equals, PaymentFrequency.monthly.rawValue)], category: .abosDigital)
+        XCTAssertNil(AssignmentRules.firstCategory(for: t, rules: [r]))
     }
 
     // MARK: firstCategory

@@ -10,35 +10,37 @@ import Foundation
 
 enum QuickSendFormatting {
 
-    /// Normalisiert die Betrag-Eingabe: nur Ziffern + ein einzelnes Komma,
-    /// max. 5 Vorkomma- und 2 Nachkommastellen (≤ 99999,99).
+    /// Normalisiert die Betrag-Eingabe locale-sicher und gibt sie im
+    /// DE-Anzeigeformat (Komma als Dezimaltrenner) zurück.
+    ///
+    /// Regeln:
+    ///  - Akzeptiert **Punkt UND Komma** als Trenner (DE „12,50" wie EN „12.50").
+    ///  - Der **letzte** Trenner gilt als Dezimaltrenner; frühere Trenner sind
+    ///    Tausender-Gruppierung und werden verworfen („1.234,56" / „1,234.56" →
+    ///    „1234,56"). Ein einzelner Trenner ist damit immer der Dezimaltrenner —
+    ///    das ist die häufigste Tipp-Absicht und verhindert den gefährlichen
+    ///    „12.50" → „1250"-Fehler. Der Confirm-Schritt zeigt den Betrag nochmal
+    ///    explizit, falls jemand „1.000" als Tausender meinte.
+    ///  - max. 5 Vorkomma- und 2 Nachkommastellen (≤ 99999,99).
     static func sanitizeAmountInput(_ raw: String) -> String {
-        // Nur Ziffern und Kommas behalten.
-        var cleaned = raw.filter { $0.isNumber || $0 == "," }
+        let chars = Array(raw.filter { $0.isNumber || $0 == "," || $0 == "." })
 
-        // Mehrfach-Kommas auf das erste reduzieren.
-        let parts = cleaned.split(separator: ",", omittingEmptySubsequences: false)
-        if parts.count > 2 {
-            cleaned = String(parts[0]) + "," + parts[1...].joined()
-        }
-
-        // In Vor-/Nachkomma zerlegen.
-        var intPart: String
-        var fracPart: String?
-        if let commaIdx = cleaned.firstIndex(of: ",") {
-            intPart = String(cleaned[cleaned.startIndex..<commaIdx])
-            fracPart = String(cleaned[cleaned.index(after: commaIdx)...])
+        var intDigits: String
+        var fracDigits: String?
+        if let lastSep = chars.lastIndex(where: { $0 == "," || $0 == "." }) {
+            intDigits = String(chars[..<lastSep].filter { $0.isNumber })
+            fracDigits = String(chars[(lastSep + 1)...].filter { $0.isNumber })
         } else {
-            intPart = cleaned
-            fracPart = nil
+            intDigits = String(chars.filter { $0.isNumber })
+            fracDigits = nil
         }
 
-        if intPart.count > 5 { intPart = String(intPart.prefix(5)) }
+        if intDigits.count > 5 { intDigits = String(intDigits.prefix(5)) }
 
-        if let frac = fracPart {
-            return intPart + "," + String(frac.prefix(2))
+        if let frac = fracDigits {
+            return intDigits + "," + String(frac.prefix(2))
         }
-        return intPart
+        return intDigits
     }
 
     /// Wandelt die bereinigte Betrag-Eingabe in einen `Decimal`. Gibt `nil`
@@ -61,6 +63,13 @@ enum QuickSendFormatting {
             out.append(ch)
         }
         return out
+    }
+
+    /// Gekürzte IBAN für die Bestätigungszeile: „DE12 … 3456" (erste 4 + letzte 4).
+    static func maskedIban(_ raw: String) -> String {
+        let clean = TransferRequest.normalizeIban(raw)
+        guard clean.count > 8 else { return groupIban(clean) }
+        return "\(clean.prefix(4)) … \(clean.suffix(4))"
     }
 
     /// `true` wenn die (ggf. gruppierte) Eingabe eine gültige IBAN ist.

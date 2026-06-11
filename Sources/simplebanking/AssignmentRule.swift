@@ -321,9 +321,11 @@ enum AssignmentRules {
             return c.op == .notEquals ? !isMatch : isMatch
 
         case .interval:
-            // Braucht die erkannte Frequenz des Händlers. Ohne Kontext (Live-Kategorisierung)
-            // non-blocking → zählt als erfüllt.
-            guard let cadence else { return true }
+            // Braucht die erkannte Frequenz des Händlers. Ohne Cadence (z.B. Live-
+            // Kategorisierung ohne Abo-Kontext) lässt sich die Bedingung NICHT erfüllen
+            // → false. Sonst würde eine Regel „monatlich → Kategorie X" praktisch jede
+            // Buchung kategorisieren. Cadence-tragende Pfade (Abo-Kontext) bleiben gültig.
+            guard let cadence else { return false }
             return normalize(cadence.rawValue) == normalize(c.value)
 
         default:

@@ -2,6 +2,16 @@
 
 ## [Unreleased] (1.6.0)
 
+### Behoben
+
+- **Quick-Send: Dezimaltrenner** — „12.50" wurde durch das Verwerfen des Punkts zu „1250" multipliziert. `sanitizeAmountInput` akzeptiert jetzt **Punkt UND Komma** locale-sicher (letzter Trenner = Dezimal, frühere = Tausender). (P1)
+- **Quick-Send: Bestätigungsstufe** — vor dem realen Versand erscheint jetzt eine kompakte Zusammenfassung (Name · gekürzte IBAN · Betrag) mit „Zurück"/„Jetzt senden"; kein Direktversand mehr aus der Eingabe. (P1)
+- **Quick-Send: Saldo/Dispo-Grenze** — Beträge über Saldo + Dispo werden blockiert (gleiche Hartgrenze wie die große Überweisungsansicht). (P2)
+- **Dashboard bei Kontowechsel** — ein offenes Dashboard zeigte nach einem Slot-Wechsel Bank B im Kopf, rechnete aber mit Bank A. Bank, Saldo und Transaktionen werden jetzt atomar umgeschaltet; der Kalender-Tab nutzt denselben Snapshot wie die übrigen Tabs. (P1/P2)
+- **Zuordnungsregeln: Intervall** — eine Intervallbedingung ohne erkannte Cadence galt als erfüllt, wodurch „monatlich → Kategorie X" praktisch alle Buchungen kategorisierte. Ohne Cadence ist sie jetzt `false`. (P1)
+- **Geld-Alter** — Trend-Pfeil/-Farbe waren invertiert (steigendes Alter = jetzt grün); Deckungs-Text zeigt jetzt die gedeckte Anzahl statt der FIFO-Stichprobengröße (konsistent zum Prozentwert). (P2)
+- **MMI-Sparzuordnung** — im Unified-Modus konnte eine Sparbuchung aus einem Slot eine identische Buchung eines anderen Slots fälschlich als Sparen markieren; Schlüssel ist jetzt `(slotId, fingerprint)`. Die Abo-Erkennung läuft zudem off-main (Generation-Token), um den MainActor nicht zu blockieren. (P2/P3)
+
 ### Neu
 
 - **Schnellüberweisung im Flyout (Quick-Send, Opt-in)** — ein Papierflieger-Button in der Flyout-Kopfzeile klappt einen kompakten Überweisungs-Drawer direkt unter der Saldo-Karte auf (Popover-Höhe wächst animiert mit). Felder: Name + Betrag (mit Live-Validierung), IBAN (mod-97-Check mit grünem Haken, 4er-Gruppierung), Betreff. Dazu eine Reihe **gepinnter Vorlagen** (Emoji-Shortcuts, füllen das Formular per Klick; „+“ pinnt die aktuelle Eingabe, max. 4). Versand läuft über denselben Pfad wie „Geld senden“ (Master-Passwort + SCA via `YaxiService.sendTransfer`) — direkt, ohne Sende-Verzögerung. Aktivierung in **Einstellungen → Labs → „Schnellüberweisung im Flyout“** (Default aus), inkl. Vorlagen-Editor. Nur auf der Einzelkonto-Karte (nicht im Aufrunden-/Aggregat-Modus). Die große `TransferSheet` bleibt unverändert.

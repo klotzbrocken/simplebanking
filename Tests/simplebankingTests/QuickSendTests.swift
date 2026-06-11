@@ -13,8 +13,33 @@ final class QuickSendFormattingTests: XCTestCase {
         XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1a2b3"), "123")
     }
 
-    func test_amount_collapsesMultipleCommas() {
-        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1,2,3"), "1,23")
+    func test_amount_multipleSeparators_lastIsDecimal() {
+        // Mehrere Trenner: der letzte ist Dezimal, frühere = Tausender → verworfen.
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1,2,3"), "12,3")
+    }
+
+    // MARK: Locale-sichere Trenner (P1-Fix: „12.50" darf NICHT „1250" werden)
+
+    func test_amount_pointAsDecimalSeparator() {
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("12.50"), "12,50")
+    }
+
+    func test_amount_commaAsDecimalSeparator() {
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("12,50"), "12,50")
+    }
+
+    func test_amount_germanThousandsWithCommaDecimal() {
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1.234,56"), "1234,56")
+    }
+
+    func test_amount_englishThousandsWithPointDecimal() {
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1,234.56"), "1234,56")
+    }
+
+    func test_amount_pointInput_decimalValueIsNotMultiplied() {
+        // Kern des P1-Bugs: „12.50" ergibt 12,50 € — nicht 1250 €.
+        let sanitized = QuickSendFormatting.sanitizeAmountInput("12.50")
+        XCTAssertEqual(QuickSendFormatting.amountDecimal(sanitized), Decimal(string: "12.50"))
     }
 
     func test_amount_limitsToTwoDecimals() {
@@ -67,6 +92,13 @@ final class QuickSendFormattingTests: XCTestCase {
 
     func test_isValidIban_rejectsBadChecksum() {
         XCTAssertFalse(QuickSendFormatting.isValidIban("DE00 3704 0044 0532 0130 00"))
+    }
+
+    func test_maskedIban_showsFirstAndLastFour() {
+        XCTAssertEqual(
+            QuickSendFormatting.maskedIban("DE89 3704 0044 0532 0130 00"),
+            "DE89 … 3000"
+        )
     }
 
     func test_displayEUR_formatsGermanStyle() {
