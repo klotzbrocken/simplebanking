@@ -37,6 +37,19 @@ struct CalendarHeatmapView: View {
     @State private var selectedDay: Int? = nil   // nil = Monatsansicht
     @State private var hasAutoNavigated = false
 
+    // (b) Fixkosten/Alle-Filter (nur Geldfluss-Modus).
+    @State private var fixkostenOnly = false
+    /// txIDs der als wiederkehrend (Fixkosten) erkannten Buchungen — exakt per
+    /// `SubscriptionDetector`-matchedTransactions ermittelt (Fingerprint → txID).
+    @State private var recurringTxIDs: Set<String> = []
+
+    /// Records gemäß Fixkosten-Filter. `hasData`/Monatsauswahl nutzen bewusst die
+    /// VOLLEN records, damit ein Monat mit Umsätzen wählbar bleibt.
+    private var filteredRecords: [TransactionRecord] {
+        guard fixkostenOnly else { return records }
+        return records.filter { recurringTxIDs.contains($0.txID) }
+    }
+
     // Sheet state
     @State private var showDaySheet = false
     @State private var sheetDay: Int = 0
@@ -98,7 +111,7 @@ struct CalendarHeatmapView: View {
     private var dataByDay: [Int: DayData] {
         var result: [Int: DayData] = [:]
         let monthKey = displayedMonthKey
-        for rec in records {
+        for rec in filteredRecords {
             let dateStr = rec.datum
             guard dateStr.count >= 10,
                   String(dateStr.prefix(7)) == monthKey,
@@ -143,7 +156,7 @@ struct CalendarHeatmapView: View {
     private var abosByDay: [Int: [String]] {
         var result: [Int: [String]] = [:]
         let monthKey = displayedMonthKey
-        for rec in records {
+        for rec in filteredRecords {
             guard rec.betrag < 0 else { continue }
             let dateStr = rec.datum
             guard dateStr.count >= 10,
@@ -275,7 +288,26 @@ struct CalendarHeatmapView: View {
             guard let n = cal.date(byAdding: .month, value: 1, to: d) else { break }
             d = n; safety += 1; if safety > 60 { break }
         }
-        return months.reversed()
+        // (a) Im Geldfluss-Modus nur Monate MIT Daten zeigen — alte leere Monate raus.
+        // Der laufende Monat bleibt immer wählbar (auch wenn noch keine Buchung da ist).
+        if mode == .spending {
+            months = months.filter {
+                hasData(for: $0) || gregorian.isDate($0, equalTo: currentMonthStart, toGranularity: .month)
+            }
+        }
+        return months.reversed()   // neueste zuerst
+    }
+
+    /// Index von `displayedMonth` in `selectableMonths` (neueste zuerst), falls vorhanden.
+    private var displayedMonthIndex: Int? {
+        selectableMonths.firstIndex { gregorian.isDate($0, equalTo: displayedMonth, toGranularity: .month) }
+    }
+
+    /// Zurück-Pfeil sperren, wenn kein älterer Monat MIT Daten existiert (Geldfluss-Modus).
+    private var backwardDisabled: Bool {
+        guard mode == .spending else { return false }
+        guard let idx = displayedMonthIndex else { return false }
+        return idx >= selectableMonths.count - 1   // bereits ältester Daten-Monat
     }
 
     private func monthLabel(_ date: Date) -> String {
@@ -299,6 +331,7 @@ struct CalendarHeatmapView: View {
 
             Button { navigateMonth(-1) } label: { Image(systemName: "chevron.left").font(.system(size: 13, weight: .medium)) }
                 .buttonStyle(.plain)
+                .disabled(backwardDisabled).opacity(backwardDisabled ? 0.3 : 1)
             Button { navigateMonth(1) } label: { Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)) }
                 .buttonStyle(.plain)
                 .disabled(forwardDisabled).opacity(forwardDisabled ? 0.3 : 1)
@@ -314,6 +347,19 @@ struct CalendarHeatmapView: View {
             } else {
                 HStack { Spacer(); monthNav }
                     .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 8)
+            }
+
+            // (b) Fixkosten/Alle-Umschalter — nur Geldfluss.
+            if mode == .spending {
+                Picker("", selection: $fixkostenOnly) {
+                    Text("Alle").tag(false)
+                    Text("Fixkosten").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
             }
 
             // ── Summary Card (Balance-Card-Stil) ─────────────────────────
@@ -531,42 +577,38 @@ struct CalendarHeatmapView: View {
     // MARK: - Summary Panel (Balance-Card-Stil)
 
     private var summaryPanel: some View {
-        let expBigger = summaryExpense >= summaryIncome
+        let gap = summaryIncome - summaryExpense
+        let tertiary = Color(NSColor.tertiaryLabelColor)
 
-        let topText:    String = expBigger ? "-\(formatAmount(summaryExpense))" : "+\(formatAmount(summaryIncome))"
-        let topColor:   Color  = expBigger
-            ? (summaryExpense > 0 ? Color.expenseRed   : Color(NSColor.tertiaryLabelColor))
-            : (summaryIncome  > 0 ? Color.incomeGreen  : Color(NSColor.tertiaryLabelColor))
-
-        let bottomText:  String = expBigger ? "+\(formatAmount(summaryIncome))" : "-\(formatAmount(summaryExpense))"
-        let bottomColor: Color  = expBigger
-            ? (summaryIncome  > 0 ? Color.incomeGreen  : Color(NSColor.tertiaryLabelColor))
-            : (summaryExpense > 0 ? Color.expenseRed   : Color(NSColor.tertiaryLabelColor))
-
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 10) {
             // Label: Monatsname (kein Tag gewählt) oder Tagesname
             HStack(spacing: 6) {
                 if selectedDay != nil {
                     Image(systemName: "calendar.day.timeline.left")
-                        .font(.system(size: 13))
+                        .font(.system(size: 12))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
                 Text(summaryLabel)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
+                Spacer(minLength: 0)
             }
 
-            // Größter Wert oben (32 pt bold)
-            Text(topText)
-                .font(.system(size: 32, weight: .bold))
-                .foregroundColor(topColor)
-                .monospacedDigit()
-
-            // Kleinerer Wert darunter (13 pt)
-            Text(bottomText)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(bottomColor)
-                .monospacedDigit()
+            // Ausgaben · Einnahmen · Gap — gleichwertig in einer Zeile.
+            HStack(spacing: 0) {
+                summaryCell(icon: "arrow.up.right", title: "Ausgaben",
+                            value: "-\(formatAmount(summaryExpense))",
+                            color: summaryExpense > 0 ? Color.expenseRed : tertiary)
+                summaryDivider
+                summaryCell(icon: "arrow.down.left", title: "Einnahmen",
+                            value: "+\(formatAmount(summaryIncome))",
+                            color: summaryIncome > 0 ? Color.incomeGreen : tertiary)
+                summaryDivider
+                summaryCell(icon: gap >= 0 ? "plus.forwardslash.minus" : "plus.forwardslash.minus",
+                            title: "Gap",
+                            value: "\(gap >= 0 ? "+" : "-")\(formatAmount(abs(gap)))",
+                            color: gap > 0 ? Color.incomeGreen : (gap < 0 ? Color.expenseRed : tertiary))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -579,6 +621,23 @@ struct CalendarHeatmapView: View {
                 )
         )
         .animation(.easeInOut(duration: 0.15), value: selectedDay)
+    }
+
+    private var summaryDivider: some View {
+        Rectangle().fill(Color(NSColor.separatorColor).opacity(0.5)).frame(width: 1, height: 34)
+    }
+
+    private func summaryCell(icon: String, title: String, value: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundColor(color)
+                Text(title).font(.system(size: 11)).foregroundColor(.secondary)
+            }
+            Text(value)
+                .font(.system(size: 18, weight: .bold)).foregroundColor(color)
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.65)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Subscriptions Summary Panel (Monats-Abo-Summe + Klassifizierung)
@@ -653,6 +712,16 @@ struct CalendarHeatmapView: View {
     // MARK: - Navigation & Loading
 
     private func navigateMonth(_ delta: Int) {
+        // Geldfluss: zwischen den verfügbaren Daten-Monaten springen (leere überspringen).
+        if mode == .spending, let idx = displayedMonthIndex {
+            let months = selectableMonths                 // neueste zuerst
+            let newIdx = idx - delta                       // +1 = neuer (kleinerer Index)
+            if months.indices.contains(newIdx) {
+                displayedMonth = months[newIdx]
+                selectedDay = nil
+            }
+            return
+        }
         if let newDate = gregorian.date(byAdding: .month, value: delta, to: displayedMonth) {
             displayedMonth = newDate
             selectedDay = nil
@@ -668,8 +737,10 @@ struct CalendarHeatmapView: View {
                 let fake = FakeData.generateDemoTransactions(seed: &seed, days: days)
                 let now = ISO8601DateFormatter().string(from: Date())
                 let converted = fake.compactMap { try? TransactionRecord(transaction: $0, updatedAt: now) }
+                let recurring = Self.computeRecurringTxIDs(from: converted)
                 await MainActor.run {
                     records = converted
+                    recurringTxIDs = recurring
                     isLoading = false
                     jumpToLatestWithDataIfNeeded()
                     preloadAboLogos()
@@ -678,8 +749,10 @@ struct CalendarHeatmapView: View {
             }
             do {
                 let loaded = try TransactionsDatabase.loadAllTransactions()
+                let recurring = Self.computeRecurringTxIDs(from: loaded)
                 await MainActor.run {
                     records = loaded
+                    recurringTxIDs = recurring
                     isLoading = false
                     jumpToLatestWithDataIfNeeded()
                     preloadAboLogos()
@@ -691,6 +764,22 @@ struct CalendarHeatmapView: View {
                 }
             }
         }
+    }
+
+    /// txIDs aller Buchungen, die zu einem wiederkehrenden Posten gehören — exakt
+    /// über `SubscriptionDetector.matchedTransactions` (Fingerprint → txID).
+    nonisolated private static func computeRecurringTxIDs(
+        from records: [TransactionRecord]
+    ) -> Set<String> {
+        let pairs: [(rec: TransactionRecord, tx: TransactionsResponse.Transaction)] =
+            records.compactMap { rec in rec.toTransaction().map { (rec, $0) } }
+        guard !pairs.isEmpty else { return [] }
+        let candidates = SubscriptionDetector.detect(in: pairs.map { $0.tx })
+        let recurringFPs = Set(candidates.flatMap { $0.matchedTransactions }
+            .map { TransactionRecord.fingerprint(for: $0) })
+        return Set(pairs
+            .filter { recurringFPs.contains(TransactionRecord.fingerprint(for: $0.tx)) }
+            .map { $0.rec.txID })
     }
 
     private func preloadAboLogos() {

@@ -27,10 +27,10 @@ enum BankTintStyle: String, CaseIterable, Identifiable, Sendable {
 
     static let storageKey = "simplebanking.bankTint.style"
 
-    /// Liest den User-Default. Default `.soft`.
+    /// Liest den User-Default. Default `.sidebar` (feine Banklinie / Streifen).
     static var current: BankTintStyle {
-        let raw = UserDefaults.standard.string(forKey: storageKey) ?? BankTintStyle.soft.rawValue
-        return BankTintStyle(rawValue: raw) ?? .soft
+        let raw = UserDefaults.standard.string(forKey: storageKey) ?? BankTintStyle.sidebar.rawValue
+        return BankTintStyle(rawValue: raw) ?? .sidebar
     }
 }
 

@@ -30,28 +30,73 @@ enum LeftToPayCalculator {
         toleranceAfter: Int = 0,
         today: Date = Date()
     ) -> Double {
+        countedPayments(payments: payments,
+                        salaryDay: salaryDay,
+                        toleranceBefore: toleranceBefore,
+                        toleranceAfter: toleranceAfter,
+                        today: today)
+            .reduce(0) { $0 + $1.averageAmount }
+    }
+
+    /// Die konkreten Posten, die `compute` aufsummiert — für Diagnose/Aufschlüsselung.
+    /// Selbe Prädikate wie `compute`: nicht-irregulär, Confidence ≥ 0.6, in diesem
+    /// Zyklus noch nicht gebucht (last < cycleStart) und nächste Fälligkeit ≤ cycleEnd
+    /// (überfällige zählen bewusst mit).
+    static func countedPayments(
+        payments: [RecurringPayment],
+        salaryDay: Int,
+        toleranceBefore: Int = 0,
+        toleranceAfter: Int = 0,
+        today: Date = Date()
+    ) -> [RecurringPayment] {
         let cStart = cycleStart(salaryDay: salaryDay, toleranceBefore: toleranceBefore, today: today)
         let cEnd   = cycleEnd(salaryDay: salaryDay,
                               toleranceBefore: toleranceBefore,
                               toleranceAfter: toleranceAfter,
                               today: today)
+        return countedPayments(payments: payments, cycleStart: cStart, cycleEnd: cEnd)
+    }
 
-        var sum: Double = 0
-        for p in payments {
-            guard p.frequency != .irregular else { continue }
-            guard p.confidence >= 0.6 else { continue }
-            guard let last = isoFormatter.date(from: p.lastDate) else { continue }
+    /// Variante mit EXPLIZITEN Zyklusgrenzen (z.B. aus `cycleBounds`, wenn das
+    /// Gehalt real früher einging). Selbe Prädikate.
+    static func countedPayments(
+        payments: [RecurringPayment],
+        cycleStart cStart: Date,
+        cycleEnd cEnd: Date
+    ) -> [RecurringPayment] {
+        payments.filter { p in
+            guard p.frequency != .irregular,
+                  p.confidence >= 0.6,
+                  let last = isoFormatter.date(from: p.lastDate),
+                  last < cStart                                   // noch nicht in diesem Zyklus gebucht
+            else { return false }
+            return nextExpected(last: last, frequency: p.frequency) <= cEnd
+        }
+    }
 
-            // Already charged in this cycle → nothing more expected from it.
-            if last >= cStart { continue }
-
-            let next = nextExpected(last: last, frequency: p.frequency)
-            // Expected in the cycle (or overdue, which also counts).
-            if next <= cEnd {
-                sum += p.averageAmount
+    /// Tatsächliche Zyklusgrenzen für „Noch offen":
+    /// - Standard = NOMINALER Gehaltszyklus (Gehaltstag → Gehaltstag, OHNE Toleranz).
+    /// - Wenn `actualSalaryArrival` gesetzt ist (real erkannte Gehalts-Gutschrift)
+    ///   und aktueller als der nominale Start liegt (= Gehalt kam diesen Monat,
+    ///   evtl. früher) → Start = dieses Eingangsdatum, Ende = +1 Monat.
+    /// So schaltet der Zyklus NUR bei tatsächlich früherem Geldeingang um, nicht
+    /// schon im Toleranzfenster davor.
+    static func cycleBounds(
+        salaryDay: Int,
+        today: Date = Date(),
+        actualSalaryArrival: Date? = nil
+    ) -> (start: Date, end: Date) {
+        let cal = Calendar.current
+        let nominalStart = cycleStart(salaryDay: salaryDay, toleranceBefore: 0, today: today)
+        let nominalEnd   = cycleEnd(salaryDay: salaryDay, toleranceBefore: 0, toleranceAfter: 0, today: today)
+        if let arrival = actualSalaryArrival {
+            let a = cal.startOfDay(for: arrival)
+            if a > nominalStart && a <= cal.startOfDay(for: today) {
+                let end = cal.date(byAdding: .month, value: 1, to: a) ?? nominalEnd
+                return (a, end)
             }
         }
-        return sum
+        return (nominalStart, nominalEnd)
     }
 
     // MARK: - Cycle boundaries

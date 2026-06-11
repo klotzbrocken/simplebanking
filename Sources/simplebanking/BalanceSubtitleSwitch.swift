@@ -14,6 +14,11 @@ struct BalanceSubtitleSwitch: View {
     let salaryDay: Int
     let salaryToleranceBefore: Int
     let salaryToleranceAfter: Int
+    /// Optionales Zyklusende (nächster Gehaltseingang) aus derselben Berechnung wie
+    /// `leftToPayAmount`. Wenn gesetzt, treibt es das „bis zum …"-Datum statt der
+    /// toleranzbasierten Eigenberechnung — sonst springt die Anzeige im Vorfenster
+    /// des Gehalts einen Monat zu weit.
+    var cycleEndOverride: Date? = nil
     @Binding var style: Int
     /// Wenn `true`, wird zwingend der Classic-Mode angezeigt und der Toggle-Button
     /// ausgeblendet. Nutzung: im Unified-Mode, wo Sub-Metrics mit aggregiertem
@@ -70,10 +75,20 @@ struct BalanceSubtitleSwitch: View {
     var body: some View {
         HStack(spacing: 6) {
             if !forceClassic {
+                // Als kleine Pille darstellen, damit klar ist: das ist ein Umschalter.
                 Button(action: toggle) {
                     Image(systemName: currentModeIcon)
-                        .font(.system(size: 11))
-                        .foregroundColor(Color(NSColor.tertiaryLabelColor))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 22, height: 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color.sbInputTint)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .stroke(Color.sbBorder, lineWidth: 0.5)
+                                )
+                        )
                 }
                 .buttonStyle(.plain)
                 .help(L10n.t(
@@ -110,7 +125,8 @@ struct BalanceSubtitleSwitch: View {
             leftToPay: leftToPayAmount,
             salaryDay: salaryDay,
             toleranceBefore: salaryToleranceBefore,
-            toleranceAfter: salaryToleranceAfter
+            toleranceAfter: salaryToleranceAfter,
+            cycleEndOverride: cycleEndOverride
         )
         switch metrics.state {
         case .normal, .overdrawn:

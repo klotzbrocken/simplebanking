@@ -53,10 +53,33 @@ final class DashboardModel: ObservableObject {
 /// Kalender, Abos, Geld-Alter) with one tabbed window.
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
+    @ObservedObject private var multibankingStore = MultibankingStore.shared
+
+    private func bankLogo(for slot: BankSlot) -> NSImage? {
+        let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: nil, iban: nil)
+        BankLogoStore.shared.preload(brand: brand)
+        return BankLogoStore.shared.image(for: brand)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
+                // Aktive Bank — Logo + Name vor den Tabs.
+                if let slot = multibankingStore.activeSlot {
+                    HStack(spacing: 6) {
+                        if let logo = bankLogo(for: slot) {
+                            Image(nsImage: logo).resizable().scaledToFit()
+                                .frame(width: 16, height: 16)
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                        Text(slot.nickname?.trimmingCharacters(in: .whitespaces).nilIfEmpty ?? slot.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 8)
+                    Divider().frame(height: 16).padding(.trailing, 2)
+                }
                 ForEach(DashboardTab.allCases) { tab in
                     let active = model.tab == tab
                     Button { model.tab = tab } label: {

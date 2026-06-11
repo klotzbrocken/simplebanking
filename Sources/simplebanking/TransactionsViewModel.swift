@@ -113,6 +113,9 @@ final class TransactionsViewModel: ObservableObject {
     @Published var isTanPending: Bool = false
     /// Sum of recurring payments still expected in the current cycle (nil = not computed yet).
     @Published var leftToPayAmount: Double? = nil
+    /// Ende des aktuellen Gehaltszyklus (= nächster erwarteter Gehaltseingang) — derselbe
+    /// Zyklus, den `leftToPayAmount` nutzt. Treibt das "bis zum …"-Datum im Untertitel.
+    @Published var leftToPayCycleEnd: Date? = nil
     @Published var enrichmentData: [String: TxEnrichment] = [:] {
         didSet {
             // Re-apply filter when reminders filter is active — enrichment changes

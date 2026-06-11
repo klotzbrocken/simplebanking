@@ -37,17 +37,19 @@ struct FinancialHealthScoreView: View {
         VStack(spacing: 0) {
             Spacer(minLength: 8)
 
-            // Ring + Score/Sparrate/Puffer nebeneinander
-            HStack(alignment: .center, spacing: 28) {
-                Spacer(minLength: 0)
-                MMIRingView(components: vm.displayed, size: 248, lineWidth: 24, animProgress: animProgress)
-                VStack(alignment: .leading, spacing: 18) {
-                    compactStat("Score", String(format: "%.2f", vm.displayed.score * animProgress), vm.displayed.rating.color)
-                    compactStat("Sparrate", String(format: "%+.0f %%", vm.displayed.savingsRate * 100 * animProgress),
-                                vm.displayed.savingsRate >= 0 ? .sbBlueStrong : .sbRedStrong)
-                    compactStat("Puffer", String(format: "%.1f Mon.", vm.displayed.bufferMonths), Self.liquidColor)
+            // Ring + Score LINKS, Erklärung im freien Platz rechts.
+            HStack(alignment: .top, spacing: 22) {
+                VStack(spacing: 14) {
+                    MMIRingView(components: vm.displayed, size: 168, lineWidth: 18, animProgress: animProgress)
+                    VStack(alignment: .leading, spacing: 9) {
+                        compactStat("Score", String(format: "%.2f", vm.displayed.score * animProgress), vm.displayed.rating.color)
+                        compactStat("Sparrate", String(format: "%+.0f %%", vm.displayed.savingsRate * 100 * animProgress),
+                                    vm.displayed.savingsRate >= 0 ? .sbBlueStrong : .sbRedStrong)
+                        compactStat("Puffer", String(format: "%.1f Mon.", vm.displayed.bufferMonths), Self.liquidColor)
+                    }
                 }
-                Spacer(minLength: 0)
+                .fixedSize()
+                mmiExplanation
             }
             .padding(.horizontal)
 
@@ -60,16 +62,16 @@ struct FinancialHealthScoreView: View {
                              desc: "Summe aller Ausgaben im Zeitraum.")
                 metricColumn(color: Self.savingsColor, title: "Geparkt",
                              value: formatCurrency(vm.displayed.savings),
-                             desc: "Abflüsse zu Spar-/Vorsorgekonten.")
+                             desc: "Abflüsse zu Spar-/Vorsorgekonten (Sparrate).")
                 metricColumn(color: Self.liquidColor, title: "Liquide",
                              value: formatCurrency(vm.displayed.balance),
                              desc: String(format: "Kontostand — %.1f Mon. Ausgaben.", vm.displayed.bufferMonths))
             }
             .padding(.horizontal)
 
-            Spacer(minLength: 16)
+            Spacer(minLength: 10)
 
-            Text("Zeitraum: \(vm.period.label) · Sparbewegungen = erkannte Abflüsse zu Spar-/Vorsorgekonten · Kontostand ≠ Notfallreserve")
+            Text("Zeitraum: \(vm.period.label) · Kontostand ≠ Notfallreserve")
                 .font(.caption2).foregroundColor(.secondary).multilineTextAlignment(.center)
                 .padding(.horizontal)
 
@@ -110,6 +112,46 @@ struct FinancialHealthScoreView: View {
         HStack(spacing: 8) {
             Text(value).font(.system(size: 22, weight: .bold)).foregroundColor(color).monospacedDigit()
             Text(title).font(.system(size: 12.5)).foregroundColor(.secondary)
+        }
+    }
+
+    // MARK: - MMI-Erklärung (rechts neben Ring)
+
+    private var mmiExplanation: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("So entsteht dein MMI")
+                .font(.system(size: 14, weight: .bold))
+            explainRow(color: Self.liquidColor, title: "Pufferreichweite",
+                       text: "Wie viele Monate dein Kontostand die ø-Ausgaben deckt — der Kern des Scores. ~3 Monate = gesund.")
+            explainRow(color: Self.savingsColor, title: "Sparrate",
+                       text: "Aktives Sparen (ETF, Sparplan, Depot, Tagesgeld) zählt positiv mit — bis +0,15 Bonus auf den Score.")
+            Divider().padding(.vertical, 2)
+            Text("So hebst du ihn")
+                .font(.system(size: 14, weight: .bold))
+            tipRow("Liquiden Puffer aufbauen — schon 1–3 Monatsausgaben heben den Score deutlich.")
+            tipRow("Regelmäßig sparen — erkannte Sparabflüsse zählen positiv mit.")
+            tipRow("Fixkosten senken — weniger Burn = längere Pufferreichweite.")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func explainRow(color: Color, title: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Circle().fill(color).frame(width: 8, height: 8).padding(.top, 5)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 12.5, weight: .semibold))
+                Text(text).font(.system(size: 11)).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func tipRow(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11)).foregroundColor(.sbGreenStrong).padding(.top, 1)
+            Text(text).font(.system(size: 11)).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

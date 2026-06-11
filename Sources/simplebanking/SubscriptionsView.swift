@@ -200,17 +200,33 @@ struct SubscriptionsView: View {
             Divider()
 
             if viewMode == .liste {
-            Picker("", selection: $activeTab) {
+            // Linksbündige Tab-Piles mit Icon (statt gestrecktem Segmented-Picker).
+            HStack(spacing: 8) {
                 ForEach(SubscriptionTab.allCases, id: \.self) { tab in
-                    Text(tabLabel(tab)).tag(tab)
+                    let active = activeTab == tab
+                    Button { activeTab = tab } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: tabIcon(tab)).font(.system(size: 11, weight: .medium))
+                            Text(tabLabel(tab)).font(.system(size: 12.5, weight: active ? .semibold : .regular))
+                        }
+                        .foregroundColor(active ? .primary : .secondary)
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(active ? Color.cardBackground : Color.sbInputTint)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(active ? Color.sbBorder : Color.clear, lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
+                Spacer(minLength: 0)
             }
-            .pickerStyle(.segmented)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
             .padding(.horizontal, 20)
             .padding(.top, 12)
-            .padding(.bottom, 12)
+            .padding(.bottom, 10)
 
             Divider()
 
@@ -232,12 +248,12 @@ struct SubscriptionsView: View {
                         .frame(width: 1, height: 28)
 
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text("Gesamt")
+                        Text("Monatl. Fixkosten")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.secondary)
                         Text(Self.fmt(grandTotal))
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.primary)
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
@@ -341,6 +357,15 @@ struct SubscriptionsView: View {
     private func tabLabel(_ tab: SubscriptionTab) -> String {
         let total = confirmed(for: tab).count + possible(for: tab).count
         return total > 0 ? "\(tab.rawValue) (\(total))" : tab.rawValue
+    }
+
+    private func tabIcon(_ tab: SubscriptionTab) -> String {
+        switch tab {
+        case .abos:              return "play.rectangle"
+        case .vertraege:         return "doc.text"
+        case .sparen:            return "banknote"
+        case .verbindlichkeiten: return "lock.doc"
+        }
     }
 
     private var subtitleText: String {

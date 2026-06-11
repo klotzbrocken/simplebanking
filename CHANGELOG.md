@@ -4,6 +4,7 @@
 
 ### Neu
 
+- **Schnellüberweisung im Flyout (Quick-Send, Opt-in)** — ein Papierflieger-Button in der Flyout-Kopfzeile klappt einen kompakten Überweisungs-Drawer direkt unter der Saldo-Karte auf (Popover-Höhe wächst animiert mit). Felder: Name + Betrag (mit Live-Validierung), IBAN (mod-97-Check mit grünem Haken, 4er-Gruppierung), Betreff. Dazu eine Reihe **gepinnter Vorlagen** (Emoji-Shortcuts, füllen das Formular per Klick; „+“ pinnt die aktuelle Eingabe, max. 4). Versand läuft über denselben Pfad wie „Geld senden“ (Master-Passwort + SCA via `YaxiService.sendTransfer`) — direkt, ohne Sende-Verzögerung. Aktivierung in **Einstellungen → Labs → „Schnellüberweisung im Flyout“** (Default aus), inkl. Vorlagen-Editor. Nur auf der Einzelkonto-Karte (nicht im Aufrunden-/Aggregat-Modus). Die große `TransferSheet` bleibt unverändert.
 - **Aufrunden-Ansicht** — neuer Sicht-Modus im Umsatzpanel, der den **Freeze-Modus ersetzt**. Aktivierung über den Centsign-Toggle (ehem. Schneeflocken-Icon) im Filter-Header, nur sichtbar wenn Aufrunden in den Slot-Einstellungen aktiviert ist und kein Aggregat-Mode aktiv ist. Beim Einschalten:
   - **Beträge in der Liste werden aufgerundet** angezeigt (z. B. -3,47 € → -5,00 € bei 5 €-Step). Original-Beträge bleiben in Detail-Sheets/Reports unverändert.
   - **Unter dem Kontostand** erscheint zweizeilig „Virtuell gespart X €" + „Heute +Y €".

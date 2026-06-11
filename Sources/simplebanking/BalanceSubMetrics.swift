@@ -36,7 +36,8 @@ struct BalanceSubMetrics: Equatable {
         salaryDay: Int,
         toleranceBefore: Int,
         toleranceAfter: Int,
-        today: Date = Date()
+        today: Date = Date(),
+        cycleEndOverride: Date? = nil
     ) -> BalanceSubMetrics {
         guard let balance, let ltp = leftToPay else {
             return BalanceSubMetrics(availableAmount: 0, daysUntilSalary: 0,
@@ -46,10 +47,13 @@ struct BalanceSubMetrics: Equatable {
 
         let available = balance - ltp
 
-        let cycleEnd = LeftToPayCalculator.cycleEnd(salaryDay: salaryDay,
-                                                    toleranceBefore: toleranceBefore,
-                                                    toleranceAfter: toleranceAfter,
-                                                    today: today)
+        // Wenn der Aufrufer das Zyklusende kennt (gleiche Berechnung wie leftToPay),
+        // dieses verwenden — sonst aus Gehaltstag + Toleranz herleiten.
+        let cycleEnd = cycleEndOverride ?? LeftToPayCalculator.cycleEnd(
+            salaryDay: salaryDay,
+            toleranceBefore: toleranceBefore,
+            toleranceAfter: toleranceAfter,
+            today: today)
         let cal = Calendar.current
         let daysRaw = cal.dateComponents(
             [.day],
@@ -130,6 +134,32 @@ struct BalanceSubMetricsLabel: View {
         return (isDE ? Self.shortDateDE : Self.shortDateEN).string(from: metrics.cycleEnd)
     }
 
+    private static let monthNameDE: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "de_DE"); f.dateFormat = "LLLL"; return f
+    }()
+    private static let monthNameEN: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "LLLL"; return f
+    }()
+
+    /// „X € bis zum 15. verfügbar". Liegt das Zyklusende NICHT im aktuellen Monat
+    /// (Gehalt kam → neuer Zyklus → Folgemonat greift), wird der Monat ergänzt:
+    /// „X € bis zum 15. Juli verfügbar" — sonst wäre unklar, ob der 15. dieses oder
+    /// des nächsten Monats gemeint ist.
+    private func untilText() -> String {
+        let cal = Calendar.current
+        let amount = euro(metrics.availableAmount)
+        let day = cal.component(.day, from: metrics.cycleEnd)
+        let isDE = AppLanguage.resolved() == .de
+        let sameMonth = cal.isDate(metrics.cycleEnd, equalTo: Date(), toGranularity: .month)
+        if sameMonth {
+            return isDE ? "\(amount) bis zum \(day). verfügbar"
+                        : "\(amount) until \(day). available"
+        }
+        let month = (isDE ? Self.monthNameDE : Self.monthNameEN).string(from: metrics.cycleEnd)
+        return isDE ? "\(amount) bis zum \(day). \(month) verfügbar"
+                    : "\(amount) until \(month) \(day). available"
+    }
+
     var body: some View {
         switch metrics.state {
         case .overdrawn:
@@ -160,14 +190,11 @@ struct BalanceSubMetricsLabel: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             } else {
-                Text(L10n.t(
-                    "\(euro(metrics.availableAmount)) bis zum \(metrics.salaryDayOfMonth). verfügbar",
-                    "\(euro(metrics.availableAmount)) until \(metrics.salaryDayOfMonth). available"
-                ))
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                .lineLimit(1)
-                .truncationMode(.tail)
+                Text(untilText())
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
 
         case .unknown:

@@ -26,7 +26,7 @@ private struct TransactionsPanelView: View {
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
-    @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.soft.rawValue
+    @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.sidebar.rawValue
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false
     @AppStorage("greenZoneShowDispo") private var greenZoneShowDispo: Bool = true
     @AppStorage("demoMode") private var demoMode: Bool = false
@@ -163,6 +163,7 @@ private struct TransactionsPanelView: View {
             salaryDay: activeSlotSettings.effectiveSalaryDay,
             salaryToleranceBefore: activeSlotSettings.salaryDayToleranceBefore,
             salaryToleranceAfter: activeSlotSettings.salaryDayToleranceAfter,
+            cycleEndOverride: vm.leftToPayCycleEnd,
             style: $panelSubtitleStyle,
             forceClassic: vm.isUnifiedMode
         )
@@ -1405,6 +1406,11 @@ private struct TransactionsPanelView: View {
                 }
                 .coordinateSpace(name: "transactionsScroll")
                 .offset(y: pullListOffset)
+                // `.offset` verschiebt nur das Rendering, nicht das Layout — ohne
+                // Clipping ragt der (beim Pull/Overscroll) verschobene Listeninhalt
+                // unter den Footer und scheint dort durch (#3). Auf den Layout-Frame
+                // zurückclippen, Pull-Indikator (separat in der ZStack) bleibt sichtbar.
+                .clipped()
                 .onPreferenceChange(TransactionsTopOffsetPreferenceKey.self) { topSentinelOffset = $0 }
                 .simultaneousGesture(pullToRefreshGesture)
                 .onChange(of: scrollTarget) { target in
@@ -1472,14 +1478,15 @@ private struct TransactionsPanelView: View {
                         .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
                     }
 
-                    // Abos
-                    Button(action: { onOpenDashboard?(.subscriptions) }) {
-                        Image(systemName: "list.bullet.rectangle")
+                    // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
+                    // (Abos/Fixkosten/Kalender/Financial Health/Money Age sind dort Tabs).
+                    Button(action: { onOpenDashboard?(.overview) }) {
+                        Image(systemName: "square.grid.2x2")
                             .font(.system(size: 15))
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("Abos der letzten 60 Tage", "Subscriptions of the last 60 days"))
+                    .help(L10n.t("Dashboard", "Dashboard"))
 
                     // Inbox mit Badge — nur wenn vom User aktiviert (Setting in
                     // SettingsPanel). Die Detector-Logik läuft bei deaktiviertem
@@ -1510,54 +1517,11 @@ private struct TransactionsPanelView: View {
                         .help(L10n.t("Attention Inbox", "Attention Inbox"))
                     }
 
-                    // Wenn Fenster maximiert: Financial Health, Kalender, Fixkosten als
-                    // eigenständige Icon-Buttons. Sonst bleiben sie im „Mehr ▾"-Menü unten.
-                    if panelIsWide {
-                        Button(action: { onOpenDashboard?(.overview) }) {
-                            Image(systemName: "square.grid.2x2")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help(L10n.t("Financial Health", "Financial Health"))
-
-                        Button(action: { onOpenDashboard?(.calendar) }) {
-                            Image(systemName: "calendar.badge.clock")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help(L10n.t("Kalender", "Calendar"))
-
-                        Button(action: { onOpenDashboard?(.subscriptions) }) {
-                            Image(systemName: "repeat.circle")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help(L10n.t("Fixkosten", "Fixed costs"))
-                    }
+                    // (Financial Health / Kalender / Fixkosten / Money Age leben jetzt
+                    //  im Dashboard — kein eigener Toolbar-/Menüeintrag mehr.)
 
                     // Mehr ▾
                     Menu {
-                        if !panelIsWide {
-                            Button(action: { onOpenDashboard?(.overview) }) {
-                                Label(L10n.t("Financial Health", "Financial Health"), systemImage: "square.grid.2x2")
-                            }
-
-                            Button(action: { onOpenDashboard?(.calendar) }) {
-                                Label(L10n.t("Kalender", "Calendar"), systemImage: "calendar.badge.clock")
-                            }
-
-                            Button(action: { onOpenDashboard?(.subscriptions) }) {
-                                Label(L10n.t("Fixkosten", "Fixed costs"), systemImage: "repeat.circle")
-                            }
-                        }
-
-                        Button(action: { onOpenDashboard?(.moneyAge) }) {
-                            Label(L10n.t("Money Age", "Money Age"), systemImage: "hourglass")
-                        }
-
                         Button(action: { markAllTransactionsRead() }) {
                             Label(L10n.t("Alle als gelesen markieren", "Mark all as read"), systemImage: "checkmark.circle")
                         }
@@ -1772,12 +1736,17 @@ private struct TransactionsPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(activePanelBg)
-        .overlay(alignment: .leading) {
+        .overlay(alignment: .topLeading) {
             if currentTintStyle == .sidebar, let color = bankAccentForOverlay {
-                // 4 px Streifen am linken Panel-Rand.
+                // 4 px Streifen am linken Rand — von oben (BalanceBar) bis knapp
+                // OBERHALB der Iconbar. Der Footer ist ~52 pt hoch (padding.top 28 +
+                // Icons + padding.bottom 4) und deckend; der Streifen wird unten um
+                // diese Höhe gekürzt, sonst liefe er hinter die Iconbar.
                 Rectangle()
                     .fill(color)
                     .frame(width: 4)
+                    .frame(maxHeight: .infinity)
+                    .padding(.bottom, 52)
                     .allowsHitTesting(false)
             }
         }
@@ -1808,6 +1777,12 @@ private struct TransactionsPanelView: View {
     private func installScrollWheelMonitor() {
         guard scrollWheelMonitor == nil else { return }
         scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .keyDown]) { event in
+            // Nur Events DIESES Fensters behandeln. Sonst greift der app-weite
+            // Monitor auch Scroll-/Tasten-Events im Settings-Fenster ab und scrollt
+            // die Umsatzliste dahinter mit (#5).
+            guard event.window?.identifier?.rawValue == TransactionsPanel.panelWindowIdentifier else {
+                return event
+            }
             if event.type == .keyDown {
                 return handleKeyDown(event)
             }
@@ -3261,6 +3236,8 @@ final class AccountNavModel: ObservableObject {
     nonisolated static let narrowWidth: CGFloat = 420
     nonisolated static let wideWidth:   CGFloat = 840
     nonisolated static let panelHeight: CGFloat = 620
+    /// Window-Identifier des Umsatz-Panels — der Scroll-Monitor reagiert nur auf dieses Fenster.
+    nonisolated static let panelWindowIdentifier = "simplebanking.transactions.panel"
     private var toolbarDelegate: TransactionsPanelToolbarDelegate?
     private var cancellables: Set<AnyCancellable> = []
     private let onSettings: (() -> Void)?
@@ -3300,6 +3277,9 @@ final class AccountNavModel: ObservableObject {
             defer: false
         )
         panel.title = "simplebanking"
+        // Eindeutige ID, damit der app-weite Scroll-Monitor NUR Events dieses
+        // Fensters verarbeitet (sonst scrollt das Settings-Fenster die Liste mit).
+        panel.identifier = NSUserInterfaceItemIdentifier(Self.panelWindowIdentifier)
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         // Theme-aware panel background — picks light/dark based on appearance

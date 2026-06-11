@@ -192,6 +192,13 @@ struct SettingsView: View {
     @AppStorage("transferDelaySeconds") private var transferDelaySeconds: Int = 5
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("mcpDraftsEnabled") private var mcpDraftsEnabled: Bool = false
+    @AppStorage("quickSendEnabled") private var quickSendEnabled: Bool = false
+    @ObservedObject private var quickSendFavorites = QuickSendFavoritesStore.shared
+    @State private var qsNewEmoji = "💸"
+    @State private var qsNewName = ""
+    @State private var qsNewIban = ""
+    @State private var qsNewAmount = ""
+    @State private var qsNewPurpose = ""
     @AppStorage("dockModeEnabled") private var dockModeEnabled: Bool = false
     @AppStorage("showBalanceInMenuBar") private var showBalanceInMenuBar: Bool = false
     @AppStorage("llmAPIKeyPresent") private var llmAPIKeyPresent: Bool = false
@@ -205,7 +212,7 @@ struct SettingsView: View {
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
-    @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.soft.rawValue
+    @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.sidebar.rawValue
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
@@ -1312,35 +1319,6 @@ struct SettingsView: View {
                 .padding(.trailing, 14)
             }
 
-            Divider()
-
-            // --- Bankfarben-Stil ---
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Bankfarben-Stil", "Bank tint style"))
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Wie soll die Bankfarbe in der Umsatzliste sichtbar gemacht werden? Wirkt nur wenn der globale Bankfarben-Toggle (Verhalten → Darstellung) aktiv ist.",
-                           "How should the bank color appear in the transaction list? Active only when the global bank-tint toggle (Behavior → Appearance) is on."))
-                        .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Picker("", selection: Binding(
-                    get: { bankTintStyleRaw },
-                    set: { newValue in
-                        bankTintStyleRaw = newValue
-                        NotificationCenter.default.post(name: .bankTintChanged, object: nil)
-                    }
-                )) {
-                    Text(t("Sanft", "Soft")).tag(BankTintStyle.soft.rawValue)
-                    Text(t("Streifen", "Stripe")).tag(BankTintStyle.sidebar.rawValue)
-                    Text(t("Karten", "Cards")).tag(BankTintStyle.cardOnPanel.rawValue)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .disabled(!bankTintEnabled)
-                .opacity(bankTintEnabled ? 1.0 : 0.4)
-            }
         }
     }
 
@@ -2190,6 +2168,33 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                         .frame(width: 44, alignment: .trailing)
                 }
+
+                // --- Bankfarben-Stil (Sanft / Streifen / Karten) ---
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(t("Stil", "Style"))
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(t("Wie die Bankfarbe in der Umsatzliste dargestellt wird.",
+                               "How the bank color appears in the transaction list."))
+                            .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { bankTintStyleRaw },
+                        set: { newValue in
+                            bankTintStyleRaw = newValue
+                            NotificationCenter.default.post(name: .bankTintChanged, object: nil)
+                        }
+                    )) {
+                        Text(t("Sanft", "Soft")).tag(BankTintStyle.soft.rawValue)
+                        Text(t("Streifen", "Stripe")).tag(BankTintStyle.sidebar.rawValue)
+                        Text(t("Karten", "Cards")).tag(BankTintStyle.cardOnPanel.rawValue)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 240)
+                }
             }
 
             Divider()
@@ -2892,6 +2897,100 @@ struct SettingsView: View {
         }
     }
     
+    // MARK: - Quick-Send Favoriten-Editor
+
+    @ViewBuilder
+    private var quickSendFavoritesEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(t("Vorlagen (max. 4)", "Templates (max. 4)"))
+                .font(ThemeFonts.body(size: 12, weight: .medium))
+                .foregroundColor(.secondary)
+
+            if quickSendFavorites.items.isEmpty {
+                Text(t("Noch keine Vorlagen — im Drawer über „+“ sichern oder hier anlegen.",
+                       "No templates yet — pin via “+” in the drawer or add one here."))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(quickSendFavorites.items) { fav in
+                HStack(spacing: 8) {
+                    Text(fav.emoji.isEmpty ? "💸" : fav.emoji)
+                        .font(.system(size: 16))
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(fav.name)
+                            .font(ThemeFonts.body(size: 12, weight: .medium))
+                            .lineLimit(1)
+                        Text(QuickSendFormatting.groupIban(fav.iban))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    if !fav.amount.isEmpty {
+                        Text(fav.amount + " €")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                    Button { quickSendFavorites.remove(id: fav.id) } label: {
+                        Image(systemName: "trash").font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.sbRedStrong)
+                    .help(t("Vorlage entfernen", "Remove template"))
+                }
+                .padding(.vertical, 4)
+            }
+
+            if quickSendFavorites.canAddMore {
+                quickSendFavoriteAdder
+            }
+        }
+    }
+
+    private var quickSendFavoriteAdder: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                TextField("💸", text: $qsNewEmoji).frame(width: 44)
+                TextField(t("Name", "Name"), text: $qsNewName)
+            }
+            HStack(spacing: 6) {
+                TextField(t("IBAN", "IBAN"), text: $qsNewIban)
+                    .font(.system(size: 11, design: .monospaced))
+                TextField(t("Betrag", "Amount"), text: $qsNewAmount)
+                    .frame(width: 90)
+                    .onChange(of: qsNewAmount) { v in
+                        let s = QuickSendFormatting.sanitizeAmountInput(v)
+                        if s != v { qsNewAmount = s }
+                    }
+            }
+            TextField(t("Betreff (optional)", "Reference (optional)"), text: $qsNewPurpose)
+            Button { addQuickSendFavorite() } label: {
+                Label(t("Vorlage hinzufügen", "Add template"), systemImage: "plus.circle")
+            }
+            .disabled(qsNewName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      || !QuickSendFormatting.isValidIban(qsNewIban))
+        }
+        .textFieldStyle(RoundedBorderTextFieldStyle())
+        .font(ThemeFonts.body(size: 12))
+        .padding(.top, 4)
+    }
+
+    private func addQuickSendFavorite() {
+        let name = qsNewName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, QuickSendFormatting.isValidIban(qsNewIban) else { return }
+        let emoji = qsNewEmoji.isEmpty ? "💸" : String(qsNewEmoji.prefix(2))
+        quickSendFavorites.add(QuickSendFavorite(
+            emoji: emoji,
+            name: name,
+            iban: TransferRequest.normalizeIban(qsNewIban),
+            amount: QuickSendFormatting.sanitizeAmountInput(qsNewAmount),
+            purpose: qsNewPurpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        ))
+        qsNewEmoji = "💸"; qsNewName = ""; qsNewIban = ""; qsNewAmount = ""; qsNewPurpose = ""
+    }
+
     // MARK: - Labs Settings
 
     private var labsSettings: some View {
@@ -2960,6 +3059,26 @@ struct SettingsView: View {
             }
 
             Divider()
+
+            // Quick-Send — Schnellüberweisung direkt im Flyout (Opt-in).
+            if FeatureFlags.transferMoneyEnabled {
+                SettingsToggleRow(
+                    title: t("Schnellüberweisung im Flyout", "Quick transfer in flyout"),
+                    subtitle: t(
+                        "Ein Papierflieger-Button in der Flyout-Kopfzeile klappt einen kompakten Überweisungs-Drawer auf (Name, IBAN, Betrag, Betreff + gepinnte Vorlagen). Master-Passwort & SCA laufen wie bei „Geld senden“.",
+                        "A paper-plane button in the flyout header opens a compact transfer drawer (name, IBAN, amount, reference + pinned templates). Master password & SCA work like \"Send money\"."
+                    ),
+                    isOn: $quickSendEnabled
+                )
+
+                if quickSendEnabled {
+                    quickSendFavoritesEditor
+                        .padding(.leading, 4)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                Divider()
+            }
 
             // Agenten & Automatisierung — Lese-only-Zugriff über externe Tools.
             VStack(alignment: .leading, spacing: 12) {

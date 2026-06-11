@@ -1499,6 +1499,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var transferWindow: NSWindow?
     private var upsellWindow: NSWindow?
     private var transferVoucherWindow: NSWindow?
+    private var licenseStartWindow: NSWindow?
     private var bankDiagnosticsWindow: NSWindow?
     private var roundupWindow: NSWindow?
 
@@ -1539,24 +1540,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let sheet = UpsellSheet(
+        // Derselbe Freischalt-Screen wie am Start — hier kontextbezogen ohne
+        // „nicht mehr anzeigen"-Checkbox (nur Schließen).
+        let sheet = LicenseStartScreen(
             onClose: { [weak self] in
                 self?.upsellWindow?.close()
                 self?.upsellWindow = nil
             },
-            onOpenSettings: { [weak self] in
+            showDontShowAgain: false,
+            onEnterKey: { [weak self] in
                 self?.upsellWindow?.close()
                 self?.upsellWindow = nil
-                // Direkt auf den Über-Tab springen, wo die License-Sektion lebt.
+                // Lizenz-Sektion lebt im Über-Tab.
                 UserDefaults.standard.set(5, forKey: "settingsLastTab")
                 self?.showSettings()
             }
         )
         let host = NSHostingController(rootView: sheet)
+        host.sizingOptions = []
         let window = NSWindow(contentViewController: host)
-        window.title = L10n.t("simplesend — Lizenz", "simplesend — License")
+        window.title = "simplesend"
         window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 460, height: 380))
+        window.setContentSize(NSSize(width: 460, height: 520))
+        window.minSize = NSSize(width: 460, height: 520)
+        window.maxSize = NSSize(width: 460, height: 520)
         window.center()
         window.isReleasedWhenClosed = false
         window.level = .floating
@@ -2877,6 +2884,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     ///
     /// Demo mode: transactions are never persisted to SQLite, so generate
     /// 90 days of fake history via FakeData with the current demoSeed.
+    /// Datum der jüngsten erkannten Gehalts-Gutschrift ≤ today. Nur EXPLIZITE
+    /// Signale (SALA-Purpose oder GEHALT/LOHN im Verwendungszweck) — bewusst keine
+    /// „größter Eingang"-Heuristik, die den Zyklus fälschlich verschieben könnte.
+    /// Spiegelt die Signal-Logik aus `PaycheckRightZoneView.detectedIncome`.
+    nonisolated private static func mostRecentSalaryArrival(
+        in txs: [TransactionsResponse.Transaction], today: Date
+    ) -> Date? {
+        let cal = Calendar.current
+        let todayStart = cal.startOfDay(for: today)
+        func txDate(_ tx: TransactionsResponse.Transaction) -> Date? {
+            let d = tx.bookingDate ?? tx.valueDate ?? ""
+            guard d.count >= 10 else { return nil }
+            let parts = d.prefix(10).split(separator: "-")
+            guard parts.count == 3, let y = Int(parts[0]), let m = Int(parts[1]), let day = Int(parts[2])
+            else { return nil }
+            return cal.date(from: DateComponents(year: y, month: m, day: day)).map { cal.startOfDay(for: $0) }
+        }
+        var best: Date? = nil
+        for tx in txs {
+            guard tx.parsedAmount > 0, let d = txDate(tx), d <= todayStart else { continue }
+            let purpose = tx.purposeCode?.uppercased() ?? ""
+            let rem = (tx.remittanceInformation ?? []).joined(separator: " ").uppercased()
+            let add = tx.additionalInformation?.uppercased() ?? ""
+            let isSalary = purpose == "SALA"
+                || rem.contains("GEHALT") || rem.contains("LOHN")
+                || add.contains("GEHALT") || add.contains("LOHN")
+            guard isSalary else { continue }
+            if best == nil || d > best! { best = d }
+        }
+        return best
+    }
+
     private func recomputeLeftToPay() {
         let activeSlot = YaxiService.activeSlotId
         let isDemo = demoMode
@@ -2889,6 +2928,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         Task.detached(priority: .utility) {
             var total: Double = 0
             var sawAny = false
+            var cycleEndForDisplay: Date? = nil   // gleicher Zyklus für die Untertitel-Anzeige
 
             if isDemo {
                 // Generate fake history per slot profile (matches what the panel shows).
@@ -2937,12 +2977,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     sawAny = true
                     let payments = FixedCostsAnalyzer.analyze(transactions: history)
                     let cfg = BankSlotSettingsStore.load(slotId: slot)
-                    total += LeftToPayCalculator.compute(
-                        payments: payments,
+                    // Zyklusstart = nominaler Gehaltstag, ODER das TATSÄCHLICHE
+                    // Gehalts-Eingangsdatum, falls das Gehalt diesen Monat real (auch
+                    // früher) einging. Nur ein echter Geldeingang schaltet den Zyklus
+                    // um — nicht schon das Toleranzfenster davor. Dadurch zählt z.B.
+                    // das am 1. gezahlte Haushaltsgeld vor dem Gehalt (15.) korrekt
+                    // als "diesen Zyklus erledigt" und fliegt aus "Noch offen".
+                    let salaryArrival = Self.mostRecentSalaryArrival(in: history, today: Date())
+                    let (cycS, cycE) = LeftToPayCalculator.cycleBounds(
                         salaryDay: cfg.effectiveSalaryDay,
-                        toleranceBefore: cfg.salaryDayToleranceBefore,
-                        toleranceAfter: cfg.salaryDayToleranceAfter
+                        today: Date(),
+                        actualSalaryArrival: salaryArrival
                     )
+                    AppLogger.log(
+                        "leftToPay cycle slot=\(slot) salaryDay=\(cfg.effectiveSalaryDay) salaryArrival=\(salaryArrival.map { "\($0)" } ?? "none") cStart=\(cycS) cEnd=\(cycE)",
+                        category: "LeftToPay"
+                    )
+                    if !isUnified { cycleEndForDisplay = cycE }   // Single-Slot: Datum für Untertitel
+                    let counted = LeftToPayCalculator.countedPayments(
+                        payments: payments,
+                        cycleStart: cycS,
+                        cycleEnd: cycE
+                    )
+                    // Diagnose: jeder Posten, der in "Noch offen" einfließt — damit
+                    // sich eine zu hohe Summe nachvollziehen/zuordnen lässt.
+                    for c in counted {
+                        AppLogger.log(
+                            "leftToPay item slot=\(slot) '\(c.merchant)' avg=\(String(format: "%.2f", c.averageAmount)) freq=\(c.frequency) last=\(c.lastDate) conf=\(String(format: "%.2f", c.confidence)) occ=\(c.occurrences) months=\(c.months)",
+                            category: "LeftToPay"
+                        )
+                    }
+                    total += counted.reduce(0) { $0 + $1.averageAmount }
                 }
             }
 
@@ -2952,6 +3017,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             )
             await MainActor.run { [weak self] in
                 self?.txVM.leftToPayAmount = sawAny ? total : nil
+                self?.txVM.leftToPayCycleEnd = cycleEndForDisplay
             }
         }
     }
@@ -2968,7 +3034,155 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     // MainActor.assumeIsolated is safe here because NSPopoverDelegate always runs on the main thread.
     nonisolated func popoverWillClose(_ notification: Notification) {
         MainActor.assumeIsolated {
+            AppLogger.log("popoverWillClose qsOpen=\(flyoutQuickSendOpen)", category: "Flyout")
             flyoutClosedByClickAt = Date()
+            flyoutQuickSendOpen = false
+        }
+    }
+
+    /// Solange der Quick-Send-Drawer offen ist, KEIN System-Dismiss zulassen
+    /// (Klick außerhalb, App-Deaktivierung, auch performClose der Auto-Hide). Der
+    /// User soll das Überweisungsformular in Ruhe ausfüllen können. Geschlossen
+    /// wird dann gezielt: Drawer einklappen (Chevron) oder nach erfolgreichem
+    /// Versand (onQuickSendSent setzt flyoutQuickSendOpen vorher auf false).
+    nonisolated func popoverShouldClose(_ popover: NSPopover) -> Bool {
+        MainActor.assumeIsolated { !flyoutQuickSendOpen }
+    }
+
+    // MARK: - Quick-Send (Flyout-Drawer)
+
+    /// Ob der Quick-Send-Drawer im Flyout gerade aufgeklappt ist. Treibt die
+    /// Popover-/Overlay-Höhe an allen drei Berechnungsstellen.
+    private var flyoutQuickSendOpen = false
+
+    /// Opt-in (`quickSendEnabled`) — Sichtbarkeit des Papierfliegers. Die Lizenz-
+    /// Prüfung erfolgt wie in der Umsatzliste erst beim KLICK (Upsell), nicht über
+    /// die Sichtbarkeit — siehe `quickSendFlyoutNeedsUnlock`.
+    private var quickSendFlyoutAvailable: Bool {
+        guard FeatureFlags.transferMoneyEnabled || demoMode else { return false }
+        // Demo zeigt alle Features — Quick-Send ohne Labs-Toggle.
+        if demoMode { return true }
+        return UserDefaults.standard.bool(forKey: "quickSendEnabled")
+    }
+
+    /// `true`, wenn simplesend noch nicht freigeschaltet ist → Klick auf den
+    /// Papierflieger öffnet das UpsellSheet statt des Drawers (wie `sendMoney()`).
+    private var quickSendFlyoutNeedsUnlock: Bool {
+        guard !demoMode else { return false }
+        return LicenseConfig.licensingEnabled && !LicenseManager.shared.isLicensed
+    }
+
+    /// Popover-/Overlay-Größe inkl. evtl. offenem Quick-Send-Drawer.
+    private func flyoutContentSize(hasDots: Bool) -> NSSize {
+        let base: CGFloat = hasDots ? 192 : 170
+        let extra: CGFloat = flyoutQuickSendOpen ? QuickSendDrawerView.totalDrawerHeight : 0
+        return NSSize(width: 348, height: base + extra)
+    }
+
+    /// Vom Drawer-Toggle gerufen — fährt die aktive Flyout-Präsentation hoch/runter.
+    fileprivate func setFlyoutQuickSendOpen(_ open: Bool) {
+        flyoutQuickSendOpen = open
+        let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
+        let size = flyoutContentSize(hasDots: hasDots)
+        if let popover = balancePopover, popover.isShown {
+            // Solange der Drawer offen ist, bleibt das Flyout offen+aktiv, damit man
+            // das Formular in Ruhe ausfüllen kann — kein Auto-Dismiss bei Klick
+            // außerhalb / App-Wechsel (.applicationDefined). Beim Zuklappen wieder
+            // .semitransient, damit die reine Saldo-Karte normal verschwindet.
+            popover.behavior = open ? .applicationDefined : .semitransient
+            // EINZIGE Timeline: NSPopover animiert die contentSize-Änderung (animates
+            // == true). Der SwiftUI-Inhalt ist statisch (Drawer immer voll gerendert,
+            // oben verankert) — das Fenster wächst nach unten und gibt ihn frei.
+            popover.contentSize = size
+        }
+        // App nach vorn holen, damit die Textfelder des Drawers sofort Tastaturfokus
+        // bekommen (Menüleisten-App ist .accessory). Aktivierung in den NÄCHSTEN
+        // Runloop verschieben: beim allerersten Flyout-Öffnen ist die App noch
+        // inaktiv, und eine sofortige Aktivierung kollidiert mit dem laufenden
+        // Klick-Event und verwirft das gerade gezeigte Popover. `behavior` ist hier
+        // schon .applicationDefined, das Flyout bleibt also offen.
+        if open {
+            DispatchQueue.main.async { NSApp.activate(ignoringOtherApps: true) }
+        }
+        if let content = centeredFlyoutContentWindow {
+            var frame = content.frame
+            let delta = size.height - frame.size.height
+            frame.size = size
+            frame.origin.y -= delta   // oben verankert nach unten wachsen lassen
+            content.animator().setFrame(frame, display: true)
+        }
+    }
+
+    /// Baut Credentials (Demo: leer) und sendet über denselben Pfad wie
+    /// `TransferSheet`. SCA wird vollständig in `YaxiService.sendTransfer`
+    /// behandelt.
+    fileprivate func performQuickSend(_ request: TransferRequest) async -> TransferOutcome {
+        let userId: String
+        let password: String
+        if demoMode {
+            userId = ""
+            password = ""
+        } else {
+            guard let pw = requestMasterPassword() else {
+                return TransferOutcome(
+                    ok: false, scaRequired: false, error: "locked",
+                    userMessage: L10n.t("Bitte zuerst die App entsperren.",
+                                        "Please unlock the app first."),
+                    mayHaveBeenExecuted: false)
+            }
+            do {
+                let creds = try CredentialsStore.load(masterPassword: pw)
+                userId = creds.userId
+                password = creds.password
+            } catch {
+                return TransferOutcome(
+                    ok: false, scaRequired: false, error: "bad-password",
+                    userMessage: L10n.t("Falsches Master-Passwort.", "Wrong master password."),
+                    mayHaveBeenExecuted: false)
+            }
+        }
+        do {
+            return try await YaxiService.sendTransfer(request: request,
+                                                      userId: userId,
+                                                      password: password)
+        } catch {
+            return TransferOutcome(
+                ok: false, scaRequired: false, error: error.localizedDescription,
+                userMessage: error.localizedDescription, mayHaveBeenExecuted: false)
+        }
+    }
+
+    /// Verdrahtet die Quick-Send-Closures auf einen frisch gebauten Flyout-RootView.
+    private func applyQuickSendWiring(to rootView: inout StatusBalanceFlyoutCardView) {
+        rootView.quickSendAvailable = quickSendFlyoutAvailable
+        rootView.quickSendNeedsUnlock = quickSendFlyoutNeedsUnlock
+        rootView.onQuickSendUpsell = { [weak self] in
+            self?.balancePopover?.performClose(nil)
+            self?.hideCenteredFlyout()
+            self?.showUpsellSheet()
+        }
+        rootView.onQuickSendAddTemplate = { [weak self] in
+            // Flyout schließen + Einstellungen am Labs-Tab (Vorlagen-Editor) öffnen.
+            self?.balancePopover?.performClose(nil)
+            self?.hideCenteredFlyout()
+            UserDefaults.standard.set(6, forKey: "settingsLastTab")
+            self?.showSettings()
+        }
+        rootView.onQuickSendToggle = { [weak self] open in
+            self?.setFlyoutQuickSendOpen(open)
+        }
+        rootView.quickSendPerform = { [weak self] request in
+            await self?.performQuickSend(request)
+                ?? TransferOutcome(ok: false, scaRequired: false, error: "unavailable",
+                                   userMessage: nil, mayHaveBeenExecuted: false)
+        }
+        rootView.onQuickSendSent = { [weak self] in
+            // Nach erfolgreichem Versand das Flyout schließen — leicht verzögert,
+            // damit der eingeklappte Übergang noch sichtbar ist.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                self?.balancePopover?.performClose(nil)
+                self?.hideCenteredFlyout()
+            }
         }
     }
 
@@ -2990,11 +3204,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             Task { await self?.openTransactionsPanel() }
         })
         let host = result.host
+        // WICHTIG: Größe wird über popover.contentSize gesteuert, NICHT über die
+        // SwiftUI-Fitting-Size. Der SwiftUI-Root ist immer voll hoch (Card + Drawer)
+        // und oben verankert (`maxHeight:.infinity, alignment:.top`); das Popover-
+        // Fenster clippt den Überhang. Beim Aufklappen wächst NUR das Fenster nach
+        // unten (NSPopover animiert) und gibt den bereits gezeichneten Drawer frei —
+        // der Inhalt deckt das Fenster in JEDER Zwischengröße vollständig (oben
+        // verankert), daher kein Zentrieren der Card und kein Freiliegen des roten
+        // Host-Layers während der Animation.
+        host.sizingOptions = []
         let hasDots = result.hasDots
-        popover.contentSize = NSSize(width: 348, height: hasDots ? 192 : 170)
+        flyoutQuickSendOpen = false   // frisch geöffnetes Flyout startet eingeklappt
+        popover.contentSize = flyoutContentSize(hasDots: hasDots)
         popover.contentViewController = host
         balancePopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        // "Noch offen" aus dem lokalen 90-Tage-Cache neu berechnen (kein Bank-Call) —
+        // hält den Wert frisch und schreibt bei aktivem Logging die Posten-
+        // Aufschlüsselung ins Log, auch ohne erfolgreichen Refresh.
+        recomputeLeftToPay()
 
         // Pending Error-Report ggf. nachholen wenn der User das Flyout öffnet
         // (= User ist explizit in der App). Activation-Notification deckt
@@ -3007,7 +3236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if let delay = flyoutDelay {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.balancePopover?.isShown == true else { return }
-                if self.isFlyoutHovered {
+                // Quick-Send-Drawer offen → Flyout offen lassen (Formular ausfüllen);
+                // erst weiter prüfen, sobald er wieder zu ist.
+                if self.flyoutQuickSendOpen || self.isFlyoutHovered {
                     self.deferFlyoutCloseUntilMouseLeaves()
                     return
                 }
@@ -3054,6 +3285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             forcedColorScheme: configuredColorScheme()
         )
         rootView.leftToPayAmount = txVM.leftToPayAmount
+        rootView.leftToPayCycleEnd = txVM.leftToPayCycleEnd
         let subMetricsSettings = BankSlotSettingsStore.load(
             slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy"
         )
@@ -3121,6 +3353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
+        applyQuickSendWiring(to: &rootView)
         let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
         let host = NSHostingController(rootView: rootView)
         host.view.wantsLayer = true
@@ -3194,6 +3427,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.hideCenteredFlyout()
             Task { await self?.openTransactionsPanel() }
         })
+        // Anders als beim Popover steuert hier das NSWindow die Größe selbst
+        // (manuelles setFrame in setFlyoutQuickSendOpen) — preferredContentSize würde
+        // das Auto-Resizing übernehmen und mit der Top-Verankerung kollidieren.
+        result.host.sizingOptions = []
         let contentHeight: CGFloat = result.hasDots ? 192 : 170
         let contentWidth: CGFloat = 348
         let content = NSWindow(
@@ -3364,7 +3601,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func deferFlyoutCloseUntilMouseLeaves() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self, self.balancePopover?.isShown == true else { return }
-            if self.isFlyoutHovered {
+            // Solange der Quick-Send-Drawer offen ist (oder die Maus drin ist), nicht
+            // schließen — weiter pollen, bis beides nicht mehr zutrifft.
+            if self.flyoutQuickSendOpen || self.isFlyoutHovered {
                 self.deferFlyoutCloseUntilMouseLeaves()
             } else {
                 self.balancePopover?.performClose(nil)
@@ -3406,6 +3645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             forcedColorScheme: configuredColorScheme()
         )
         rootView.leftToPayAmount = txVM.leftToPayAmount
+        rootView.leftToPayCycleEnd = txVM.leftToPayCycleEnd
         let subMetricsSettings = BankSlotSettingsStore.load(
             slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy"
         )
@@ -3439,8 +3679,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
+        applyQuickSendWiring(to: &rootView)
         let hasDots = store.slots.count > 1 && (!demoMode || isMultiDemo)
-        let newSize = NSSize(width: 348, height: hasDots ? 192 : 170)
+        let newSize = flyoutContentSize(hasDots: hasDots)
 
         if let popover = balancePopover, popover.isShown {
             popover.contentSize = newSize
@@ -4304,7 +4545,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Direkt nach (oder anstelle von) WhatsNew einmalig den
             // Launch-Voucher für „Geld senden" anbieten.
             self.showTransferVoucherIfNeeded(existingUser: existingUser)
+            // Kauf-/Freischalt-Screen bei jedem Start (bis lizenziert oder abgehakt).
+            self.showLicenseStartScreenIfNeeded()
         }
+    }
+
+    /// Zeigt den Kauf-/Freischalt-Screen beim Start — solange simplesend nicht
+    /// freigeschaltet ist und der User „nicht mehr anzeigen" nicht gehakt hat.
+    /// Nutzer mit bereits gespeichertem Lizenz-Key werden NICHT genervt (sie
+    /// revalidieren async; `hasStoredLicenseKey` ist synchron true).
+    private func showLicenseStartScreenIfNeeded() {
+        guard !demoMode else { return }
+        // Test-Schalter: `defaults write … forceLicenseStartScreen -bool YES` zeigt
+        // den Screen unabhängig vom Lizenzstatus (zum Prüfen, ohne die Lizenz anzufassen).
+        let force = UserDefaults.standard.bool(forKey: "forceLicenseStartScreen")
+        // Zweiter Test-Schalter: erzwingt die APP-Aufruf-Variante (Link statt Checkbox).
+        let forceAppCall = UserDefaults.standard.bool(forKey: "forceLicenseStartScreenAppCall")
+        if !force && !forceAppCall {
+            guard LicenseConfig.licensingEnabled else { return }
+            guard !LicenseManager.shared.isLicensed else { return }
+            guard !LicenseManager.shared.hasStoredLicenseKey else { return }
+            guard !UserDefaults.standard.bool(forKey: "licenseScreen.dontShowAgain") else { return }
+        }
+
+        if let existing = licenseStartWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let screen = LicenseStartScreen(
+            onClose: { [weak self] in
+                self?.licenseStartWindow?.close()
+                self?.licenseStartWindow = nil
+            },
+            showDontShowAgain: !forceAppCall,
+            onEnterKey: forceAppCall ? { [weak self] in
+                self?.licenseStartWindow?.close()
+                self?.licenseStartWindow = nil
+                UserDefaults.standard.set(5, forKey: "settingsLastTab")
+                self?.showSettings()
+            } : nil
+        )
+        let host = NSHostingController(rootView: screen)
+        host.sizingOptions = []
+        let window = NSWindow(contentViewController: host)
+        window.title = "simplesend"
+        window.styleMask = [.titled, .closable]
+        window.setContentSize(NSSize(width: 460, height: 520))
+        window.minSize = NSSize(width: 460, height: 520)
+        window.maxSize = NSSize(width: 460, height: 520)
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        licenseStartWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Einmaliger Post-Update-Voucher fürs neue „Geld senden"-Modul.
@@ -5277,12 +5572,33 @@ private struct StatusBalanceFlyoutCardView: View {
     var onSwitchToIndex: ((Int) -> Void)? = nil
     var onActivateUnified: (() -> Void)? = nil
     var leftToPayAmount: Double? = nil
+    /// Zyklusende (nächster Gehaltseingang) aus derselben Berechnung wie leftToPay —
+    /// überschreibt das vom Toleranz-Default abweichende "bis zum …"-Datum im Untertitel.
+    var leftToPayCycleEnd: Date? = nil
     var salaryDay: Int = 1                 // effective salary day for sub-metrics
     var salaryToleranceBefore: Int = 0     // darf N Tage früher kommen (z.B. 4)
     var salaryToleranceAfter: Int = 0      // darf N Tage später kommen (z.B. 1)
     /// "Verfügbar"-Wert (gebucht + vorgemerkte Ausgaben). Nur gesetzt, wenn er vom gebuchten
     /// Saldo abweicht (es also vorgemerkte Lastschriften gibt) — sonst `nil` → keine Sub-Zeile.
     var availableBalance: Double? = nil
+
+    // MARK: Quick-Send (Flyout-Drawer)
+    /// Vom Host (BalanceBar) gesetzt: ob der Quick-Send-Drawer angeboten wird
+    /// (Opt-in + Lizenz/Demo-Gate). false → Toggle-Button bleibt unsichtbar.
+    var quickSendAvailable: Bool = false
+    /// Meldet dem Host das Auf-/Zuklappen, damit er die Popover-/Overlay-Höhe
+    /// animiert mitwachsen lässt.
+    var onQuickSendToggle: ((Bool) -> Void)? = nil
+    /// Führt den eigentlichen Versand aus (Master-Passwort + SCA im Host).
+    var quickSendPerform: (@MainActor (TransferRequest) async -> TransferOutcome)? = nil
+    /// Wird nach erfolgreichem Versand gerufen (nachdem die Bestätigung im Drawer
+    /// kurz stand) — der Host schließt daraufhin das ganze Flyout.
+    var onQuickSendSent: (() -> Void)? = nil
+    /// simplesend noch nicht freigeschaltet → Klick öffnet Upsell statt Drawer.
+    var quickSendNeedsUnlock: Bool = false
+    var onQuickSendUpsell: (() -> Void)? = nil
+    var onQuickSendAddTemplate: (() -> Void)? = nil
+    @State private var showSend: Bool = false
 
     @Environment(\.colorScheme) private var environmentColorScheme
 
@@ -5338,6 +5654,63 @@ private struct StatusBalanceFlyoutCardView: View {
 
     @ObservedObject private var roundupView = RoundupViewState.shared
 
+    /// Quick-Send nur auf der normalen Einzelkonto-Karte — nicht im Aufrunden-
+    /// Modus (eigene Card) und nicht im Aggregiert-/Unified-Modus (Empfänger-
+    /// Slot wäre mehrdeutig).
+    private var quickSendActive: Bool {
+        quickSendAvailable && !roundupView.isActive && unifiedSlots == nil
+    }
+
+    /// Höhe des oberen Karten-Bereichs (Saldo-Card + ggf. Konto-Dots). Konstant —
+    /// unabhängig davon, ob der Quick-Send-Drawer offen ist. Entspricht der
+    /// Basis-Höhe, die der Host (BalanceBar.flyoutContentSize) als Popover-Größe
+    /// im eingeklappten Zustand setzt.
+    private var cardRegionHeight: CGFloat { hasDots ? 192 : 170 }
+
+    /// 26×26 Toggle in der Kartenkopfzeile: Papierflieger (zu) ↔ Chevron-up (offen, invertiert).
+    /// Liegt in-flow am rechten Ende der Header-HStack (nach dem Emoji), damit
+    /// es nichts überlappt.
+    @ViewBuilder
+    private var quickSendToggleButton: some View {
+        if quickSendActive {
+            Button {
+                // simplesend nicht freigeschaltet → wie in der Umsatzliste: Upsell
+                // statt Drawer öffnen (Drawer bleibt zu).
+                if quickSendNeedsUnlock {
+                    onQuickSendUpsell?()
+                    return
+                }
+                // Keine SwiftUI-Höhenanimation: der Drawer ist immer voll gerendert
+                // (oben verankert) und wird nur vom wachsenden Popover-Fenster
+                // freigegeben. showSend steuert Icon + Interaktion; den Resize macht
+                // setFlyoutQuickSendOpen (NSPopover animiert, eine Timeline).
+                showSend.toggle()
+                onQuickSendToggle?(showSend)
+            } label: {
+                // Immer Papierflieger; offen invertiert (heller Flieger auf dunklem
+                // Grund). Rahmen in beiden Zuständen, damit der „Geld senden"-Button
+                // klar als Button lesbar ist.
+                Image(systemName: "paperplane")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(showSend ? Color.panelBackground : Color.sbTextPrimary)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(showSend ? Color.sbTextPrimary : Color.sbSurface)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(showSend ? Color.sbTextPrimary : Color.sbBorder, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(L10n.t("Schnellüberweisung", "Quick transfer"))
+            // Etwas Luft zur Karten-/Popover-Kante, damit das Icon nicht klebt.
+            .padding(.top, 12)
+            .padding(.trailing, 12)
+        }
+    }
+
     @ViewBuilder
     private var leftToPaySubtitle: some View {
         // Im Aufrunden-Modus wird die ganze Flyout-Card durch RoundupSavingsCard
@@ -5350,6 +5723,7 @@ private struct StatusBalanceFlyoutCardView: View {
             salaryDay: salaryDay,
             salaryToleranceBefore: salaryToleranceBefore,
             salaryToleranceAfter: salaryToleranceAfter,
+            cycleEndOverride: leftToPayCycleEnd,
             style: $flyoutSubtitleStyle,
             forceClassic: isUnifiedMode,
             compact: true
@@ -5357,8 +5731,15 @@ private struct StatusBalanceFlyoutCardView: View {
     }
 
 
-    var body: some View {
+    /// Der eigentliche Flyout-Inhalt: oberer Karten-Bereich (feste Höhe) + darunter
+    /// der Quick-Send-Drawer (feste Höhe). Natürliche Gesamthöhe = Card + Drawer.
+    /// Wird im `body` als oben verankertes Overlay über einen fenstergroßen Container
+    /// gelegt und auf Fenstergröße geclippt (siehe dort).
+    private var flyoutColumn: some View {
         VStack(spacing: 0) {
+            // ── Oberer Karten-Bereich — feste Höhe (cardRegionHeight), komplett
+            //    statisch. Wird beim Auf-/Zuklappen des Drawers NIE neu layoutet.
+            VStack(spacing: 0) {
             Group {
                 if roundupView.isActive {
                     RoundupSavingsCard(compact: true)
@@ -5376,6 +5757,7 @@ private struct StatusBalanceFlyoutCardView: View {
             .onTapGesture(count: 2) { onDoubleTap?() }
             // Ripple only on the balance card, not the dot row
             .rippleEffect(trigger: rippleTrigger, defaultOrigin: CGPoint(x: 310, y: 130))
+            .overlay(alignment: .topTrailing) { quickSendToggleButton }
 
             // Account dot indicators
             if hasDots, let slots = allSlots {
@@ -5413,11 +5795,51 @@ private struct StatusBalanceFlyoutCardView: View {
                 .padding(.top, 2)
                 .padding(.bottom, 8)
             }
+            }
+            .frame(height: cardRegionHeight, alignment: .top)
+
+            // Quick-Send-Drawer — IMMER voll gerendert (wenn aktiv), feste Höhe. Er
+            // wird vom SwiftUI-Layout NICHT animiert. Beim Toggle wächst nur das
+            // Popover-Fenster nach unten und gibt den darunter bereits gezeichneten
+            // Drawer frei (genau wie `overflow:hidden`/`max-height` im Design-HTML).
+            // `.disabled` verhindert Tab-Fokus, solange er (geclippt) verborgen ist.
+            if quickSendActive {
+                QuickSendDrawerView(
+                    performSend: quickSendPerform,
+                    onClose: {
+                        // Wird nur nach erfolgreichem Versand gerufen (Bestätigung
+                        // stand schon ~1,5 s). Drawer einklappen + ganzes Flyout zu.
+                        showSend = false
+                        onQuickSendToggle?(false)
+                        onQuickSendSent?()
+                    },
+                    onAddTemplate: { onQuickSendAddTemplate?() }
+                )
+                .frame(height: QuickSendDrawerView.totalDrawerHeight, alignment: .top)
+                .disabled(!showSend)
+                .accessibilityHidden(!showSend)
+            }
         }
-        .frame(width: 348, height: hasDots ? 192 : 170)
-        .background(roundupView.isActive ? Color.roundupPanelBackground : Color.panelBackground)
-        .preferredColorScheme(forcedColorScheme)
-        .onHover { hovering in onHoverChanged?(hovering) }
+        .frame(width: 348)
+    }
+
+    var body: some View {
+        // Container = EXAKT die Fenstergröße: `Color.clear` nimmt den angebotenen
+        // Platz (Popover-contentSize) voll ein, daher zentriert NSHostingController
+        // NICHTS. Der eigentliche Inhalt (`flyoutColumn`, höher als das Fenster) liegt
+        // als OBEN verankertes Overlay darauf und wird per `.clipped()` auf die
+        // Fenstergröße beschnitten — exakt die `overflow:hidden`-Mechanik des Designs.
+        // Geschlossen zeigt das Fenster genau den Karten-Bereich (Drawer ragt unten
+        // heraus, abgeschnitten). Beim Klick wächst nur das Popover-Fenster nach unten
+        // und gibt den Drawer frei; der obere Bereich bleibt fix und unverändert.
+        Color.clear
+            .frame(width: 348)
+            .frame(maxHeight: .infinity)
+            .overlay(alignment: .top) { flyoutColumn }
+            .clipped()
+            .background(roundupView.isActive ? Color.roundupPanelBackground : Color.panelBackground)
+            .preferredColorScheme(forcedColorScheme)
+            .onHover { hovering in onHoverChanged?(hovering) }
     }
 
     /// Renders the header line in the flyout, replacing the old "Kontostand …" timestamp.
@@ -5477,7 +5899,6 @@ private struct StatusBalanceFlyoutCardView: View {
                         .minimumScaleFactor(0.7)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
                     leftToPaySubtitle
-                    availableBalanceSubline
                 }
                 Spacer()
                 // Mini account bars — same 72pt height as GreenZoneRing
@@ -5565,9 +5986,6 @@ private struct StatusBalanceFlyoutCardView: View {
                     .font(.system(size: 14))
                     .foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
-                if emojiEnabled, let emoji = BalanceSignal.emoji(for: level) {
-                    Text(emoji).font(.system(size: 16))
-                }
             }
 
             HStack(alignment: .balanceTextCenter, spacing: 12) {
@@ -5578,7 +5996,6 @@ private struct StatusBalanceFlyoutCardView: View {
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
 
                     leftToPaySubtitle
-                    availableBalanceSubline
                 }
                 Spacer()
                 if greenZoneRingEnabled {
