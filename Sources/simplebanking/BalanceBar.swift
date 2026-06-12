@@ -1055,7 +1055,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         } else if demoMode {
             // Demo mode starts unlocked with demo data
             locked = false
-            if demoStyle == 1 { activateMultiDemo() }
+            if demoStyle == 1 { activateMultiDemo() } else { activateSingleDemo() }
             Task { await refreshAsync() }
             recomputeLeftToPay()
         }
@@ -1943,31 +1943,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     @objc private func setDemoSingle() {
         let wasMulti = isMultiDemo
-        if wasMulti { tearDownMultiDemo() }
+        if wasMulti { tearDownDemoSlots() }
         demoStyle = 0
         demoMode = true
         demoSeed = Int.random(in: 1...Int.max)
         txVM.anthropicApiKey = nil
-        txVM.connectedBankDisplayName = "Demo-Bank"
-        txVM.connectedBankLogoID = nil
         txVM.connectedBankIBAN = nil
         txVM.leftToPayAmount = nil   // drop stale live value
-        var seed = UInt64(truncatingIfNeeded: demoSeed)
-        let fake = FakeData.demoBalance(seed: &seed)
-        lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
-        lastBalance = fake
-        txVM.currentBalance = formatEURWithCents(fake)
-        applyBalanceDisplayModeConstraints()
-        updateStatusBalanceTitle()
-        updateMenuBarButton()
-        statusItem.button?.toolTip = "🎭 Demo-Modus: Single-Banking"
+        activateSingleDemo()
         rebuildMenuTitleForDemoMode()
         recomputeLeftToPay()
     }
 
+    /// Baut den Single-Demo-Slot. Wählt EINE zufällige Bank-Marke — deren Farbe
+    /// gibt das Streifen-/Karten-Design vor (BankTintProvider liest die Slot-`logoId`).
+    /// Ohne echten Brand am aktiven Slot bliebe der Streifen im Demo unsichtbar,
+    /// weil `BankTintProvider.hex(for:)` ohne logoId/customColor `nil` liefert.
+    private func activateSingleDemo() {
+        backupSlotsForDemo()
+        var seed = UInt64(truncatingIfNeeded: demoSeed)
+        let brands = BankLogoAssets.brands
+        let demoSlot: BankSlot
+        if brands.isEmpty {
+            demoSlot = BankSlot(id: "demo-slot-0", iban: "DE00000000000000000000",
+                                displayName: "Demo-Bank", logoId: nil)
+        } else {
+            let idx = max(0, min(brands.count - 1, Int(FakeData.nextDouble(&seed) * Double(brands.count))))
+            let brand = brands[idx]
+            demoSlot = BankSlot(id: "demo-slot-0", iban: "DE00000000000000000000",
+                                displayName: brand.displayName, logoId: brand.id)
+        }
+        MultibankingStore.shared.injectDemoSlots([demoSlot])
+
+        let fake = FakeData.demoBalance(seed: &seed)
+        UserDefaults.standard.set(fake, forKey: "simplebanking.cachedBalance.\(demoSlot.id)")
+        lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
+        lastBalance = fake
+        txVM.currentBalance = formatEURWithCents(fake)
+        applyBalanceDisplayModeConstraints()
+        // Spiegelt Brand (Logo/Name) + Streifen-Quelle (Slot-logoId) ins ViewModel.
+        applySlotToViewModel(demoSlot)
+        updateStatusBalanceTitle()
+        updateMenuBarButton()
+        statusItem.button?.toolTip = "🎭 Demo-Modus: Single-Banking"
+    }
+
+    /// Sichert die echten Slots vor dem Injizieren ephemerer Demo-Slots.
+    /// Defensiv: zeigt der Store bereits Demo-Slots (unsauberer Zustand), erst
+    /// sauber von Disk laden — sonst persistiert das Teardown später Demo-Daten.
+    private func backupSlotsForDemo() {
+        let currentSlots = MultibankingStore.shared.slots
+        let storeLooksDemo = currentSlots.contains { $0.id.hasPrefix("demo-slot-") }
+        if storeLooksDemo {
+            MultibankingStore.shared.reloadFromDisk()
+        }
+        demoPreviousSlots = MultibankingStore.shared.slots
+        demoPreviousActiveIndex = MultibankingStore.shared.activeIndex
+        demoPreviousUnifiedMode = UserDefaults.standard.bool(forKey: "unifiedModeEnabled")
+    }
+
     @objc private func setDemoMulti() {
         let wasMulti = isMultiDemo
-        if wasMulti { tearDownMultiDemo() }
+        if wasMulti { tearDownDemoSlots() }
         demoStyle = 1
         demoMode = true
         demoSeed = Int.random(in: 1...Int.max)
@@ -1979,7 +2016,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     @objc private func setDemoOff() {
         guard demoMode else { return }
-        if isMultiDemo { tearDownMultiDemo() }
+        if MultibankingStore.shared.slots.contains(where: { $0.id.hasPrefix("demo-slot-") }) {
+            tearDownDemoSlots()
+        }
         demoMode = false
         demoStyle = 0
         txVM.transactions = []
@@ -1990,7 +2029,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // (slot ID) must be set correctly, otherwise exists() returns false and the
         // menu shows "Verbinden" even though credentials are stored on disk.
         //
-        // tearDownMultiDemo restores MultibankingStore.slots, but the static
+        // tearDownDemoSlots restores MultibankingStore.slots, but the static
         // activeSlotIds (YaxiService/CredentialsStore/TransactionsDatabase) still
         // point at a non-existent "demo-slot-N" if the user navigated between
         // demo accounts. Restore them from the active live slot so the credential
@@ -2022,26 +2061,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         demoSeed = Int.random(in: 1...Int.max)
         guard demoMode else { return }
         if isMultiDemo {
-            tearDownMultiDemo()
+            tearDownDemoSlots()
             activateMultiDemo()
+        } else {
+            tearDownDemoSlots()
+            activateSingleDemo()
         }
         Task { await refreshAsync() }
     }
 
     private func activateMultiDemo() {
-        // Backup current slot state. Vor dem Backup defensiv prüfen:
-        // wenn der Store gerade schon Demo-Slots zeigt (z.B. wegen
-        // unsauberem App-Zustand), NICHT überschreiben — sonst persistiert
-        // tearDownMultiDemo später Demo-Daten. Stattdessen frisch von Disk
-        // laden, wo `injectDemoSlots` nichts geschrieben hat.
-        let currentSlots = MultibankingStore.shared.slots
-        let storeLooksDemo = currentSlots.contains { $0.id.hasPrefix("demo-slot-") }
-        if storeLooksDemo {
-            MultibankingStore.shared.reloadFromDisk()
-        }
-        demoPreviousSlots = MultibankingStore.shared.slots
-        demoPreviousActiveIndex = MultibankingStore.shared.activeIndex
-        demoPreviousUnifiedMode = UserDefaults.standard.bool(forKey: "unifiedModeEnabled")
+        backupSlotsForDemo()
 
         // Pick 3 distinct random banks
         var seed = UInt64(truncatingIfNeeded: demoSeed)
@@ -2099,7 +2129,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
-    private func tearDownMultiDemo() {
+    /// Räumt injizierte Demo-Slots (Single = `demo-slot-0`, Multi = 0..2) ab und
+    /// stellt die echten Slots aus dem Backup wieder her.
+    private func tearDownDemoSlots() {
         for i in 0..<3 {
             UserDefaults.standard.removeObject(forKey: "simplebanking.cachedBalance.demo-slot-\(i)")
             BankSlotSettingsStore.delete(slotId: "demo-slot-\(i)")
