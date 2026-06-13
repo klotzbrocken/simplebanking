@@ -131,7 +131,11 @@ enum TransactionCategorizer {
         _ = rules
     }
 
-    static func category(for transaction: TransactionsResponse.Transaction) -> TransactionCategory {
+    /// `cadenceMap` (optional): wenn gesetzt, wird die Intervall-Regel-Cadence EXPLIZIT aus
+    /// dieser Karte berechnet (timing-unabhängig, z.B. beim Suchindex-Build) statt aus dem
+    /// globalen Live-Cache. `nil` → bisheriges Verhalten (globaler `liveCadence`).
+    static func category(for transaction: TransactionsResponse.Transaction,
+                         cadenceMap: [String: PaymentFrequency]? = nil) -> TransactionCategory {
         let txID = TransactionRecord.fingerprint(for: transaction)
         // transaction.slotId ist von DB-load gesetzt (unified-mode), sonst nil
         // → fallback auf activeSlotId. Beide gibt slot-korrekten Override-Lookup —
@@ -142,8 +146,10 @@ enum TransactionCategorizer {
         }
 
         // Reusable user assignment rules win over the stored/auto category (explicit intent),
-        // but not over the per-transaction override above.
-        if let ruleCategory = AssignmentRules.firstCategory(for: transaction) {
+        // but not over the per-transaction override above. Cadence explizit (Index) oder global.
+        let cadence = cadenceMap.map { AssignmentRules.cadence(for: transaction, map: $0) }
+            ?? AssignmentRules.liveCadence(for: transaction)
+        if let ruleCategory = AssignmentRules.firstCategory(for: RuleInput(transaction), cadence: cadence) {
             return ruleCategory
         }
 

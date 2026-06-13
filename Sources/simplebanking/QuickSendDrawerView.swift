@@ -18,10 +18,15 @@ struct QuickSendDrawerView: View {
     private static let contentHeight: CGFloat = 167
 
     /// Sendet die Überweisung. Rückgabe = Bank-Outcome. Wird vom Host gesetzt.
-    var performSend: (@MainActor (TransferRequest) async -> TransferOutcome)? = nil
+    /// Zweiter Parameter = in der Vorschau eingefrorenes Quellkonto → der Host validiert
+    /// vor dem Bankaufruf, dass es noch das aktive Konto ist.
+    var performSend: (@MainActor (TransferRequest, String) async -> TransferOutcome)? = nil
     /// Saldo + Dispo-Rahmen des aktiven Slots. Überweisungen darüber werden blockiert
     /// (dieselbe Hartgrenze wie in der großen `TransferSheet`). `nil` = unbekannt → keine Sperre.
     var availableLimit: Decimal? = nil
+    /// Aktives Quellkonto (vom Host gesetzt, zusammen mit `availableLimit`). Wird beim
+    /// Review eingefroren und beim Versand zur Konto-Validierung an den Host gereicht.
+    var sourceSlotId: String = ""
     /// Schließt den Drawer (Host fährt die Popover-Höhe zurück).
     var onClose: (() -> Void)? = nil
     /// „+“ im Vorlagen-Bereich → springt in die Einstellungen (Vorlagen-Editor).
@@ -36,6 +41,8 @@ struct QuickSendDrawerView: View {
     @State private var phase: Phase = .idle
     /// Der in der Confirm-Stufe geprüfte, fertig gebaute Request (rebuild-frei beim Senden).
     @State private var pendingRequest: TransferRequest? = nil
+    /// Beim Review eingefrorenes Quellkonto — verhindert Versand von Konto B nach Wechsel.
+    @State private var confirmedSourceSlotId: String? = nil
 
     /// Läuft gerade ein realer Versand (aus der Confirm-Stufe heraus)?
     @State private var isSending = false
@@ -260,7 +267,7 @@ struct QuickSendDrawerView: View {
             .background(fieldBackground())
             Spacer(minLength: 0)
             HStack(spacing: 8) {
-                Button { phase = .idle } label: {
+                Button { phase = .idle; confirmedSourceSlotId = nil } label: {
                     Text(L10n.t("Zurück", "Back"))
                         .font(.system(size: 12, weight: .medium))
                         .frame(height: 30).padding(.horizontal, 14)
@@ -377,6 +384,7 @@ struct QuickSendDrawerView: View {
             return
         }
         pendingRequest = request
+        confirmedSourceSlotId = sourceSlotId   // Quellkonto einfrieren
         phase = .confirm(
             amount: QuickSendFormatting.displayEUR(amt),
             name: trimmedName,
@@ -389,9 +397,10 @@ struct QuickSendDrawerView: View {
         guard let request = pendingRequest, !isSending else { return }
         let amountDisplay = QuickSendFormatting.displayEUR(request.amountEUR)
         let recipient = request.creditorName
+        let frozenSlot = confirmedSourceSlotId ?? sourceSlotId
         isSending = true
         Task { @MainActor in
-            let outcome = await performSend?(request)
+            let outcome = await performSend?(request, frozenSlot)
                 ?? TransferOutcome(ok: false, scaRequired: false, error: "no-handler",
                                    userMessage: nil, mayHaveBeenExecuted: false)
             isSending = false

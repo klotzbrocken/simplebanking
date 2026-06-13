@@ -1961,20 +1961,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// weil `BankTintProvider.hex(for:)` ohne logoId/customColor `nil` liefert.
     private func activateSingleDemo() {
         backupSlotsForDemo()
-        var seed = UInt64(truncatingIfNeeded: demoSeed)
+        // Bankmarke aus einem ABGELEITETEN Seed ziehen, damit der Saldo unten direkt aus
+        // `demoSeed` kommt — identisch zum Refresh-Pfad. Sonst verbraucht der Marken-Draw
+        // den Seed vor dem Saldo-Draw → Anzeige/Cache (und Transfer-Hartgrenze) divergieren.
+        var brandSeed = UInt64(truncatingIfNeeded: demoSeed) ^ 0xD1B54A32D192ED03
         let brands = BankLogoAssets.brands
         let demoSlot: BankSlot
         if brands.isEmpty {
             demoSlot = BankSlot(id: "demo-slot-0", iban: "DE00000000000000000000",
                                 displayName: "Demo-Bank", logoId: nil)
         } else {
-            let idx = max(0, min(brands.count - 1, Int(FakeData.nextDouble(&seed) * Double(brands.count))))
+            let idx = max(0, min(brands.count - 1, Int(FakeData.nextDouble(&brandSeed) * Double(brands.count))))
             let brand = brands[idx]
             demoSlot = BankSlot(id: "demo-slot-0", iban: "DE00000000000000000000",
                                 displayName: brand.displayName, logoId: brand.id)
         }
         MultibankingStore.shared.injectDemoSlots([demoSlot])
 
+        var seed = UInt64(truncatingIfNeeded: demoSeed)
         let fake = FakeData.demoBalance(seed: &seed)
         UserDefaults.standard.set(fake, forKey: "simplebanking.cachedBalance.\(demoSlot.id)")
         lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
@@ -3148,7 +3152,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Baut Credentials (Demo: leer) und sendet über denselben Pfad wie
     /// `TransferSheet`. SCA wird vollständig in `YaxiService.sendTransfer`
     /// behandelt.
-    fileprivate func performQuickSend(_ request: TransferRequest) async -> TransferOutcome {
+    fileprivate func performQuickSend(_ request: TransferRequest, sourceSlotId: String) async -> TransferOutcome {
+        // Quellkonto-Kontext: das beim Review eingefrorene Konto muss noch das aktive sein —
+        // sonst würde eine unter Konto A bestätigte Überweisung von Konto B ausgeführt.
+        guard (MultibankingStore.shared.activeSlot?.id ?? "legacy") == sourceSlotId else {
+            return TransferOutcome(
+                ok: false, scaRequired: false, error: "slot-changed",
+                userMessage: L10n.t("Quellkonto hat sich geändert — Überweisung abgebrochen.",
+                                    "Source account changed — transfer cancelled."),
+                mayHaveBeenExecuted: false)
+        }
+        // Saldo/Dispo erneut für das Quellkonto prüfen (nur bei bekanntem gecachten Saldo —
+        // gleiche Hartgrenze wie TransferSheet, kein Fehl-Block bei unbekanntem Saldo).
+        if let cached = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(sourceSlotId)") as? Double {
+            let dispo = Decimal(BankSlotSettingsStore.load(slotId: sourceSlotId).dispoLimit)
+            if request.amountEUR > Decimal(cached) + dispo {
+                return TransferOutcome(
+                    ok: false, scaRequired: false, error: "limit",
+                    userMessage: L10n.t("Betrag übersteigt den verfügbaren Rahmen (inkl. Dispo).",
+                                        "Amount exceeds the available limit (incl. overdraft)."),
+                    mayHaveBeenExecuted: false)
+            }
+        }
         let userId: String
         let password: String
         if demoMode {
@@ -3203,8 +3228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.onQuickSendToggle = { [weak self] open in
             self?.setFlyoutQuickSendOpen(open)
         }
-        rootView.quickSendPerform = { [weak self] request in
-            await self?.performQuickSend(request)
+        rootView.quickSendPerform = { [weak self] request, sourceSlotId in
+            await self?.performQuickSend(request, sourceSlotId: sourceSlotId)
                 ?? TransferOutcome(ok: false, scaRequired: false, error: "unavailable",
                                    userMessage: nil, mayHaveBeenExecuted: false)
         }
@@ -3824,6 +3849,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             let fake = FakeData.demoBalance(seed: &seed)
             lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
             lastBalance = fake
+            // Cache mit demselben Wert füllen wie activateSingleDemo (beide aus `demoSeed`),
+            // damit Anzeige und gecachter Saldo (→ Transfer-Hartgrenze) übereinstimmen.
+            if let sid = MultibankingStore.shared.activeSlot?.id {
+                UserDefaults.standard.set(fake, forKey: "simplebanking.cachedBalance.\(sid)")
+            }
             applyBalanceDisplayModeConstraints()
             updateStatusBalanceTitle()
             statusItem.button?.toolTip = "🎭 Demo-Modus: Simulierter Kontostand"
@@ -3935,6 +3965,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 }
 
                 recomputeLeftToPay()
+                // Offenes Dashboard auch bei reinem Saldo-Refresh aktualisieren (Auto-
+                // Umsatzabruf ist Default aus → sonst bliebe der Dashboard-Saldo veraltet).
+                refreshDashboardIfOpen()
             } else if resp.scaRequired == true {
                 // SCA redirect timed out or was missed. State has been cleared (server + Swift).
                 // Pause auto-refresh for 1 hour so we don't burn through the bank's daily
@@ -5657,8 +5690,9 @@ private struct StatusBalanceFlyoutCardView: View {
     /// Meldet dem Host das Auf-/Zuklappen, damit er die Popover-/Overlay-Höhe
     /// animiert mitwachsen lässt.
     var onQuickSendToggle: ((Bool) -> Void)? = nil
-    /// Führt den eigentlichen Versand aus (Master-Passwort + SCA im Host).
-    var quickSendPerform: (@MainActor (TransferRequest) async -> TransferOutcome)? = nil
+    /// Führt den eigentlichen Versand aus (Master-Passwort + SCA im Host). Zweiter
+    /// Parameter = eingefrorenes Quellkonto → Host validiert es vor dem Bankaufruf.
+    var quickSendPerform: (@MainActor (TransferRequest, String) async -> TransferOutcome)? = nil
     /// Wird nach erfolgreichem Versand gerufen (nachdem die Bestätigung im Drawer
     /// kurz stand) — der Host schließt daraufhin das ganze Flyout.
     var onQuickSendSent: (() -> Void)? = nil
@@ -5882,6 +5916,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 QuickSendDrawerView(
                     performSend: quickSendPerform,
                     availableLimit: quickSendAvailableLimit,
+                    sourceSlotId: MultibankingStore.shared.activeSlot?.id ?? "legacy",
                     onClose: {
                         // Wird nur nach erfolgreichem Versand gerufen (Bestätigung
                         // stand schon ~1,5 s). Drawer einklappen + ganzes Flyout zu.

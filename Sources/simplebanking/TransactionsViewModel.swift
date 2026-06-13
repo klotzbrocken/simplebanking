@@ -66,16 +66,13 @@ final class TransactionsViewModel: ObservableObject {
         indexRebuildTask?.cancel()
         indexRebuildTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            // Cadence ZUERST setzen (vor dem Suchindex): `computeSearchIndexText`
-            // kategorisiert und liest den globalen Live-Cadence-Cache. Würde der Cache
-            // erst danach gesetzt, baute der Index mit der Cadence des VORHERIGEN Kontos
-            // (Intervall-Regel-Kategorien könnten vom falschen Konto stammen).
-            // `analyze` ist heavy → off-main.
+            // Cadence DIESES Snapshots berechnen und EXPLIZIT in den Index-Build geben —
+            // der Index hängt damit nicht am Timing des globalen Live-Cache (ein
+            // veralteter Task könnte ihn sonst clobbern). `analyze` ist heavy → off-main.
             let cadence = AssignmentRules.cadenceMap(for: snapshot)
-            AssignmentRules.setLiveCadence(cadence)
             if Task.isCancelled { return }
             // Pure Funktionen / read-only Resolver — safe off-main.
-            let search = snapshot.map(Self.computeSearchIndexText)
+            let search = snapshot.map { Self.computeSearchIndexText($0, cadenceMap: cadence) }
             if Task.isCancelled { return }
             let fixed = FixedCostsAnalyzer.getFixedCostMerchants(transactions: snapshot)
             if Task.isCancelled { return }
@@ -89,6 +86,9 @@ final class TransactionsViewModel: ObservableObject {
             }
             await MainActor.run {
                 guard self.indexGen == gen else { return }   // stale → discard
+                // Globalen Live-Cache erst HINTER dem Generation-Guard setzen, damit ein
+                // abgebrochener Stale-Task den Kontext nicht überschreibt (für Zeilen/DB).
+                AssignmentRules.setLiveCadence(cadence)
                 self.searchIndex = search
                 self.fixedMerchants = fixed
                 self.subscriptionTxIDs = subIDs
@@ -192,10 +192,13 @@ final class TransactionsViewModel: ObservableObject {
     }
 
     /// Off-main-fähige Variante — nur read-only Resolver + pure String-Ops.
-    nonisolated private static func computeSearchableText(_ transaction: TransactionsResponse.Transaction) -> String {
+    /// `cadenceMap` (optional) macht die Intervall-Regel-Kategorisierung timing-unabhängig:
+    /// statt des globalen Live-Cache wird die Cadence DIESES Snapshots explizit genutzt.
+    nonisolated private static func computeSearchableText(_ transaction: TransactionsResponse.Transaction,
+                                                          cadenceMap: [String: PaymentFrequency]? = nil) -> String {
         let remittance = (transaction.remittanceInformation ?? []).map(clean).joined(separator: " ")
         let resolvedMerchant = MerchantResolver.resolve(transaction: transaction).effectiveMerchant
-        let resolvedCategory = TransactionCategorizer.category(for: transaction).displayName
+        let resolvedCategory = TransactionCategorizer.category(for: transaction, cadenceMap: cadenceMap).displayName
         let fields: [String] = [
             clean(transaction.bookingDate),
             clean(transaction.valueDate),
@@ -218,8 +221,9 @@ final class TransactionsViewModel: ObservableObject {
         return fields.joined(separator: " ").lowercased()
     }
 
-    nonisolated static func computeSearchIndexText(_ transaction: TransactionsResponse.Transaction) -> String {
-        let base = computeSearchableText(transaction)
+    nonisolated static func computeSearchIndexText(_ transaction: TransactionsResponse.Transaction,
+                                                   cadenceMap: [String: PaymentFrequency]? = nil) -> String {
+        let base = computeSearchableText(transaction, cadenceMap: cadenceMap)
         let amountRaw = clean(transaction.amount?.amount).lowercased()
         let amountDot = amountRaw.replacingOccurrences(of: ",", with: ".")
         let amountCompact = amountDot.replacingOccurrences(of: ".", with: "")

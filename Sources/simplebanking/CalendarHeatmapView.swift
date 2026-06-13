@@ -741,13 +741,21 @@ struct CalendarHeatmapView: View {
         // Dashboard-Einbettung: DENSELBEN Snapshot wie die übrigen Tabs verwenden,
         // statt eigenständig aus der aktiven DB zu laden.
         if let injected = injectedTransactions {
+            // Konvertierung + Wiederkehr-Erkennung off-main — bei Unified-Ansicht/langer
+            // Historie sonst sichtbare Ruckler (lief bisher synchron aus der SwiftUI-Task).
             let now = ISO8601DateFormatter().string(from: Date())
-            let converted = injected.compactMap { try? TransactionRecord(transaction: $0, updatedAt: now) }
-            records = converted
-            recurringTxIDs = Self.computeRecurringTxIDs(from: converted)
-            isLoading = false
-            jumpToLatestWithDataIfNeeded()
-            preloadAboLogos()
+            Task { @MainActor in
+                let result = await Task.detached(priority: .userInitiated) {
+                    () -> (records: [TransactionRecord], recurring: Set<String>) in
+                    let conv = injected.compactMap { try? TransactionRecord(transaction: $0, updatedAt: now) }
+                    return (conv, CalendarHeatmapView.computeRecurringTxIDs(from: conv))
+                }.value
+                records = result.records
+                recurringTxIDs = result.recurring
+                isLoading = false
+                jumpToLatestWithDataIfNeeded()
+                preloadAboLogos()
+            }
             return
         }
         Task {
