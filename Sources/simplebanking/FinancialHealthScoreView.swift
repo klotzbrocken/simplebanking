@@ -7,6 +7,9 @@ struct FinancialHealthScoreView: View {
     let transactions: [TransactionsResponse.Transaction]
     let balance: Double
     var embedded: Bool = false
+    /// Wechselt bei Slot-Wechsel/Refresh (Dashboard-`snapshotID`) → erzwingt Neuberechnung
+    /// via `.task(id:)`. Default 0 für Standalone-Nutzung (feuert dann nur einmal).
+    var reloadToken: Int = 0
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var vm = MMIViewModel()
@@ -82,7 +85,9 @@ struct FinancialHealthScoreView: View {
         .frame(width: embedded ? nil : 420, height: embedded ? nil : 680)
         .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .background(Color.sbBackground.edgesIgnoringSafeArea(.all))
-        .onAppear {
+        // `.task(id:)` feuert beim Erscheinen UND bei jeder Token-Änderung (Slot-Wechsel/
+        // Refresh) → MMI rechnet frisch, ohne die View neu aufzubauen.
+        .task(id: reloadToken) {
             vm.load(transactions: transactions, balance: balance)
             resetAnimation()
         }

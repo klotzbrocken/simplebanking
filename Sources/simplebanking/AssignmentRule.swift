@@ -351,12 +351,37 @@ enum AssignmentRules {
     // Consumers
 
     /// First enabled rule (priority then createdAt) that matches and assigns a category.
-    static func firstCategory(for input: RuleInput, rules: [AssignmentRule]? = nil) -> TransactionCategory? {
-        sorted(rules ?? all()).first { $0.setCategory != nil && $0.matches(input) }?.setCategory
+    static func firstCategory(for input: RuleInput, rules: [AssignmentRule]? = nil,
+                              cadence: PaymentFrequency? = nil) -> TransactionCategory? {
+        sorted(rules ?? all()).first { $0.setCategory != nil && $0.matches(input, cadence: cadence) }?.setCategory
     }
 
+    /// Live-Pfad: zieht die Händler-Cadence aus dem Live-Cache, sodass `.interval`-
+    /// Regeln auch automatisch (nicht nur beim manuellen Anwenden) greifen.
     static func firstCategory(for tx: TransactionsResponse.Transaction, rules: [AssignmentRule]? = nil) -> TransactionCategory? {
-        firstCategory(for: RuleInput(tx), rules: rules)
+        firstCategory(for: RuleInput(tx), rules: rules, cadence: liveCadence(for: tx))
+    }
+
+    // MARK: - Live-Cadence-Cache (für `.interval`-Regeln im Live-Kategorisierer)
+    //
+    // Nach jedem Transaktions-Rebuild via `setLiveCadence(_:)` befüllt
+    // (TransactionsViewModel.scheduleIndexRebuild, off-main). Leerer Cache ⇒
+    // `liveCadence == nil` ⇒ altes, sicheres Verhalten (interval non-blocking).
+    // Lock-geschützt, da Schreiber (MainActor) und Leser (Kategorisierung auf
+    // diversen Threads) konkurrieren.
+    nonisolated(unsafe) private static var _liveCadenceMap: [String: PaymentFrequency] = [:]
+    private static let liveCadenceLock = NSLock()
+
+    /// Überschreibt den Live-Cadence-Cache (canonical merchant → Frequenz).
+    static func setLiveCadence(_ map: [String: PaymentFrequency]) {
+        liveCadenceLock.lock(); _liveCadenceMap = map; liveCadenceLock.unlock()
+    }
+
+    /// Cadence des Händlers dieser Tx aus dem Live-Cache (oder `nil`).
+    static func liveCadence(for tx: TransactionsResponse.Transaction) -> PaymentFrequency? {
+        let key = RecurringAssignments.canonicalKey(FixedCostsAnalyzer.merchantName(for: tx))
+        liveCadenceLock.lock(); defer { liveCadenceLock.unlock() }
+        return _liveCadenceMap[key]
     }
 
     /// Map merchant (canonical) → detected frequency, for `.interval` conditions.

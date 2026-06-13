@@ -58,8 +58,14 @@ struct QuickSendDrawerView: View {
         guard let amount, let limit = availableLimit else { return false }
         return amount > limit
     }
+    /// `true` wenn der Betrag die absolute Quick-Send-Obergrenze übersteigt. Große
+    /// Eingaben werden NICHT mehr gekürzt (Wert-Verfälschung), sondern hier invalidiert.
+    private var amountTooLarge: Bool {
+        guard let amount else { return false }
+        return amount > QuickSendFormatting.maxAmount
+    }
     private var canSubmit: Bool {
-        !trimmedName.isEmpty && ibanValid && (amount ?? 0) > 0 && !amountExceedsLimit
+        !trimmedName.isEmpty && ibanValid && (amount ?? 0) > 0 && !amountExceedsLimit && !amountTooLarge
     }
 
     // MARK: Body
@@ -117,7 +123,12 @@ struct QuickSendDrawerView: View {
                 }
                 .padding(.horizontal, 9)
                 .frame(width: 122, height: 30)
-                .background(fieldBackground(border: amountExceedsLimit ? .sbRedStrong : .sbBorder))
+                .background(fieldBackground(border: (amountExceedsLimit || amountTooLarge) ? .sbRedStrong : .sbBorder))
+                .help(amountTooLarge
+                      ? L10n.t("Betrag zu groß (max. 99.999,99 €)", "Amount too large (max. €99,999.99)")
+                      : (amountExceedsLimit
+                         ? L10n.t("Betrag übersteigt den verfügbaren Rahmen", "Amount exceeds available limit")
+                         : ""))
             }
 
             // Reihe 2: IBAN + grüner Haken

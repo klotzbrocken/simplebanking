@@ -29,6 +29,9 @@ struct CalendarHeatmapView: View {
     /// der aktiven DB zu laden — so zeigen Kalender und die übrigen Dashboard-Tabs immer dasselbe
     /// Konto (sonst driftet der Kalender im Unified-Modus / nach Slot-Wechsel auseinander).
     var injectedTransactions: [TransactionsResponse.Transaction]? = nil
+    /// Wechselt bei Slot-Wechsel/Refresh (Dashboard-`snapshotID`) → lädt via `.task(id:)`
+    /// neu, auch wenn sich der Slot nicht ändert (Same-Slot-Refresh). Default 0 = einmalig.
+    var reloadToken: Int = 0
 
     @StateObject private var logoStore = SubscriptionLogoStore.shared
 
@@ -567,7 +570,9 @@ struct CalendarHeatmapView: View {
         .frame(width: embedded ? nil : 420, height: embedded ? nil : 620)
         .frame(maxWidth: embedded ? .infinity : nil, maxHeight: embedded ? .infinity : nil)
         .background(Color.panelBackground)
-        .onAppear { loadFromDatabase() }
+        // `.task(id:)` lädt beim Erscheinen UND bei Slot-Wechsel/Refresh neu (Same-Slot-
+        // Refresh inklusive) — ersetzt das frühere `.id(slot)` am Einbettungsort.
+        .task(id: reloadToken) { loadFromDatabase() }
         .sheet(isPresented: $showDaySheet) {
             CalendarDaySheet(
                 day: sheetDay,

@@ -66,8 +66,9 @@ final class DashboardPanel: NSObject, NSWindowDelegate {
     func show(tab: DashboardTab,
               transactions: [TransactionsResponse.Transaction],
               balance: Double,
-              slot: BankSlot?) {
-        model.apply(transactions: transactions, balance: balance, slot: slot)
+              slot: BankSlot?,
+              isUnified: Bool) {
+        model.apply(transactions: transactions, balance: balance, slot: slot, isUnified: isUnified)
         model.tab = tab
         if !panel.isVisible {
             clampAndCenterToScreen()
@@ -77,10 +78,11 @@ final class DashboardPanel: NSObject, NSWindowDelegate {
     }
 
     /// Aktualisiert den Daten-/Bank-Snapshot eines bereits geöffneten Dashboards
-    /// (z.B. nach einem Slot-Wechsel) — Bank, Saldo und Transaktionen atomar.
-    func refresh(transactions: [TransactionsResponse.Transaction], balance: Double, slot: BankSlot?) {
+    /// (z.B. nach einem Slot-Wechsel/Refresh) — Bank, Saldo und Transaktionen atomar.
+    func refresh(transactions: [TransactionsResponse.Transaction], balance: Double,
+                 slot: BankSlot?, isUnified: Bool) {
         guard panel.isVisible else { return }
-        model.apply(transactions: transactions, balance: balance, slot: slot)
+        model.apply(transactions: transactions, balance: balance, slot: slot, isUnified: isUnified)
     }
 
     /// Feste Größe (auf die sichtbare Bildschirmfläche gedeckelt, falls Display kleiner) + zentriert.

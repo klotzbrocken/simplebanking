@@ -10,32 +10,61 @@ import Foundation
 
 enum QuickSendFormatting {
 
+    /// Obergrenze für Quick-Send-Beträge. Größere Eingaben werden NICHT gekürzt
+    /// (das würde den Wert still verfälschen), sondern vom Drawer als „zu groß"
+    /// invalidiert (Senden gesperrt).
+    static let maxAmount: Decimal = 99999.99
+
     /// Normalisiert die Betrag-Eingabe locale-sicher und gibt sie im
     /// DE-Anzeigeformat (Komma als Dezimaltrenner) zurück.
     ///
     /// Regeln:
     ///  - Akzeptiert **Punkt UND Komma** als Trenner (DE „12,50" wie EN „12.50").
-    ///  - Der **letzte** Trenner gilt als Dezimaltrenner; frühere Trenner sind
-    ///    Tausender-Gruppierung und werden verworfen („1.234,56" / „1,234.56" →
-    ///    „1234,56"). Ein einzelner Trenner ist damit immer der Dezimaltrenner —
-    ///    das ist die häufigste Tipp-Absicht und verhindert den gefährlichen
-    ///    „12.50" → „1250"-Fehler. Der Confirm-Schritt zeigt den Betrag nochmal
-    ///    explizit, falls jemand „1.000" als Tausender meinte.
-    ///  - max. 5 Vorkomma- und 2 Nachkommastellen (≤ 99999,99).
+    ///  - Sind **beide** Trennertypen vorhanden, gilt der **letzte** als
+    ///    Dezimaltrenner, frühere sind Gruppierung („1.234,56" / „1,234.56" → „1234,56").
+    ///  - Bei **einem** Trennertyp entscheidet das Muster: ein **valides Tausender-
+    ///    Muster** (jede Gruppe nach der ersten exakt 3 Ziffern) ist reine Gruppierung
+    ///    („1.000"/„1,000" → 1000; „1.000.000" → 1000000). Sonst ist der **letzte**
+    ///    Trenner der Dezimaltrenner („12,50"/„12.50" → 12,50; „1,5" → 1,5; „1,2,3" → 12,3).
+    ///    Das behebt den „1.000" → 1,00 €-Fehler, ohne die gewollte EN-Dezimaleingabe
+    ///    zu brechen. Der Confirm-Schritt zeigt den Betrag zusätzlich explizit.
+    ///  - max. 2 Nachkommastellen. Vorkommastellen werden NICHT mehr gekürzt — zu
+    ///    große Beträge invalidiert der Drawer via `maxAmount` (kein stilles Kürzen).
     static func sanitizeAmountInput(_ raw: String) -> String {
         let chars = Array(raw.filter { $0.isNumber || $0 == "," || $0 == "." })
+        let sepIndices = chars.indices.filter { chars[$0] == "," || chars[$0] == "." }
 
         var intDigits: String
         var fracDigits: String?
-        if let lastSep = chars.lastIndex(where: { $0 == "," || $0 == "." }) {
-            intDigits = String(chars[..<lastSep].filter { $0.isNumber })
-            fracDigits = String(chars[(lastSep + 1)...].filter { $0.isNumber })
-        } else {
+
+        if sepIndices.isEmpty {
             intDigits = String(chars.filter { $0.isNumber })
             fracDigits = nil
-        }
+        } else {
+            let lastSep = sepIndices.last!
+            let bothTypes = chars.contains(",") && chars.contains(".")
 
-        if intDigits.count > 5 { intDigits = String(intDigits.prefix(5)) }
+            // Zifferngruppen zwischen den Trennern. Valides Tausender-Muster:
+            // ≥2 Gruppen, erste 1–3 Ziffern, alle weiteren exakt 3 („1.000",
+            // „1.000.000"). „1,2,3" oder „12.50" passen NICHT → letzter Trenner = Dezimal.
+            let segments = String(chars).split(omittingEmptySubsequences: false,
+                                               whereSeparator: { $0 == "," || $0 == "." })
+            let looksGrouped = segments.count >= 2
+                && (1...3).contains(segments.first!.count)
+                && segments.dropFirst().allSatisfy { $0.count == 3 }
+
+            // Dezimaltrenner, wenn beide Trennertypen vorkommen (letzter = Dezimal)
+            // ODER das Muster KEINE reine Tausender-Gruppierung ist.
+            let isDecimal = bothTypes || !looksGrouped
+
+            if isDecimal {
+                intDigits = String(chars[..<lastSep].filter { $0.isNumber })
+                fracDigits = String(chars[(lastSep + 1)...].filter { $0.isNumber })
+            } else {
+                intDigits = String(chars.filter { $0.isNumber })
+                fracDigits = nil
+            }
+        }
 
         if let frac = fracDigits {
             return intDigits + "," + String(frac.prefix(2))

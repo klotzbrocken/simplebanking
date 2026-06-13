@@ -44,23 +44,36 @@ final class DashboardModel: ObservableObject {
     /// IMMER zum selben Konto gehören (sonst zeigt das offene Dashboard nach einem
     /// Slot-Wechsel Bank B im Kopf, rechnet aber weiter mit Bank A).
     @Published var slot: BankSlot?
+    /// Aggregiert dieser Snapshot mehrere Konten (Unified-Modus)? Dann zeigt der
+    /// Header „Alle Konten" statt einer einzelnen Bank — sonst würde z.B. „Sparkasse"
+    /// im Kopf stehen, während MMI/Geld-Alter alle Konten auswerten.
+    @Published var isUnified: Bool
+    /// Monoton steigender Token, bei jedem `apply` (= Öffnen / Slot-Wechsel / Refresh)
+    /// inkrementiert. Subviews mit interner Berechnung hängen ihr `.task(id:)` daran,
+    /// damit MMI/Abos/Kalender bei Kontowechsel UND Refresh frisch rechnen.
+    @Published var snapshotID: Int = 0
 
     init(tab: DashboardTab = .overview,
          transactions: [TransactionsResponse.Transaction] = [],
          balance: Double = 0,
-         slot: BankSlot? = nil) {
+         slot: BankSlot? = nil,
+         isUnified: Bool = false) {
         self.tab = tab
         self.transactions = transactions
         self.balance = balance
         self.slot = slot
+        self.isUnified = isUnified
     }
 
     /// Setzt Bank-Kontext + Daten ATOMAR (ein Objekt-Update). Nutzung beim Öffnen
-    /// und bei jedem Slot-Wechsel, solange das Panel offen ist.
-    func apply(transactions: [TransactionsResponse.Transaction], balance: Double, slot: BankSlot?) {
+    /// und bei jedem Slot-Wechsel/Refresh, solange das Panel offen ist.
+    func apply(transactions: [TransactionsResponse.Transaction], balance: Double,
+               slot: BankSlot?, isUnified: Bool) {
         self.transactions = transactions
         self.balance = balance
         self.slot = slot
+        self.isUnified = isUnified
+        self.snapshotID &+= 1
     }
 }
 
@@ -79,8 +92,20 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
                 // Aktive Bank — Logo + Name vor den Tabs. Quelle = Model-Snapshot (atomar
-                // mit Saldo/Transaktionen), NICHT der Live-Store.
-                if let slot = model.slot {
+                // mit Saldo/Transaktionen), NICHT der Live-Store. Im Unified-Modus
+                // „Alle Konten", da Saldo/Transaktionen kontenübergreifend aggregiert sind.
+                if model.isUnified {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.stack.3d.up.fill").font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                        Text(L10n.t("Alle Konten", "All accounts"))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 8)
+                    Divider().frame(height: 16).padding(.trailing, 2)
+                } else if let slot = model.slot {
                     HStack(spacing: 6) {
                         if let logo = bankLogo(for: slot) {
                             Image(nsImage: logo).resizable().scaledToFit()
@@ -127,13 +152,17 @@ struct DashboardView: View {
             Group {
                 switch model.tab {
                 case .overview:
-                    FinancialHealthScoreView(transactions: model.transactions, balance: model.balance, embedded: true)
+                    FinancialHealthScoreView(transactions: model.transactions, balance: model.balance,
+                                             embedded: true, reloadToken: model.snapshotID)
                 case .subscriptions:
-                    SubscriptionsView(transactions: model.transactions, embedded: true)
+                    SubscriptionsView(transactions: model.transactions, embedded: true,
+                                      reloadToken: model.snapshotID)
                 case .calendar:
+                    // `reloadToken` (= snapshotID) deckt Slot-Wechsel UND Same-Slot-Refresh ab;
+                    // ersetzt das frühere `.id(slot)`, das nur den Slot-Wechsel erfasste.
                     CalendarHeatmapView(mode: .spending, embedded: true,
-                                        injectedTransactions: model.transactions)
-                        .id(model.slot?.id ?? "—")   // Re-Init bei Slot-Wechsel → frischer Snapshot
+                                        injectedTransactions: model.transactions,
+                                        reloadToken: model.snapshotID)
                 case .moneyAge:
                     MoneyAgeSheet(transactions: model.transactions, embedded: true)
                 case .rules:

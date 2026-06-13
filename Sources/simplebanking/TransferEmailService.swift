@@ -61,19 +61,21 @@ enum TransferEmailService {
         recipientName: String,
         amountEUR: Decimal,
         pdfURL: URL,
-        senderSlotNickname: String?
+        senderSlotNickname: String?,
+        scheduledDate: Date? = nil
     ) -> Bool {
         guard let service = NSSharingService(named: .composeEmail) else {
             AppLogger.log("TransferEmailService: no .composeEmail service available", category: "Transfer", level: "WARN")
             return false
         }
         service.recipients = [recipientEmail]
-        service.subject = subject(for: recipientName, amountEUR: amountEUR)
+        service.subject = subject(for: recipientName, amountEUR: amountEUR, scheduledDate: scheduledDate)
 
         let body = bodyText(
             recipientName: recipientName,
             amountEUR: amountEUR,
-            senderSlotNickname: senderSlotNickname
+            senderSlotNickname: senderSlotNickname,
+            scheduledDate: scheduledDate
         )
 
         let canPerform = service.canPerform(withItems: [body, pdfURL])
@@ -85,13 +87,13 @@ enum TransferEmailService {
         return true
     }
 
-    private static func subject(for recipientName: String, amountEUR: Decimal) -> String {
+    private static func subject(for recipientName: String, amountEUR: Decimal, scheduledDate: Date?) -> String {
         let amountStr = formatEUR(amountEUR)
-        let trimmedName = recipientName.trimmingCharacters(in: .whitespaces)
-        if trimmedName.isEmpty {
+        if let d = scheduledDate {
+            let dateStr = TransferScheduleHelpers.formatDateDisplay(d)
             return L10n.t(
-                "Überweisung über € \(amountStr) ist raus",
-                "I just sent you € \(amountStr)"
+                "Überweisung über € \(amountStr) für den \(dateStr) terminiert",
+                "I scheduled € \(amountStr) to you for \(dateStr)"
             )
         }
         return L10n.t(
@@ -103,7 +105,8 @@ enum TransferEmailService {
     private static func bodyText(
         recipientName: String,
         amountEUR: Decimal,
-        senderSlotNickname: String?
+        senderSlotNickname: String?,
+        scheduledDate: Date?
     ) -> String {
         let amountStr = formatEUR(amountEUR)
         let firstName = recipientName
@@ -111,6 +114,34 @@ enum TransferEmailService {
             .components(separatedBy: " ")
             .first ?? recipientName
         let from = senderSlotNickname?.nilIfEmpty.map { " (von \($0))" } ?? ""
+
+        if let d = scheduledDate {
+            let dateStr = TransferScheduleHelpers.formatDateDisplay(d)
+            return L10n.t(
+                """
+                Hallo \(firstName),
+
+                kurze Info: Ich habe eine Überweisung über € \(amountStr) an dich\(from) \
+                für den \(dateStr) terminiert. Die genauen Details findest du im PDF im Anhang.
+
+                Das Geld wird erst am \(dateStr) von meiner Bank ausgeführt — es ist also \
+                noch nicht unterwegs, sondern für dieses Datum geplant.
+
+                Liebe Grüße
+                """,
+                """
+                Hi \(firstName),
+
+                quick heads-up: I've scheduled a transfer of € \(amountStr) to you for \(dateStr). \
+                Full details are in the PDF attached.
+
+                The money will only be sent by my bank on \(dateStr) — so it's not on its way \
+                yet, it's scheduled for that date.
+
+                Cheers
+                """
+            )
+        }
 
         return L10n.t(
             """

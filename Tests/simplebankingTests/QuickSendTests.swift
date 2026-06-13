@@ -46,12 +46,43 @@ final class QuickSendFormattingTests: XCTestCase {
         XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("12,3456"), "12,34")
     }
 
-    func test_amount_limitsToFiveIntegerDigits() {
-        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1234567,89"), "12345,89")
+    func test_amount_keepsAllIntegerDigits_noTruncation() {
+        // P2-Fix: große Beträge werden NICHT mehr gekürzt (sonst stille Wertänderung).
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1234567,89"), "1234567,89")
+        XCTAssertEqual(QuickSendFormatting.amountDecimal("1234567,89"), Decimal(string: "1234567.89"))
+    }
+
+    func test_amount_overMax_isInvalidatedNotTruncated() {
+        // Betrag > maxAmount bleibt erhalten und ist > maxAmount (Drawer sperrt das Senden).
+        let parsed = QuickSendFormatting.amountDecimal(QuickSendFormatting.sanitizeAmountInput("123456,78"))
+        XCTAssertEqual(parsed, Decimal(string: "123456.78"))
+        XCTAssertTrue((parsed ?? 0) > QuickSendFormatting.maxAmount)
     }
 
     func test_amount_keepsTrailingComma() {
         XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("85,"), "85,")
+    }
+
+    // MARK: Einzel-Trenner-Heuristik (P2-Fix: „1.000" ist 1000 €, nicht 1,00 €)
+
+    func test_amount_singleDotThreeDigits_isThousands() {
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1.000"), "1000")
+        XCTAssertEqual(QuickSendFormatting.amountDecimal(QuickSendFormatting.sanitizeAmountInput("1.000")),
+                       Decimal(1000))
+    }
+
+    func test_amount_singleCommaThreeDigits_isThousands() {
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1,000"), "1000")
+    }
+
+    func test_amount_repeatedSingleType_isGrouping() {
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1.000.000"), "1000000") // Gruppierung, ungekürzt
+    }
+
+    func test_amount_singleSeparatorTwoDigits_staysDecimal() {
+        // Regressionsschutz: 1–2 Nachkommastellen bleiben Dezimal.
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("12.50"), "12,50")
+        XCTAssertEqual(QuickSendFormatting.sanitizeAmountInput("1,5"), "1,5")
     }
 
     // MARK: Amount → Decimal

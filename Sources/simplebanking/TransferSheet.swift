@@ -55,6 +55,10 @@ struct TransferSheet: View {
     @State private var purpose: String = ""
     @State private var phase: Phase = .idle
     @State private var bodyError: String? = nil
+    /// Beim Eintritt in `.confirm` eingefrorenes Quellkonto. Vor dem Bankaufruf wird
+    /// geprüft, dass es noch dem aktiven Slot entspricht — verhindert, dass eine unter
+    /// Konto A bestätigte Überweisung von Konto B ausgeführt wird (Slot-Wechsel im Hintergrund).
+    @State private var confirmedSourceSlotId: String? = nil
 
     // Clipboard-IBAN-Hinweis: erkannte IBAN aus Pasteboard, wird als
     // dismissable Banner gezeigt solange iban-Feld leer ist.
@@ -126,9 +130,19 @@ struct TransferSheet: View {
     private var slot: BankSlot? { MultibankingStore.shared.activeSlot }
     private var slotId: String { slot?.id ?? "legacy" }
 
+    /// Roher gecachter Saldo oder `nil`, wenn für den Slot noch keiner vorliegt
+    /// (frisch eingerichtet, noch kein Fetch). Wichtig für die Hard-Limit-Logik:
+    /// ohne bekannten Saldo darf NICHT blockiert werden (sonst wäre jede
+    /// Überweisung gesperrt), mit bekanntem Saldo schon — auch bei Rahmen ≤ 0.
+    private var cachedBalanceRaw: Double? {
+        UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slotId)") as? Double
+    }
+
+    /// Liegt ein gecachter Saldo vor? Gate für die Hard-Limit-Prüfung.
+    private var balanceKnown: Bool { cachedBalanceRaw != nil }
+
     private var availableBalance: Decimal {
-        let raw = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slotId)") as? Double
-        guard let raw else { return 0 }
+        guard let raw = cachedBalanceRaw else { return 0 }
         return Decimal(raw)
     }
 
@@ -160,9 +174,12 @@ struct TransferSheet: View {
     }
 
     /// Echte Hard-Limit-Überschreitung — auch der Dispo reicht nicht.
-    /// Sperrt den Senden-Button.
+    /// Sperrt den Senden-Button. Gilt NUR bei bekanntem Saldo (`balanceKnown`):
+    /// dann blockiert jeder Betrag über `availableInclDispo`, auch wenn der
+    /// verfügbare Rahmen 0 oder negativ ist (z.B. Saldo −500 € + Dispo 500 €).
+    /// Ohne bekannten Saldo greift die Grenze nicht (kein Fehl-Block).
     private var amountExceedsDispoLimit: Bool {
-        amountValue > availableInclDispo && availableInclDispo > 0
+        balanceKnown && amountValue > availableInclDispo
     }
 
     private var ibanClean: String {
@@ -406,7 +423,9 @@ struct TransferSheet: View {
             SourcePill(
                 slot: slot,
                 allSlots: bankingStore.slots,
-                onSelect: onSwitchSlot
+                // Kontowechsel nur im Idle — nach „Senden" (Confirm/Countdown/Sending)
+                // ist das Quellkonto eingefroren (`nil` macht die Pille inaktiv).
+                onSelect: phase == .idle ? onSwitchSlot : nil
             )
         }
     }
@@ -1234,6 +1253,7 @@ struct TransferSheet: View {
             Spacer()
             Button(action: {
                 guard canSubmit else { return }
+                confirmedSourceSlotId = slotId   // Quellkonto einfrieren
                 phase = .confirm
                 bodyError = nil
             }) {
@@ -1281,7 +1301,7 @@ struct TransferSheet: View {
             .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 8) {
-                Button(L10n.t("Zurück", "Back")) { phase = .idle }
+                Button(L10n.t("Zurück", "Back")) { phase = .idle; confirmedSourceSlotId = nil }
                     .buttonStyle(SecondaryActionStyle())
                     .keyboardShortcut(.cancelAction)
                 Button(action: {
@@ -1585,6 +1605,7 @@ struct TransferSheet: View {
         delayTask = nil
         delayRemaining = 0
         phase = .idle
+        confirmedSourceSlotId = nil
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             nameFocused = true
         }
@@ -1605,6 +1626,31 @@ struct TransferSheet: View {
             return
         } catch {
             await MainActor.run { bodyError = error.localizedDescription; phase = .idle }
+            return
+        }
+
+        // Quellkonto-Kontext prüfen: das beim Bestätigen eingefrorene Konto muss noch
+        // das aktive sein. Schützt vor einem Slot-Wechsel zwischen Bestätigung und
+        // Versand (z.B. über Menüleiste/Hotkey) — sonst würde von Konto B statt A gesendet.
+        if let frozen = confirmedSourceSlotId, frozen != slotId {
+            await MainActor.run {
+                bodyError = L10n.t("Quellkonto hat sich geändert — Überweisung abgebrochen.",
+                                   "Source account changed — transfer cancelled.")
+                phase = .idle
+                confirmedSourceSlotId = nil
+            }
+            return
+        }
+
+        // Hard-Limit unmittelbar vor dem Bankaufruf erneut prüfen (Defense-in-Depth):
+        // `canSubmit` sperrt den Button bereits, aber Confirm-/Delay-Pfad kann
+        // `performSend` auch sonst erreichen. Nur bei bekanntem Saldo blockieren.
+        if amountExceedsDispoLimit {
+            await MainActor.run {
+                bodyError = L10n.t("Betrag übersteigt den verfügbaren Rahmen (inkl. Dispo).",
+                                   "Amount exceeds the available limit (incl. overdraft).")
+                phase = .idle
+            }
             return
         }
 
@@ -1683,7 +1729,8 @@ struct TransferSheet: View {
             recipientName: request.creditorName,
             amountEUR: request.amountEUR,
             pdfURL: pdfURL,
-            senderSlotNickname: slot?.nickname?.nilIfEmpty
+            senderSlotNickname: slot?.nickname?.nilIfEmpty,
+            scheduledDate: scheduledDate
         )
     }
 

@@ -66,6 +66,14 @@ final class TransactionsViewModel: ObservableObject {
         indexRebuildTask?.cancel()
         indexRebuildTask = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            // Cadence ZUERST setzen (vor dem Suchindex): `computeSearchIndexText`
+            // kategorisiert und liest den globalen Live-Cadence-Cache. Würde der Cache
+            // erst danach gesetzt, baute der Index mit der Cadence des VORHERIGEN Kontos
+            // (Intervall-Regel-Kategorien könnten vom falschen Konto stammen).
+            // `analyze` ist heavy → off-main.
+            let cadence = AssignmentRules.cadenceMap(for: snapshot)
+            AssignmentRules.setLiveCadence(cadence)
+            if Task.isCancelled { return }
             // Pure Funktionen / read-only Resolver — safe off-main.
             let search = snapshot.map(Self.computeSearchIndexText)
             if Task.isCancelled { return }

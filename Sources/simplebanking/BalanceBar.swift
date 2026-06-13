@@ -4250,6 +4250,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             maybeTriggerTransactionsConfetti(transactions: confettiTransactions, currentBalance: self.lastBalance)
         }
 
+        // Offenes Dashboard mit dem frischen Snapshot (Saldo + Transaktionen) spiegeln —
+        // sonst bleibt es nach einem normalen Refresh stale (kein Slot-Wechsel = kein apply).
+        // Epoche ist hier valide (Guards bei 4200/4232).
+        refreshDashboardIfOpen()
+
         // AI categorization — fire-and-forget, silent on error, reloads from DB when done.
         // Re-load nutzt `displayDays`, damit nach einem Deep-Sync-Import auch die kategorisierten
         // Transactions außerhalb der `fetchDays`-Range in der UI auftauchen.
@@ -4266,6 +4271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     await MainActor.run {
                         guard self.slotEpoch == epochForCategorization else { return }
                         self.txVM.transactions = self.sortTransactionsNewestFirst(updated)
+                        self.refreshDashboardIfOpen()
                     }
                 }
             } else {
@@ -4273,6 +4279,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     await MainActor.run {
                         guard self.slotEpoch == epochForCategorization else { return }
                         self.txVM.transactions = self.sortTransactionsNewestFirst(updated)
+                        self.refreshDashboardIfOpen()
                     }
                 }
             }
@@ -5468,19 +5475,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Öffnet das einheitliche Dashboard am gewünschten Tab (löst die fünf Einzel-Sheets ab).
     private func openDashboard(tab: DashboardTab) {
         if dashboardPanel == nil { dashboardPanel = DashboardPanel() }
+        let unified = dashboardIsUnified
         dashboardPanel?.show(tab: tab,
                              transactions: txVM.transactions,
                              balance: lastBalance ?? 0,
-                             slot: MultibankingStore.shared.activeSlot)
+                             slot: unified ? nil : MultibankingStore.shared.activeSlot,
+                             isUnified: unified)
     }
 
-    /// Spiegelt den aktuellen Slot-Snapshot (Bank + Saldo + Transaktionen) in ein
-    /// bereits offenes Dashboard — no-op, wenn keins offen ist. Wird beim Slot-Wechsel
+    /// Spiegelt den aktuellen Snapshot (Bank/„Alle Konten" + Saldo + Transaktionen) in ein
+    /// bereits offenes Dashboard — no-op, wenn keins offen ist. Wird beim Slot-Wechsel/Refresh
     /// gerufen, damit das Dashboard nicht Bank B zeigt, aber Bank A auswertet.
     private func refreshDashboardIfOpen() {
+        let unified = dashboardIsUnified
         dashboardPanel?.refresh(transactions: txVM.transactions,
                                 balance: lastBalance ?? 0,
-                                slot: MultibankingStore.shared.activeSlot)
+                                slot: unified ? nil : MultibankingStore.shared.activeSlot,
+                                isUnified: unified)
+    }
+
+    /// Aggregiert das Dashboard gerade mehrere Konten? Gleiches Idiom wie an den
+    /// übrigen Unified-Stellen (z.B. Saldo-Aggregation): Unified nur außerhalb des
+    /// Single-Demo (im Multi-Demo aber erlaubt).
+    private var dashboardIsUnified: Bool {
+        txVM.isUnifiedMode && (!demoMode || isMultiDemo)
     }
 
     @objc private func checkForUpdates() {

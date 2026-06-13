@@ -30,6 +30,9 @@ enum SubViewMode: String, CaseIterable {
 struct SubscriptionsView: View {
     let transactions: [TransactionsResponse.Transaction]
     var embedded: Bool = false
+    /// Wechselt bei Slot-Wechsel/Refresh (Dashboard-`snapshotID`) → erzwingt Neu-Detektion
+    /// via `.task(id:)`. Default 0 für Standalone-Nutzung (feuert dann nur einmal).
+    var reloadToken: Int = 0
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var logoStore = SubscriptionLogoStore.shared
@@ -338,17 +341,19 @@ struct SubscriptionsView: View {
         .sheet(item: $detailCandidate) { candidate in
             SubscriptionDetailView(candidate: candidate)
         }
-        .onAppear {
+        // `.task(id:)` feuert beim Erscheinen UND bei Slot-Wechsel/Refresh → frische
+        // Abo-Detektion. Detect läuft off-main; bei Token-Wechsel wird der Task gecancelt
+        // und ein veraltetes Ergebnis vor dem Schreiben verworfen.
+        .task(id: reloadToken) {
             RecurringAssignments.migrateLegacyIfNeeded()
             let txSnapshot = transactions
-            Task.detached(priority: .userInitiated) {
-                let result = SubscriptionDetector.detect(in: txSnapshot)
-                await MainActor.run {
-                    detectedCandidates = result
-                    isLoading = false
-                    logoStore.preloadInitial(displayNames: result.map(\.displayName))
-                }
-            }
+            let result = await Task.detached(priority: .userInitiated) {
+                SubscriptionDetector.detect(in: txSnapshot)
+            }.value
+            if Task.isCancelled { return }
+            detectedCandidates = result
+            isLoading = false
+            logoStore.preloadInitial(displayNames: result.map(\.displayName))
         }
     }
 
