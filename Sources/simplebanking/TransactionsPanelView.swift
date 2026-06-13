@@ -770,6 +770,23 @@ private struct TransactionsPanelView: View {
         if v > 0 { return .incomeGreen }
         return Color(NSColor.tertiaryLabelColor)
     }
+
+    /// Im Sparmode: Original → Aufgerundet (z.B. „32,00 €" → „35,00 €") für Zeilen,
+    /// die tatsächlich aufgerundet werden (EUR-Lastschrift, kein glattes Vielfaches).
+    /// `nil` → Zeile zeigt den normalen Betrag (Einnahmen, glatte Beträge, Normalmodus).
+    private func roundupDisplay(_ t: TransactionsResponse.Transaction) -> (original: String, rounded: String)? {
+        guard roundupView.isActive else { return nil }
+        let raw = Decimal(t.parsedAmount)
+        let cents = RoundupCalculator.roundupCents(amount: raw, stepCents: roundupView.stepCents)
+        guard cents > 0 else { return nil }
+        let currency = t.amount?.currency ?? "EUR"
+        let rounded = RoundupCalculator.displayedAmount(originalAmount: raw, currency: currency, stepCents: roundupView.stepCents)
+        let origAbs = abs(NSDecimalNumber(decimal: raw).doubleValue)
+        let roundedAbs = abs(NSDecimalNumber(decimal: rounded).doubleValue)
+        let origStr = (Self.amountFormatter.string(from: NSNumber(value: origAbs)) ?? "") + " €"
+        let roundedStr = (Self.amountFormatter.string(from: NSNumber(value: roundedAbs)) ?? "") + " €"
+        return (origStr, roundedStr)
+    }
     
     private func recipientName(_ t: TransactionsResponse.Transaction) -> String {
         let rawName: String
@@ -982,6 +999,46 @@ private struct TransactionsPanelView: View {
     }
 
 
+    /// Konto-Indikatoren (Slot-Dots + „Alle Konten"). Von Normal- und Sparmode-Layout
+    /// geteilt (im Sparmode in der RoundupOverlay-Steuerzeile, sonst eigene Zeile).
+    @ViewBuilder
+    private var accountDotsBar: some View {
+        HStack(spacing: 8) {
+            // One dot per slot
+            ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
+                let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
+                let color = slotDisplayColor(for: slot)
+                Button {
+                    guard !isActive else { return }
+                    if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
+                    accountNav.onSwitchToIndex?(idx)
+                } label: {
+                    Capsule()
+                        .fill(isActive ? color : Color(NSColor.tertiaryLabelColor))
+                        .frame(width: isActive ? 24 : 8, height: 8)
+                        .animation(.easeInOut(duration: 0.3), value: isActive)
+                        .frame(height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            // "Alle Konten" dot
+            let unifiedActive = vm.unifiedModeEnabled
+            Button {
+                guard !unifiedActive else { return }
+                vm.unifiedModeEnabled = true
+            } label: {
+                Capsule()
+                    .fill(unifiedActive ? Color(NSColor.secondaryLabelColor) : Color(NSColor.tertiaryLabelColor))
+                    .frame(width: unifiedActive ? 24 : 8, height: 8)
+                    .animation(.easeInOut(duration: 0.3), value: unifiedActive)
+                    .frame(height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Balance Card
@@ -1002,46 +1059,17 @@ private struct TransactionsPanelView: View {
             .padding(.top, -9)
             .padding(.bottom, multibankingStore.slots.count > 1 ? 4 : 6)
 
-            // Account dot indicators — slot dots + "Alle Konten" dot
+            // Account dot indicators — slot dots + "Alle Konten" dot. Eigene Zeile in
+            // beiden Modi (im Sparmode darüber der Steuerzeile, damit die Step-Pills
+            // nicht beschnitten werden).
             if multibankingStore.slots.count > 1 {
-                HStack(spacing: 8) {
-                    // One dot per slot
-                    ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
-                        let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
-                        let color = slotDisplayColor(for: slot)
-                        Button {
-                            guard !isActive else { return }
-                            if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
-                            accountNav.onSwitchToIndex?(idx)
-                        } label: {
-                            Capsule()
-                                .fill(isActive ? color : Color(NSColor.tertiaryLabelColor))
-                                .frame(width: isActive ? 24 : 8, height: 8)
-                                .animation(.easeInOut(duration: 0.3), value: isActive)
-                                .frame(height: 24)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    // "Alle Konten" dot
-                    let unifiedActive = vm.unifiedModeEnabled
-                    Button {
-                        guard !unifiedActive else { return }
-                        vm.unifiedModeEnabled = true
-                    } label: {
-                        Capsule()
-                            .fill(unifiedActive ? Color(NSColor.secondaryLabelColor) : Color(NSColor.tertiaryLabelColor))
-                            .frame(width: unifiedActive ? 24 : 8, height: 8)
-                            .animation(.easeInOut(duration: 0.3), value: unifiedActive)
-                            .frame(height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.bottom, 6)
+                accountDotsBar
+                    .padding(.bottom, 6)
             }
 
-            // Search + Icons — same row
+            // Search + Icons — same row. Im Sparmode ausgeblendet (Suche/Filter/Kategorien
+            // sind dort deaktiviert; der ¢-Toggle liegt in der Steuerzeile).
+            if !roundupView.isActive {
             HStack(spacing: 8) {
                 // Search field — flexible
                 HStack(spacing: 6) {
@@ -1110,13 +1138,14 @@ private struct TransactionsPanelView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+            }
 
             // Filter-Pills — direkte Schnellfilter unter der Suche (toggelbar via Filter-Button).
             // `.all` wird nicht als Pill gerendert: Klick auf einen aktiven Pill setzt zurück
             // auf `.all`, der „Alle"-Slot spart einen sichtbaren Pill ein. Edge-Fade an beiden
             // Seiten signalisiert dass die Reihe scrollbar ist; ScrollViewReader scrollt den
             // aktiven Pill automatisch in die Mitte sobald er aktiviert wird.
-            if showFilterPills {
+            if showFilterPills && !roundupView.isActive {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
@@ -1319,6 +1348,7 @@ private struct TransactionsPanelView: View {
                                             normalizedMerchant: resolution.normalizedMerchant,
                                             amount: amountText(t),
                                             amountColor: amountColor(t),
+                                            roundupDisplay: roundupDisplay(t),
                                             matchBadges: vm.searchMatchBadges(for: t),
                                             userNote: enrichment?.note,
                                             attachmentCount: enrichment?.attachmentCount ?? 0,
@@ -1327,7 +1357,7 @@ private struct TransactionsPanelView: View {
                                             isWide: panelIsWide,
                                             slotColor: rowSlotColor,
                                             isInternalTransfer: isTransfer,
-                                            showCategories: showCategories,
+                                            showCategories: roundupView.isActive ? false : showCategories,
                                             isUnread: txIsUnread,
                                             hasReminder: txHasReminder,
                                             reminderId: txReminderId,
@@ -2351,6 +2381,8 @@ private struct TransactionRowNew: View {
     let normalizedMerchant: String
     let amount: String
     let amountColor: Color
+    /// Sparmode: wenn gesetzt, zeigt die Zeile „Original → Aufgerundet" statt `amount`.
+    var roundupDisplay: (original: String, rounded: String)? = nil
     let matchBadges: [String]
     let userNote: String?
     let attachmentCount: Int
@@ -2482,9 +2514,24 @@ private struct TransactionRowNew: View {
                     }
                 }
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(amount)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(amountColor)
+                    if let rd = roundupDisplay {
+                        // Sparmode: Original → aufgerundetes Ziel (Ziel in Mint betont).
+                        HStack(spacing: 4) {
+                            Text(rd.original)
+                                .font(.system(size: 12, weight: .regular))
+                                .foregroundColor(.sbTextSecondary)
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.sbTextSecondary)
+                            Text(rd.rounded)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(Color.roundupAccent)
+                        }
+                    } else {
+                        Text(amount)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(amountColor)
+                    }
                     if isPending {
                         Text(L10n.t("Vorgemerkt", "Pending"))
                             .font(.system(size: 10, weight: .semibold))

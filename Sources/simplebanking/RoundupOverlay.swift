@@ -26,15 +26,24 @@ struct RoundupOverlay: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            // Steuerzeile: „Aufrunden um" Steps · ¢-Toggle (Mode aus).
+            // Konto-Picker liegt eine Zeile darüber (eigene Reihe), damit die Pills Platz haben.
             HStack(spacing: 10) {
-                Image(systemName: "centsign.circle.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color.roundupAccent)
                 Text(L10n.t("Aufrunden um:", "Round up to:"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.primary)
-                stepPills
-                Spacer(minLength: 0)
+                    .fixedSize()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    stepPills.padding(.vertical, 1)
+                }
+                Spacer(minLength: 4)
+                Button(action: onClose) {
+                    Image(systemName: "centsign.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(Color.roundupAccent)
+                }
+                .buttonStyle(.plain)
+                .help(L10n.t("Sparmodus beenden", "Leave round-up mode"))
             }
 
             payoutButton
@@ -53,21 +62,22 @@ struct RoundupOverlay: View {
     private var payoutButton: some View {
         Button(action: openChoiceSheet) {
             HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Image(systemName: "tray.and.arrow.down.fill")
+                    .font(.system(size: 12, weight: .semibold))
                 Text(L10n.t("Aufgerundeten Betrag zur Seite legen",
                             "Set aside round-up amount"))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 0)
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 10, weight: .semibold))
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.roundupAccent.opacity(0.18))
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.roundupAccent)
             )
-            .foregroundColor(Color.roundupAccent)
+            .foregroundColor(.white)
         }
         .buttonStyle(.plain)
         .help(L10n.t("Öffnet den Auswahl-Dialog (Heute / Gestern / Vorgestern / Monat).",
