@@ -1046,11 +1046,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 } else {
                     // Auto-unlock password mismatch → fall back to prompt
                     locked = true
-                    promptUnlockIfNeeded()
+                    deferUnlockPrompt()
                 }
             } else {
                 locked = true
-                promptUnlockIfNeeded()
+                deferUnlockPrompt()
             }
         } else if demoMode {
             // Demo mode starts unlocked with demo data
@@ -2575,6 +2575,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     @AppStorage("resetAttempts") private var resetAttemptsLimit: Int = 0
     private var failedAttempts: Int = 0
     private var isPromptingUnlock: Bool = false
+
+    /// Schiebt den Unlock-Modal auf die nächste Main-Loop-Iteration, statt ihn
+    /// synchron aus `applicationDidFinishLaunching` zu starten.
+    ///
+    /// Grund: `promptUnlockIfNeeded()` öffnet via `NSApp.runModal(for:)` einen
+    /// verschachtelten Modal-Run-Loop. Wird der noch *innerhalb* von
+    /// didFinishLaunching gestartet — also bevor der reguläre App-Run-Loop läuft —
+    /// kann das `MasterPasswordPanel` (floating `.accessory`-App, kein Dock) unter
+    /// macOS 26 nicht Key werden: der User sieht kein Panel, die App steckt für
+    /// immer in `runModal` fest („App tut nichts / kein Menüleisten-Icon"), und der
+    /// Rest des Setups (Menü, Watcher) läuft nie. Durch das Deferral ist der
+    /// Run-Loop garantiert aktiv, wenn das Panel erscheint, und didFinishLaunching
+    /// läuft vollständig durch.
+    private func deferUnlockPrompt() {
+        Task { @MainActor in
+            self.promptUnlockIfNeeded()
+        }
+    }
 
     private func promptUnlockIfNeeded() {
         guard locked else { return }
