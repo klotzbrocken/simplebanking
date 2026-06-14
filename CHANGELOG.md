@@ -1,5 +1,15 @@
 # Changelog — simplebanking
 
+## [1.6.1]
+
+### Geändert
+
+- **Schnellüberweisung im Flyout jetzt standardmäßig an** — der Papierflieger-Quick-Send ist nicht mehr Opt-in; nur ein explizit deaktivierter Schalter (Einstellungen → Labs) blendet ihn aus. Lizenz-/Feature-Gate (`simplesend`) unverändert.
+
+### Behoben
+
+- **Start unter macOS 26: kein Menüleisten-Symbol** — der Entsperr-Dialog wurde synchron aus `applicationDidFinishLaunching` gestartet; bei einer Dock-losen Menüleisten-App konnte das unter macOS 26 den Start blockieren (kein Symbol, App „tut nichts"). Der Dialog wird jetzt auf die nächste Run-Loop-Iteration verschoben, sodass der Startvorgang vollständig durchläuft. (Kandidaten-Fix)
+
 ## [Unreleased] (1.6.0)
 
 ### Behoben

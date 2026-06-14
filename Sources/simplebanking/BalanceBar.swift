@@ -3137,7 +3137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard FeatureFlags.transferMoneyEnabled || demoMode else { return false }
         // Demo zeigt alle Features — Quick-Send ohne Labs-Toggle.
         if demoMode { return true }
-        return UserDefaults.standard.bool(forKey: "quickSendEnabled")
+        // Default an: nur ein explizit gesetztes `false` blendet den Papierflieger aus.
+        return (UserDefaults.standard.object(forKey: "quickSendEnabled") as? Bool) ?? true
     }
 
     /// `true`, wenn simplesend noch nicht freigeschaltet ist → Klick auf den

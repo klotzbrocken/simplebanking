@@ -197,7 +197,7 @@ struct SettingsView: View {
     @AppStorage("transferDelaySeconds") private var transferDelaySeconds: Int = 5
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("mcpDraftsEnabled") private var mcpDraftsEnabled: Bool = false
-    @AppStorage("quickSendEnabled") private var quickSendEnabled: Bool = false
+    @AppStorage("quickSendEnabled") private var quickSendEnabled: Bool = true
     @ObservedObject private var quickSendFavorites = QuickSendFavoritesStore.shared
     @State private var qsNewEmoji = "💸"
     @State private var qsNewName = ""
