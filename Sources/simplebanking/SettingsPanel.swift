@@ -3,6 +3,11 @@ import ServiceManagement
 import SwiftUI
 import UserNotifications
 
+extension Notification.Name {
+    /// Flyout-„+" → Settings öffnen und zum Quick-Send-Vorlagen-Editor (Konten-Tab) scrollen.
+    static let openQuickSendTemplates = Notification.Name("simplebanking.openQuickSendTemplates")
+}
+
 // Breite des Gehaltseingang-Pickers ("31. des Monats") — via Font-Metriken + Button-Chrome
 private let _settingsGehaltsPickerWidth: CGFloat = {
     let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
@@ -241,6 +246,9 @@ struct SettingsView: View {
     @AppStorage("passwordRequired") private var passwordRequired: Bool = true
 
     @AppStorage("settingsLastTab") private var selectedTab: Int = 0
+    /// Wird gesetzt, wenn aus dem Flyout-„+" heraus direkt zum Quick-Send-Vorlagen-Editor
+    /// (im Konten-Tab) gescrollt werden soll.
+    @State private var scrollToQuickSend: Bool = false
     @State private var showResetConfirmation: Bool = false
     @State private var slotToDelete: BankSlot? = nil
     @State private var showSlotDeleteConfirmation: Bool = false
@@ -769,30 +777,40 @@ struct SettingsView: View {
                 .padding(.top, 8)
             
             // Content
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    switch selectedTab {
-                    case 0:
-                        generalSettings
-                    case 1:
-                        accountsSettings
-                    case 2:
-                        financeSettings
-                    case 3:
-                        behaviorSettings
-                    case 4:
-                        securitySettings
-                    case 5:
-                        aboutSection
-                    case 6:
-                        labsSettings
-                    default:
-                        EmptyView()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        switch selectedTab {
+                        case 0:
+                            generalSettings
+                        case 1:
+                            accountsSettings
+                        case 2:
+                            financeSettings
+                        case 3:
+                            behaviorSettings
+                        case 4:
+                            securitySettings
+                        case 5:
+                            aboutSection
+                        case 6:
+                            labsSettings
+                        default:
+                            EmptyView()
+                        }
+                    }
+                    .padding(20)
+                }
+                .onChange(of: scrollToQuickSend) { shouldScroll in
+                    guard shouldScroll else { return }
+                    // Kurzer Delay, damit der Konten-Tab gerendert ist, bevor zum Anker gescrollt wird.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                        withAnimation { proxy.scrollTo("quickSendTemplates", anchor: .top) }
+                        scrollToQuickSend = false
                     }
                 }
-                .padding(20)
             }
-            
+
             Spacer()
         }
         .frame(width: 520, height: 520)
@@ -813,6 +831,17 @@ struct SettingsView: View {
                 didInitialMerchantRefresh = true
                 refreshMerchantResolutionData(pipelineEnabled: effectiveMerchantPipelineEnabled)
             }
+            // Erst-Öffnung aus dem Flyout-„+": direkt zum Quick-Send-Vorlagen-Editor scrollen.
+            if UserDefaults.standard.bool(forKey: "settingsScrollToQuickSend") {
+                UserDefaults.standard.removeObject(forKey: "settingsScrollToQuickSend")
+                selectedTab = 1
+                scrollToQuickSend = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openQuickSendTemplates)) { _ in
+            UserDefaults.standard.removeObject(forKey: "settingsScrollToQuickSend")
+            selectedTab = 1
+            scrollToQuickSend = true
         }
         .onChange(of: launchAtLogin) { newValue in
             updateLaunchAtLogin(newValue)
@@ -1798,6 +1827,9 @@ struct SettingsView: View {
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
+
+            // Schnellüberweisung — aus „Labs" hierher (zu „Konten") verschoben.
+            quickSendSettings
         }
     }
 
@@ -2991,6 +3023,32 @@ struct SettingsView: View {
         qsNewEmoji = "💸"; qsNewName = ""; qsNewIban = ""; qsNewAmount = ""; qsNewPurpose = ""
     }
 
+    /// Schnellüberweisung-Sektion (Opt-in-Toggle + Vorlagen-Editor). Liegt im Konten-Tab;
+    /// `.id("quickSendTemplates")` ist das Scroll-Ziel für den Flyout-„+"-Sprung.
+    @ViewBuilder
+    private var quickSendSettings: some View {
+        if FeatureFlags.transferMoneyEnabled {
+            VStack(alignment: .leading, spacing: 16) {
+                Divider()
+                SettingsToggleRow(
+                    title: t("Schnellüberweisung im Flyout", "Quick transfer in flyout"),
+                    subtitle: t(
+                        "Ein Papierflieger-Button in der Flyout-Kopfzeile klappt einen kompakten Überweisungs-Drawer auf (Name, IBAN, Betrag, Betreff + gepinnte Vorlagen). Master-Passwort & SCA laufen wie bei „Geld senden“.",
+                        "A paper-plane button in the flyout header opens a compact transfer drawer (name, IBAN, amount, reference + pinned templates). Master password & SCA work like \"Send money\"."
+                    ),
+                    isOn: $quickSendEnabled
+                )
+
+                if quickSendEnabled {
+                    quickSendFavoritesEditor
+                        .padding(.leading, 4)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .id("quickSendTemplates")
+        }
+    }
+
     // MARK: - Labs Settings
 
     private var labsSettings: some View {
@@ -3059,26 +3117,6 @@ struct SettingsView: View {
             }
 
             Divider()
-
-            // Quick-Send — Schnellüberweisung direkt im Flyout (Opt-in).
-            if FeatureFlags.transferMoneyEnabled {
-                SettingsToggleRow(
-                    title: t("Schnellüberweisung im Flyout", "Quick transfer in flyout"),
-                    subtitle: t(
-                        "Ein Papierflieger-Button in der Flyout-Kopfzeile klappt einen kompakten Überweisungs-Drawer auf (Name, IBAN, Betrag, Betreff + gepinnte Vorlagen). Master-Passwort & SCA laufen wie bei „Geld senden“.",
-                        "A paper-plane button in the flyout header opens a compact transfer drawer (name, IBAN, amount, reference + pinned templates). Master password & SCA work like \"Send money\"."
-                    ),
-                    isOn: $quickSendEnabled
-                )
-
-                if quickSendEnabled {
-                    quickSendFavoritesEditor
-                        .padding(.leading, 4)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                Divider()
-            }
 
             // Agenten & Automatisierung — Lese-only-Zugriff über externe Tools.
             VStack(alignment: .leading, spacing: 12) {

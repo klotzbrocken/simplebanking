@@ -139,42 +139,49 @@ final class RoundupViewState: ObservableObject {
         todayDate = today; yesterdayDate = yesterday
         dayBeforeDate = dayBefore; monthStartDate = monthStart
 
-        // Bereits ausgezahlte Tage — werden aus den Payout-Werten ausgeblendet.
-        let transferredDates: Set<String> = {
-            guard let slotId = lastSlotId else { return [] }
-            return (try? RoundupStore.transferredPotDates(slotId: slotId, bankId: lastBankId)) ?? []
-        }()
-
-        todayPotCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: today, bookingDateTo: today, stepCents: stepCents
-        )
-        yesterdayPotCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: yesterday, bookingDateTo: yesterday, stepCents: stepCents
-        )
-        dayBeforeYesterdayPotCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: dayBefore, bookingDateTo: dayBefore, stepCents: stepCents
-        )
-        monthToDateCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: monthStart, bookingDateTo: today, stepCents: stepCents
-        )
-
-        todayPayoutCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: today, bookingDateTo: today, stepCents: stepCents, excludingDates: transferredDates
-        )
-        yesterdayPayoutCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: yesterday, bookingDateTo: yesterday, stepCents: stepCents, excludingDates: transferredDates
-        )
-        dayBeforePayoutCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: dayBefore, bookingDateTo: dayBefore, stepCents: stepCents, excludingDates: transferredDates
-        )
-        monthToDatePayoutCents = RoundupCalculator.liveRoundupCents(
-            transactions: cachedTransactions, bookingDateFrom: monthStart, bookingDateTo: today, stepCents: stepCents, excludingDates: transferredDates
-        )
-
+        // Spar-IBAN dieses Slots — Überweisungen dorthin werden NICHT aufgerundet.
         let savingsIban: String = {
             guard let slotId = lastSlotId else { return "" }
             return BankSlotSettingsStore.load(slotId: slotId).savingsAccountIban ?? ""
         }()
+
+        // Bereits ausgezahlte Tage — aus den Payout-Werten ausgeblendet. Umfasst sowohl
+        // einzelne `transferred`-Pot-Tage als auch ALLE Tage in persistierten Auszahlungs-
+        // Ranges (deckt Buchungen ohne Pot-Zeile ab → verhindert Doppelauszahlung).
+        let transferredDates: Set<String> = {
+            guard let slotId = lastSlotId else { return [] }
+            var dates = (try? RoundupStore.transferredPotDates(slotId: slotId, bankId: lastBankId)) ?? []
+            let ranges = (try? RoundupStore.paidDateRanges(slotId: slotId, bankId: lastBankId)) ?? []
+            for r in ranges { dates.formUnion(Self.datesInRange(from: r.from, to: r.to)) }
+            return dates
+        }()
+
+        todayPotCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: today, bookingDateTo: today, stepCents: stepCents, savingsIban: savingsIban
+        )
+        yesterdayPotCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: yesterday, bookingDateTo: yesterday, stepCents: stepCents, savingsIban: savingsIban
+        )
+        dayBeforeYesterdayPotCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: dayBefore, bookingDateTo: dayBefore, stepCents: stepCents, savingsIban: savingsIban
+        )
+        monthToDateCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: monthStart, bookingDateTo: today, stepCents: stepCents, savingsIban: savingsIban
+        )
+
+        todayPayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: today, bookingDateTo: today, stepCents: stepCents, excludingDates: transferredDates, savingsIban: savingsIban
+        )
+        yesterdayPayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: yesterday, bookingDateTo: yesterday, stepCents: stepCents, excludingDates: transferredDates, savingsIban: savingsIban
+        )
+        dayBeforePayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: dayBefore, bookingDateTo: dayBefore, stepCents: stepCents, excludingDates: transferredDates, savingsIban: savingsIban
+        )
+        monthToDatePayoutCents = RoundupCalculator.liveRoundupCents(
+            transactions: cachedTransactions, bookingDateFrom: monthStart, bookingDateTo: today, stepCents: stepCents, excludingDates: transferredDates, savingsIban: savingsIban
+        )
+
         streakDays = RoundupCalculator.liveStreakDays(
             transactions: cachedTransactions,
             savingsIban: savingsIban,
@@ -198,6 +205,24 @@ final class RoundupViewState: ObservableObject {
     }
 
     // MARK: - Private
+
+    /// Alle ISO-Tage (YYYY-MM-DD) im inklusiven Range [from, to]. Leer bei ungültigem
+    /// Range. Für den Ausschluss ausgezahlter Zeiträume aus der Live-Anzeige.
+    private static func datesInRange(from: String, to: String) -> [String] {
+        let cal = Calendar(identifier: .gregorian)
+        guard let start = isoDateFormatter.date(from: from),
+              let end = isoDateFormatter.date(from: to),
+              start <= end else { return [] }
+        var out: [String] = []
+        var cur = cal.startOfDay(for: start)
+        let last = cal.startOfDay(for: end)
+        while cur <= last {
+            out.append(isoDateFormatter.string(from: cur))
+            guard let next = cal.date(byAdding: .day, value: 1, to: cur) else { break }
+            cur = next
+        }
+        return out
+    }
 
     nonisolated(unsafe) private static let isoDateFormatter: DateFormatter = {
         let f = DateFormatter()

@@ -1785,30 +1785,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     ) {
         let amount = Decimal(amountCents) / 100
         let bankId = demoMode ? "demo" : "primary"
-        do {
-            let request = try TransferRequest(
-                creditorName: recipientName,
-                creditorIban: recipientIban,
-                amountEUR: amount,
-                remittance: L10n.t("Aufgerundet (\(rangeLabel))", "Round-up (\(rangeLabel))")
-            )
-            showTransferSheet(prefill: request, prefillSource: "roundup") { _ in
-                // Erst nach erfolgreicher Ausführung: alle erfassten Pots im
-                // gewählten Zeitraum als `transferred` finalisieren, damit derselbe
-                // Betrag nicht erneut überwiesen werden kann.
-                do {
-                    try RoundupStore.markRangeTransferred(
-                        slotId: slotId, from: fromDate, to: toDate, bankId: bankId
-                    )
-                } catch {
-                    AppLogger.log("Roundup-Finalisierung fehlgeschlagen (slot=\(slotId), \(fromDate)…\(toDate)): \(error.localizedDescription)",
-                                  category: "Roundup", level: "ERROR")
+        let present: () -> Void = { [weak self] in
+            guard let self else { return }
+            do {
+                let request = try TransferRequest(
+                    creditorName: recipientName,
+                    creditorIban: recipientIban,
+                    amountEUR: amount,
+                    remittance: L10n.t("Aufgerundet (\(rangeLabel))", "Round-up (\(rangeLabel))")
+                )
+                self.showTransferSheet(prefill: request, prefillSource: "roundup") { _ in
+                    // Erst nach erfolgreicher Ausführung finalisieren, damit derselbe
+                    // Betrag nicht erneut überwiesen werden kann: Pots als `transferred`
+                    // markieren UND den Zeitraum als bezahlt festhalten (deckt auch
+                    // Buchungen ohne Pot-Zeile ab → keine Doppelauszahlung).
+                    do {
+                        try RoundupStore.markRangeTransferred(slotId: slotId, from: fromDate, to: toDate, bankId: bankId)
+                    } catch {
+                        AppLogger.log("Roundup-Finalisierung fehlgeschlagen (slot=\(slotId), \(fromDate)…\(toDate)): \(error.localizedDescription)",
+                                      category: "Roundup", level: "ERROR")
+                    }
+                    do {
+                        try RoundupStore.recordPayout(slotId: slotId, from: fromDate, to: toDate, amountCents: amountCents, bankId: bankId)
+                    } catch {
+                        AppLogger.log("Roundup-Payout-Record fehlgeschlagen (slot=\(slotId)): \(error.localizedDescription)",
+                                      category: "Roundup", level: "ERROR")
+                    }
+                    RoundupViewState.shared.refreshAfterPayout()
                 }
-                RoundupViewState.shared.refreshAfterPayout()
+            } catch {
+                AppLogger.log("Roundup-Choice TransferRequest fehlgeschlagen: \(error.localizedDescription)",
+                              category: "Roundup", level: "ERROR")
             }
-        } catch {
-            AppLogger.log("Roundup-Choice TransferRequest fehlgeschlagen: \(error.localizedDescription)",
-                          category: "Roundup", level: "ERROR")
+        }
+
+        // Quellkonto festschreiben: falls der Nutzer zwischen Choice-Panel und Transfer
+        // das Konto gewechselt hat, vor dem Öffnen zurück auf den Spar-Slot wechseln —
+        // sonst würde vom falschen Konto gesendet, während die Pots von A finalisiert werden.
+        if (MultibankingStore.shared.activeSlot?.id ?? "") != slotId,
+           let idx = MultibankingStore.shared.slots.firstIndex(where: { $0.id == slotId }) {
+            Task { @MainActor in
+                await self.switchToSlot(index: idx)
+                present()
+            }
+        } else {
+            present()
         }
     }
 
@@ -3219,11 +3240,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.showUpsellSheet()
         }
         rootView.onQuickSendAddTemplate = { [weak self] in
-            // Flyout schließen + Einstellungen am Labs-Tab (Vorlagen-Editor) öffnen.
+            // Flyout schließen + Einstellungen am Konten-Tab öffnen und direkt zum
+            // Vorlagen-Editor scrollen (nicht nur den Tab wählen).
             self?.balancePopover?.performClose(nil)
             self?.hideCenteredFlyout()
-            UserDefaults.standard.set(6, forKey: "settingsLastTab")
+            UserDefaults.standard.set(1, forKey: "settingsLastTab")              // Konten
+            UserDefaults.standard.set(true, forKey: "settingsScrollToQuickSend") // Backup für Erst-Öffnung
             self?.showSettings()
+            // Notification für ein bereits offenes Settings-Fenster (onAppear feuert dort nicht).
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .openQuickSendTemplates, object: nil)
+            }
         }
         rootView.onQuickSendToggle = { [weak self] open in
             self?.setFlyoutQuickSendOpen(open)

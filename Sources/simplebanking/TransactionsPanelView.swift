@@ -776,10 +776,12 @@ private struct TransactionsPanelView: View {
     /// `nil` → Zeile zeigt den normalen Betrag (Einnahmen, glatte Beträge, Normalmodus).
     private func roundupDisplay(_ t: TransactionsResponse.Transaction) -> (original: String, rounded: String)? {
         guard roundupView.isActive else { return nil }
+        // Nur EUR rundet auf — Fremdwährung zeigt den normalen Betrag (kein Pfeil, kein „€").
+        let currency = (t.amount?.currency ?? "EUR")
+        guard currency.uppercased() == "EUR" else { return nil }
         let raw = Decimal(t.parsedAmount)
         let cents = RoundupCalculator.roundupCents(amount: raw, stepCents: roundupView.stepCents)
         guard cents > 0 else { return nil }
-        let currency = t.amount?.currency ?? "EUR"
         let rounded = RoundupCalculator.displayedAmount(originalAmount: raw, currency: currency, stepCents: roundupView.stepCents)
         let origAbs = abs(NSDecimalNumber(decimal: raw).doubleValue)
         let roundedAbs = abs(NSDecimalNumber(decimal: rounded).doubleValue)
@@ -1969,6 +1971,11 @@ private struct TransactionsPanelView: View {
         if roundupView.isActive {
             roundupView.deactivate()
         } else if let slotId = multibankingStore.activeSlot?.id {
+            // Aktive Suche/Filter zurücksetzen: im Sparmodus sind sie ausgeblendet, der
+            // Spartopf rechnet aber aus ALLEN Buchungen — sonst zeigt die Liste einen
+            // stillen Ausschnitt, der nicht zur Spar-Summe passt.
+            vm.query = ""
+            vm.activeFilter = .all
             roundupView.activate(slotId: slotId, bankId: activeBankId, transactions: vm.transactions)
         }
     }

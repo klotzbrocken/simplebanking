@@ -256,8 +256,8 @@ enum RoundupStore {
         }
     }
 
-    /// Entfernt alle Roundup-Daten (Entries + Pots) eines Slots. Aufgerufen beim
-    /// Entfernen eines Kontos — v22 nutzt bewusst keine FK zu `transactions`, daher
+    /// Entfernt alle Roundup-Daten (Entries + Pots + Payouts) eines Slots. Aufgerufen beim
+    /// Entfernen eines Kontos — v22/v23 nutzen bewusst keine FK zu `transactions`, daher
     /// müssen diese Tabellen separat bereinigt werden.
     static func deleteForSlot(
         slotId: String,
@@ -267,6 +267,44 @@ enum RoundupStore {
         try queue.write { db in
             try db.execute(sql: "DELETE FROM roundup_entries WHERE slot_id = ?", arguments: [slotId])
             try db.execute(sql: "DELETE FROM roundup_pots WHERE slot_id = ?", arguments: [slotId])
+            try db.execute(sql: "DELETE FROM roundup_payouts WHERE slot_id = ?", arguments: [slotId])
+        }
+    }
+
+    // MARK: - Payouts (Auszahlungs-Zeiträume)
+
+    /// Hält einen ausgezahlten Datums-Range fest. Anders als `markRangeTransferred`
+    /// (nur vorhandene Pot-Zeilen) deckt das den ganzen Zeitraum ab — auch Buchungstage
+    /// vor Sparmodus-Aktivierung, die keine Pot-Zeile haben.
+    static func recordPayout(
+        slotId: String,
+        from: String,
+        to: String,
+        amountCents: Int,
+        bankId: String = "primary"
+    ) throws {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        let now = isoFormatter.string(from: Date())
+        try queue.write { db in
+            try db.execute(sql: """
+                INSERT INTO roundup_payouts (slot_id, from_date, to_date, amount_cents, executed_at)
+                VALUES (?, ?, ?, ?, ?)
+                """, arguments: [slotId, from, to, amountCents, now])
+        }
+    }
+
+    /// Alle ausgezahlten Datums-Ranges `[from, to]` eines Slots. Von der Live-Anzeige
+    /// genutzt, um sämtliche Tage darin aus dem Payout-Betrag auszublenden.
+    static func paidDateRanges(
+        slotId: String,
+        bankId: String = "primary"
+    ) throws -> [(from: String, to: String)] {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bankId)
+        return try queue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT from_date, to_date FROM roundup_payouts WHERE slot_id = ?
+                """, arguments: [slotId])
+            return rows.map { (from: $0["from_date"], to: $0["to_date"]) }
         }
     }
 

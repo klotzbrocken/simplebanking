@@ -572,7 +572,7 @@ struct CalendarHeatmapView: View {
         .background(Color.panelBackground)
         // `.task(id:)` lädt beim Erscheinen UND bei Slot-Wechsel/Refresh neu (Same-Slot-
         // Refresh inklusive) — ersetzt das frühere `.id(slot)` am Einbettungsort.
-        .task(id: reloadToken) { loadFromDatabase() }
+        .task(id: reloadToken) { await loadFromDatabase() }
         .sheet(isPresented: $showDaySheet) {
             CalendarDaySheet(
                 day: sheetDay,
@@ -737,62 +737,62 @@ struct CalendarHeatmapView: View {
         }
     }
 
-    private func loadFromDatabase() {
+    /// Läuft im `.task(id: reloadToken)`-Kontext: schwere Arbeit off-main via
+    /// `Task.detached`, danach `Task.isCancelled`-Guard vor dem Zuweisen — so kann ein
+    /// veralteter Lauf (nach schnellem Slot-Wechsel) die Daten des neuen Kontos nicht
+    /// überschreiben (Cancellation propagiert über `.task(id:)`).
+    @MainActor
+    private func loadFromDatabase() async {
         // Dashboard-Einbettung: DENSELBEN Snapshot wie die übrigen Tabs verwenden,
         // statt eigenständig aus der aktiven DB zu laden.
         if let injected = injectedTransactions {
-            // Konvertierung + Wiederkehr-Erkennung off-main — bei Unified-Ansicht/langer
-            // Historie sonst sichtbare Ruckler (lief bisher synchron aus der SwiftUI-Task).
             let now = ISO8601DateFormatter().string(from: Date())
-            Task { @MainActor in
-                let result = await Task.detached(priority: .userInitiated) {
-                    () -> (records: [TransactionRecord], recurring: Set<String>) in
-                    let conv = injected.compactMap { try? TransactionRecord(transaction: $0, updatedAt: now) }
-                    return (conv, CalendarHeatmapView.computeRecurringTxIDs(from: conv))
-                }.value
-                records = result.records
-                recurringTxIDs = result.recurring
-                isLoading = false
-                jumpToLatestWithDataIfNeeded()
-                preloadAboLogos()
-            }
+            let result = await Task.detached(priority: .userInitiated) {
+                () -> (records: [TransactionRecord], recurring: Set<String>) in
+                let conv = injected.compactMap { try? TransactionRecord(transaction: $0, updatedAt: now) }
+                return (conv, CalendarHeatmapView.computeRecurringTxIDs(from: conv))
+            }.value
+            guard !Task.isCancelled else { return }
+            applyLoadResult(result)
             return
         }
-        Task {
-            if demoMode {
-                var seed = UInt64(truncatingIfNeeded: demoSeed)
-                let fetchDays = UserDefaults.standard.integer(forKey: "fetchDays")
-                let days = fetchDays > 0 ? fetchDays : 60
+        if demoMode {
+            let now = ISO8601DateFormatter().string(from: Date())
+            let seedValue = demoSeed
+            let fetchDays = UserDefaults.standard.integer(forKey: "fetchDays")
+            let days = fetchDays > 0 ? fetchDays : 60
+            let result = await Task.detached(priority: .userInitiated) {
+                () -> (records: [TransactionRecord], recurring: Set<String>) in
+                var seed = UInt64(truncatingIfNeeded: seedValue)
                 let fake = FakeData.generateDemoTransactions(seed: &seed, days: days)
-                let now = ISO8601DateFormatter().string(from: Date())
                 let converted = fake.compactMap { try? TransactionRecord(transaction: $0, updatedAt: now) }
-                let recurring = Self.computeRecurringTxIDs(from: converted)
-                await MainActor.run {
-                    records = converted
-                    recurringTxIDs = recurring
-                    isLoading = false
-                    jumpToLatestWithDataIfNeeded()
-                    preloadAboLogos()
-                }
-                return
-            }
-            do {
-                let loaded = try TransactionsDatabase.loadAllTransactions()
-                let recurring = Self.computeRecurringTxIDs(from: loaded)
-                await MainActor.run {
-                    records = loaded
-                    recurringTxIDs = recurring
-                    isLoading = false
-                    jumpToLatestWithDataIfNeeded()
-                    preloadAboLogos()
-                }
-            } catch {
-                await MainActor.run {
-                    isLoading = false
-                    records = []
-                }
-            }
+                return (converted, CalendarHeatmapView.computeRecurringTxIDs(from: converted))
+            }.value
+            guard !Task.isCancelled else { return }
+            applyLoadResult(result)
+            return
         }
+        let result: (records: [TransactionRecord], recurring: Set<String>)?
+            = await Task.detached(priority: .userInitiated) {
+                guard let loaded = try? TransactionsDatabase.loadAllTransactions() else { return nil }
+                return (loaded, CalendarHeatmapView.computeRecurringTxIDs(from: loaded))
+            }.value
+        guard !Task.isCancelled else { return }
+        if let result {
+            applyLoadResult(result)
+        } else {
+            isLoading = false
+            records = []
+        }
+    }
+
+    @MainActor
+    private func applyLoadResult(_ result: (records: [TransactionRecord], recurring: Set<String>)) {
+        records = result.records
+        recurringTxIDs = result.recurring
+        isLoading = false
+        jumpToLatestWithDataIfNeeded()
+        preloadAboLogos()
     }
 
     /// txIDs aller Buchungen, die zu einem wiederkehrenden Posten gehören — exakt

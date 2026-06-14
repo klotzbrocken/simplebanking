@@ -45,9 +45,11 @@ enum RoundupCalculator {
         bookingDateFrom: String,
         bookingDateTo: String,
         stepCents: Int,
-        excludingDates: Set<String> = []
+        excludingDates: Set<String> = [],
+        savingsIban: String = ""
     ) -> Int {
         guard stepCents > 0 else { return 0 }
+        let normalizedSavings = savingsIban.uppercased().filter { !$0.isWhitespace }
         var sum = 0
         for tx in transactions {
             guard let booking = tx.bookingDate,
@@ -57,6 +59,10 @@ enum RoundupCalculator {
             guard tx.status == "booked" else { continue }
             let currency = (tx.amount?.currency ?? "EUR").uppercased()
             guard currency == "EUR" else { continue }
+            // Überweisung an die Spar-IBAN nicht erneut aufrunden (sonst Selbst-Spartopf).
+            if !normalizedSavings.isEmpty,
+               let cred = tx.creditor?.iban?.uppercased().filter({ !$0.isWhitespace }),
+               cred == normalizedSavings { continue }
             let amount = Decimal(tx.parsedAmount)
             sum += roundupCents(amount: amount, stepCents: stepCents)
         }

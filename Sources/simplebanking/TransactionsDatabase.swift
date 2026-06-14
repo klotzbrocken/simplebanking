@@ -389,6 +389,22 @@ enum TransactionsDatabase {
                 )
                 """)
         }
+        migrator.registerMigration("v23_roundup_payouts") { db in
+            // Persistierte Auszahlungs-Zeiträume. Anders als `roundup_pots` (nur für
+            // Buchungen NACH Sparmodus-Aktivierung) deckt das jeden ausgezahlten Range
+            // ab — die Live-Anzeige blendet alle Tage darin aus (verhindert Doppel-
+            // auszahlung auch für ältere Buchungen ohne Pot-Zeile).
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS roundup_payouts (
+                    slot_id      TEXT    NOT NULL,
+                    from_date    TEXT    NOT NULL,
+                    to_date      TEXT    NOT NULL,
+                    amount_cents INTEGER NOT NULL,
+                    executed_at  TEXT    NOT NULL
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_roundup_payouts_slot ON roundup_payouts(slot_id)")
+        }
         return migrator
     }
 
@@ -562,12 +578,18 @@ enum TransactionsDatabase {
         let settings = BankSlotSettingsStore.load(slotId: slotId)
         if settings.roundupEnabled, settings.roundupStepCents > 0 {
             let stepCents = settings.roundupStepCents
+            let normalizedSavings = (settings.savingsAccountIban ?? "").uppercased().filter { !$0.isWhitespace }
             for record in records where
                 !alreadyBookedIds.contains(record.txID) &&
                 record.status == "booked" &&
                 record.waehrung == "EUR" &&
                 record.betrag < 0
             {
+                // Überweisung an die Spar-IBAN nicht aufrunden — sonst erzeugt die
+                // Sparüberweisung selbst einen neuen Spartopf.
+                if !normalizedSavings.isEmpty,
+                   let recIban = record.iban?.uppercased().filter({ !$0.isWhitespace }),
+                   recIban == normalizedSavings { continue }
                 let cents = RoundupCalculator.roundupCents(
                     amount: Decimal(record.betrag),
                     stepCents: stepCents

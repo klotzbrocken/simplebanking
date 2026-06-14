@@ -35,6 +35,9 @@ struct TransferSheet: View {
     var prefill: TransferRequest? = nil
     /// Quelle des Prefills, z.B. "mcp" — bestimmt den Badge-Text.
     var prefillSource: String? = nil
+    /// Aufrunden-Auszahlung: Betrag + Quellkonto sind festgeschrieben (entspricht exakt
+    /// der Spartopf-Summe und dem Spar-Slot) — Betragsfeld und Konto-Picker sind gesperrt.
+    private var isRoundupPrefill: Bool { prefillSource == "roundup" }
     /// Optionaler Callback bei erfolgreich ausgeführter Überweisung (`outcome.ok`).
     /// Wird z.B. vom Aufrunden-Flow genutzt, um die ausgezahlten Pots zu finalisieren.
     /// Greift NICHT bei `.mayHaveBeenExecuted` oder `.failed`.
@@ -424,8 +427,9 @@ struct TransferSheet: View {
                 slot: slot,
                 allSlots: bankingStore.slots,
                 // Kontowechsel nur im Idle — nach „Senden" (Confirm/Countdown/Sending)
-                // ist das Quellkonto eingefroren (`nil` macht die Pille inaktiv).
-                onSelect: phase == .idle ? onSwitchSlot : nil
+                // ist das Quellkonto eingefroren (`nil` macht die Pille inaktiv). Bei
+                // Aufrunden-Auszahlung generell gesperrt (Quell-Slot ist festgeschrieben).
+                onSelect: (phase == .idle && !isRoundupPrefill) ? onSwitchSlot : nil
             )
         }
     }
@@ -735,6 +739,7 @@ struct TransferSheet: View {
                         .onChange(of: amountInput) { _, newValue in
                             amountInput = sanitizeDecimal(newValue)
                         }
+                        .disabled(isRoundupPrefill)   // Aufrunden-Betrag ist festgeschrieben
                 }
             }
 
@@ -768,9 +773,11 @@ struct TransferSheet: View {
                         lineWidth: 1)
         )
         .opacity(amountFieldEnabled ? 1 : 0.4)
-        .allowsHitTesting(amountFieldEnabled)
+        // Aufrunden-Auszahlung: Betrag (Feld + Piles) gesperrt — er entspricht exakt der
+        // Spartopf-Summe; eine Änderung würde den ganzen Zeitraum trotzdem abschließen.
+        .allowsHitTesting(amountFieldEnabled && !isRoundupPrefill)
         .animation(.easeInOut(duration: 0.15), value: amountFieldEnabled)
-        .onTapGesture { if amountFieldEnabled { amountFocused = true } }
+        .onTapGesture { if amountFieldEnabled && !isRoundupPrefill { amountFocused = true } }
     }
 
     /// MoneyMood-Style — gleiche Klassifikation wie in der Umsatzliste,

@@ -179,6 +179,26 @@ final class RoundupCalculatorTests: XCTestCase {
         )
     }
 
+    func test_liveRoundupCents_excludesSavingsIban() {
+        // Überweisung an die Spar-IBAN darf NICHT erneut aufgerundet werden.
+        let savings = "DE00111122223333444455"
+        let toSavings = TransactionsResponse.Transaction(
+            bookingDate: "2026-05-30", valueDate: "2026-05-30", status: "booked",
+            endToEndId: "sav", amount: TransactionsResponse.Amount(currency: "EUR", amount: "-3.47"),
+            creditor: TransactionsResponse.Party(name: "Sparkonto", iban: savings, bic: "TESTDEFF"),
+            debtor: nil, remittanceInformation: nil, additionalInformation: nil, purposeCode: nil
+        )
+        let normal = makeTx(date: "2026-05-30", amount: "-2.10")  // → 90 ct
+        // Ohne Filter wäre es 53 + 90 = 143; mit Spar-IBAN-Ausschluss nur 90.
+        XCTAssertEqual(
+            RoundupCalculator.liveRoundupCents(
+                transactions: [toSavings, normal],
+                bookingDateFrom: "2026-05-30", bookingDateTo: "2026-05-30",
+                stepCents: 100, savingsIban: savings),
+            90
+        )
+    }
+
     func test_liveRoundupCents_stepChangeChangesResult() {
         // Selbe TRX, anderer Step → andere Summe (Live-Sicht-Effekt).
         let txs = [makeTx(date: "2026-05-30", amount: "-3.47")]
