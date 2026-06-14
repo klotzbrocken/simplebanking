@@ -6,11 +6,19 @@ Diagnose-Daten von deinem Mac. Dauert ca. 2 Minuten, ist ungefährlich — es we
 
 ## So geht's
 
-1. Starte simplebanking ganz normal (Doppelklick), auch wenn nichts in der
-   Menüleiste erscheint. **Lass die App im „hängenden" Zustand offen** — nicht
-   beenden.
-2. Öffne das Programm **Terminal** (⌘+Leertaste → „Terminal").
-3. Kopiere den folgenden Befehl **komplett** hinein und drücke Enter:
+1. Öffne das Programm **Terminal** (⌘+Leertaste → „Terminal").
+2. Schalte zuerst das interne Protokoll ein (ist normalerweise aus). Kopiere
+   diese eine Zeile hinein und drücke Enter:
+
+```bash
+defaults write tech.yaxi.simplebanking appLoggingEnabled -bool YES
+```
+
+3. **Falls simplebanking schon läuft, beende es einmal** (Rechtsklick aufs
+   Symbol → Beenden, oder im Aktivitätsmonitor) und **starte es neu** — damit der
+   Startvorgang ins Protokoll geschrieben wird. Lass die App danach im
+   „hängenden" Zustand offen, auch wenn nichts in der Menüleiste erscheint.
+4. Kopiere jetzt den folgenden Befehl **komplett** ins Terminal und drücke Enter:
 
 ```bash
 DEST=~/Desktop/simplebanking-diagnose-$(date +%Y%m%d-%H%M); mkdir -p "$DEST"; \
@@ -25,9 +33,9 @@ else echo "ℹ️  Keine Crash-Reports."; fi; \
 echo "----------"; ls -l "$DEST"; echo "FERTIG → $DEST"
 ```
 
-4. Nach „**FERTIG**" liegt auf deinem Schreibtisch ein Ordner
+5. Nach „**FERTIG**" liegt auf deinem Schreibtisch ein Ordner
    `simplebanking-diagnose-…`.
-5. Zieh ihn in eine **E-Mail an maik.klotz@gmail.com** (oder vorher per
+6. Zieh ihn in eine **E-Mail an maik.klotz@gmail.com** (oder vorher per
    Rechtsklick → „… komprimieren").
 
 > Wichtig: Die App muss **währenddessen geöffnet** sein, sonst kann kein Sample
