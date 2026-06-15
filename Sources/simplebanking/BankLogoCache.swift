@@ -67,7 +67,7 @@ enum BankLogoCache {
     /// SHA-256 des gebundelten Catalog-Files. Stabil zwischen Builds wenn
     /// catalog.json unverändert, ändert sich bei jedem Catalog-Update.
     private static func catalogHash() -> String {
-        guard let url = Bundle.module.url(forResource: "yaxi-bank-catalog", withExtension: "json"),
+        guard let url = BankCatalogResource.fileURL,
               let data = try? Data(contentsOf: url) else { return "no-catalog" }
         let hash = SHA256.hash(data: data)
         return hash.map { String(format: "%02x", $0) }.joined()

@@ -8,7 +8,8 @@
 
 ### Behoben
 
-- **Start unter macOS 26: kein Menüleisten-Symbol** — der Entsperr-Dialog wurde synchron aus `applicationDidFinishLaunching` gestartet; bei einer Dock-losen Menüleisten-App konnte das unter macOS 26 den Start blockieren (kein Symbol, App „tut nichts"). Der Dialog wird jetzt auf die nächste Run-Loop-Iteration verschoben, sodass der Startvorgang vollständig durchläuft. (Kandidaten-Fix)
+- **App startete nicht (Absturz beim Start)** — bei jedem Nutzer mit eingerichteter Bank stürzte die App unmittelbar nach dem Start ab (kein Menüleisten-Symbol, kein Prozess). Ursache: Der Bank-Logo-Katalog wurde über das SwiftPM-Ressourcen-Bundle geladen, das im fertigen App-Paket nicht an der erwarteten Stelle lag → harter Absturz, sobald beim Start ein Konto angewandt wurde. Der Katalog wird jetzt direkt aus den App-Ressourcen geladen (kein Absturz mehr möglich, auch wenn er fehlen sollte). Betraf nur eingerichtete Installationen, daher in Demo/Tests unsichtbar.
+- **Start unter macOS 26: Entsperr-Dialog** — der Entsperr-Dialog wurde synchron aus `applicationDidFinishLaunching` gestartet; er wird jetzt auf die nächste Run-Loop-Iteration verschoben, sodass der Startvorgang vollständig durchläuft. (Vorsorglich; war nicht die Ursache des obigen Absturzes.)
 
 ## [Unreleased] (1.6.0)
 

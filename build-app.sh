@@ -123,6 +123,22 @@ if [[ -d "$MERCHANT_LOGOS_SRC" ]]; then
     cp -R "$MERCHANT_LOGOS_SRC" "$APP/Contents/Resources/merchant-logos"
 fi
 
+# YAXI-Bank-Katalog. MUSS nach Contents/Resources/ — BankLogoCatalog/BankLogoCache
+# laden ihn über BankCatalogResource (Bundle.main). Liegt er nicht im .app, bleibt
+# der Bank-Logo-Katalog leer (Logos fehlen). Früher (1.6.0) wurde er über den
+# SwiftPM-`Bundle.module`-Accessor gelesen, der hier mit fatalError (EXC_BREAKPOINT)
+# crashte, weil das generierte simplebanking_simplebanking.bundle im handgebauten
+# .app nicht an der erwarteten Stelle liegt — jeder User MIT konfigurierter Bank
+# stürzte beim Start ab. Jetzt blanke Datei am Standard-Ort, signier-/notar-sicher.
+CATALOG_JSON_SRC="$ROOT/Sources/simplebanking/Resources/yaxi-bank-catalog.json"
+if [[ -f "$CATALOG_JSON_SRC" ]]; then
+    cp "$CATALOG_JSON_SRC" "$APP/Contents/Resources/yaxi-bank-catalog.json"
+    echo "Bank catalog bundled: yaxi-bank-catalog.json"
+else
+    echo "FATAL: bank catalog not found at $CATALOG_JSON_SRC" >&2
+    exit 1
+fi
+
 # Generate .icns from source PNG if available
 if [[ -f "$ICON_SRC" ]]; then
     ICONSET="$ROOT/.build/AppIcon.iconset"

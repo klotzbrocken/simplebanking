@@ -31,10 +31,10 @@ enum BankLogoCatalog {
     static var schemaURL: String? { loaded.schema }
 
     private static func loadFromBundle() -> (entries: [String: Entry], schema: String?) {
-        // SwiftPM-Resource-Bundle. `Bundle.module` greift sowohl im App-Bundle
-        // (Release) als auch im Test-Bundle, anders als `Bundle.main`.
-        let bundle: Bundle = .module
-        guard let url = bundle.url(forResource: "yaxi-bank-catalog", withExtension: "json"),
+        // Katalog über BankCatalogResource auflösen (nicht-trappend), NICHT über
+        // den SwiftPM-`Bundle.module`-Accessor — der crasht im von Hand gebauten
+        // .app, weil das Resource-Bundle dort nicht an der erwarteten Stelle liegt.
+        guard let url = BankCatalogResource.fileURL,
               let data = try? Data(contentsOf: url) else {
             AppLogger.log("BankLogoCatalog: catalog file missing in bundle",
                           category: "BankLogos", level: "ERROR")
