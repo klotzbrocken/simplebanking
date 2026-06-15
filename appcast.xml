@@ -3,6 +3,17 @@
     <channel>
         <title>simplebanking</title>
         <item>
+            <title>1.6.1</title>
+            <pubDate>Mon, 15 Jun 2026 12:13:34 +0200</pubDate>
+            <sparkle:version>20260615370</sparkle:version>
+            <sparkle:shortVersionString>1.6.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.6.1/simplebanking-20260615-120846.dmg" length="30453097" type="application/octet-stream" sparkle:edSignature="dY8w6TYvK81zZEB5a+cye+Zmi3C1qVsyA2VY0Ot8yEqXhX08Vr4vBM7mFSo/50xIo9Bkr2sl9PRGAOqxO4ZnDQ=="/>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v1.6.1/simplebanking20260615370-20260518262.delta" sparkle:deltaFrom="20260518262" length="5177066" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="NzDcqwImsFK1XGPbKF9XlSzuD3XXmq4WUDLONchZIun36Nu4KNmYdo4LelxnXWlfZ1hRZfbpiJbBNMmJ6UIDAg=="/>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>1.5.0</title>
             <pubDate>Mon, 18 May 2026 14:44:03 +0200</pubDate>
             <sparkle:version>20260518262</sparkle:version>
