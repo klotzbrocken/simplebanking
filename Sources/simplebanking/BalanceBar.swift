@@ -380,6 +380,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let logoID = connectedBankLogoID.isEmpty ? nil : connectedBankLogoID
         guard let logoID else { return nil }
         let brand = BankLogoAssets.resolve(displayName: connectedBankDisplayName, logoID: logoID, iban: nil)
+
+        // Bevorzugt die einfarbige Mask-Variante für die Menüleiste. Logos mit
+        // eigenem, deckendem Hintergrund (z. B. comdirect: dunkles Quadrat +
+        // gelbes „C") werden unter `isTemplate = true` sonst zu einem massiven
+        // Block, weil macOS bei Template-Bildern nur den Alpha-Kanal auswertet
+        // und die voll deckende Karte komplett einfärbt. Die Mask ist
+        // hintergrundlos und rendert als sauberes, hell/dunkel-adaptives Symbol.
+        if let brandId = brand?.id,
+           BankLogoCache.hasMask(forLogoId: brandId),
+           let maskURL = BankLogoCache.url(forLogoId: brandId, mask: true),
+           let maskImg = NSImage(contentsOf: maskURL) {
+            let sized = maskImg.resized(to: NSSize(width: 16, height: 16))
+            sized.isTemplate = true
+            return sized
+        }
+
         BankLogoStore.shared.preload(brand: brand)
         guard let img = BankLogoStore.shared.image(for: brand) else { return nil }
         let sized = img.resized(to: NSSize(width: 16, height: 16))
