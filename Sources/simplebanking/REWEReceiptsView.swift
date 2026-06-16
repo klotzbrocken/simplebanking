@@ -47,48 +47,61 @@ struct REWEReceiptsView: View {
     @ViewBuilder
     private func row(_ r: ReweReceipt) -> some View {
         let isOpen = expanded.contains(r.receiptId)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
+            // Kopfzeile im Bank-Umsatz-Stil: Logo 20×20 · Name/Datum · Betrag rechts.
             Button {
                 if isOpen { expanded.remove(r.receiptId) } else { expanded.insert(r.receiptId) }
             } label: {
                 HStack(spacing: 10) {
+                    if let logo = ReweLogoAsset.image {
+                        Image(nsImage: logo).resizable().scaledToFill()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                            .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
+                    } else {
+                        Image(systemName: "cart.fill").font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.secondary).frame(width: 20, height: 20)
+                    }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(dateString(r.timestamp)).font(.system(size: 13, weight: .semibold))
-                        Text("\(r.marketCity ?? r.marketName ?? "REWE") · \(r.items.count) Artikel")
-                            .font(.caption).foregroundStyle(.secondary)
+                        Text(r.marketName ?? "REWE")
+                            .font(.system(size: 14, weight: .medium)).foregroundColor(.primary).lineLimit(1)
+                        Text("\(dateString(r.timestamp)) · \(r.items.count) Artikel")
+                            .font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
                     }
                     Spacer()
-                    Text(euro(r.totalCents)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                    Text(euro(r.totalCents))
+                        .font(.system(size: 14, weight: .medium)).monospacedDigit().foregroundColor(.primary)
                     Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                        .font(.system(size: 10, weight: .semibold)).foregroundColor(Color(NSColor.tertiaryLabelColor))
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
+            // Aufgeklappt: Warenkorb.
             if isOpen {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     if r.items.isEmpty {
                         Text("Kein Warenkorb (Bon nicht geparst).")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.system(size: 11)).foregroundColor(.secondary)
                     } else {
                         ForEach(Array(r.items.enumerated()), id: \.offset) { _, it in
                             HStack(spacing: 8) {
-                                Text(it.name).font(.caption)
+                                Text(it.name).font(.system(size: 12)).foregroundColor(.primary)
                                 if let q = it.quantity {
-                                    Text(q).font(.caption2).foregroundStyle(.tertiary)
+                                    Text(q).font(.system(size: 10)).foregroundColor(Color(NSColor.tertiaryLabelColor))
                                 }
                                 Spacer()
-                                Text(euro(it.totalCents)).font(.caption).monospacedDigit()
-                                    .foregroundStyle(.secondary)
+                                Text(euro(it.totalCents)).font(.system(size: 12)).monospacedDigit().foregroundColor(.secondary)
                             }
                         }
                     }
                 }
-                .padding(.leading, 8).padding(.bottom, 2)
+                .padding(.leading, 30).padding(.trailing, 2).padding(.bottom, 2)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(Color(NSColor.controlBackgroundColor).opacity(isOpen ? 0.5 : 0.001))
     }
 
     private func euro(_ c: Int) -> String { String(format: "%.2f €", Double(c) / 100) }
