@@ -13,7 +13,8 @@ let package = Package(
         .executable(name: "simplebanking", targets: ["simplebanking"]),
         .executable(name: "simplebanking-mcp", targets: ["simplebanking-mcp"]),
         .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"]),
-        .executable(name: "list-foreign-banks", targets: ["list-foreign-banks"])
+        .executable(name: "list-foreign-banks", targets: ["list-foreign-banks"]),
+        .executable(name: "rewe-poc", targets: ["rewe-poc"])
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
@@ -74,6 +75,19 @@ let package = Package(
                 .product(name: "RoutexClient", package: "routex-client-swift")
             ],
             path: "Scripts/ListForeignBanks"
+        ),
+        // Phase-0-PoC für die REWE-eBon-Integration: isoliertes Tool, das per
+        // WKWebView den REWE-Login zeigt, im JS-Kontext die Receipts-API +
+        // eine eBon-PDF abruft und mit ReceiptParser den Warenkorb extrahiert.
+        // Berührt die Hauptapp nicht.
+        .executableTarget(
+            name: "rewe-poc",
+            path: "Scripts/REWEPoc",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("WebKit"),
+                .linkedFramework("PDFKit")
+            ]
         ),
         .testTarget(
             name: "simplebankingTests",
