@@ -4677,7 +4677,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 slotId = existing.id
             } else {
                 let slot = BankSlot.makeREWE()
-                store.addSlot(slot)
+                // Nicht-aktiv + kein Aggregat-Zwang → kein destabilisierendes
+                // Re-Render der aktiven Bank-Ansicht mitten in der Session.
+                store.addSlot(slot, makeActive: false, autoUnified: false)
                 slotId = slot.id
             }
             REWEAuthWebView.present(slotId: slotId) { [weak self] result in

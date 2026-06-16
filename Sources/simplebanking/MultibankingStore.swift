@@ -68,12 +68,15 @@ final class MultibankingStore: ObservableObject {
 
     // MARK: - Public API
 
-    func addSlot(_ slot: BankSlot) {
+    /// `makeActive`/`autoUnified` default true (bestehendes Bank-Verhalten).
+    /// REWE legt den Slot bewusst NICHT-aktiv und ohne Aggregat-Zwang an, damit
+    /// das Hinzufügen mitten in der Session die aktive Bank-Ansicht nicht
+    /// destabilisiert (vermeidet Re-Render auf einen halb-fertigen Slot).
+    func addSlot(_ slot: BankSlot, makeActive: Bool = true, autoUnified: Bool = true) {
         slots.append(slot)
-        activeIndex = slots.count - 1
+        if makeActive { activeIndex = slots.count - 1 }
         save()
-        // Auto-enable unified mode when user has more than one bank connected.
-        if slots.count > 1 {
+        if autoUnified, slots.count > 1 {
             UserDefaults.standard.set(true, forKey: "unifiedModeEnabled")
         }
     }
