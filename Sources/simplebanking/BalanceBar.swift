@@ -4846,7 +4846,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func autoStartSetupWizardIfNeeded() {
         guard !didTriggerAutoSetupThisLaunch else { return }
         guard !demoMode else { return }
-        guard !CredentialsStore.exists() else { return }
+        // anyExists() statt exists(): ein aktiver REWE-Slot (ohne eigene Credentials)
+        // darf die Ersteinrichtung nicht auslösen, wenn ein Bank-Slot eingerichtet ist.
+        guard !CredentialsStore.anyExists() else { return }
 
         didTriggerAutoSetupThisLaunch = true
 

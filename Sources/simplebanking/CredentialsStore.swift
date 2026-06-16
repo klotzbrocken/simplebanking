@@ -73,6 +73,16 @@ enum CredentialsStore {
         (try? defaultURL()).map { FileManager.default.fileExists(atPath: $0.path) } ?? false
     }
 
+    /// True, wenn IRGENDEIN Slot Credentials hat (inkl. Legacy-`credentials.json`).
+    /// Für den Onboarding-Trigger: ein aktiver Slot OHNE eigene Credentials-Datei
+    /// (z. B. ein REWE-eBon-Slot) darf NICHT die Ersteinrichtung auslösen, solange
+    /// ein Bank-Slot bereits eingerichtet ist (`exists()` prüft nur den aktiven Slot).
+    static func anyExists() -> Bool {
+        guard let appDir = try? appSupportURL(),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: appDir.path) else { return false }
+        return names.contains { $0.hasPrefix("credentials") && $0.hasSuffix(".json") }
+    }
+
     static func delete() throws {
         let url = try defaultURL()
         if FileManager.default.fileExists(atPath: url.path) {
