@@ -377,6 +377,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img?.isTemplate = true
             return img
         }
+        // REWE-Slot: eigener Warenkorb-Fallback. Ohne Logo UND ohne Saldo-Titel
+        // (isShort-Default) wäre das Status-Item sonst null-breit → unsichtbar.
+        if MultibankingStore.shared.activeSlot?.isREWE == true {
+            let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+            let img = NSImage(systemSymbolName: "cart.fill", accessibilityDescription: "REWE")?
+                .withSymbolConfiguration(cfg)
+            img?.isTemplate = true
+            return img
+        }
         let logoID = connectedBankLogoID.isEmpty ? nil : connectedBankLogoID
         guard let logoID else { return nil }
         let brand = BankLogoAssets.resolve(displayName: connectedBankDisplayName, logoID: logoID, iban: nil)
