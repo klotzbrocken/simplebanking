@@ -3287,6 +3287,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     /// Verdrahtet die Quick-Send-Closures auf einen frisch gebauten Flyout-RootView.
+    /// Setzt die REWE-Flyout-Karte (Letzter Einkauf + Mini-Warenkorb), wenn der
+    /// aktive Slot ein REWE-Slot ist. No-op sonst. An beiden rootView-Bau-Stellen
+    /// aufgerufen (buildFlyoutHost + refreshFlyoutIfVisible).
+    private func applyREWEFlyout(to rootView: inout StatusBalanceFlyoutCardView) {
+        guard let active = MultibankingStore.shared.activeSlot, active.isREWE else { return }
+        rootView.reweMode = true
+        if let latest = try? ReweReceiptStore.latest(slotId: active.id) {
+            let city = latest.marketCity ?? latest.marketName ?? "REWE"
+            let d = String(latest.timestamp.prefix(10)).split(separator: "-")
+            let date = d.count == 3 ? "\(d[2]).\(d[1]).\(d[0])" : ""
+            rootView.reweSubtitle = date.isEmpty ? city : "\(city) · \(date)"
+            rootView.reweTopItems = latest.items.prefix(3).map(\.name)
+            rootView.reweMoreCount = max(0, latest.items.count - 3)
+        }
+        let slotId = active.id
+        rootView.onOpenReceipts = { REWEReceiptsWindow.present(slotId: slotId) }
+    }
+
     private func applyQuickSendWiring(to rootView: inout StatusBalanceFlyoutCardView) {
         rootView.quickSendAvailable = quickSendFlyoutAvailable
         rootView.quickSendNeedsUnlock = quickSendFlyoutNeedsUnlock
@@ -3455,6 +3473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             rootView.bankName = txVM.connectedBankDisplayName
             rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
         }
+        applyREWEFlyout(to: &rootView)
         let rippleAlwaysOn = UserDefaults.standard.bool(forKey: "rippleAlwaysOn")
         let hasUnseenTx = latestTxSigBySlot.contains { slotId, sig in !sig.isEmpty && sig != lastSeenTxSig(for: slotId) }
         if rippleAlwaysOn || hasUnseenTx {
@@ -3814,6 +3833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             rootView.bankName = txVM.connectedBankDisplayName
             rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
         }
+        applyREWEFlyout(to: &rootView)
         rootView.rippleTrigger = flyoutRippleTrigger
         rootView.greenZoneFraction = computeGreenZoneFraction()
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
@@ -5808,6 +5828,15 @@ private struct StatusBalanceFlyoutCardView: View {
     /// Saldo abweicht (es also vorgemerkte Lastschriften gibt) — sonst `nil` → keine Sub-Zeile.
     var availableBalance: Double? = nil
 
+    // MARK: REWE eBon-Slot
+    /// Wenn true, wird statt der Saldo-Karte die REWE-Karte gezeigt
+    /// (Eyebrow „Letzter Einkauf" + Betrag + Mini-Warenkorb + Button).
+    var reweMode: Bool = false
+    var reweSubtitle: String? = nil       // "Siegen · 13.06.2026"
+    var reweTopItems: [String] = []       // Top-Artikel des letzten Bons
+    var reweMoreCount: Int = 0            // weitere Artikel über die Top hinaus
+    var onOpenReceipts: (() -> Void)? = nil
+
     // MARK: Quick-Send (Flyout-Drawer)
     /// Vom Host (BalanceBar) gesetzt: ob der Quick-Send-Drawer angeboten wird
     /// (Opt-in + Lizenz/Demo-Gate). false → Toggle-Button bleibt unsichtbar.
@@ -5977,6 +6006,8 @@ private struct StatusBalanceFlyoutCardView: View {
             Group {
                 if roundupView.isActive {
                     RoundupSavingsCard(compact: true)
+                } else if reweMode {
+                    reweCard
                 } else if unifiedSlots != nil {
                     unifiedCard
                 } else if isDefaultTheme {
@@ -6188,6 +6219,57 @@ private struct StatusBalanceFlyoutCardView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(borderColor, lineWidth: 1)
         )
+    }
+
+    private var reweCard: some View {
+        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
+        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                if let img = bankLogoImage {
+                    Image(nsImage: img).resizable().scaledToFit().frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+                Text(reweSubtitle ?? (bankName ?? "REWE"))
+                    .font(.system(size: 12)).foregroundColor(.secondary).lineLimit(1)
+                Spacer()
+                Button { onOpenReceipts?() } label: {
+                    HStack(spacing: 3) {
+                        Text(L10n.t("Einkäufe", "Purchases"))
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Text(L10n.t("LETZTER EINKAUF", "LAST PURCHASE"))
+                .font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary).opacity(0.7)
+            Text(balanceText)
+                .font(.system(size: 28, weight: .bold)).monospacedDigit()
+                .foregroundColor(.primary).lineLimit(1).minimumScaleFactor(0.7)
+            if !reweTopItems.isEmpty {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(reweTopItems.prefix(3).enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+                    }
+                    if reweMoreCount > 0 {
+                        Text(L10n.t("… +\(reweMoreCount) weitere", "… +\(reweMoreCount) more"))
+                            .font(.system(size: 10)).foregroundColor(.secondary).opacity(0.7)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.primary.opacity(0.10), .clear],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+        )
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(borderColor, lineWidth: 1))
     }
 
     private var defaultThemeCard: some View {
