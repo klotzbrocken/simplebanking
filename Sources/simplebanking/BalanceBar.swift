@@ -1166,6 +1166,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         addBankItem.tag = 100
         settingsSub.addItem(addBankItem)
 
+        let reweItem = NSMenuItem(title: t("REWE eBons verbinden… (Beta)", "Connect REWE Receipts… (Beta)"),
+                                  action: #selector(openREWEBeta), keyEquivalent: "")
+        settingsSub.addItem(reweItem)
+
         let openSettingsItem = NSMenuItem(title: t("Einstellungen öffnen…", "Open Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         openSettingsItem.tag = 200
         settingsSub.addItem(openSettingsItem)
@@ -4636,6 +4640,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         let s = Self.eurWholeNumberFormatter.string(from: NSNumber(value: rounded)) ?? "0"
         return s
+    }
+
+    /// Phase-3a-Beta: öffnet das REWE-Login-/Sync-Fenster. Legt NOCH KEINEN Slot
+    /// an — speichert die Bons unter Test-Slot "rewe-beta", um den In-App-Sync
+    /// zu verifizieren, ohne die bestehende Konto-UI zu berühren.
+    @objc private func openREWEBeta() {
+        DispatchQueue.main.async {
+            REWEAuthWebView.present(slotId: "rewe-beta") { result in
+                AppLogger.log("REWE beta sync: listed=\(result.listed) matched=\(result.matched) stored=\(result.stored)",
+                              category: "REWE")
+            }
+        }
     }
 
     @objc private func connect() {
