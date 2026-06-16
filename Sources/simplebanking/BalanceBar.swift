@@ -4126,10 +4126,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func openTransactionsPanel() async {
-        // REWE-Slot: eigene „Kiste der Einkäufe" statt des Bank-Umsatzfensters
-        // (kein Master-PW-/Session-Gate). Liest lokal aus ReweReceiptStore.
-        if let active = MultibankingStore.shared.activeSlot, active.isREWE {
-            REWEReceiptsWindow.present(slotId: active.id)
+        // REWE-Slot: dasselbe Umsatz-Panel (BalanceBar + Liste + Footer), aber mit
+        // REWE-Balance-Card + Einkaufsliste (im Panel via reweActive-Zweig). Kein
+        // Bank-Fetch.
+        if MultibankingStore.shared.activeSlot?.isREWE == true {
+            txPanel?.show()
             return
         }
         let epochAtStart = slotEpoch
