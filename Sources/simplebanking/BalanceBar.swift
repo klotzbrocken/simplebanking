@@ -4083,6 +4083,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func openTransactionsPanel() async {
+        // REWE-Slot: eigene „Kiste der Einkäufe" statt des Bank-Umsatzfensters
+        // (kein Master-PW-/Session-Gate). Liest lokal aus ReweReceiptStore.
+        if let active = MultibankingStore.shared.activeSlot, active.isREWE {
+            REWEReceiptsWindow.present(slotId: active.id)
+            return
+        }
         let epochAtStart = slotEpoch
         txPanel?.show()
         let didTriggerInitialConfetti = triggerInitialConfettiIfNeeded()
