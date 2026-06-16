@@ -405,6 +405,27 @@ enum TransactionsDatabase {
                 """)
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_roundup_payouts_slot ON roundup_payouts(slot_id)")
         }
+        migrator.registerMigration("v24_rewe_receipts") { db in
+            // 1.7 — REWE-eBon-Slot. Ein Bon je Zeile; Einzelposten als JSON in
+            // items_json (nil/parsed=0 bis die PDF geparst wurde). Append-only,
+            // keine FK zu transactions (eigener Slot-Typ, unabhängig vom Bank-Cache).
+            try db.execute(sql: """
+                CREATE TABLE IF NOT EXISTS rewe_receipts (
+                    slot_id     TEXT    NOT NULL,
+                    receipt_id  TEXT    NOT NULL,
+                    timestamp   TEXT    NOT NULL,
+                    total_cents INTEGER NOT NULL,
+                    market_name TEXT,
+                    market_city TEXT,
+                    cancelled   INTEGER NOT NULL DEFAULT 0,
+                    items_json  TEXT,
+                    parsed      INTEGER NOT NULL DEFAULT 0,
+                    fetched_at  TEXT    NOT NULL,
+                    PRIMARY KEY (slot_id, receipt_id)
+                )
+                """)
+            try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_rewe_receipts_slot ON rewe_receipts(slot_id, timestamp)")
+        }
         return migrator
     }
 

@@ -3,6 +3,14 @@ import Foundation
 
 // MARK: - BankSlot
 
+/// Herkunft eines Slots. `nil`/`.yaxi` = klassischer Bank-Slot über YAXI.
+/// `.rewe` = REWE-eBon-Slot (kein YAXI/IBAN, eigener Datenpfad, kein Refresh
+/// über die Bank-Call-Pfade).
+enum SlotSource: String, Codable {
+    case yaxi
+    case rewe
+}
+
 struct BankSlot: Codable, Identifiable, Equatable {
     let id: String          // UUID string, stable identifier
     var iban: String
@@ -11,9 +19,21 @@ struct BankSlot: Codable, Identifiable, Equatable {
     var currency: String? = nil   // ISO-Code, z.B. "EUR", "USD" — auto aus Balance-API
     var nickname: String? = nil   // nutzer-definierbares Kürzel, z.B. "Privat", "Reisen"
     var customColor: String? = nil  // user-chosen hex color (without #), e.g. "FF5500"
+    /// `nil` = Legacy/Bank-Slot (YAXI). Optional gehalten, damit bereits
+    /// persistierte Slots ohne dieses Feld weiterhin sauber dekodieren.
+    var source: SlotSource? = nil
+
+    /// True für REWE-eBon-Slots — Bank-Call-/YAXI-Pfade müssen diese überspringen.
+    var isREWE: Bool { source == .rewe }
 
     static func makeNew(iban: String, displayName: String, logoId: String?) -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: iban, displayName: displayName, logoId: logoId)
+    }
+
+    /// Erzeugt einen REWE-eBon-Slot (kein IBAN/YAXI-Connection).
+    static func makeREWE(displayName: String = "REWE") -> BankSlot {
+        BankSlot(id: UUID().uuidString, iban: "", displayName: displayName,
+                 logoId: "rewe", currency: "EUR", source: .rewe)
     }
 }
 
