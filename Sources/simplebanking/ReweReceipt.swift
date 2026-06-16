@@ -15,6 +15,7 @@ struct ReweLineItem: Codable, Equatable {
 /// Roh-Ergebnis des PDF-Text-Parsings (vor Anreicherung mit Listen-Metadaten).
 struct ReweParsedReceipt: Equatable {
     var marketHeader: String?
+    var date: String?          // "yyyy-MM-dd" aus der "Datum:"-Zeile (für Listen-Match)
     var totalCents: Int?
     var items: [ReweLineItem]
 }
@@ -70,6 +71,16 @@ enum ReweReceiptParser {
             break
         }
 
+        // Datum aus der "Datum: 13.06.2026"-Zeile → "yyyy-MM-dd".
+        var date: String? = nil
+        let dateRE = try! NSRegularExpression(pattern: #"Datum:\s*.*?(\d{2})\.(\d{2})\.(\d{4})"#)
+        if let m = dateRE.firstMatch(in: rawText, range: NSRange(rawText.startIndex..., in: rawText)),
+           let dd = Range(m.range(at: 1), in: rawText),
+           let mm = Range(m.range(at: 2), in: rawText),
+           let yy = Range(m.range(at: 3), in: rawText) {
+            date = "\(rawText[yy])-\(rawText[mm])-\(rawText[dd])"
+        }
+
         // "<name>  <12,99>  <A|B>" — optional gefolgt von " *" (Pfand/Kein-Bonus).
         let itemRE = try! NSRegularExpression(
             pattern: #"^(.{2,}?)\s+(-?\d{1,4},\d{2})\s+([AB])\s*\*?\s*$"#)
@@ -106,7 +117,7 @@ enum ReweReceiptParser {
             }
         }
 
-        return ReweParsedReceipt(marketHeader: market, totalCents: total, items: items)
+        return ReweParsedReceipt(marketHeader: market, date: date, totalCents: total, items: items)
     }
 
     // MARK: - Helpers

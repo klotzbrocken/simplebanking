@@ -170,45 +170,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let bonTotal = (items.first?["receiptTotalPrice"] as? Int) ?? 0
             log("✅ \(items.count) Bons · erster: \(euro(bonTotal))")
 
-            // NEU: ZIP aller Bons in EINEM Request (vom User gefunden).
-            log("=== ZIP via curl (/api/receipts/zip) ===")
-            let (zcode, zdata) = await curlPDF("https://www.rewe.de/api/receipts/zip", cookie: cookie, ua: ua)
-            let isZip = zdata.prefix(2).elementsEqual(Array("PK".utf8))
-            log("curl HTTP \(zcode) · \(zdata.count) bytes · ZIP=\(isZip)")
-            if isZip {
-                let pdfs = await unzipPDFs(zdata)
-                log("📦 \(pdfs.count) PDFs im ZIP")
-                guard let first = pdfs.first, let zdoc = PDFDocument(data: first), let ztext = zdoc.string, !ztext.isEmpty else {
-                    log("⚠️ ZIP da, aber keine lesbare PDF darin."); return
-                }
-                let zp = ReceiptParser.parse(ztext)
-                let zsum = zp.items.reduce(0) { $0 + $1.totalCents }
-                log("=== ERSTER BON AUS ZIP ===")
-                log("Artikel \(zp.items.count) · Σ \(euro(zsum)) vs Summe \(zp.totalCents.map(euro) ?? "—") → \(zsum == (zp.totalCents ?? -1) ? "✅ MATCH" : "⚠️")")
-                log("\n=== ROH-TEXT (erster Bon) ===")
-                log(ztext)
-                return
+            // ZIP aller Bons in EINEM Request. Phase-2-Frage: geht das sauber via
+            // URLSession, oder braucht's den curl-Subprozess?
+            func isZip(_ d: Data) -> Bool { d.prefix(2).elementsEqual(Array("PK".utf8)) }
+            let zipURL = "https://www.rewe.de/api/receipts/zip"
+            var zdata = Data(); var via = ""
+
+            // 1) URLSession (sauberer nativer Weg)
+            var zreq = URLRequest(url: URL(string: zipURL)!)
+            zreq.setValue(cookie, forHTTPHeaderField: "Cookie")
+            zreq.setValue(ua, forHTTPHeaderField: "User-Agent")
+            zreq.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+            zreq.setValue(IM_MARKT, forHTTPHeaderField: "Referer")
+            zreq.setValue("document", forHTTPHeaderField: "Sec-Fetch-Dest")
+            zreq.setValue("navigate", forHTTPHeaderField: "Sec-Fetch-Mode")
+            zreq.setValue("same-origin", forHTTPHeaderField: "Sec-Fetch-Site")
+            zreq.setValue("?1", forHTTPHeaderField: "Sec-Fetch-User")
+            let zcfg = URLSessionConfiguration.ephemeral; zcfg.httpCookieStorage = nil; zcfg.httpShouldSetCookies = false
+            if let (d, resp) = try? await URLSession(configuration: zcfg).data(for: zreq) {
+                let c = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                log("ZIP via URLSession: HTTP \(c) · \(d.count) bytes · ZIP=\(isZip(d))")
+                if isZip(d) { zdata = d; via = "URLSession ✅" }
+            } else {
+                log("ZIP via URLSession: Fehler")
             }
-            log("ZIP nicht verfügbar (HTTP \(zcode)) — versuche Einzel-PDF…")
-            log("=== PDF via curl (\(rid.prefix(8))…) ===")
-            let (code, pdfData) = await curlPDF("https://www.rewe.de/api/receipts/\(rid)/pdf", cookie: cookie, ua: ua)
-            let isPDF = pdfData.prefix(4).elementsEqual(Array("%PDF".utf8))
-            log("curl HTTP \(code) · \(pdfData.count) bytes · %PDF=\(isPDF)")
-            guard isPDF, let doc = PDFDocument(data: pdfData), let text = doc.string, !text.isEmpty else {
-                log("⚠️ Kein PDF-Text (HTTP \(code))."); return
+
+            // 2) Fallback curl (PoC-Beweis)
+            if zdata.isEmpty {
+                let (c, d) = await curlPDF(zipURL, cookie: cookie, ua: ua)
+                log("ZIP via curl: HTTP \(c) · \(d.count) bytes · ZIP=\(isZip(d))")
+                if isZip(d) { zdata = d; via = "curl (URLSession ging NICHT)" }
             }
-            log("\n=== ROH-TEXT (PDFKit .string) ===")
-            log(text)
-            log("\n=== PARSE-ERGEBNIS ===")
-            let p = ReceiptParser.parse(text)
-            log("Markt: \(p.market ?? "—") · Summe: \(p.totalCents.map(euro) ?? "—") (Bon: \(euro(bonTotal)))")
-            log("Artikel (\(p.items.count)):")
-            for a in p.items {
-                let q = a.quantity.map { " · \($0)" } ?? ""
-                log("  • \(a.name.padding(toLength: 26, withPad: " ", startingAt: 0))  \(euro(a.totalCents)) \(a.taxCategory ?? "")\(q)")
+
+            guard !zdata.isEmpty else { log("⚠️ ZIP weder via URLSession noch curl bekommen."); return }
+            log("📦 ZIP via \(via)")
+            let pdfs = await unzipPDFs(zdata)
+            log("📦 \(pdfs.count) PDFs im ZIP")
+            guard let first = pdfs.first, let zdoc = PDFDocument(data: first), let ztext = zdoc.string, !ztext.isEmpty else {
+                log("⚠️ ZIP da, aber keine lesbare PDF darin."); return
             }
-            let sum = p.items.reduce(0) { $0 + $1.totalCents }
-            log("\nΣ Artikel = \(euro(sum)) → \(sum == (p.totalCents ?? -1) ? "✅ MATCH" : "⚠️ ABWEICHUNG")")
+            let zp = ReceiptParser.parse(ztext)
+            let zsum = zp.items.reduce(0) { $0 + $1.totalCents }
+            log("=== ERSTER BON AUS ZIP === Artikel \(zp.items.count) · Σ \(euro(zsum)) vs \(zp.totalCents.map(euro) ?? "—") → \(zsum == (zp.totalCents ?? -1) ? "✅ MATCH" : "⚠️")")
         } catch { log("❌ \(error)") }
     }
 
