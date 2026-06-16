@@ -453,7 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func computeFlyoutSlots() -> [FlyoutSlotItem] {
         let store = MultibankingStore.shared
         return store.slots.map { slot in
-            let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.iban)
+            let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.isREWE ? nil : slot.iban)
             BankLogoStore.shared.preload(brand: brand)
             let logo = BankLogoStore.shared.image(for: brand)
             let balance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double
@@ -512,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard slots.count > 1 else { return nil }
         var total = 0.0
         var hasAny = false
-        for slot in slots {
+        for slot in slots where !slot.isREWE {
             guard let b = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double else { continue }
             total += b
             hasAny = true
@@ -759,7 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             resolvedLogo = brand.id
         } else if !resolvedLogo.isEmpty, BankLogoAssets.find(byLogoID: resolvedLogo) != nil {
             // logo is already valid — keep it
-        } else if !slot.iban.isEmpty, let brand = BankLogoAssets.find(byIBAN: slot.iban) {
+        } else if !slot.isREWE, !slot.iban.isEmpty, let brand = BankLogoAssets.find(byIBAN: slot.iban) {
             if resolvedName.isEmpty { resolvedName = brand.displayName }
             resolvedLogo = brand.id
         }
@@ -796,6 +796,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                                            iban: normalizedIBAN.isEmpty ? nil : normalizedIBAN)
         BankLogoStore.shared.preload(brand: brand)
         txVM.connectedBankLogoImage = BankLogoStore.shared.image(for: brand)
+    }
+
+    /// Anzeige für einen REWE-Slot: letzter Einkauf als „Saldo" (kein YAXI).
+    /// Politur (Eyebrow „Letzter Einkauf", Mini-Warenkorb, Kiste der Einkäufe)
+    /// folgt in der UI-Phase. Renutzt den bestehenden Saldo-Anzeigepfad.
+    private func applyREWEDisplay(slotId: String) {
+        if let r = try? ReweReceiptStore.latest(slotId: slotId) {
+            let amount = Double(r.totalCents) / 100.0
+            UserDefaults.standard.set(amount, forKey: "simplebanking.cachedBalance.\(slotId)")
+            lastBalance = amount
+            txVM.currentBalance = formatEURWithCents(amount)
+        } else {
+            lastBalance = nil
+            txVM.currentBalance = nil
+        }
+        updateStatusBalanceTitle()
+        refreshFlyoutIfVisible()
     }
 
     private func updateConnectedBankState(_ bank: DiscoveredBank, iban: String? = nil) {
@@ -3860,6 +3877,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// für `refreshFromCLI()`, das den TX-Fetch sequentiell selbst macht —
     /// sonst rennen zwei TX-Fetches parallel gegen den HBCI-Mutex.
     private func refreshAsync(suppressTransactionsFetch: Bool = false) async {
+        // REWE-Slot: kein YAXI/HBCI. Anzeige kommt aus den lokal gespeicherten Bons.
+        if let active = MultibankingStore.shared.activeSlot, active.isREWE {
+            applyREWEDisplay(slotId: active.id)
+            return
+        }
         // Prevent concurrent HBCI calls — banks like Volksbank fail with "Fehlender Dialogkontext"
         // when two simultaneous requests hit the same HBCI connection.
         guard !isHBCICallInFlight else {
@@ -4646,10 +4668,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// an — speichert die Bons unter Test-Slot "rewe-beta", um den In-App-Sync
     /// zu verifizieren, ohne die bestehende Konto-UI zu berühren.
     @objc private func openREWEBeta() {
-        DispatchQueue.main.async {
-            REWEAuthWebView.present(slotId: "rewe-beta") { result in
-                AppLogger.log("REWE beta sync: listed=\(result.listed) matched=\(result.matched) stored=\(result.stored)",
+        DispatchQueue.main.async { [weak self] in
+            let store = MultibankingStore.shared
+            // Echten REWE-Slot anlegen (falls noch keiner existiert) und die Bons
+            // unter dessen Slot-Id synchronisieren.
+            let slotId: String
+            if let existing = store.slots.first(where: { $0.isREWE }) {
+                slotId = existing.id
+            } else {
+                let slot = BankSlot.makeREWE()
+                store.addSlot(slot)
+                slotId = slot.id
+            }
+            REWEAuthWebView.present(slotId: slotId) { [weak self] result in
+                AppLogger.log("REWE sync: listed=\(result.listed) matched=\(result.matched) stored=\(result.stored)",
                               category: "REWE")
+                // Falls der REWE-Slot gerade aktiv ist, Anzeige sofort aktualisieren.
+                if MultibankingStore.shared.activeSlot?.id == slotId {
+                    self?.applyREWEDisplay(slotId: slotId)
+                }
             }
         }
     }
