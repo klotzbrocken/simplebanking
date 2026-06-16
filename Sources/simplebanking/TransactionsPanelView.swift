@@ -39,7 +39,12 @@ private struct TransactionsPanelView: View {
     @State private var reweShowYear: Bool = false
     @State private var reweExpanded: Set<String> = []
     @State private var reweTab: Int = 0   // 0 = Einkäufe, 1 = Kategorien
-    private var reweActive: Bool { multibankingStore.activeSlot?.isREWE == true }
+    /// eBon-Slot aktiv (REWE oder dm) — selbe Karten-/Listen-Mechanik, nur Logo,
+    /// Name und Kategorie-Wörterbuch unterscheiden sich.
+    private var receiptActive: Bool { multibankingStore.activeSlot?.isReceiptSlot == true }
+    private var dmActive: Bool { multibankingStore.activeSlot?.isDM == true }
+    private var receiptLogo: NSImage? { dmActive ? DMLogoAsset.image : ReweLogoAsset.image }
+    private var receiptBrandName: String { dmActive ? "dm" : "REWE" }
     @State private var showAttentionInbox = false
     @State private var attentionCards: [AttentionCard] = []
     @State private var inboxGeneration: Int = 0
@@ -674,7 +679,7 @@ private struct TransactionsPanelView: View {
     }
 
     func loadReweReceipts() {
-        guard let active = multibankingStore.activeSlot, active.isREWE else { reweReceipts = []; return }
+        guard let active = multibankingStore.activeSlot, active.isReceiptSlot else { reweReceipts = []; return }
         reweReceipts = (try? ReweReceiptStore.all(slotId: active.id)) ?? []
     }
 
@@ -687,13 +692,13 @@ private struct TransactionsPanelView: View {
         let subAmount = reweEuro(reweShowYear ? reweYearCents : reweMonthCents)
         let leftContent = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let logo = ReweLogoAsset.image {
+                if let logo = receiptLogo {
                     Image(nsImage: logo).resizable().scaledToFit().frame(width: 18, height: 18)
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 } else {
                     Image(systemName: "cart.fill").font(.system(size: 16)).foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text(formatBankHeader(nickname: nil, bankName: "REWE", date: vm.currentBalanceFetchedAt))
+                Text(formatBankHeader(nickname: nil, bankName: receiptBrandName, date: vm.currentBalanceFetchedAt))
                     .font(.system(size: 13)).foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
@@ -732,8 +737,8 @@ private struct TransactionsPanelView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if reweReceipts.isEmpty {
-                    Text(L10n.t("Noch keine Bons. Im REWE-Fenster synchronisieren.",
-                                "No receipts yet. Sync in the REWE window."))
+                    Text(L10n.t("Noch keine Bons. Im \(receiptBrandName)-Fenster synchronisieren.",
+                                "No receipts yet. Sync in the \(receiptBrandName) window."))
                         .font(.system(size: 12)).foregroundColor(.secondary)
                         .frame(maxWidth: .infinity).padding(.top, 40)
                 } else {
@@ -752,9 +757,20 @@ private struct TransactionsPanelView: View {
         }
     }
 
+    /// Quelle-abhängige Kategorie-Aufschlüsselung, vereinheitlicht auf ein
+    /// gemeinsames Tupel (REWE = Lebensmittel-Wörterbuch, dm = Drogerie).
+    private var receiptCategoryBreakdown: [(label: String, symbol: String, totalCents: Int, count: Int)] {
+        if dmActive {
+            return DMItemCategorizer.breakdown(reweReceipts)
+                .map { (label: $0.category.rawValue, symbol: $0.category.symbol, totalCents: $0.totalCents, count: $0.count) }
+        }
+        return ReweItemCategorizer.breakdown(reweReceipts)
+            .map { (label: $0.category.rawValue, symbol: $0.category.symbol, totalCents: $0.totalCents, count: $0.count) }
+    }
+
     /// „Was kaufst du ein?" — Kategorien-Aufschlüsselung (Summe + Anteils-Balken).
     private var reweCategoryView: some View {
-        let breakdown = ReweItemCategorizer.breakdown(reweReceipts)
+        let breakdown = receiptCategoryBreakdown
         let total = max(1, breakdown.reduce(0) { $0 + $1.totalCents })
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -763,13 +779,13 @@ private struct TransactionsPanelView: View {
                         .font(.system(size: 12)).foregroundColor(.secondary)
                         .frame(maxWidth: .infinity).padding(.top, 40)
                 } else {
-                    ForEach(breakdown, id: \.category) { entry in
+                    ForEach(breakdown, id: \.label) { entry in
                         let frac = Double(entry.totalCents) / Double(total)
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 10) {
-                                Image(systemName: entry.category.symbol)
+                                Image(systemName: entry.symbol)
                                     .font(.system(size: 13)).foregroundColor(.secondary).frame(width: 20)
-                                Text(entry.category.rawValue).font(.system(size: 14, weight: .medium))
+                                Text(entry.label).font(.system(size: 14, weight: .medium))
                                 Text("· \(entry.count)").font(.system(size: 11)).foregroundColor(Color(NSColor.tertiaryLabelColor))
                                 Spacer()
                                 Text(reweEuro(entry.totalCents)).font(.system(size: 14, weight: .medium)).monospacedDigit()
@@ -800,7 +816,7 @@ private struct TransactionsPanelView: View {
                 if isOpen { reweExpanded.remove(r.receiptId) } else { reweExpanded.insert(r.receiptId) }
             } label: {
                 HStack(spacing: 10) {
-                    if let logo = ReweLogoAsset.image {
+                    if let logo = receiptLogo {
                         Image(nsImage: logo).resizable().scaledToFill().frame(width: 20, height: 20)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                             .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
@@ -809,7 +825,7 @@ private struct TransactionsPanelView: View {
                             .foregroundColor(.secondary).frame(width: 20, height: 20)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(r.marketName ?? "REWE")
+                        Text(r.marketName ?? receiptBrandName)
                             .font(.system(size: 14, weight: .medium)).foregroundColor(.primary).lineLimit(1)
                         Text("\(r.items.count) Artikel")
                             .font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
@@ -1245,7 +1261,7 @@ private struct TransactionsPanelView: View {
         VStack(spacing: 0) {
             // Balance Card
             Group {
-                if reweActive {
+                if receiptActive {
                     reweBalanceCard
                 } else if roundupView.isActive {
                     RoundupSavingsCard(compact: false)
@@ -1273,7 +1289,7 @@ private struct TransactionsPanelView: View {
 
             // Search + Icons — same row. Im Sparmode + REWE-Slot ausgeblendet
             // (bank-spezifische Suche/Filter/Kategorien dort nicht sinnvoll).
-            if !roundupView.isActive && !reweActive {
+            if !roundupView.isActive && !receiptActive {
             HStack(spacing: 8) {
                 // Search field — flexible
                 HStack(spacing: 6) {
@@ -1462,7 +1478,7 @@ private struct TransactionsPanelView: View {
             }
 
             // REWE: Umschalter Einkäufe ⇄ Kategorien
-            if reweActive {
+            if receiptActive {
                 Picker("", selection: $reweTab) {
                     Text(L10n.t("Einkäufe", "Purchases")).tag(0)
                     Text(L10n.t("Kategorien", "Categories")).tag(1)
@@ -1475,7 +1491,7 @@ private struct TransactionsPanelView: View {
 
             // Transactions List (grouped by date) with pull-to-refresh indicator
             ZStack(alignment: .top) {
-                if reweActive {
+                if receiptActive {
                     if reweTab == 0 { reweReceiptScroll } else { reweCategoryView }
                 } else {
                 ScrollViewReader { scrollProxy in

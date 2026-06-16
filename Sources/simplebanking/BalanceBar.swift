@@ -377,15 +377,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img?.isTemplate = true
             return img
         }
-        // REWE-Slot: echtes REWE-Logo (farbig, nicht-Template). Ohne Logo UND ohne
-        // Saldo-Titel (isShort-Default) wäre das Status-Item sonst null-breit.
-        if MultibankingStore.shared.activeSlot?.isREWE == true {
-            if let logo = ReweLogoAsset.image?.resized(to: NSSize(width: 16, height: 16)) {
+        // eBon-Slot (REWE/dm): echtes Marken-Logo (farbig, nicht-Template). Ohne
+        // Logo UND ohne Saldo-Titel (isShort-Default) wäre das Status-Item null-breit.
+        if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
+            let asset = active.isDM ? DMLogoAsset.image : ReweLogoAsset.image
+            if let logo = asset?.resized(to: NSSize(width: 16, height: 16)) {
                 logo.isTemplate = false
                 return logo
             }
             let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-            let img = NSImage(systemSymbolName: "cart.fill", accessibilityDescription: "REWE")?
+            let img = NSImage(systemSymbolName: "cart.fill", accessibilityDescription: active.displayName)?
                 .withSymbolConfiguration(cfg)
             img?.isTemplate = true
             return img
@@ -466,7 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func computeFlyoutSlots() -> [FlyoutSlotItem] {
         let store = MultibankingStore.shared
         return store.slots.map { slot in
-            let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.isREWE ? nil : slot.iban)
+            let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.isReceiptSlot ? nil : slot.iban)
             BankLogoStore.shared.preload(brand: brand)
             let logo = BankLogoStore.shared.image(for: brand)
             let balance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double
@@ -525,7 +526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard slots.count > 1 else { return nil }
         var total = 0.0
         var hasAny = false
-        for slot in slots where !slot.isREWE {
+        for slot in slots where !slot.isReceiptSlot {
             guard let b = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double else { continue }
             total += b
             hasAny = true
@@ -772,7 +773,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             resolvedLogo = brand.id
         } else if !resolvedLogo.isEmpty, BankLogoAssets.find(byLogoID: resolvedLogo) != nil {
             // logo is already valid — keep it
-        } else if !slot.isREWE, !slot.iban.isEmpty, let brand = BankLogoAssets.find(byIBAN: slot.iban) {
+        } else if !slot.isReceiptSlot, !slot.iban.isEmpty, let brand = BankLogoAssets.find(byIBAN: slot.iban) {
             if resolvedName.isEmpty { resolvedName = brand.displayName }
             resolvedLogo = brand.id
         }
@@ -1200,6 +1201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                                   action: #selector(openREWEBeta), keyEquivalent: "")
         settingsSub.addItem(reweItem)
 
+        let dmItem = NSMenuItem(title: t("dm eBons verbinden… (Beta)", "Connect dm Receipts… (Beta)"),
+                                action: #selector(openDMBeta), keyEquivalent: "")
+        settingsSub.addItem(dmItem)
+
         let openSettingsItem = NSMenuItem(title: t("Einstellungen öffnen…", "Open Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         openSettingsItem.tag = 200
         settingsSub.addItem(openSettingsItem)
@@ -1539,11 +1544,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     @objc private func refresh() {
-        // REWE-Slot: kein Bank-Refresh/Auto-Sync. „Aktualisieren" stößt manuell
-        // das Login-/Sync-Fenster an (das holt frische Cookies + ZIP). Ist man
-        // noch eingeloggt, reicht ein Klick auf „synchronisieren" darin.
-        if MultibankingStore.shared.activeSlot?.isREWE == true {
-            if let id = MultibankingStore.shared.activeSlot?.id { presentREWELogin(slotId: id) }
+        // eBon-Slot (REWE/dm): kein Bank-Refresh/Auto-Sync. „Aktualisieren" stößt
+        // manuell das Login-/Sync-Fenster an. Ist man noch eingeloggt, reicht ein
+        // Klick auf „synchronisieren" darin.
+        if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
+            if active.isDM { presentDMLogin(slotId: active.id) } else { presentREWELogin(slotId: active.id) }
             return
         }
         // Manual refresh always clears the SCA backoff — user explicitly wants to retry.
@@ -3307,14 +3312,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     /// Verdrahtet die Quick-Send-Closures auf einen frisch gebauten Flyout-RootView.
-    /// Setzt die REWE-Flyout-Karte (Letzter Einkauf + Mini-Warenkorb), wenn der
-    /// aktive Slot ein REWE-Slot ist. No-op sonst. An beiden rootView-Bau-Stellen
-    /// aufgerufen (buildFlyoutHost + refreshFlyoutIfVisible).
+    /// Setzt die eBon-Flyout-Karte (Letzter Einkauf + Mini-Warenkorb), wenn der
+    /// aktive Slot ein eBon-Slot (REWE/dm) ist. No-op sonst. An beiden rootView-Bau-
+    /// Stellen aufgerufen (buildFlyoutHost + refreshFlyoutIfVisible).
     private func applyREWEFlyout(to rootView: inout StatusBalanceFlyoutCardView) {
-        guard let active = MultibankingStore.shared.activeSlot, active.isREWE else { return }
+        guard let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot else { return }
         rootView.reweMode = true
-        rootView.bankLogoImage = ReweLogoAsset.image
-        rootView.bankName = "REWE"
+        rootView.bankLogoImage = active.isDM ? DMLogoAsset.image : ReweLogoAsset.image
+        rootView.bankName = active.isDM ? "dm" : "REWE"
 
         let all = (try? ReweReceiptStore.all(slotId: active.id)) ?? []
         // Header-Uhrzeit = letzter Sync (fetchedAt des neuesten Bons).
@@ -3927,8 +3932,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// für `refreshFromCLI()`, das den TX-Fetch sequentiell selbst macht —
     /// sonst rennen zwei TX-Fetches parallel gegen den HBCI-Mutex.
     private func refreshAsync(suppressTransactionsFetch: Bool = false) async {
-        // REWE-Slot: kein YAXI/HBCI. Anzeige kommt aus den lokal gespeicherten Bons.
-        if let active = MultibankingStore.shared.activeSlot, active.isREWE {
+        // eBon-Slot (REWE/dm): kein YAXI/HBCI. Anzeige kommt aus lokal gespeicherten Bons.
+        if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
             applyREWEDisplay(slotId: active.id)
             return
         }
@@ -4133,10 +4138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     private func openTransactionsPanel() async {
-        // REWE-Slot: dasselbe Umsatz-Panel (BalanceBar + Liste + Footer), aber mit
-        // REWE-Balance-Card + Einkaufsliste (im Panel via reweActive-Zweig). Kein
-        // Bank-Fetch.
-        if MultibankingStore.shared.activeSlot?.isREWE == true {
+        // eBon-Slot (REWE/dm): dasselbe Umsatz-Panel (BalanceBar + Liste + Footer),
+        // aber mit eBon-Balance-Card + Einkaufsliste (im Panel via receiptActive-
+        // Zweig). Kein Bank-Fetch.
+        if MultibankingStore.shared.activeSlot?.isReceiptSlot == true {
             txPanel?.show()
             return
         }
@@ -4750,6 +4755,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if MultibankingStore.shared.activeSlot?.id == slotId {
                 self?.applyREWEDisplay(slotId: slotId)
             }
+            NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
+        }
+    }
+
+    /// Phase-3a-Beta: öffnet das dm-Login-/Sync-Fenster (analog zu REWE). Legt
+    /// einen dm-eBon-Slot an (nicht-aktiv, kein Aggregat-Zwang), falls keiner da ist.
+    @objc private func openDMBeta() {
+        DispatchQueue.main.async { [weak self] in
+            let store = MultibankingStore.shared
+            let slotId: String
+            if let existing = store.slots.first(where: { $0.isDM }) {
+                slotId = existing.id
+            } else {
+                let slot = BankSlot.makeDM()
+                store.addSlot(slot, makeActive: false, autoUnified: false)
+                slotId = slot.id
+            }
+            self?.presentDMLogin(slotId: slotId)
+        }
+    }
+
+    /// Öffnet das dm-Login-/Sync-Fenster (manuell angestoßen — kein Auto-Sync).
+    private func presentDMLogin(slotId: String) {
+        DMAuthWebView.present(slotId: slotId) { [weak self] result in
+            AppLogger.log("dm sync: listed=\(result.listed) detailed=\(result.detailed) stored=\(result.stored)",
+                          category: "DM")
+            if MultibankingStore.shared.activeSlot?.id == slotId {
+                self?.applyREWEDisplay(slotId: slotId)
+            }
+            NotificationCenter.default.post(name: .dmReceiptsChanged, object: nil)
             NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
         }
     }

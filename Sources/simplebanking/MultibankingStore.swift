@@ -4,11 +4,12 @@ import Foundation
 // MARK: - BankSlot
 
 /// Herkunft eines Slots. `nil`/`.yaxi` = klassischer Bank-Slot über YAXI.
-/// `.rewe` = REWE-eBon-Slot (kein YAXI/IBAN, eigener Datenpfad, kein Refresh
-/// über die Bank-Call-Pfade).
+/// `.rewe` / `.dm` = eBon-Slots (kein YAXI/IBAN, eigener Datenpfad, kein Refresh
+/// über die Bank-Call-Pfade — nur manueller Sync über ein Login-Fenster).
 enum SlotSource: String, Codable {
     case yaxi
     case rewe
+    case dm
 }
 
 struct BankSlot: Codable, Identifiable, Equatable {
@@ -25,6 +26,12 @@ struct BankSlot: Codable, Identifiable, Equatable {
 
     /// True für REWE-eBon-Slots — Bank-Call-/YAXI-Pfade müssen diese überspringen.
     var isREWE: Bool { source == .rewe }
+    /// True für dm-eBon-Slots.
+    var isDM: Bool { source == .dm }
+    /// True für jeden eBon-/Kassenbon-Slot (REWE oder dm): kein YAXI/IBAN, kein
+    /// Auto-Refresh, Anzeige aus lokal gespeicherten Bons. Bank-Aggregat- und
+    /// YAXI-Pfade müssen diese Slots überspringen.
+    var isReceiptSlot: Bool { source == .rewe || source == .dm }
 
     static func makeNew(iban: String, displayName: String, logoId: String?) -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: iban, displayName: displayName, logoId: logoId)
@@ -34,6 +41,12 @@ struct BankSlot: Codable, Identifiable, Equatable {
     static func makeREWE(displayName: String = "REWE") -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: "", displayName: displayName,
                  logoId: "rewe", currency: "EUR", source: .rewe)
+    }
+
+    /// Erzeugt einen dm-eBon-Slot (kein IBAN/YAXI-Connection).
+    static func makeDM(displayName: String = "dm") -> BankSlot {
+        BankSlot(id: UUID().uuidString, iban: "", displayName: displayName,
+                 logoId: "dm", currency: "EUR", source: .dm)
     }
 }
 
