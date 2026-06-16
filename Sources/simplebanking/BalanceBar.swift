@@ -6285,7 +6285,10 @@ private struct StatusBalanceFlyoutCardView: View {
                     .help(L10n.t("Tippen: Monat/Jahr umschalten", "Tap: toggle month/year"))
                 }
                 Spacer()
-                // bewusst KEIN Ring (REWE hat keinen Saldo-/Grünbereich)
+                // Kein sichtbarer Ring, aber dieselbe 72×72-Fläche freihalten,
+                // damit die REWE-Karte EXAKT so hoch ist wie die Bank-Karte.
+                Color.clear.frame(width: 72, height: 72)
+                    .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
