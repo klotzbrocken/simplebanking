@@ -1,6 +1,11 @@
 import Foundation
 import PDFKit
 
+extension Notification.Name {
+    /// Gepostet nach erfolgreichem REWE-Sync → offene Panels laden die Bons neu.
+    static let reweReceiptsChanged = Notification.Name("reweReceiptsChanged")
+}
+
 // MARK: - Result / Errors
 
 struct REWESyncResult: Equatable {

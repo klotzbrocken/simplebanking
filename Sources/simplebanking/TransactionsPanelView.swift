@@ -1811,6 +1811,7 @@ private struct TransactionsPanelView: View {
             vm.objectWillChange.send()
         }
         .onChange(of: multibankingStore.activeIndex) { _ in loadReweReceipts() }
+        .onReceive(NotificationCenter.default.publisher(for: .reweReceiptsChanged)) { _ in loadReweReceipts() }
         .onAppear {
             loadReweReceipts()
             resetInfiniteWindowIfNeeded()

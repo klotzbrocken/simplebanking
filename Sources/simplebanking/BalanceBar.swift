@@ -1539,6 +1539,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     }
 
     @objc private func refresh() {
+        // REWE-Slot: kein Bank-Refresh/Auto-Sync. „Aktualisieren" stößt manuell
+        // das Login-/Sync-Fenster an (das holt frische Cookies + ZIP). Ist man
+        // noch eingeloggt, reicht ein Klick auf „synchronisieren" darin.
+        if MultibankingStore.shared.activeSlot?.isREWE == true {
+            if let id = MultibankingStore.shared.activeSlot?.id { presentREWELogin(slotId: id) }
+            return
+        }
         // Manual refresh always clears the SCA backoff — user explicitly wants to retry.
         scaBackoffUntil = nil
         Task { await refreshAsync() }
@@ -4720,8 +4727,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     @objc private func openREWEBeta() {
         DispatchQueue.main.async { [weak self] in
             let store = MultibankingStore.shared
-            // Echten REWE-Slot anlegen (falls noch keiner existiert) und die Bons
-            // unter dessen Slot-Id synchronisieren.
             let slotId: String
             if let existing = store.slots.first(where: { $0.isREWE }) {
                 slotId = existing.id
@@ -4732,14 +4737,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 store.addSlot(slot, makeActive: false, autoUnified: false)
                 slotId = slot.id
             }
-            REWEAuthWebView.present(slotId: slotId) { [weak self] result in
-                AppLogger.log("REWE sync: listed=\(result.listed) matched=\(result.matched) stored=\(result.stored)",
-                              category: "REWE")
-                // Falls der REWE-Slot gerade aktiv ist, Anzeige sofort aktualisieren.
-                if MultibankingStore.shared.activeSlot?.id == slotId {
-                    self?.applyREWEDisplay(slotId: slotId)
-                }
+            self?.presentREWELogin(slotId: slotId)
+        }
+    }
+
+    /// Öffnet das REWE-Login-/Sync-Fenster (manuell angestoßen — kein Auto-Sync).
+    /// Nach erfolgreichem Sync: Anzeige + Panel-Liste aktualisieren.
+    private func presentREWELogin(slotId: String) {
+        REWEAuthWebView.present(slotId: slotId) { [weak self] result in
+            AppLogger.log("REWE sync: listed=\(result.listed) matched=\(result.matched) stored=\(result.stored)",
+                          category: "REWE")
+            if MultibankingStore.shared.activeSlot?.id == slotId {
+                self?.applyREWEDisplay(slotId: slotId)
             }
+            NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
         }
     }
 
