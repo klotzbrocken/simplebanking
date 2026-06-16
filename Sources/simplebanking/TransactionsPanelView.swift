@@ -719,7 +719,14 @@ private struct TransactionsPanelView: View {
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(borderColor, lineWidth: 1))
     }
 
-    /// Einkaufsliste im Bank-Umsatz-Look (Logo · Name/Datum · Betrag), Klick → Warenkorb.
+    /// Einkaufsliste im Bank-Umsatz-Look, nach TAGEN gruppiert (Datums-Header
+    /// wie in der echten Umsatzliste), Klick auf Einkauf → Warenkorb.
+    private var reweReceiptDayGroups: [(day: String, items: [ReweReceipt])] {
+        Dictionary(grouping: reweReceipts, by: { String($0.timestamp.prefix(10)) })
+            .map { (day: $0.key, items: $0.value) }
+            .sorted { $0.day > $1.day }   // neuester Tag oben
+    }
+
     private var reweReceiptScroll: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
@@ -729,9 +736,14 @@ private struct TransactionsPanelView: View {
                         .font(.system(size: 12)).foregroundColor(.secondary)
                         .frame(maxWidth: .infinity).padding(.top, 40)
                 } else {
-                    ForEach(reweReceipts) { r in
-                        reweRow(r)
-                        Divider()
+                    ForEach(reweReceiptDayGroups, id: \.day) { group in
+                        Text(formatDateDE(group.day))
+                            .font(.system(size: 13)).foregroundColor(.secondary)
+                            .padding(.top, 8).padding(.bottom, 4).padding(.horizontal, 12)
+                        ForEach(group.items) { r in
+                            reweRow(r)
+                            Divider()
+                        }
                     }
                 }
             }
@@ -758,7 +770,7 @@ private struct TransactionsPanelView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(r.marketName ?? "REWE")
                             .font(.system(size: 14, weight: .medium)).foregroundColor(.primary).lineLimit(1)
-                        Text("\(reweDate(r.timestamp)) · \(r.items.count) Artikel")
+                        Text("\(r.items.count) Artikel")
                             .font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
                     }
                     Spacer()
