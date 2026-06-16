@@ -377,9 +377,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img?.isTemplate = true
             return img
         }
-        // REWE-Slot: eigener Warenkorb-Fallback. Ohne Logo UND ohne Saldo-Titel
-        // (isShort-Default) wäre das Status-Item sonst null-breit → unsichtbar.
+        // REWE-Slot: echtes REWE-Logo (farbig, nicht-Template). Ohne Logo UND ohne
+        // Saldo-Titel (isShort-Default) wäre das Status-Item sonst null-breit.
         if MultibankingStore.shared.activeSlot?.isREWE == true {
+            if let logo = ReweLogoAsset.image?.resized(to: NSSize(width: 16, height: 16)) {
+                logo.isTemplate = false
+                return logo
+            }
             let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
             let img = NSImage(systemSymbolName: "cart.fill", accessibilityDescription: "REWE")?
                 .withSymbolConfiguration(cfg)
@@ -3302,16 +3306,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func applyREWEFlyout(to rootView: inout StatusBalanceFlyoutCardView) {
         guard let active = MultibankingStore.shared.activeSlot, active.isREWE else { return }
         rootView.reweMode = true
-        if let latest = try? ReweReceiptStore.latest(slotId: active.id) {
-            let city = latest.marketCity ?? latest.marketName ?? "REWE"
-            let d = String(latest.timestamp.prefix(10)).split(separator: "-")
-            let date = d.count == 3 ? "\(d[2]).\(d[1]).\(d[0])" : ""
-            rootView.reweSubtitle = date.isEmpty ? city : "\(city) · \(date)"
-            rootView.reweTopItems = latest.items.prefix(3).map(\.name)
-            rootView.reweMoreCount = max(0, latest.items.count - 3)
+        rootView.bankLogoImage = ReweLogoAsset.image
+        rootView.bankName = "REWE"
+
+        let all = (try? ReweReceiptStore.all(slotId: active.id)) ?? []
+        // Header-Uhrzeit = letzter Sync (fetchedAt des neuesten Bons).
+        if let latestFetched = all.first?.fetchedAt {
+            rootView.balanceFetchedAt = ISO8601DateFormatter().date(from: latestFetched)
         }
-        let slotId = active.id
-        rootView.onOpenReceipts = { REWEReceiptsWindow.present(slotId: slotId) }
+        // Einkäufe Monat/Jahr (cancelled ausgenommen).
+        let cal = Calendar.current
+        let now = Date()
+        let ym = String(format: "%04d-%02d", cal.component(.year, from: now), cal.component(.month, from: now))
+        let y = String(format: "%04d", cal.component(.year, from: now))
+        rootView.reweMonthTotalCents = all.filter { !$0.cancelled && $0.timestamp.hasPrefix(ym) }.reduce(0) { $0 + $1.totalCents }
+        rootView.reweYearTotalCents = all.filter { !$0.cancelled && $0.timestamp.hasPrefix(y) }.reduce(0) { $0 + $1.totalCents }
+        let monthFmt = DateFormatter()
+        monthFmt.locale = Locale(identifier: "de_DE")
+        monthFmt.dateFormat = "LLLL"
+        rootView.reweMonthLabel = monthFmt.string(from: now)
+        rootView.reweYearLabel = y
     }
 
     private func applyQuickSendWiring(to rootView: inout StatusBalanceFlyoutCardView) {
@@ -5838,13 +5852,15 @@ private struct StatusBalanceFlyoutCardView: View {
     var availableBalance: Double? = nil
 
     // MARK: REWE eBon-Slot
-    /// Wenn true, wird statt der Saldo-Karte die REWE-Karte gezeigt
-    /// (Eyebrow „Letzter Einkauf" + Betrag + Mini-Warenkorb + Button).
+    /// Wenn true, wird statt der Saldo-Karte die REWE-Karte im Bank-Layout
+    /// gezeigt (Header „REWE · Uhrzeit", großer Betrag letzter Einkauf, kein Ring,
+    /// darunter Einkäufe Monat/Jahr mit Toggle).
     var reweMode: Bool = false
-    var reweSubtitle: String? = nil       // "Siegen · 13.06.2026"
-    var reweTopItems: [String] = []       // Top-Artikel des letzten Bons
-    var reweMoreCount: Int = 0            // weitere Artikel über die Top hinaus
-    var onOpenReceipts: (() -> Void)? = nil
+    var reweMonthLabel: String = ""       // "Juni"
+    var reweMonthTotalCents: Int = 0
+    var reweYearLabel: String = ""        // "2026"
+    var reweYearTotalCents: Int = 0
+    @State private var reweShowYear: Bool = false
 
     // MARK: Quick-Send (Flyout-Drawer)
     /// Vom Host (BalanceBar) gesetzt: ob der Quick-Send-Drawer angeboten wird
@@ -6230,42 +6246,46 @@ private struct StatusBalanceFlyoutCardView: View {
         )
     }
 
+    private func reweEuro(_ c: Int) -> String { String(format: "%.2f €", Double(c) / 100) }
+
+    /// REWE-Karte im EXAKTEN Bank-Layout (defaultThemeCard-Struktur): Header
+    /// (Logo + „REWE · HH Uhr"), großer schwarzer Betrag (= letzter Einkauf),
+    /// KEIN Ring, darunter „Einkäufe <Monat>: …" mit Toggle auf Jahr.
     private var reweCard: some View {
         let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
         let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
-        return VStack(alignment: .leading, spacing: 6) {
+        let subLabel = reweShowYear ? reweYearLabel : reweMonthLabel
+        let subAmount = reweEuro(reweShowYear ? reweYearTotalCents : reweMonthTotalCents)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let img = bankLogoImage {
-                    Image(nsImage: img).resizable().scaledToFit().frame(width: 18, height: 18)
+                    Image(nsImage: img).resizable().scaledToFit()
+                        .frame(width: 18, height: 18)
                         .clipShape(RoundedRectangle(cornerRadius: 3))
+                } else {
+                    Image(systemName: "cart.fill").font(.system(size: 16))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text(reweSubtitle ?? (bankName ?? "REWE"))
-                    .font(.system(size: 12)).foregroundColor(.secondary).lineLimit(1)
+                Text(formatBankHeader(date: balanceFetchedAt))
+                    .font(.system(size: 14)).foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
-                Button { onOpenReceipts?() } label: {
-                    HStack(spacing: 3) {
-                        Text(L10n.t("Einkäufe", "Purchases"))
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
             }
-            Text(L10n.t("LETZTER EINKAUF", "LAST PURCHASE"))
-                .font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary).opacity(0.7)
-            Text(balanceText)
-                .font(.system(size: 28, weight: .bold)).monospacedDigit()
-                .foregroundColor(.primary).lineLimit(1).minimumScaleFactor(0.7)
-            if !reweTopItems.isEmpty {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(Array(reweTopItems.prefix(3).enumerated()), id: \.offset) { _, line in
-                        Text(line).font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+            HStack(alignment: .balanceTextCenter, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(balanceText)
+                        .font(.system(size: 30, weight: .bold, design: .default))
+                        .foregroundColor(.primary)
+                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                    Button { reweShowYear.toggle() } label: {
+                        Text("\(L10n.t("Einkäufe", "Purchases")) \(subLabel): \(subAmount)")
+                            .font(.system(size: 12))
+                            .foregroundColor(Color(NSColor.secondaryLabelColor))
                     }
-                    if reweMoreCount > 0 {
-                        Text(L10n.t("… +\(reweMoreCount) weitere", "… +\(reweMoreCount) more"))
-                            .font(.system(size: 10)).foregroundColor(.secondary).opacity(0.7)
-                    }
+                    .buttonStyle(.plain)
+                    .help(L10n.t("Tippen: Monat/Jahr umschalten", "Tap: toggle month/year"))
                 }
+                Spacer()
+                // bewusst KEIN Ring (REWE hat keinen Saldo-/Grünbereich)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
