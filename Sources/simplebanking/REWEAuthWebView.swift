@@ -181,7 +181,12 @@ final class REWEAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate {
                 if retry < 2 {
                     AppLogger.log("REWE sync retry \(retry + 1) nach Fehler: \(error)", category: "REWE")
                     syncButton.isEnabled = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in self?.runSync(retry: retry + 1) }
+                    // 403 direkt nach der Kontoauswahl: cf_clearance/Shop-Cookies sind
+                    // noch nicht durchgereicht. Die im-markt-Seite NEU laden (frischer
+                    // Navigationskontext setzt die Cookies), dann erst erneut syncen —
+                    // sonst klappt es erst beim zweiten Fenster.
+                    webView?.load(URLRequest(url: URL(string: Self.imMarkt)!))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in self?.runSync(retry: retry + 1) }
                     return
                 }
                 statusLabel.stringValue = "Fehler: \(error)"

@@ -1339,11 +1339,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         syncAutoHideMenuState()
 
         txPanel = TransactionsPanel(vm: txVM, onRefresh: { [weak self] in
+            // Pull-to-Refresh UND Header-↻ laufen hier durch (gleicher Spinner).
             // Only open/refresh if the panel is already visible.
-            // This prevents onChange(of: unifiedModeEnabled) in TransactionsPanelView
-            // from auto-opening the panel when unified mode is toggled from the flyout.
-            guard self?.txPanel?.isVisible == true else { return }
-            await self?.openTransactionsPanel()
+            guard let self, self.txPanel?.isVisible == true else { return }
+            // eBon-Slot: still im Hintergrund / Fenster nur bei Login.
+            if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
+                self.syncReceiptSlot(active, allowWindow: true)
+                return
+            }
+            // Gesperrtes Echtkonto → Unlock-Dialog (statt funktionslos).
+            if !self.demoMode, CredentialsStore.anyExists(), self.locked || self.masterPassword == nil {
+                if self.masterPassword == nil { self.locked = true }
+                self.promptUnlockIfNeeded()
+                return
+            }
+            await self.openTransactionsPanel()
         }, onSettings: { [weak self] in
             self?.showSettings()
         }, onOpenDashboard: { [weak self] tab in
@@ -1567,6 +1577,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
             // Erst still im Hintergrund; Fenster nur, wenn ein Login nötig ist.
             syncReceiptSlot(active, allowWindow: true)
+            return
+        }
+        // Gesperrtes / nicht entsperrtes Echtkonto: der manuelle Refresh soll den
+        // Unlock-Dialog auslösen (sonst „Unlock required" + funktionsloser Klick).
+        // promptUnlockIfNeeded refresht bei Erfolg selbst.
+        if !demoMode, CredentialsStore.anyExists(), locked || masterPassword == nil {
+            if masterPassword == nil { locked = true }
+            promptUnlockIfNeeded()
             return
         }
         // Manual refresh always clears the SCA backoff — user explicitly wants to retry.
@@ -5125,6 +5143,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Offenes Dashboard sofort auf den neuen Slot umstellen (cached Snapshot).
         refreshDashboardIfOpen()
 
+        // leftToPay-Subzeile sofort aus der DB-Historie neu berechnen, sonst zeigt
+        // die Subzeile nach dem Switch nur das Icon, bis der Netz-Refresh durch ist.
+        recomputeLeftToPay()
+
         guard !Task.isCancelled else { return }
 
         // Wait for any in-flight HBCI call to finish before refreshing for the new slot.
@@ -5530,13 +5552,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     throw SetupFlowError.connectTimeout(step: step)
                 }
 
-                guard let result = try await group.next() else {
-                    throw SetupFlowError.authenticationFailed("Einrichtung wurde unterbrochen.")
+                do {
+                    guard let result = try await group.next() else {
+                        throw SetupFlowError.authenticationFailed("Einrichtung wurde unterbrochen.")
+                    }
+                    group.cancelAll()
+                    while let _ = try? await group.next() {}
+                    return result
+                } catch {
+                    group.cancelAll()
+                    while let _ = try? await group.next() {}
+                    // Parent-Cancellation (z.B. Setup-Fenster/Sheet geschlossen):
+                    // sauber als CancellationError werfen — NICHT als Step-Fehler,
+                    // sonst maskiert der Timeout-Sleep das echte Ergebnis und es
+                    // landet als „Verbindungsprüfung fehlgeschlagen" beim User.
+                    if error is CancellationError || Task.isCancelled {
+                        throw CancellationError()
+                    }
+                    throw error
                 }
-                group.cancelAll()
-                // Drain remaining cancelled tasks to prevent CancellationError propagation
-                while let _ = try? await group.next() {}
-                return result
             }
             let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
             logger?.log(step: step, event: "success", details: ["duration_ms": String(durationMs)])
@@ -5791,6 +5825,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 apiKey: nil,
                 additionalAccounts: additionalAccounts
             )
+        } catch is CancellationError {
+            // Abbruch (Fenster/Sheet geschlossen) ist KEIN Fehler → roh weiterreichen,
+            // damit SetupFlowPanels `catch is CancellationError` es still behandelt
+            // (statt „Verbindungsprüfung fehlgeschlagen: …CancellationError").
+            AppLogger.log("Setup performSetupConnection cancelled", category: "Setup")
+            diagnosticsLogger?.finish(success: false, error: "cancelled")
+            throw CancellationError()
         } catch {
             let setupError = normalizeSetupError(error)
             AppLogger.log("Setup performSetupConnection failed error=\(setupError.localizedDescription)", category: "Setup", level: "ERROR")

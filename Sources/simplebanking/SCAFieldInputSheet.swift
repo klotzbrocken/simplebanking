@@ -16,13 +16,20 @@ import SwiftUI
 @MainActor
 enum SCAFieldInputPresenter {
 
+    /// Wenn gesetzt (vom Setup-Panel während der Verbindungsprüfung), wird das
+    /// Field-Input als **Sheet an diesem Fenster** gezeigt — statt als frei
+    /// schwebendes NSPanel + `NSApp.activate`. Das verhindert die Fokus-/Modal-
+    /// Störung, die sonst den Connect-Task cancelt (HVB-„CancellationError"-Bug).
+    nonisolated(unsafe) static weak var hostWindow: NSWindow?
+
     /// Zeigt das Sheet modal, returnt async den User-Wert oder nil bei Cancel.
     static func present(_ spec: SCAFieldInput.Spec) async -> String? {
         await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            let host = hostWindow
             // Hosting-Container — der Closure-Capture stellt sicher, dass nur
             // genau einmal `cont.resume` aufgerufen wird, egal ob Submit,
             // Cancel oder Window-Close den Flow beendet.
-            let box = ContinuationBox(cont: cont)
+            let box = ContinuationBox(cont: cont, host: host)
 
             let panel = NSPanel(
                 contentRect: NSRect(x: 0, y: 0, width: 380, height: 230),
@@ -30,10 +37,8 @@ enum SCAFieldInputPresenter {
                 backing: .buffered, defer: false
             )
             panel.title = L10n.t("Bank-Eingabe erforderlich", "Bank input required")
-            panel.isFloatingPanel = true
             panel.titlebarAppearsTransparent = false
             panel.isReleasedWhenClosed = false
-            panel.center()
 
             let delegate = SCAFieldInputWindowDelegate { box.resolve(nil, panel: panel) }
             panel.delegate = delegate
@@ -47,8 +52,18 @@ enum SCAFieldInputPresenter {
                 onCancel: { box.resolve(nil, panel: panel) }
             )
             panel.contentView = NSHostingView(rootView: view)
-            panel.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+
+            if let host {
+                // Als Sheet am Setup-Fenster — gleiche Modal-Session, kein Cancel.
+                host.beginSheet(panel) { _ in }
+            } else {
+                // Fallback (SCA außerhalb des Setups, z.B. beim Refresh/Transfer):
+                // frei schwebendes Panel.
+                panel.isFloatingPanel = true
+                panel.center()
+                panel.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
     }
 }
@@ -60,11 +75,15 @@ private nonisolated(unsafe) var SCAFieldInputDelegateKey: UInt8 = 0
 @MainActor
 private final class ContinuationBox {
     private var cont: CheckedContinuation<String?, Never>?
-    init(cont: CheckedContinuation<String?, Never>) { self.cont = cont }
+    private weak var host: NSWindow?
+    init(cont: CheckedContinuation<String?, Never>, host: NSWindow?) {
+        self.cont = cont
+        self.host = host
+    }
     func resolve(_ value: String?, panel: NSPanel) {
         guard let c = cont else { return }
         cont = nil
-        panel.close()
+        if let host { host.endSheet(panel) } else { panel.close() }
         c.resume(returning: value)
     }
 }
@@ -87,6 +106,14 @@ private struct SCAFieldInputView: View {
     @State private var value: String = ""
     @FocusState private var focused: Bool
 
+    private var promptText: String {
+        if let m = spec.msg?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty { return m }
+        return L10n.t(
+            "Bitte gib den von der Bank angeforderten Code ein.",
+            "Please enter the code requested by your bank."
+        )
+    }
+
     private var isValid: Bool { SCAFieldInput.isValid(value, spec: spec) }
     private var isSecure: Bool {
         spec.secrecyLevel == .otp || spec.secrecyLevel == .password
@@ -96,13 +123,12 @@ private struct SCAFieldInputView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(spec.bankDisplayName)
                 .font(.system(size: 15, weight: .semibold))
-            Text(L10n.t(
-                "Bitte gib den von der Bank angeforderten Code ein.",
-                "Please enter the code requested by your bank."
-            ))
-            .font(.system(size: 12))
-            .foregroundColor(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            // Challenge-Text der Bank anzeigen, falls vorhanden (z.B. „TAN an
+            // ***1234"); sonst generischer Hinweis.
+            Text(promptText)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Group {
                 if isSecure {

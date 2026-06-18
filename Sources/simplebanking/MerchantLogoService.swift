@@ -570,6 +570,23 @@ final class MerchantLogoService: ObservableObject {
     /// 3. Empfängertext nach Brand-Needle durchsuchen (z.B. "Amazon Payments Europe" → "amazon")
     /// 4. Verwendungszweck nach Brand-Needle durchsuchen (Intermediäre ausgeschlossen)
     /// 5. Kein Treffer → normalizedMerchant zurückgeben (kein Logo)
+    /// Substring-Treffer nur an Wortgrenzen: ein Buchstabe direkt vor oder nach dem
+    /// Needle disqualifiziert den Treffer. Verhindert z.B., dass das Brand-Needle
+    /// "otto" mitten in „Lotto24" matcht (Ziffern/Satzzeichen/Leerzeichen sind ok).
+    nonisolated static func wordContains(_ haystack: String, _ needle: String) -> Bool {
+        guard !needle.isEmpty else { return false }
+        var from = haystack.startIndex
+        while let r = haystack.range(of: needle, range: from..<haystack.endIndex) {
+            let beforeOK = r.lowerBound == haystack.startIndex
+                || !haystack[haystack.index(before: r.lowerBound)].isLetter
+            let afterOK = r.upperBound == haystack.endIndex
+                || !haystack[r.upperBound].isLetter
+            if beforeOK && afterOK { return true }
+            from = haystack.index(after: r.lowerBound)
+        }
+        return false
+    }
+
     func effectiveLogoKey(normalizedMerchant: String, empfaenger: String, verwendungszweck: String) -> String {
         let key = normalizedMerchant.lowercased()
 
@@ -580,7 +597,7 @@ final class MerchantLogoService: ObservableObject {
         if isIntermediaryKey {
             let vzweck = verwendungszweck.lowercased()
             for needle in Self.brandSearchNeedles {
-                if !Self.paymentIntermediaries.contains(needle) && vzweck.contains(needle) {
+                if !Self.paymentIntermediaries.contains(needle) && Self.wordContains(vzweck, needle) {
                     return needle
                 }
             }
@@ -594,7 +611,7 @@ final class MerchantLogoService: ObservableObject {
         // Regel 3: Empfängertext nach Brand-Needle durchsuchen (Intermediäre ausgeschlossen)
         let emp = empfaenger.lowercased()
         for needle in Self.brandSearchNeedles {
-            if !Self.paymentIntermediaries.contains(needle) && emp.contains(needle) {
+            if !Self.paymentIntermediaries.contains(needle) && Self.wordContains(emp, needle) {
                 return needle
             }
         }
@@ -602,7 +619,7 @@ final class MerchantLogoService: ObservableObject {
         // Regel 4: Verwendungszweck durchsuchen (Intermediäre ausgeschlossen)
         let vzweck = verwendungszweck.lowercased()
         for needle in Self.brandSearchNeedles {
-            if !Self.paymentIntermediaries.contains(needle) && vzweck.contains(needle) {
+            if !Self.paymentIntermediaries.contains(needle) && Self.wordContains(vzweck, needle) {
                 return needle
             }
         }

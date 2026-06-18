@@ -953,7 +953,8 @@ enum MerchantResolver {
 
     private static func canonicalMerchant(for merchant: String) -> String {
         let lower = merchant.lowercased()
-        for alias in merchantAliases where lower.contains(alias.needle) {
+        // Wortgrenzen-Treffer: „otto" darf nicht in „Lotto24" matchen.
+        for alias in merchantAliases where MerchantLogoService.wordContains(lower, alias.needle) {
             return alias.canonical
         }
         return merchant

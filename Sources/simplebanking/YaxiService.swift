@@ -1654,7 +1654,9 @@ enum YaxiService {
 
     private enum SCACommon {
         case result(SCAPayload, Session?, ConnectionData?)
-        case dialog(DialogInput)
+        /// `String?` = optionale Challenge-Nachricht der Bank (z.B. „TAN an ***1234"),
+        /// wird im Field-Input-Sheet angezeigt.
+        case dialog(DialogInput, String?)
         case redirect(URL, ConfirmationContext)
         case redirectHandle(String, ConfirmationContext)
     }
@@ -1662,7 +1664,7 @@ enum YaxiService {
     private static func toSCACommon(_ r: Routex.BalancesResponse) -> SCACommon {
         switch r {
         case .result(let res, let s, let cd): return .result(.balances(res), s, cd)
-        case .dialog(_, _, _, let input):     return .dialog(input)
+        case .dialog(_, let msg, _, let input): return .dialog(input, msg)
         case .redirect(let url, let ctx):     return .redirect(url, ctx)
         case .redirectHandle(let h, let ctx): return .redirectHandle(h, ctx)
         }
@@ -1671,7 +1673,7 @@ enum YaxiService {
     private static func toSCACommon(_ r: Routex.TransactionsResponse) -> SCACommon {
         switch r {
         case .result(let res, let s, let cd): return .result(.transactions(res), s, cd)
-        case .dialog(_, _, _, let input):     return .dialog(input)
+        case .dialog(_, let msg, _, let input): return .dialog(input, msg)
         case .redirect(let url, let ctx):     return .redirect(url, ctx)
         case .redirectHandle(let h, let ctx): return .redirectHandle(h, ctx)
         }
@@ -1680,7 +1682,7 @@ enum YaxiService {
     private static func toSCACommon(_ r: Routex.TransferResponse) -> SCACommon {
         switch r {
         case .result(let res, let s, let cd): return .result(.transfer(res), s, cd)
-        case .dialog(_, _, _, let input):     return .dialog(input)
+        case .dialog(_, let msg, _, let input): return .dialog(input, msg)
         case .redirect(let url, let ctx):     return .redirect(url, ctx)
         case .redirectHandle(let h, let ctx): return .redirectHandle(h, ctx)
         }
@@ -1691,7 +1693,7 @@ enum YaxiService {
         case .result(let res, let s, let cd): return .result(.accounts(res), s, cd)
         case .dialog(let ctx, let msg, _, let input):
             AppLogger.log("AccountsResponse dialog: ctx=\(ctx.map{"\($0)"} ?? "nil") msg=\(msg ?? "nil") input=\(input)", category: "YaxiService")
-            return .dialog(input)
+            return .dialog(input, msg)
         case .redirect(let url, let ctx):     return .redirect(url, ctx)
         case .redirectHandle(let h, let ctx): return .redirectHandle(h, ctx)
         }
@@ -1716,7 +1718,7 @@ enum YaxiService {
             AppLogger.log("SCA result: connectionData=\(connectionData == nil ? "nil" : "\(connectionData!.count)b")", category: "YaxiService")
             return SCAOutcome(payload: payload, session: session, connectionData: connectionData)
 
-        case .dialog(let input):
+        case .dialog(let input, let dialogMsg):
             switch input {
 
             case .selection(let options, let context):
@@ -1781,6 +1783,7 @@ enum YaxiService {
                     type: type, secrecyLevel: secrecy,
                     minLength: minLen, maxLength: maxLen,
                     bankDisplayName: bankName,
+                    msg: dialogMsg,
                     slotEpochAtRequest: slotEpochSnapshot
                 )
                 // Nur Metadaten loggen — der eingegebene Wert ist Secret.
@@ -1899,7 +1902,7 @@ enum YaxiService {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket,
                                            confirm: confirm, respond: respond, depth: depth + 1)
-                case .dialog(let input):
+                case .dialog(let input, _):
                     if case .confirmation(let newCtx, let newDelay) = input {
                         let ctxChanged = newCtx != ctx
                         ctx = newCtx
@@ -1981,7 +1984,7 @@ enum YaxiService {
                     ctx = newCtx
                 case .redirectHandle(_, let newCtx):
                     ctx = newCtx
-                case .dialog(let input):
+                case .dialog(let input, _):
                     if case .confirmation = input {
                         return await handleSCA(initial: next, client: client, ticket: ticket,
                                                confirm: confirm, respond: respond)

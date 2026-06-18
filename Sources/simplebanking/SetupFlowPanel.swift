@@ -195,6 +195,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         NSApp.activate(ignoringOtherApps: true)
         panel.center()
         panel.makeKeyAndOrderFront(nil)
+        // SCA-Field-Input während des Setups als Sheet AN diesem Fenster zeigen
+        // (nicht als frei schwebendes Panel) → kein Cancel des Connect-Tasks.
+        SCAFieldInputPresenter.hostWindow = panel
+        defer { SCAFieldInputPresenter.hostWindow = nil }
         let response = NSApp.runModal(for: panel)
         panel.orderOut(nil)
         if response == .stop {

@@ -1534,27 +1534,15 @@ private struct TransactionsPanelView: View {
                 )
             }
 
-            // eBon: Umschalter Einkäufe ⇄ Kategorien + kleiner Aktualisieren-Button.
+            // eBon: Umschalter Einkäufe ⇄ Kategorien (Aktualisieren liegt jetzt
+            // global im Header-Toolbar neben dem Pin-Button).
             if receiptActive {
-                HStack(spacing: 8) {
-                    Picker("", selection: $reweTab) {
-                        Text(L10n.t("Einkäufe", "Purchases")).tag(0)
-                        Text(L10n.t("Kategorien", "Categories")).tag(1)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    Button {
-                        accountNav.onReceiptRefresh?()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .semibold))
-                            .frame(width: 24, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
-                    .help(L10n.t("\(receiptBrandName) aktualisieren", "Refresh \(receiptBrandName)"))
+                Picker("", selection: $reweTab) {
+                    Text(L10n.t("Einkäufe", "Purchases")).tag(0)
+                    Text(L10n.t("Kategorien", "Categories")).tag(1)
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
@@ -1940,17 +1928,7 @@ private struct TransactionsPanelView: View {
                 showChatSheet = false
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MerchantRulesChanged"))) { _ in
-            vm.objectWillChange.send()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("TransactionCategoriesChanged"))) { _ in
-            vm.objectWillChange.send()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .bankTintChanged)) { _ in
-            vm.objectWillChange.send()
-        }
-        .onChange(of: multibankingStore.activeIndex) { _ in loadReweReceipts() }
-        .onReceive(NotificationCenter.default.publisher(for: .reweReceiptsChanged)) { _ in loadReweReceipts() }
+        .background(notificationObservers)
         .onAppear {
             loadReweReceipts()
             resetInfiniteWindowIfNeeded()
@@ -2089,6 +2067,29 @@ private struct TransactionsPanelView: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    /// Notification-/Change-Observer gebündelt (eigener Type-Check-Scope, hält die
+    /// Haupt-`body`-Kette kurz genug für den Compiler).
+    private var notificationObservers: some View {
+        Color.clear
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("MerchantRulesChanged"))) { _ in
+                vm.objectWillChange.send()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("TransactionCategoriesChanged"))) { _ in
+                vm.objectWillChange.send()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .bankTintChanged)) { _ in
+                vm.objectWillChange.send()
+            }
+            .onChange(of: multibankingStore.activeIndex) { _ in loadReweReceipts() }
+            .onReceive(NotificationCenter.default.publisher(for: .reweReceiptsChanged)) { _ in loadReweReceipts() }
+            .onReceive(NotificationCenter.default.publisher(for: .transactionsPanelHeaderRefresh), perform: handleHeaderRefresh)
+    }
+
+    /// Header-↻ nutzt denselben Pull-to-Refresh-Pfad → gleicher Spinner.
+    private func handleHeaderRefresh(_ note: Notification) {
+        Task { await triggerPullRefresh() }
     }
 
     private func triggerPullRefresh() async {
@@ -3616,6 +3617,9 @@ final class AccountNavModel: ObservableObject {
     // MARK: - Stay on Top
 
     private static let stayOnTopKey = "transactionsPanel.stayOnTop"
+    private static let frameAutosaveName = "simplebanking.transactionsPanel"
+    /// true, sobald eine Position gesetzt wurde (gespeichert oder einmalig zentriert).
+    private var positionRestored = false
 
     private var isPinned: Bool {
         get { UserDefaults.standard.bool(forKey: Self.stayOnTopKey) }
@@ -3650,6 +3654,11 @@ final class AccountNavModel: ObservableObject {
         // Eindeutige ID, damit der app-weite Scroll-Monitor NUR Events dieses
         // Fensters verarbeitet (sonst scrollt das Settings-Fenster die Liste mit).
         panel.identifier = NSUserInterfaceItemIdentifier(Self.panelWindowIdentifier)
+        // Fensterposition merken: AppKit persistiert/restauriert das Frame bei
+        // Move/Resize. positionRestored=true, wenn eine gespeicherte Position
+        // angewandt wurde → show() zentriert dann nicht mehr.
+        panel.setFrameAutosaveName(Self.frameAutosaveName)
+        positionRestored = panel.setFrameUsingName(Self.frameAutosaveName)
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         // Theme-aware panel background — picks light/dark based on appearance
@@ -3697,7 +3706,12 @@ final class AccountNavModel: ObservableObject {
     }
 
     func show() {
-        panel.center()
+        // Nur beim allerersten Öffnen zentrieren; danach gemerkte Position behalten
+        // (auch über Konto-Wechsel hinweg — show() wird bei jedem Switch gerufen).
+        if !positionRestored {
+            panel.center()
+            positionRestored = true
+        }
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -3758,6 +3772,7 @@ final class AccountNavModel: ObservableObject {
         let delegate = TransactionsPanelToolbarDelegate(
             onSettings: onSettings,
             onTogglePin: { [weak self] in self?.togglePin() },
+            onRefresh: { NotificationCenter.default.post(name: .transactionsPanelHeaderRefresh, object: nil) },
             isPinnedProvider: { [weak self] in self?.isPinned ?? false }
         )
         toolbar.delegate = delegate
@@ -3773,32 +3788,41 @@ final class AccountNavModel: ObservableObject {
     }
 }
 
+extension Notification.Name {
+    /// Header-Toolbar „Aktualisieren" → löst den Pull-to-Refresh-Pfad aus.
+    static let transactionsPanelHeaderRefresh = Notification.Name("simplebanking.transactionsPanelHeaderRefresh")
+}
+
 @MainActor
 private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegate {
     private let settingsIdentifier = NSToolbarItem.Identifier("simplebanking.transactions.settings")
     private let pinIdentifier      = NSToolbarItem.Identifier("simplebanking.transactions.pin")
+    private let refreshIdentifier  = NSToolbarItem.Identifier("simplebanking.transactions.refresh")
     private let onSettings: (() -> Void)?
     private let onTogglePin: (() -> Void)?
+    private let onRefresh: (() -> Void)?
     private let isPinnedProvider: () -> Bool
     private weak var pinButton: NSButton?
 
     init(
         onSettings: (() -> Void)?,
         onTogglePin: (() -> Void)? = nil,
+        onRefresh: (() -> Void)? = nil,
         isPinnedProvider: @escaping () -> Bool = { false }
     ) {
         self.onSettings = onSettings
         self.onTogglePin = onTogglePin
+        self.onRefresh = onRefresh
         self.isPinnedProvider = isPinnedProvider
         super.init()
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, pinIdentifier, settingsIdentifier]
+        [.flexibleSpace, refreshIdentifier, pinIdentifier, settingsIdentifier]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, pinIdentifier, settingsIdentifier]
+        [.flexibleSpace, refreshIdentifier, pinIdentifier, settingsIdentifier]
     }
 
     func toolbar(
@@ -3806,6 +3830,20 @@ private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegat
         itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
         willBeInsertedIntoToolbar flag: Bool
     ) -> NSToolbarItem? {
+        if itemIdentifier == refreshIdentifier {
+            let item = NSToolbarItem(itemIdentifier: refreshIdentifier)
+            let button = NSButton()
+            button.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Aktualisieren")
+            button.bezelStyle = .texturedRounded
+            button.isBordered = false
+            button.target = self
+            button.action = #selector(refreshTapped)
+            button.toolTip = "Aktuelles Konto aktualisieren"
+            item.view = button
+            item.label = ""
+            item.paletteLabel = "Aktualisieren"
+            return item
+        }
         if itemIdentifier == settingsIdentifier {
             let item = NSToolbarItem(itemIdentifier: settingsIdentifier)
             let button = NSButton()
@@ -3861,6 +3899,10 @@ private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegat
 
     @objc private func pinTapped() {
         onTogglePin?()
+    }
+
+    @objc private func refreshTapped() {
+        onRefresh?()
     }
 }
 

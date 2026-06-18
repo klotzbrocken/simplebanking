@@ -24,6 +24,9 @@ enum SCAFieldInput {
         /// Anzeige im Sheet-Header (z.B. „Sparkasse Siegen") — kommt vom
         /// Aufrufer aus dem aktiven Slot, nicht aus dem SDK.
         let bankDisplayName: String
+        /// Optionale Challenge-/Anweisungsnachricht der Bank (z.B. „TAN an ***1234",
+        /// photoTAN-Hinweis). `nil`, wenn die Bank keine schickt → Fallback-Text.
+        var msg: String? = nil
         /// Snapshot des `MultibankingStore.shared.activeSlotEpoch` zum
         /// Zeitpunkt der Anfrage. Bei Submit prüfen wir, dass der User
         /// nicht zwischenzeitlich die Bank gewechselt hat (sonst wäre der
