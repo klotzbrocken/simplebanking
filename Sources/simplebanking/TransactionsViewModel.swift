@@ -143,7 +143,9 @@ final class TransactionsViewModel: ObservableObject {
     }
 
     var isUnifiedMode: Bool {
-        unifiedModeEnabled && MultibankingStore.shared.slots.count > 1
+        // Unified bezieht sich nur auf ECHTE Konten — eBon-Slots (REWE/dm) zählen
+        // nicht. Erst ab 2 echten Konten ist die Übersicht sinnvoll.
+        unifiedModeEnabled && MultibankingStore.shared.realSlotCount > 1
     }
 
     let pageSize: Int = 10

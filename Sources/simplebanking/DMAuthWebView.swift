@@ -31,10 +31,16 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
 
     /// Frischester via JS-Hook geernteter Bearer-Token (ohne "Bearer "-Präfix).
     private var latestToken: String = ""
+    /// Auto-Sync nur einmal pro Fenster (Token wird mehrfach gepostet).
+    private var didAutoSync = false
 
     var onSynced: ((DMSyncResult) -> Void)?
+    /// Headless-Abschluss: true = synchronisiert, false = Timeout/Login nötig.
+    var onFinished: ((Bool) -> Void)?
+    private var headless = false
+    private var finished = false
 
-    private static var retained: DMAuthWebView?
+    private static var retained: [String: DMAuthWebView] = [:]
 
     init(slotId: String, bankId: String = "primary") {
         self.slotId = slotId
@@ -46,33 +52,34 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
     static func present(slotId: String, onSynced: ((DMSyncResult) -> Void)? = nil) -> DMAuthWebView {
         let c = DMAuthWebView(slotId: slotId)
         c.onSynced = onSynced
-        retained = c
+        retained[slotId] = c
         c.show()
         return c
     }
 
-    private func show() {
+    /// Unsichtbarer Hintergrund-Sync auf Basis der gespeicherten dm-Sitzung.
+    static func presentHeadless(slotId: String, timeout: TimeInterval = 25,
+                                onFinished: @escaping (Bool) -> Void) {
+        let c = DMAuthWebView(slotId: slotId)
+        c.headless = true
+        c.onFinished = onFinished
+        retained[slotId] = c
+        c.show(timeout: timeout)
+    }
+
+    private func finish(_ ok: Bool) {
+        guard !finished else { return }
+        finished = true
+        if headless {
+            webView?.configuration.userContentController.removeScriptMessageHandler(forName: "dmToken")
+            let id = slotId
+            DispatchQueue.main.async { DMAuthWebView.retained[id] = nil }
+        }
+        onFinished?(ok)
+    }
+
+    private func show(timeout: TimeInterval = 0) {
         let frame = NSRect(x: 0, y: 0, width: 780, height: 720)
-        window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable],
-                          backing: .buffered, defer: false)
-        window.title = "dm eBons verbinden"
-        window.delegate = self
-        window.center()
-
-        let content = NSView(frame: frame)
-        content.autoresizesSubviews = true
-
-        let bar = NSView(frame: NSRect(x: 0, y: frame.height - 40, width: frame.width, height: 40))
-        bar.autoresizingMask = [.width, .minYMargin]
-        syncButton = NSButton(title: "Einkäufe synchronisieren", target: self, action: #selector(syncTapped))
-        syncButton.bezelStyle = .rounded
-        syncButton.frame = NSRect(x: 8, y: 6, width: 220, height: 28)
-        statusLabel = NSTextField(labelWithString: "Bei dm einloggen und Einkäufe öffnen, dann synchronisieren.")
-        statusLabel.frame = NSRect(x: 238, y: 10, width: frame.width - 248, height: 20)
-        statusLabel.autoresizingMask = [.width]
-        statusLabel.lineBreakMode = .byTruncatingTail
-        bar.addSubview(syncButton)
-        bar.addSubview(statusLabel)
 
         // JS-Hook: Authorization-Header aus fetch + XHR abgreifen → native posten.
         let cfg = WKWebViewConfiguration()
@@ -83,7 +90,6 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
             cfg.userContentController.addUserScript(userScript)
             cfg.userContentController.add(self, name: "dmToken")
         }
-
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: frame.width, height: frame.height - 40),
                             configuration: cfg)
         webView.autoresizingMask = [.width, .height]
@@ -91,6 +97,34 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
         // Echte Safari-UA, damit die WebView nicht als veralteter Client gilt.
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
 
+        syncButton = NSButton(title: "Einkäufe synchronisieren", target: self, action: #selector(syncTapped))
+        syncButton.bezelStyle = .rounded
+        statusLabel = NSTextField(labelWithString: "Bei dm einloggen und Einkäufe öffnen, dann synchronisieren.")
+        statusLabel.lineBreakMode = .byTruncatingTail
+
+        if headless {
+            // KEIN Fenster: WKWebView lädt + führt JS (Angular + Token-Hook) auch
+            // ohne View-Hierarchie aus.
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in self?.finish(false) }
+            webView.load(URLRequest(url: URL(string: Self.purchasesURL)!))
+            return
+        }
+
+        window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable],
+                          backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.title = "dm eBons verbinden"
+        window.delegate = self
+        window.center()
+        let content = NSView(frame: frame)
+        content.autoresizesSubviews = true
+        let bar = NSView(frame: NSRect(x: 0, y: frame.height - 40, width: frame.width, height: 40))
+        bar.autoresizingMask = [.width, .minYMargin]
+        syncButton.frame = NSRect(x: 8, y: 6, width: 220, height: 28)
+        statusLabel.frame = NSRect(x: 238, y: 10, width: frame.width - 248, height: 20)
+        statusLabel.autoresizingMask = [.width]
+        bar.addSubview(syncButton)
+        bar.addSubview(statusLabel)
         content.addSubview(webView)
         content.addSubview(bar)
         window.contentView = content
@@ -101,7 +135,7 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
 
     func windowWillClose(_ notification: Notification) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "dmToken")
-        Self.retained = nil
+        Self.retained[slotId] = nil
     }
 
     // MARK: - Token-Hook
@@ -164,7 +198,13 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
         guard message.name == "dmToken", let token = message.body as? String, !token.isEmpty else { return }
         latestToken = token
         if syncButton.isEnabled == false { return }   // läuft gerade — Status nicht überschreiben
-        statusLabel.stringValue = "Bereit — jetzt synchronisieren."
+        // Auto-Sync, sobald ein gültiger Token da ist — kein manueller Klick nötig.
+        if !didAutoSync, !DMService.isExpired(token) {
+            didAutoSync = true
+            syncTapped()
+        } else {
+            statusLabel.stringValue = "Bereit — jetzt synchronisieren."
+        }
     }
 
     // MARK: - Sync
@@ -182,11 +222,14 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
                 let result = try await DMService.sync(token: token, slotId: slotId, bankId: bankId)
                 statusLabel.stringValue = "✅ \(result.listed) Einkäufe · \(result.detailed) mit Warenkorb · \(result.stored) gespeichert"
                 onSynced?(result)
+                finish(true)
             } catch DMServiceError.tokenExpired {
                 statusLabel.stringValue = "Sitzung abgelaufen — Seite neu laden und nochmal synchronisieren."
+                if headless { finish(false) }
             } catch {
                 statusLabel.stringValue = "Fehler: \(error)"
                 AppLogger.log("dm sync failed: \(error)", category: "DM", level: "WARN")
+                if headless { finish(false) }
             }
             syncButton.isEnabled = true
         }

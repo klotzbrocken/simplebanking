@@ -10,6 +10,7 @@ enum SlotSource: String, Codable {
     case yaxi
     case rewe
     case dm
+    case amazon
 }
 
 struct BankSlot: Codable, Identifiable, Equatable {
@@ -28,10 +29,29 @@ struct BankSlot: Codable, Identifiable, Equatable {
     var isREWE: Bool { source == .rewe }
     /// True für dm-eBon-Slots.
     var isDM: Bool { source == .dm }
-    /// True für jeden eBon-/Kassenbon-Slot (REWE oder dm): kein YAXI/IBAN, kein
-    /// Auto-Refresh, Anzeige aus lokal gespeicherten Bons. Bank-Aggregat- und
-    /// YAXI-Pfade müssen diese Slots überspringen.
-    var isReceiptSlot: Bool { source == .rewe || source == .dm }
+    /// True für Amazon-Bestell-Slots.
+    var isAmazon: Bool { source == .amazon }
+    /// True für jeden eBon-/Kassenbon-/Bestell-Slot (REWE, dm, Amazon): kein
+    /// YAXI/IBAN, kein Auto-Refresh, Anzeige aus lokal gespeicherten Bons.
+    /// Bank-Aggregat- und YAXI-Pfade müssen diese Slots überspringen.
+    var isReceiptSlot: Bool { source == .rewe || source == .dm || source == .amazon }
+
+    /// Marken-Logo des eBon-Slots (Menüleiste/Flyout/Panel) — quelle-abhängig.
+    var receiptLogoImage: NSImage? {
+        switch source {
+        case .dm: return DMLogoAsset.image
+        case .amazon: return AmazonLogoAsset.image
+        default: return ReweLogoAsset.image
+        }
+    }
+    /// Anzeigename des eBon-Slots.
+    var receiptBrandName: String {
+        switch source {
+        case .dm: return "dm"
+        case .amazon: return "Amazon"
+        default: return "REWE"
+        }
+    }
 
     static func makeNew(iban: String, displayName: String, logoId: String?) -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: iban, displayName: displayName, logoId: logoId)
@@ -47,6 +67,12 @@ struct BankSlot: Codable, Identifiable, Equatable {
     static func makeDM(displayName: String = "dm") -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: "", displayName: displayName,
                  logoId: "dm", currency: "EUR", source: .dm)
+    }
+
+    /// Erzeugt einen Amazon-Bestell-Slot (kein IBAN/YAXI-Connection).
+    static func makeAmazon(displayName: String = "Amazon") -> BankSlot {
+        BankSlot(id: UUID().uuidString, iban: "", displayName: displayName,
+                 logoId: "amazon", currency: "EUR", source: .amazon)
     }
 }
 
@@ -73,6 +99,10 @@ final class MultibankingStore: ObservableObject {
 
     var activeSlot: BankSlot? { slots.indices.contains(activeIndex) ? slots[activeIndex] : slots.first }
 
+    /// Anzahl echter Bank-Konten (ohne eBon-Slots wie REWE/dm). Unified bezieht
+    /// sich NUR auf echte Konten — die Übersicht ist erst ab 2 davon sinnvoll.
+    var realSlotCount: Int { slots.filter { !$0.isReceiptSlot }.count }
+
     private init() {
         load()
         migrateFromLegacyIfNeeded()
@@ -89,7 +119,8 @@ final class MultibankingStore: ObservableObject {
         slots.append(slot)
         if makeActive { activeIndex = slots.count - 1 }
         save()
-        if autoUnified, slots.count > 1 {
+        // Unified nur bei >=2 ECHTEN Konten auto-aktivieren (eBon-Slots zählen nicht).
+        if autoUnified, realSlotCount > 1 {
             UserDefaults.standard.set(true, forKey: "unifiedModeEnabled")
         }
     }
@@ -106,8 +137,9 @@ final class MultibankingStore: ObservableObject {
         slots.remove(at: idx)
         if activeIndex >= slots.count { activeIndex = max(0, slots.count - 1) }
         save()
-        // Auto-disable unified mode when back to a single account.
-        if slots.count <= 1 {
+        // Auto-disable unified mode when fewer than 2 REAL accounts remain
+        // (eBon-Slots wie REWE/dm zählen nicht).
+        if realSlotCount <= 1 {
             UserDefaults.standard.set(false, forKey: "unifiedModeEnabled")
         }
     }

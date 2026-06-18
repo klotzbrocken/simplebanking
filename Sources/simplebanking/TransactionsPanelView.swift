@@ -36,15 +36,15 @@ private struct TransactionsPanelView: View {
     
     @ObservedObject private var roundupView = RoundupViewState.shared
     @State private var reweReceipts: [ReweReceipt] = []
-    @State private var reweShowYear: Bool = false
+    @State private var reweRange: Int = 0   // 0 = Monat, 1 = Jahr, 2 = Vorjahr
     @State private var reweExpanded: Set<String> = []
     @State private var reweTab: Int = 0   // 0 = Einkäufe, 1 = Kategorien
     /// eBon-Slot aktiv (REWE oder dm) — selbe Karten-/Listen-Mechanik, nur Logo,
     /// Name und Kategorie-Wörterbuch unterscheiden sich.
     private var receiptActive: Bool { multibankingStore.activeSlot?.isReceiptSlot == true }
-    private var dmActive: Bool { multibankingStore.activeSlot?.isDM == true }
-    private var receiptLogo: NSImage? { dmActive ? DMLogoAsset.image : ReweLogoAsset.image }
-    private var receiptBrandName: String { dmActive ? "dm" : "REWE" }
+    private var receiptSource: SlotSource { multibankingStore.activeSlot?.source ?? .rewe }
+    private var receiptLogo: NSImage? { multibankingStore.activeSlot?.receiptLogoImage }
+    private var receiptBrandName: String { multibankingStore.activeSlot?.receiptBrandName ?? "REWE" }
     @State private var showAttentionInbox = false
     @State private var attentionCards: [AttentionCard] = []
     @State private var inboxGeneration: Int = 0
@@ -673,9 +673,47 @@ private struct TransactionsPanelView: View {
         let y = String(format: "%04d", Calendar.current.component(.year, from: Date()))
         return reweReceipts.filter { !$0.cancelled && $0.timestamp.hasPrefix(y) }.reduce(0) { $0 + $1.totalCents }
     }
+    private var reweLastYearString: String { String(format: "%04d", Calendar.current.component(.year, from: Date()) - 1) }
+    private var reweLastYearReceipts: [ReweReceipt] {
+        reweReceipts.filter { !$0.cancelled && $0.timestamp.hasPrefix(reweLastYearString) }
+    }
+    private var reweLastYearCents: Int { reweLastYearReceipts.reduce(0) { $0 + $1.totalCents } }
+    private var reweHasLastYear: Bool { !reweLastYearReceipts.isEmpty }
     private var reweMonthLabel: String {
         let f = DateFormatter(); f.locale = Locale(identifier: "de_DE"); f.dateFormat = "LLLL"
         return f.string(from: Date())
+    }
+    /// 0 = Monat, 1 = Jahr, 2 = Vorjahr.
+    private var reweRangeLabel: String {
+        switch reweRange {
+        case 1: return String(format: "%04d", Calendar.current.component(.year, from: Date()))
+        case 2: return reweLastYearString
+        default: return reweMonthLabel
+        }
+    }
+    private var reweRangeAmount: String {
+        switch reweRange { case 1: return reweEuro(reweYearCents); case 2: return reweEuro(reweLastYearCents); default: return reweEuro(reweMonthCents) }
+    }
+    private func cycleReweRange() {
+        if reweRange == 0 { reweRange = 1 }
+        else if reweRange == 1 { reweRange = reweHasLastYear ? 2 : 0 }
+        else { reweRange = 0 }
+    }
+    /// Top-4-Ring-Segmente + Datum des letzten Bons (für die Balance-Card).
+    private var reweRingSegments: [ReceiptRingSegment] {
+        guard let last = reweReceipts.first else { return [] }
+        return ReceiptCategoryRing.segments(forItems: last.items, source: receiptSource)
+    }
+    private var reweLastReceiptDate: Date? {
+        guard let last = reweReceipts.first else { return nil }
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: String(last.timestamp.prefix(10)))
+    }
+    /// Zeit der letzten Aktualisierung (Sync) für den eBon-Header — aus dem
+    /// `fetchedAt` des neuesten Bons (NICHT die Bank-Abrufzeit, die hier leer ist).
+    private var receiptFetchedDate: Date? {
+        guard let stamp = reweReceipts.first?.fetchedAt else { return nil }
+        return ISO8601DateFormatter().date(from: stamp)
     }
 
     func loadReweReceipts() {
@@ -683,13 +721,12 @@ private struct TransactionsPanelView: View {
         reweReceipts = (try? ReweReceiptStore.all(slotId: active.id)) ?? []
     }
 
-    /// REWE-Balance-Card im EXAKTEN Layout der Bank-Karte (Header + großer Betrag,
-    /// kein Ring, darunter Einkäufe Monat/Jahr-Toggle). Gleiche minHeight (108).
+    /// eBon-Balance-Card im EXAKTEN Layout der Bank-Karte (Header + großer Betrag,
+    /// Kategorien-Ring rechts, darunter Einkäufe Monat/Jahr/Vorjahr-Toggle).
+    /// Gleiche minHeight (108).
     private var reweBalanceCard: some View {
         let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.60)
         let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.35)
-        let subLabel = reweShowYear ? String(format: "%04d", Calendar.current.component(.year, from: Date())) : reweMonthLabel
-        let subAmount = reweEuro(reweShowYear ? reweYearCents : reweMonthCents)
         let leftContent = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let logo = receiptLogo {
@@ -698,21 +735,30 @@ private struct TransactionsPanelView: View {
                 } else {
                     Image(systemName: "cart.fill").font(.system(size: 16)).foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text(formatBankHeader(nickname: nil, bankName: receiptBrandName, date: vm.currentBalanceFetchedAt))
+                Text(formatBankHeader(nickname: nil, bankName: receiptBrandName, date: receiptFetchedDate))
                     .font(.system(size: 13)).foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
             Text(vm.currentBalance ?? "--,-- €")
                 .font(.system(size: 32, weight: .bold, design: .default))
                 .foregroundColor(.primary)
-            Button { reweShowYear.toggle() } label: {
-                Text("\(L10n.t("Einkäufe", "Purchases")) \(subLabel): \(subAmount)")
-                    .font(.system(size: 12)).foregroundColor(Color(NSColor.secondaryLabelColor))
+            Button { cycleReweRange() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                    Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
+                        .font(.system(size: 12))
+                }
+                .foregroundColor(Color(NSColor.secondaryLabelColor))
             }
             .buttonStyle(.plain)
+            .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        return HStack(alignment: .center, spacing: 0) { leftContent.frame(minHeight: 108) }
+        return HStack(alignment: .center, spacing: 0) {
+            leftContent.frame(minHeight: 108)
+            ReceiptCategoryRing(segments: reweRingSegments, date: reweLastReceiptDate)
+                .padding(.leading, 12)
+        }
             .padding(16)
             .background(
                 ZStack {
@@ -757,15 +803,29 @@ private struct TransactionsPanelView: View {
         }
     }
 
+    /// Kategorie → Ring-Farbe (nur die Top-4 des letzten Bons sind im Ring gefärbt).
+    /// Erlaubt, die Balken in der Kategorien-Ansicht passend zum Ring einzufärben,
+    /// sodass man Farbe ↔ Kategorie zuordnen kann.
+    private var ringColorByLabel: [String: Color] {
+        Dictionary(uniqueKeysWithValues: reweRingSegments.compactMap { seg in
+            Color(hex: seg.colorHex).map { (seg.label, $0) }
+        })
+    }
+
     /// Quelle-abhängige Kategorie-Aufschlüsselung, vereinheitlicht auf ein
     /// gemeinsames Tupel (REWE = Lebensmittel-Wörterbuch, dm = Drogerie).
     private var receiptCategoryBreakdown: [(label: String, symbol: String, totalCents: Int, count: Int)] {
-        if dmActive {
+        switch receiptSource {
+        case .dm:
             return DMItemCategorizer.breakdown(reweReceipts)
                 .map { (label: $0.category.rawValue, symbol: $0.category.symbol, totalCents: $0.totalCents, count: $0.count) }
+        case .amazon:
+            return AmazonItemCategorizer.breakdown(reweReceipts)
+                .map { (label: $0.category.rawValue, symbol: $0.category.symbol, totalCents: $0.totalCents, count: $0.count) }
+        default:
+            return ReweItemCategorizer.breakdown(reweReceipts)
+                .map { (label: $0.category.rawValue, symbol: $0.category.symbol, totalCents: $0.totalCents, count: $0.count) }
         }
-        return ReweItemCategorizer.breakdown(reweReceipts)
-            .map { (label: $0.category.rawValue, symbol: $0.category.symbol, totalCents: $0.totalCents, count: $0.count) }
     }
 
     /// „Was kaufst du ein?" — Kategorien-Aufschlüsselung (Summe + Anteils-Balken).
@@ -781,10 +841,12 @@ private struct TransactionsPanelView: View {
                 } else {
                     ForEach(breakdown, id: \.label) { entry in
                         let frac = Double(entry.totalCents) / Double(total)
+                        // Ring-Farbe der Kategorie (nur Top-4 des letzten Bons); sonst neutral.
+                        let ringColor = ringColorByLabel[entry.label]
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 10) {
                                 Image(systemName: entry.symbol)
-                                    .font(.system(size: 13)).foregroundColor(.secondary).frame(width: 20)
+                                    .font(.system(size: 13)).foregroundColor(ringColor ?? .secondary).frame(width: 20)
                                 Text(entry.label).font(.system(size: 14, weight: .medium))
                                 Text("· \(entry.count)").font(.system(size: 11)).foregroundColor(Color(NSColor.tertiaryLabelColor))
                                 Spacer()
@@ -793,7 +855,7 @@ private struct TransactionsPanelView: View {
                             GeometryReader { geo in
                                 ZStack(alignment: .leading) {
                                     Capsule().fill(Color.secondary.opacity(0.12)).frame(height: 5)
-                                    Capsule().fill(Color.accentColor.opacity(0.55))
+                                    Capsule().fill((ringColor ?? Color.accentColor).opacity(ringColor == nil ? 0.45 : 0.85))
                                         .frame(width: max(4, geo.size.width * frac), height: 5)
                                 }
                             }
@@ -1240,20 +1302,22 @@ private struct TransactionsPanelView: View {
                 }
                 .buttonStyle(.plain)
             }
-            // "Alle Konten" dot
-            let unifiedActive = vm.unifiedModeEnabled
-            Button {
-                guard !unifiedActive else { return }
-                vm.unifiedModeEnabled = true
-            } label: {
-                Capsule()
-                    .fill(unifiedActive ? Color(NSColor.secondaryLabelColor) : Color(NSColor.tertiaryLabelColor))
-                    .frame(width: unifiedActive ? 24 : 8, height: 8)
-                    .animation(.easeInOut(duration: 0.3), value: unifiedActive)
-                    .frame(height: 24)
-                    .contentShape(Rectangle())
+            // "Alle Konten" dot — nur bei >=2 ECHTEN Konten (eBon-Slots zählen nicht).
+            if multibankingStore.realSlotCount > 1 {
+                let unifiedActive = vm.unifiedModeEnabled
+                Button {
+                    guard !unifiedActive else { return }
+                    vm.unifiedModeEnabled = true
+                } label: {
+                    Capsule()
+                        .fill(unifiedActive ? Color(NSColor.secondaryLabelColor) : Color(NSColor.tertiaryLabelColor))
+                        .frame(width: unifiedActive ? 24 : 8, height: 8)
+                        .animation(.easeInOut(duration: 0.3), value: unifiedActive)
+                        .frame(height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -1338,22 +1402,15 @@ private struct TransactionsPanelView: View {
                 .help(showCategories
                       ? L10n.t("Kategorien ausblenden", "Hide categories")
                       : L10n.t("Kategorien anzeigen", "Show categories"))
-                if !vm.isUnifiedMode {
-                    let roundupEnabled = activeSlotSettings.roundupEnabled
+                if !vm.isUnifiedMode && !receiptActive {
                     Button(action: { toggleRoundupView() }) {
                         Image(systemName: roundupView.isActive ? "centsign.circle.fill" : "centsign.circle")
                             .font(.system(size: 15))
-                            .foregroundColor(roundupView.isActive
-                                ? Color.roundupAccent
-                                : (roundupEnabled ? .secondary : .secondary.opacity(0.4)))
+                            .foregroundColor(roundupView.isActive ? Color.roundupAccent : .secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .disabled(!roundupEnabled)
-                    .help(roundupEnabled
-                        ? L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen",
-                                 "Round-up view — show amounts rounded up")
-                        : L10n.t("Erst in Einstellungen → Konten → Aufrunden aktivieren",
-                                 "First enable round-up in Settings → Accounts"))
+                    .help(L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
+                                 "Round-up view — show amounts rounded up (enables round-up for this account)"))
                 }
             }
             .padding(.horizontal, 16)
@@ -1477,14 +1534,27 @@ private struct TransactionsPanelView: View {
                 )
             }
 
-            // REWE: Umschalter Einkäufe ⇄ Kategorien
+            // eBon: Umschalter Einkäufe ⇄ Kategorien + kleiner Aktualisieren-Button.
             if receiptActive {
-                Picker("", selection: $reweTab) {
-                    Text(L10n.t("Einkäufe", "Purchases")).tag(0)
-                    Text(L10n.t("Kategorien", "Categories")).tag(1)
+                HStack(spacing: 8) {
+                    Picker("", selection: $reweTab) {
+                        Text(L10n.t("Einkäufe", "Purchases")).tag(0)
+                        Text(L10n.t("Kategorien", "Categories")).tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    Button {
+                        accountNav.onReceiptRefresh?()
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(width: 24, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .help(L10n.t("\(receiptBrandName) aktualisieren", "Refresh \(receiptBrandName)"))
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
@@ -2208,6 +2278,13 @@ private struct TransactionsPanelView: View {
         if roundupView.isActive {
             roundupView.deactivate()
         } else if let slotId = multibankingStore.activeSlot?.id {
+            // Aufrunden per Button direkt aktivieren — kein Umweg über die
+            // Einstellungen. Ist es für den Slot noch aus, schalten wir es hier ein.
+            var s = BankSlotSettingsStore.load(slotId: slotId)
+            if !s.roundupEnabled {
+                s.roundupEnabled = true
+                BankSlotSettingsStore.save(s, slotId: slotId)
+            }
             // Aktive Suche/Filter zurücksetzen: im Sparmodus sind sie ausgeblendet, der
             // Spartopf rechnet aber aus ALLEN Buchungen — sonst zeigt die Liste einen
             // stillen Ausschnitt, der nicht zur Spar-Summe passt.
@@ -3505,6 +3582,8 @@ final class AccountNavModel: ObservableObject {
     @Published var onNextAccount: (() -> Void)? = nil
     @Published var onAddAccount:  (() -> Void)? = nil
     @Published var onSwitchToIndex: ((Int) -> Void)? = nil
+    /// eBon-Slot (REWE/dm/Amazon) manuell aktualisieren (kleiner Button in der Liste).
+    @Published var onReceiptRefresh: (() -> Void)? = nil
     @Published var prevAccountLogo: NSImage? = nil
     @Published var nextAccountLogo: NSImage? = nil
     @Published var prevAccountBrandId: String? = nil

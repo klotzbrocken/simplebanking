@@ -380,7 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // eBon-Slot (REWE/dm): echtes Marken-Logo (farbig, nicht-Template). Ohne
         // Logo UND ohne Saldo-Titel (isShort-Default) wäre das Status-Item null-breit.
         if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
-            let asset = active.isDM ? DMLogoAsset.image : ReweLogoAsset.image
+            let asset = active.receiptLogoImage
             if let logo = asset?.resized(to: NSSize(width: 16, height: 16)) {
                 logo.isTemplate = false
                 return logo
@@ -421,8 +421,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Returns nil if unified mode is off, no slots have cached balances, or only one slot exists.
     private func computeUnifiedBalanceTitle() -> String? {
         guard txVM.isUnifiedMode else { return nil }
-        let slots = MultibankingStore.shared.slots
-        guard slots.count > 1 else { return nil }
+        let store = MultibankingStore.shared
+        let slots = store.slots
+        guard store.realSlotCount > 1 else { return nil }
         // Read cached balances; skip slots without a cached value (never synced)
         var byCurrency: [String: Double] = [:]
         for slot in slots {
@@ -522,8 +523,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Computes the unified total balance (Double) for the flyout card.
     private func computeUnifiedFlyoutTotal() -> Double? {
         guard txVM.isUnifiedMode else { return nil }
-        let slots = MultibankingStore.shared.slots
-        guard slots.count > 1 else { return nil }
+        let store = MultibankingStore.shared
+        guard store.realSlotCount > 1 else { return nil }
+        let slots = store.slots
         var total = 0.0
         var hasAny = false
         for slot in slots where !slot.isReceiptSlot {
@@ -1070,7 +1072,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.updateMenuBarButton()
         }
         NotificationCenter.default.addObserver(forName: .creditLimitToggleChanged, object: nil, queue: .main) { [weak self] _ in
-            self?.refresh()
+            // Automatischer UI-Refresh (kein User-Sync) → kein eBon-Login-Fenster.
+            Task { await self?.refreshAsync() }
         }
         // Bankfarben-Toggle (global oder pro Slot) ändert die Flyout-Host-
         // Backing-Layer-Farbe. Beim nächsten makeFlyoutHost zieht der Tint.
@@ -1204,6 +1207,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let dmItem = NSMenuItem(title: t("dm eBons verbinden… (Beta)", "Connect dm Receipts… (Beta)"),
                                 action: #selector(openDMBeta), keyEquivalent: "")
         settingsSub.addItem(dmItem)
+
+        let amazonItem = NSMenuItem(title: t("Amazon Bestellungen verbinden… (Beta)", "Connect Amazon Orders… (Beta)"),
+                                    action: #selector(openAmazonBeta), keyEquivalent: "")
+        settingsSub.addItem(amazonItem)
 
         let openSettingsItem = NSMenuItem(title: t("Einstellungen öffnen…", "Open Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         openSettingsItem.tag = 200
@@ -1448,13 +1455,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.connect()
         }
 
-        refresh()
+        // Launch: nur Anzeige aktualisieren. NICHT `refresh()` — das öffnet bei
+        // eBon-Slots (REWE/dm) das Login-/Sync-Fenster; ein WKWebView-Fenster mitten
+        // im Launch crasht (Autorelease-Pop). Sync passiert nur vom User „angestoßen".
+        Task { await refreshAsync() }
 
         // Preload subscription logos once so the Abos sheet can render icons immediately.
         SubscriptionLogoStore.shared.preloadInitial(displayNames: LogoAssets.allDisplayNames)
 
         autoStartSetupWizardIfNeeded()
         showWhatsNewIfNeeded()
+
+        // eBon-Slots (REWE/dm/Amazon) beim Start unsichtbar im Hintergrund
+        // aktualisieren — verzögert (nie während didFinishLaunching; ein WKWebView
+        // mitten im Launch crasht), und nur Anzeige-Update, nie ein Fenster.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            self?.backgroundSyncReceiptSlots()
+        }
 
         setupGlobalHotkey()
         globalHotkeyObserver = NotificationCenter.default.addObserver(
@@ -1548,7 +1565,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // manuell das Login-/Sync-Fenster an. Ist man noch eingeloggt, reicht ein
         // Klick auf „synchronisieren" darin.
         if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
-            if active.isDM { presentDMLogin(slotId: active.id) } else { presentREWELogin(slotId: active.id) }
+            // Erst still im Hintergrund; Fenster nur, wenn ein Login nötig ist.
+            syncReceiptSlot(active, allowWindow: true)
             return
         }
         // Manual refresh always clears the SCA backoff — user explicitly wants to retry.
@@ -2344,7 +2362,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             guard let self else { return }
             self.locked = true // Start locked state for logic
             self.promptUnlockIfNeeded()
-            self.refresh()
+            // Nach Unlock nur Anzeige aktualisieren — kein eBon-Login-Fenster.
+            Task { await self.refreshAsync() }
         }
     }
     
@@ -3196,6 +3215,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Prüfung erfolgt wie in der Umsatzliste erst beim KLICK (Upsell), nicht über
     /// die Sichtbarkeit — siehe `quickSendFlyoutNeedsUnlock`.
     private var quickSendFlyoutAvailable: Bool {
+        // eBon-Slots (REWE/dm) haben kein Konto zum Senden → kein Papierflieger.
+        if MultibankingStore.shared.activeSlot?.isReceiptSlot == true { return false }
         guard FeatureFlags.transferMoneyEnabled || demoMode else { return false }
         // Demo zeigt alle Features — Quick-Send ohne Labs-Toggle.
         if demoMode { return true }
@@ -3318,26 +3339,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func applyREWEFlyout(to rootView: inout StatusBalanceFlyoutCardView) {
         guard let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot else { return }
         rootView.reweMode = true
-        rootView.bankLogoImage = active.isDM ? DMLogoAsset.image : ReweLogoAsset.image
-        rootView.bankName = active.isDM ? "dm" : "REWE"
+        rootView.bankLogoImage = active.receiptLogoImage
+        rootView.bankName = active.receiptBrandName
 
         let all = (try? ReweReceiptStore.all(slotId: active.id)) ?? []
         // Header-Uhrzeit = letzter Sync (fetchedAt des neuesten Bons).
         if let latestFetched = all.first?.fetchedAt {
             rootView.balanceFetchedAt = ISO8601DateFormatter().date(from: latestFetched)
         }
-        // Einkäufe Monat/Jahr (cancelled ausgenommen).
+        // Einkäufe Monat/Jahr/Vorjahr (cancelled ausgenommen).
         let cal = Calendar.current
         let now = Date()
-        let ym = String(format: "%04d-%02d", cal.component(.year, from: now), cal.component(.month, from: now))
-        let y = String(format: "%04d", cal.component(.year, from: now))
+        let yearNum = cal.component(.year, from: now)
+        let ym = String(format: "%04d-%02d", yearNum, cal.component(.month, from: now))
+        let y = String(format: "%04d", yearNum)
+        let ly = String(format: "%04d", yearNum - 1)
         rootView.reweMonthTotalCents = all.filter { !$0.cancelled && $0.timestamp.hasPrefix(ym) }.reduce(0) { $0 + $1.totalCents }
         rootView.reweYearTotalCents = all.filter { !$0.cancelled && $0.timestamp.hasPrefix(y) }.reduce(0) { $0 + $1.totalCents }
+        let lastYearReceipts = all.filter { !$0.cancelled && $0.timestamp.hasPrefix(ly) }
+        rootView.reweLastYearTotalCents = lastYearReceipts.reduce(0) { $0 + $1.totalCents }
+        rootView.reweHasLastYear = !lastYearReceipts.isEmpty
+        rootView.reweLastYearLabel = ly
         let monthFmt = DateFormatter()
         monthFmt.locale = Locale(identifier: "de_DE")
         monthFmt.dateFormat = "LLLL"
         rootView.reweMonthLabel = monthFmt.string(from: now)
         rootView.reweYearLabel = y
+        // Kategorien-Ring: Top-4 des letzten Bons + dessen Datum.
+        if let last = all.first {
+            rootView.reweRingSegments = ReceiptCategoryRing.segments(forItems: last.items, source: active.source ?? .rewe)
+            rootView.reweLastReceiptDate = ISO8601DateFormatter().date(from: last.timestamp)
+                ?? parseReceiptDate(last.timestamp)
+        }
+    }
+
+    /// Robustes Datum aus einem Bon-Timestamp (ISO oder „yyyy-MM-dd…").
+    private func parseReceiptDate(_ ts: String) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: String(ts.prefix(10)))
     }
 
     private func applyQuickSendWiring(to rootView: inout StatusBalanceFlyoutCardView) {
@@ -3455,6 +3496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// (Popover closed via performClose, Centered via hideCenteredFlyout).
     private func buildFlyoutHost(onDoubleTap: @escaping () -> Void) -> (host: NSHostingController<StatusBalanceFlyoutCardView>, hasDots: Bool) {
         let isUnified = txVM.isUnifiedMode && (!demoMode || isMultiDemo)
+            && MultibankingStore.shared.realSlotCount > 1
         let balanceText = isUnified
             ? (computeUnifiedFlyoutBalanceText() ?? "--,-- €")
             : (lastBalance.map(formatEURWithCents) ?? "--,-- €")
@@ -3820,6 +3862,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let idx = store.activeIndex
         let count = store.slots.count
         let isUnified = txVM.isUnifiedMode && (!demoMode || isMultiDemo)
+            && MultibankingStore.shared.realSlotCount > 1
         let balanceText = isUnified
             ? (computeUnifiedFlyoutBalanceText() ?? "--,-- €")
             : (lastBalance.map(formatEURWithCents) ?? "--,-- €")
@@ -4789,6 +4832,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// Phase-3a-Beta: öffnet das Amazon-Login-/Import-Fenster. Legt einen
+    /// Amazon-Bestell-Slot an (nicht-aktiv, kein Aggregat-Zwang), falls keiner da ist.
+    @objc private func openAmazonBeta() {
+        DispatchQueue.main.async { [weak self] in
+            let store = MultibankingStore.shared
+            let slotId: String
+            if let existing = store.slots.first(where: { $0.isAmazon }) {
+                slotId = existing.id
+            } else {
+                let slot = BankSlot.makeAmazon()
+                store.addSlot(slot, makeActive: false, autoUnified: false)
+                slotId = slot.id
+            }
+            self?.presentAmazonLogin(slotId: slotId)
+        }
+    }
+
+    /// Öffnet das Amazon-Login-/Import-Fenster (manuell angestoßen — kein Auto-Sync).
+    private func presentAmazonLogin(slotId: String) {
+        AmazonAuthWebView.present(slotId: slotId) { [weak self] result in
+            AppLogger.log("amazon sync: scraped=\(result.scraped) stored=\(result.stored)", category: "Amazon")
+            if MultibankingStore.shared.activeSlot?.id == slotId {
+                self?.applyREWEDisplay(slotId: slotId)
+            }
+            NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
+        }
+    }
+
+    // MARK: - eBon Hintergrund-Sync (unsichtbar, gespeicherte Sitzung)
+
+    /// Synchronisiert einen eBon-Slot zuerst **unsichtbar im Hintergrund** (offscreen
+    /// WebView, gespeicherte Login-Sitzung). Schlägt das fehl (Login nötig/Timeout)
+    /// und `allowWindow` ist true, wird das sichtbare Login-Fenster geöffnet.
+    private func syncReceiptSlot(_ slot: BankSlot, allowWindow: Bool) {
+        let slotId = slot.id
+        let source = slot.source ?? .rewe
+        // REWE: Cloudflare-Turnstile (Mensch-Prüfung) lässt sich headless NICHT lösen.
+        // Hintergrund-Versuche verbrennen nur die cf_clearance → Turnstile käme dann
+        // bei JEDEM Öffnen. Daher REWE ausschließlich im sichtbaren Fenster, und im
+        // Hintergrund (allowWindow=false) gar nicht anfassen.
+        if source == .rewe {
+            if allowWindow { presentREWELogin(slotId: slotId) }
+            return
+        }
+        let done: (Bool) -> Void = { [weak self] ok in
+            guard let self else { return }
+            if ok {
+                if MultibankingStore.shared.activeSlot?.id == slotId { self.applyREWEDisplay(slotId: slotId) }
+                NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
+            } else if allowWindow {
+                switch source {
+                case .amazon: self.presentAmazonLogin(slotId: slotId)
+                case .dm: self.presentDMLogin(slotId: slotId)
+                default: self.presentREWELogin(slotId: slotId)
+                }
+            }
+        }
+        switch source {
+        case .amazon: AmazonAuthWebView.presentHeadless(slotId: slotId, onFinished: done)
+        case .dm: DMAuthWebView.presentHeadless(slotId: slotId, onFinished: done)
+        default: REWEAuthWebView.presentHeadless(slotId: slotId, onFinished: done)
+        }
+    }
+
+    /// Beim App-Start: alle eBon-Slots still im Hintergrund aktualisieren —
+    /// KEIN Fenster (auch nicht bei abgelaufenem Login; dann bleibt die alte Anzeige).
+    func backgroundSyncReceiptSlots() {
+        for slot in MultibankingStore.shared.slots where slot.isReceiptSlot {
+            syncReceiptSlot(slot, allowWindow: false)
+        }
+    }
+
     @objc private func connect() {
         // Defer showing modal panels until the status bar menu fully dismisses.
         DispatchQueue.main.async { [weak self] in
@@ -5066,6 +5181,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         nav.onAddAccount  = nil
         nav.onSwitchToIndex = count > 1
             ? { [weak self] i in Task { await self?.switchToSlot(index: i) } } : nil
+        // Kleiner Aktualisieren-Button für eBon-Slots: erst still im Hintergrund,
+        // Fenster nur wenn ein Login nötig ist.
+        nav.onReceiptRefresh = { [weak self] in
+            guard let self, let slot = MultibankingStore.shared.activeSlot, slot.isReceiptSlot else { return }
+            self.syncReceiptSlot(slot, allowWindow: true)
+        }
         nav.prevAccountLogo = nil
         nav.nextAccountLogo = nil
         nav.prevAccountBrandId = nil
@@ -5830,7 +5951,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard refreshInterval > 0 else { return }
         
         let interval = TimeInterval(refreshInterval * 60)
-        timer = Timer.scheduledTimer(timeInterval: interval, target: self, selector: #selector(refresh), userInfo: nil, repeats: true)
+        // autoRefresh statt refresh: der periodische Timer darf bei eBon-Slots
+        // (REWE/dm) NIEMALS das Login-/Sync-Fenster öffnen (kein Auto-Sync).
+        timer = Timer.scheduledTimer(timeInterval: interval, target: self, selector: #selector(autoRefresh), userInfo: nil, repeats: true)
+    }
+
+    /// Automatischer Refresh (Timer): nur Anzeige aktualisieren. eBon-Slots
+    /// öffnen hier KEIN Login-Fenster — das tut nur der manuelle `refresh()`.
+    @objc private func autoRefresh() {
+        Task { await refreshAsync() }
     }
 
     @objc private func quit() {
@@ -5907,7 +6036,15 @@ private struct StatusBalanceFlyoutCardView: View {
     var reweMonthTotalCents: Int = 0
     var reweYearLabel: String = ""        // "2026"
     var reweYearTotalCents: Int = 0
-    @State private var reweShowYear: Bool = false
+    var reweLastYearLabel: String = ""    // "2025"
+    var reweLastYearTotalCents: Int = 0
+    var reweHasLastYear: Bool = false     // Vorjahr-State nur, wenn Daten da
+    /// Top-4-Warengruppen des letzten Bons (für den Kategorien-Ring).
+    var reweRingSegments: [ReceiptRingSegment] = []
+    /// Datum des letzten Bons (Ring-Mitte).
+    var reweLastReceiptDate: Date? = nil
+    /// 0 = Monat, 1 = Jahr, 2 = Vorjahr.
+    @State private var reweRange: Int = 0
 
     // MARK: Quick-Send (Flyout-Drawer)
     /// Vom Host (BalanceBar) gesetzt: ob der Quick-Send-Drawer angeboten wird
@@ -6298,11 +6435,23 @@ private struct StatusBalanceFlyoutCardView: View {
     /// REWE-Karte im EXAKTEN Bank-Layout (defaultThemeCard-Struktur): Header
     /// (Logo + „REWE · HH Uhr"), großer schwarzer Betrag (= letzter Einkauf),
     /// KEIN Ring, darunter „Einkäufe <Monat>: …" mit Toggle auf Jahr.
+    /// 0 = Monat, 1 = Jahr, 2 = Vorjahr. Label + Betrag fürs aktuelle Toggle.
+    private var reweRangeLabel: String {
+        switch reweRange { case 1: return reweYearLabel; case 2: return reweLastYearLabel; default: return reweMonthLabel }
+    }
+    private var reweRangeAmount: String {
+        switch reweRange { case 1: return reweEuro(reweYearTotalCents); case 2: return reweEuro(reweLastYearTotalCents); default: return reweEuro(reweMonthTotalCents) }
+    }
+    /// Monat → Jahr → Vorjahr (nur wenn vorhanden) → Monat.
+    private func cycleReweRange() {
+        if reweRange == 0 { reweRange = 1 }
+        else if reweRange == 1 { reweRange = reweHasLastYear ? 2 : 0 }
+        else { reweRange = 0 }
+    }
+
     private var reweCard: some View {
         let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
         let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
-        let subLabel = reweShowYear ? reweYearLabel : reweMonthLabel
-        let subAmount = reweEuro(reweShowYear ? reweYearTotalCents : reweMonthTotalCents)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let img = bankLogoImage {
@@ -6323,18 +6472,21 @@ private struct StatusBalanceFlyoutCardView: View {
                         .font(.system(size: 30, weight: .bold, design: .default))
                         .foregroundColor(.primary)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
-                    Button { reweShowYear.toggle() } label: {
-                        Text("\(L10n.t("Einkäufe", "Purchases")) \(subLabel): \(subAmount)")
-                            .font(.system(size: 12))
-                            .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    Button { cycleReweRange() } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                            Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
                     }
                     .buttonStyle(.plain)
-                    .help(L10n.t("Tippen: Monat/Jahr umschalten", "Tap: toggle month/year"))
+                    .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
                 }
                 Spacer()
-                // Kein sichtbarer Ring, aber dieselbe 72×72-Fläche freihalten,
-                // damit die REWE-Karte EXAKT so hoch ist wie die Bank-Karte.
-                Color.clear.frame(width: 72, height: 72)
+                // Kategorien-Ring (Top-4 des letzten Bons) — füllt die 72×72-Fläche
+                // des Bank-Rings, damit die Karte EXAKT gleich hoch bleibt.
+                ReceiptCategoryRing(segments: reweRingSegments, date: reweLastReceiptDate)
                     .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
             }
         }
