@@ -397,4 +397,49 @@ enum FakeData {
     static func demoDispoLimit(slotProfile: Int) -> Int {
         slotProfile == 2 ? 500 : 0
     }
+
+    // MARK: - REWE eBon Demo
+
+    /// Produktpool für den REWE-eBon-Demo. Namen treffen die Stichwörter des
+    /// `ReweItemCategorizer`, damit Ring + Kategorien-Ansicht bunt aussehen.
+    private static let reweDemoProducts: [(String, Int)] = [
+        ("NEKTARINE GELB", 199), ("BANANE CHIQUITA", 159), ("AVOCADO", 129), ("SALAT KOPF", 99),
+        ("TOMATEN RISPE", 249), ("KARTOFFELN 2KG", 299), ("APFEL ELSTAR", 219), ("PAPRIKA ROT", 179),
+        ("RIND HACK 500G", 449), ("HAEHNCHENBRUST", 599), ("SALAMI", 199), ("BRATWURST", 329),
+        ("MILCH 3,5%", 119), ("BUTTER", 239), ("GOUDA JUNG", 199), ("JOGHURT NATUR", 89), ("MOZZARELLA", 99),
+        ("BROETCHEN 6ER", 149), ("VOLLKORNBROT", 269), ("CROISSANT", 79),
+        ("COLA 1,5L", 149), ("APFELSAFT", 199), ("MINERALWASSER", 89), ("KAFFEE BOHNEN", 599),
+        ("PILS 6ER", 449), ("WEIZEN BIER", 119), ("ROTWEIN", 499),
+        ("CHIPS PAPRIKA", 169), ("SCHOKOLADE", 109), ("HARIBO GOLDBAEREN", 119), ("KEKSE", 149),
+        ("PIZZA SALAMI TK", 299), ("EIS VANILLE", 249),
+        ("SPUELMITTEL", 199), ("ZAHNPASTA", 149), ("KUECHENROLLE", 179),
+        ("PFAND 0,25 EURO", 25),
+    ]
+
+    /// Erzeugt einen Satz Demo-Bons für einen REWE-eBon-Slot (für die eBon-UI).
+    static func demoReweReceipts(slotId: String, seed: UInt64, count: Int = 12) -> [ReweReceipt] {
+        var s = seed
+        let iso = ISO8601DateFormatter()
+        let now = Date()
+        let cal = Calendar.current
+        let nowStamp = iso.string(from: now)
+        let cities = ["Siegen", "Köln", "Bonn"]
+        var receipts: [ReweReceipt] = []
+        for n in 0..<count {
+            let daysAgo = n * 3 + Int(nextDouble(&s) * 2)
+            guard let date = cal.date(byAdding: .day, value: -daysAgo, to: now) else { continue }
+            let nItems = 3 + Int(nextDouble(&s) * 5)
+            var items: [ReweLineItem] = []
+            for _ in 0..<nItems {
+                let p = pick(reweDemoProducts, seed: &s)
+                items.append(ReweLineItem(name: p.0, quantity: nil, totalCents: p.1, taxCategory: nil))
+            }
+            let total = items.reduce(0) { $0 + $1.totalCents }
+            receipts.append(ReweReceipt(
+                slotId: slotId, receiptId: "demo-rewe-\(n)", timestamp: iso.string(from: date),
+                totalCents: total, marketName: "REWE Markt", marketCity: cities[n % cities.count],
+                cancelled: false, items: items, parsed: true, fetchedAt: nowStamp))
+        }
+        return receipts
+    }
 }

@@ -127,8 +127,16 @@ final class MultibankingStore: ObservableObject {
 
     func removeSlot(id: String) {
         guard let idx = slots.firstIndex(where: { $0.id == id }) else { return }
+        let removed = slots[idx]
         // Purge transactions for this slot from local DB.
         try? TransactionsDatabase.deleteTransactions(forSlotId: id)
+        // eBon-Slots (REWE/dm/Amazon): zusätzlich die gespeicherten Bons UND die
+        // lokale Händler-Login-Sitzung (Cookies) löschen — sonst leaken Bon-Daten
+        // und der Login bleibt erhalten.
+        if removed.isReceiptSlot {
+            try? ReweReceiptStore.deleteAll(slotId: id)
+            if let source = removed.source { MerchantSession.clear(source: source) }
+        }
         // Per-Slot Daten aufräumen — sonst leakt der entfernte Slot:
         //  - Bank-Credentials (encrypted, aber dead file auf Platte)
         //  - YAXI session/connectionData (sensitive)

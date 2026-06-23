@@ -3,6 +3,8 @@ import LocalAuthentication
 
 enum MasterPasswordResult {
     case password(String)
+    /// Entsperren UND danach Touch ID direkt einrichten („Touch ID einrichten"-Button).
+    case passwordSetupBiometric(String)
     case reset
     case cancelled
 }
@@ -16,11 +18,18 @@ final class MasterPasswordPanel {
     private var result: MasterPasswordResult = .cancelled
     private let isUnlock: Bool
     private var touchIDTask: Task<Void, Never>?
+    private weak var touchIDButton: NSButton?
+    private let touchIDHint = NSTextField(labelWithString: "")
+    /// „Touch ID einrichten" wurde geklickt, bevor ein Passwort da war → beim
+    /// nächsten Entsperren (OK/Enter) Touch ID mit einrichten.
+    private var pendingBiometricSetup = false
 
     init(isUnlock: Bool) {
         self.isUnlock = isUnlock
 
-        let showTouchID = isUnlock && BiometricStore.isAvailable && BiometricStore.hasSavedPassword
+        // Button immer zeigen, wenn die Hardware da ist — auch wenn Touch ID (noch)
+        // nicht eingerichtet ist (dann richtet der Klick es ein).
+        let showTouchID = isUnlock && BiometricStore.isAvailable
         let panelHeight: CGFloat = isUnlock ? (showTouchID ? 340 : 280) : 380
         
         panel = NSPanel(
@@ -117,20 +126,30 @@ final class MasterPasswordPanel {
             stackViews.append(mismatchLabel)
         }
 
-        // Touch ID button (nur im Unlock-Modus, wenn verfügbar)
+        // Touch ID button (Unlock-Modus, wenn Hardware verfügbar). Titel/Verhalten
+        // hängen davon ab, ob Touch ID schon eingerichtet ist.
         if showTouchID {
             let separator = NSBox()
             separator.boxType = .separator
             stackViews.append(separator)
 
-            let touchIDButton = NSButton(title: "  Mit Touch ID entsperren", target: self, action: #selector(onTouchID))
-            touchIDButton.bezelStyle = .rounded
-            touchIDButton.image = NSImage(systemSymbolName: "touchid", accessibilityDescription: "Touch ID")
-            touchIDButton.imagePosition = .imageLeft
-            touchIDButton.contentTintColor = .controlAccentColor
-            touchIDButton.translatesAutoresizingMaskIntoConstraints = false
-            touchIDButton.widthAnchor.constraint(equalToConstant: 220).isActive = true
-            stackViews.append(touchIDButton)
+            let configured = BiometricStore.hasSavedPassword
+            let button = NSButton(title: configured ? "  Mit Touch ID entsperren" : "  Touch ID einrichten",
+                                  target: self, action: #selector(onTouchIDButton))
+            button.bezelStyle = .rounded
+            button.image = NSImage(systemSymbolName: "touchid", accessibilityDescription: "Touch ID")
+            button.imagePosition = .imageLeft
+            button.contentTintColor = .controlAccentColor
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            self.touchIDButton = button
+            stackViews.append(button)
+
+            touchIDHint.font = .systemFont(ofSize: 11)
+            touchIDHint.textColor = .secondaryLabelColor
+            touchIDHint.alignment = .center
+            touchIDHint.isHidden = true
+            stackViews.append(touchIDHint)
         }
 
         stackViews.append(buttons)
@@ -190,7 +209,16 @@ final class MasterPasswordPanel {
         return result
     }
 
-    @objc private func onTouchID() {
+    /// Eine Aktion, zwei Zustände: konfiguriert → entsperren, sonst → einrichten.
+    @objc private func onTouchIDButton() {
+        if BiometricStore.hasSavedPassword {
+            onTouchID()
+        } else {
+            onSetupTouchID()
+        }
+    }
+
+    private func onTouchID() {
         touchIDTask?.cancel()
         touchIDTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -203,9 +231,43 @@ final class MasterPasswordPanel {
                 NSApp.stopModal(withCode: .stop)
             } catch {
                 guard !Task.isCancelled else { return }
-                // Touch ID fehlgeschlagen – Nutzer kann weiterhin Passwort eingeben
                 AppLogger.log("Touch ID failed: \(error.localizedDescription)", category: "Biometric", level: "WARN")
+                // User-Abbruch: einfach Passwort-Eingabe ermöglichen. Sonst ist die
+                // gespeicherte Anmeldung ungültig → bereinigen und auf „einrichten"
+                // umstellen, damit Touch ID neu angelegt werden kann.
+                if !Self.isUserCancel(error) {
+                    BiometricStore.clear()
+                    self.touchIDButton?.title = "  Touch ID einrichten"
+                    self.touchIDHint.stringValue = "Touch ID muss neu eingerichtet werden — Passwort eingeben."
+                    self.touchIDHint.isHidden = false
+                }
             }
+        }
+    }
+
+    /// Richtet Touch ID ein: erfordert das Master-Passwort (zum biometrisch
+    /// geschützten Speichern). Verifikation übernimmt der Aufrufer (`completeUnlock`).
+    private func onSetupTouchID() {
+        let pw = passField.stringValue
+        guard !pw.isEmpty else {
+            // Noch kein Passwort: Intent merken, Feld fokussieren. Beim Entsperren
+            // (OK/Enter) wird Touch ID dann mit eingerichtet.
+            pendingBiometricSetup = true
+            touchIDHint.stringValue = "Passwort eingeben und entsperren — Touch ID wird dabei eingerichtet."
+            touchIDHint.isHidden = false
+            passField.becomeFirstResponder()
+            UserDefaults.standard.set(false, forKey: "biometricOfferDismissed")
+            return
+        }
+        result = .passwordSetupBiometric(pw)
+        NSApp.stopModal(withCode: .stop)
+    }
+
+    private static func isUserCancel(_ error: Error) -> Bool {
+        guard let la = error as? LAError else { return false }
+        switch la.code {
+        case .userCancel, .appCancel, .systemCancel, .userFallback: return true
+        default: return false
         }
     }
     
@@ -258,7 +320,8 @@ final class MasterPasswordPanel {
             }
         }
         
-        result = .password(p)
+        // Touch-ID-Einrichtung wurde vorher angestoßen → beim Entsperren mit einrichten.
+        result = (isUnlock && pendingBiometricSetup) ? .passwordSetupBiometric(p) : .password(p)
         NSApp.stopModal(withCode: .stop)
     }
 

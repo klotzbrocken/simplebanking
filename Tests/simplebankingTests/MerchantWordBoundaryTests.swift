@@ -8,6 +8,10 @@ final class MerchantWordBoundaryTests: XCTestCase {
         XCTAssertFalse(MerchantLogoService.wordContains("1051063192335/pp.4679.pp/. lotto24 ag, ihr einkauf bei lotto24 ag", "otto"))
         XCTAssertFalse(MerchantLogoService.wordContains("lotto24 ag", "otto"))
         XCTAssertFalse(MerchantLogoService.wordContains("ottomane wohnen", "otto"))
+        // Kundenfall: Miete an „… Immobilien …" darf NICHT als OBI matchen.
+        XCTAssertFalse(MerchantLogoService.wordContains("müller immobilien gmbh miete", "obi"))
+        XCTAssertFalse(MerchantLogoService.wordContains("hausverwaltung immobilien", "obi"))
+        XCTAssertTrue(MerchantLogoService.wordContains("obi markt köln", "obi"))   // echtes OBI weiterhin
     }
 
     func test_matchesBrandNeedleAtWordBoundaries() {

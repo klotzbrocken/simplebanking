@@ -1273,6 +1273,14 @@ struct SettingsView: View {
                                     Image(systemName: "arrow.down.doc").foregroundColor(.secondary)
                                         .help(t("Umsätze importieren", "Import transactions"))
                                 }.buttonStyle(PlainButtonStyle())
+                                if slot.isReceiptSlot, let source = slot.source {
+                                    Button(action: { MerchantSession.clear(source: source) }) {
+                                        Text(t("Abmelden", "Sign out"))
+                                            .foregroundColor(.secondary).font(ThemeFonts.body(size: 12))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                    .help(t("Händler-Login-Sitzung (Cookies) löschen. Der nächste Sync verlangt erneuten Login.", "Clear merchant login session (cookies). The next sync requires logging in again."))
+                                }
                                 Button(action: {
                                     slotToDelete = slot
                                     showSlotDeleteConfirmation = true
@@ -1308,6 +1316,14 @@ struct SettingsView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .foregroundColor(.accentColor)
+
+                if multibankingStore.slots.contains(where: { $0.isReceiptSlot }) {
+                    Text(t("Händler-Login-Cookies (REWE/dm/Amazon) werden lokal gespeichert, damit der Sync ohne erneuten Login läuft. Mit Abmelden werden sie gelöscht.",
+                           "Merchant login cookies (REWE/dm/Amazon) are stored locally so syncing works without logging in again. Sign out clears them."))
+                        .font(ThemeFonts.body(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .alert(t("Konto entfernen?", "Remove account?"), isPresented: $showSlotDeleteConfirmation, presenting: slotToDelete) { slot in
                 Button(t("Entfernen", "Remove"), role: .destructive) { deleteSlot(id: slot.id) }

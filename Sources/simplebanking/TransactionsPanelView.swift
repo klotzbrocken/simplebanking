@@ -715,6 +715,11 @@ private struct TransactionsPanelView: View {
         guard let stamp = reweReceipts.first?.fetchedAt else { return nil }
         return ISO8601DateFormatter().date(from: stamp)
     }
+    /// Hintergrund-Sync scheiterte (Login abgelaufen) → „Login erneuern" statt Uhrzeit.
+    private var receiptNeedsLogin: Bool {
+        guard let id = multibankingStore.activeSlot?.id else { return false }
+        return AppDelegate.receiptNeedsLogin(id)
+    }
 
     func loadReweReceipts() {
         guard let active = multibankingStore.activeSlot, active.isReceiptSlot else { reweReceipts = []; return }
@@ -735,8 +740,13 @@ private struct TransactionsPanelView: View {
                 } else {
                     Image(systemName: "cart.fill").font(.system(size: 16)).foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text(formatBankHeader(nickname: nil, bankName: receiptBrandName, date: receiptFetchedDate))
-                    .font(.system(size: 13)).foregroundColor(Color(NSColor.secondaryLabelColor))
+                if receiptNeedsLogin {
+                    Text("⚠︎ " + L10n.t("Login erneuern", "Sign in again"))
+                        .font(.system(size: 13)).foregroundColor(.orange)
+                } else {
+                    Text(formatBankHeader(nickname: nil, bankName: receiptBrandName, date: receiptFetchedDate))
+                        .font(.system(size: 13)).foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
                 Spacer()
             }
             Text(vm.currentBalance ?? "--,-- €")

@@ -77,11 +77,14 @@ enum DMService {
 
         let receipts: [ReweReceipt] = list.map { item in
             let detail = details[item.id]
-            let items: [ReweLineItem] = (detail?.dans ?? []).map { dan in
+            let rawItems: [ReweLineItem] = (detail?.dans ?? []).map { dan in
                 let p = products[dan]
                 return ReweLineItem(name: p?.name ?? "Artikel \(dan)", quantity: nil,
                                     totalCents: p?.priceCents ?? 0, taxCategory: nil)
             }
+            // dm liefert nur AKTUELLE Shop-Preise (nicht den gezahlten Preis) → auf die
+            // maßgebliche Bon-Summe skalieren, damit Euro-Auswertungen korrekt aufsummieren.
+            let items = Self.scaleItemsToTotal(rawItems, total: item.totalCents)
             return ReweReceipt(
                 slotId: slotId, receiptId: item.id, timestamp: item.timestamp,
                 totalCents: item.totalCents,
@@ -93,6 +96,31 @@ enum DMService {
 
         try ReweReceiptStore.upsert(receipts, bankId: bankId)
         return DMSyncResult(listed: list.count, detailed: details.count, stored: receipts.count)
+    }
+
+    /// Verteilt die maßgebliche Bon-Summe proportional zu den (aktuellen) Posten-
+    /// Preisen → geschätzte Einzelbeträge, die exakt auf `total` aufsummieren. Sind
+    /// alle Preise 0 → gleichmäßig. Rundungsrest landet auf dem größten Posten.
+    nonisolated static func scaleItemsToTotal(_ items: [ReweLineItem], total: Int) -> [ReweLineItem] {
+        guard !items.isEmpty, total > 0 else { return items }
+        let sum = items.reduce(0) { $0 + $1.totalCents }
+        var scaled: [ReweLineItem]
+        if sum > 0 {
+            scaled = items.map { it in
+                var c = it
+                c.totalCents = Int((Double(it.totalCents) / Double(sum) * Double(total)).rounded())
+                return c
+            }
+        } else {
+            let each = total / items.count
+            scaled = items.map { it in var c = it; c.totalCents = each; return c }
+        }
+        let remainder = total - scaled.reduce(0) { $0 + $1.totalCents }
+        if remainder != 0,
+           let maxIdx = scaled.indices.max(by: { scaled[$0].totalCents < scaled[$1].totalCents }) {
+            scaled[maxIdx].totalCents += remainder
+        }
+        return scaled
     }
 
     // MARK: - JWT

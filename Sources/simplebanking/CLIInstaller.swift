@@ -51,14 +51,38 @@ enum CLIInstaller {
         return false
     }
 
-    /// `~/.local/bin` ist im aktuellen Shell-PATH?
-    /// (Wir prüfen die Environment-Variable unseres Prozesses; das ist ein guter
-    /// Proxy für das was der User gerade nutzt, aber Shell-Config-Files werden
-    /// nicht re-evaluiert.)
+    /// `~/.local/bin` ist im PATH? Eine aus dem Finder/Dock gestartete GUI-App erbt
+    /// NICHT den Shell-PATH aus `~/.zshrc` (nur den minimalen launchd-PATH). Daher
+    /// reicht der Prozess-PATH nicht — wir prüfen zusätzlich die Shell-Config-Dateien
+    /// (das ist es, was `sb` im Terminal funktionieren lässt).
     static var isInPath: Bool {
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        let expanded = targetDir.path
-        return path.split(separator: ":").contains { String($0) == expanded }
+        // 1) Prozess-PATH (App aus dem Terminal gestartet)
+        let procPath = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        if procPath.split(separator: ":").contains(where: { String($0) == targetDir.path }) { return true }
+        // 2) Shell-Config-Dateien nach einem PATH-Eintrag mit ~/.local/bin durchsuchen
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let configs = [".zshrc", ".zprofile", ".zshenv", ".bash_profile", ".bashrc",
+                       ".profile", ".config/fish/config.fish"]
+        for rel in configs {
+            let url = home.appendingPathComponent(rel)
+            if let contents = try? String(contentsOf: url, encoding: .utf8), Self.pathLineMatches(contents) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// True, wenn der Datei-Inhalt eine (nicht auskommentierte) Zeile enthält, die
+    /// `~/.local/bin` in den PATH aufnimmt (export PATH=…, path+=(…), fish_add_path …).
+    static func pathLineMatches(_ contents: String) -> Bool {
+        for raw in contents.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#") { continue }
+            if line.contains(".local/bin") && line.lowercased().contains("path") {
+                return true
+            }
+        }
+        return false
     }
 
     // MARK: - Actions

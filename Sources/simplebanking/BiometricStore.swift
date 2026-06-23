@@ -4,15 +4,13 @@ import Foundation
 
 /// Speichert das Master-Passwort im Keychain, gesichert durch Touch ID beim Lesen.
 ///
-/// Idealer Schutz wäre kSecAttrAccessControl + .userPresence beim Speichern,
-/// damit der Keychain selbst die Authentifizierung erzwingt. Das scheitert jedoch
-/// bei ad-hoc signierten Apps (SecItemAdd liefert errSecMissingEntitlement /
-/// errSecAuthFailed), da macOS für access-controlled Items ein gültiges
-/// Team-Identifier im Code Signing voraussetzt.
-///
-/// Daher: Item ohne Access Control speichern; der biometrische Schutz wird
-/// ausschließlich über LAContext.evaluatePolicy vor dem Lesen durchgesetzt
-/// (Soft Gate). Für echten Keychain-Level-Schutz wäre Developer ID Signing nötig.
+/// `save` versucht ZUERST den echten Keychain-Schutz (kSecAttrAccessControl +
+/// .userPresence) — das funktioniert im **Developer-ID-signierten** Build und ist
+/// robuster als der frühere Soft-Gate-only-Ansatz (dort schlug das Lesen in der
+/// Release reproduzierbar fehl). Schlägt der ACL-Save fehl (ad-hoc-Signing →
+/// errSecMissingEntitlement/authFailed), fällt er auf das ACL-freie Item zurück,
+/// dessen biometrischer Schutz nur über LAContext.evaluatePolicy beim Lesen läuft
+/// (Soft Gate). `loadPassword` liest beide Varianten.
 enum BiometricStore {
     private static let service = "tech.yaxi.simplebanking"
     private static let account = "master-password"
@@ -55,17 +53,39 @@ enum BiometricStore {
     // MARK: - Save
 
     /// Speichert das Passwort im Keychain (nur auf diesem Gerät, nur wenn entsperrt).
-    /// Ohne kSecAttrAccessControl — Soft Gate via evaluatePolicy beim Lesen.
+    /// Bevorzugt mit echtem Biometrie-ACL; Fallback ohne ACL (Soft Gate).
     static func save(password: String) throws {
         guard let data = password.data(using: .utf8) else { return }
 
-        // Vorhandenen Eintrag erst löschen
+        // Vorhandenen Eintrag erst löschen (egal welcher Typ).
         SecItemDelete([
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account
         ] as CFDictionary)
 
+        // 1) Echter Keychain-Biometrie-Gate (signierter Build). .userPresence =
+        //    Touch ID mit Passwort-Fallback, passend zu evaluatePolicy beim Lesen.
+        //    NICHT im Demo-Modus: dort prüft `verifyPasswordDirectly` das Item ohne
+        //    Prompt — ein ACL-Item wäre so nicht lesbar.
+        let allowACL = !UserDefaults.standard.bool(forKey: "demoMode")
+        var acError: Unmanaged<CFError>?
+        if allowACL, let access = SecAccessControlCreateWithFlags(
+            nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .userPresence, &acError) {
+            let aclQuery: [CFString: Any] = [
+                kSecClass: kSecClassGenericPassword,
+                kSecAttrService: service,
+                kSecAttrAccount: account,
+                kSecAttrAccessControl: access,
+                kSecValueData: data,
+                kSecUseAuthenticationUI: kSecUseAuthenticationUISkip
+            ]
+            let aclStatus = SecItemAdd(aclQuery as CFDictionary, nil)
+            if aclStatus == errSecSuccess { return }
+            AppLogger.log("Touch ID ACL save fell back (status \(aclStatus)) → soft gate", category: "Biometric")
+        }
+
+        // 2) Fallback: ACL-frei (z.B. ad-hoc-Builds). Schutz nur via evaluatePolicy.
         let addQuery: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,

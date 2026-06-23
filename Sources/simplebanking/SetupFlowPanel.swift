@@ -58,6 +58,8 @@ struct SetupConnectActionError: LocalizedError {
 enum SetupWizardOutcome {
     case realBanking(masterPassword: String, bank: DiscoveredBank)
     case demoMode
+    /// Nutzer hat im „Konto hinzufügen"-Dialog einen Händler gewählt (REWE/dm/Amazon).
+    case merchant(SlotSource)
     case cancelled
 }
 
@@ -791,6 +793,25 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.addArrangedSubview(selectedBankChipView)
         rootStack.addArrangedSubview(statusRow)
         rootStack.addArrangedSubview(yaxiInfo)
+
+        // „Oder Händler-Konto verbinden" — REWE / Amazon / dm (statt der früheren
+        // drei Menüpunkte). Klick schließt den Dialog mit outcome .merchant.
+        let merchantLabel = NSTextField(labelWithString: t("Oder Händler-Konto verbinden:", "Or connect a merchant account:"))
+        merchantLabel.font = .systemFont(ofSize: 12)
+        merchantLabel.textColor = .secondaryLabelColor
+        let merchantRow = NSStackView(views: [
+            merchantButton(title: "REWE", image: ReweLogoAsset.image, action: #selector(onAddRewe)),
+            merchantButton(title: "Amazon", image: AmazonLogoAsset.image, action: #selector(onAddAmazon)),
+            merchantButton(title: "dm", image: DMLogoAsset.image, action: #selector(onAddDM)),
+        ])
+        merchantRow.orientation = .horizontal
+        merchantRow.distribution = .fillEqually
+        merchantRow.spacing = 8
+        merchantRow.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        rootStack.addArrangedSubview(merchantLabel)
+        rootStack.addArrangedSubview(merchantRow)
+        rootStack.setCustomSpacing(6, after: merchantLabel)
+
         rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(buttonRow.stack)
 
@@ -1290,6 +1311,24 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         btn.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return btn
     }
+
+    private func merchantButton(title: String, image: NSImage?, action: Selector) -> NSButton {
+        let btn = NSButton(title: " " + title, target: self, action: action)
+        btn.bezelStyle = .regularSquare
+        btn.isBordered = true
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 8
+        btn.imagePosition = image != nil ? .imageLeading : .noImage
+        btn.image = image
+        btn.imageScaling = .scaleProportionallyDown
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        return btn
+    }
+
+    @objc private func onAddRewe()   { outcome = .merchant(.rewe);   NSApp.stopModal(withCode: .stop) }
+    @objc private func onAddDM()     { outcome = .merchant(.dm);     NSApp.stopModal(withCode: .stop) }
+    @objc private func onAddAmazon() { outcome = .merchant(.amazon); NSApp.stopModal(withCode: .stop) }
 
     private func outlineButton(title: String, action: Selector) -> NSButton {
         let btn = NSButton(title: title, target: self, action: action)

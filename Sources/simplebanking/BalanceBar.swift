@@ -226,7 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var timer: Timer?
 
     @AppStorage("demoMode") private var demoMode: Bool = false
-    @AppStorage("demoStyle") private var demoStyle: Int = 0   // 0 = single, 1 = multi
+    @AppStorage("demoStyle") private var demoStyle: Int = 0   // 0 = single, 1 = multi, 2 = REWE eBon
+    private var isReweDemo: Bool { demoMode && demoStyle == 2 }
     @AppStorage("demoSeed") private var demoSeed: Int = 123456
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     private var updateChecker: UpdateChecker?
@@ -1105,7 +1106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         } else if demoMode {
             // Demo mode starts unlocked with demo data
             locked = false
-            if demoStyle == 1 { activateMultiDemo() } else { activateSingleDemo() }
+            if demoStyle == 1 { activateMultiDemo() }
+            else if demoStyle == 2 { activateReweDemo() }
+            else { activateSingleDemo() }
             Task { await refreshAsync() }
             recomputeLeftToPay()
         }
@@ -1196,21 +1199,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // ── Einstellungen (submenu) ───────────────────────────────────────
         let settingsSub = NSMenu()
 
-        let addBankItem = NSMenuItem(title: t("Bankkonto hinzufügen…", "Add Bank Account…"), action: #selector(connect), keyEquivalent: "b")
+        // „Konto hinzufügen" deckt jetzt Bank UND Händler ab (REWE/dm/Amazon werden
+        // im Dialog angeboten) — die früheren drei Händler-Menüpunkte entfallen.
+        let addBankItem = NSMenuItem(title: t("Konto hinzufügen…", "Add Account…"), action: #selector(connect), keyEquivalent: "b")
         addBankItem.tag = 100
         settingsSub.addItem(addBankItem)
-
-        let reweItem = NSMenuItem(title: t("REWE eBons verbinden… (Beta)", "Connect REWE Receipts… (Beta)"),
-                                  action: #selector(openREWEBeta), keyEquivalent: "")
-        settingsSub.addItem(reweItem)
-
-        let dmItem = NSMenuItem(title: t("dm eBons verbinden… (Beta)", "Connect dm Receipts… (Beta)"),
-                                action: #selector(openDMBeta), keyEquivalent: "")
-        settingsSub.addItem(dmItem)
-
-        let amazonItem = NSMenuItem(title: t("Amazon Bestellungen verbinden… (Beta)", "Connect Amazon Orders… (Beta)"),
-                                    action: #selector(openAmazonBeta), keyEquivalent: "")
-        settingsSub.addItem(amazonItem)
 
         let openSettingsItem = NSMenuItem(title: t("Einstellungen öffnen…", "Open Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         openSettingsItem.tag = 200
@@ -1223,13 +1216,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         let demoSingleItem = NSMenuItem(title: t("Single-Banking", "Single Banking"), action: #selector(setDemoSingle), keyEquivalent: "")
         demoSingleItem.tag = 3011
-        demoSingleItem.state = (demoMode && !isMultiDemo) ? .on : .off
+        demoSingleItem.state = (demoMode && demoStyle == 0) ? .on : .off
         demoSub.addItem(demoSingleItem)
 
         let demoMultiItem = NSMenuItem(title: t("Multi-Banking", "Multi Banking"), action: #selector(setDemoMulti), keyEquivalent: "")
         demoMultiItem.tag = 3013
         demoMultiItem.state = isMultiDemo ? .on : .off
         demoSub.addItem(demoMultiItem)
+
+        let demoReweItem = NSMenuItem(title: t("REWE eBon", "REWE Receipts"), action: #selector(setDemoRewe), keyEquivalent: "")
+        demoReweItem.tag = 3014
+        demoReweItem.state = isReweDemo ? .on : .off
+        demoSub.addItem(demoReweItem)
 
         let demoOffItem = NSMenuItem(title: t("Aus", "Off"), action: #selector(setDemoOff), keyEquivalent: "")
         demoOffItem.tag = 3010
@@ -2186,6 +2184,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if isMultiDemo {
             tearDownDemoSlots()
             activateMultiDemo()
+        } else if isReweDemo {
+            tearDownDemoSlots()
+            activateReweDemo()
         } else {
             tearDownDemoSlots()
             activateSingleDemo()
@@ -2252,13 +2253,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
-    /// Räumt injizierte Demo-Slots (Single = `demo-slot-0`, Multi = 0..2) ab und
-    /// stellt die echten Slots aus dem Backup wieder her.
+    // MARK: - REWE eBon Demo
+
+    @objc private func setDemoRewe() {
+        if demoMode { tearDownDemoSlots() }
+        demoStyle = 2
+        demoMode = true
+        demoSeed = Int.random(in: 1...Int.max)
+        txVM.anthropicApiKey = nil
+        txVM.connectedBankIBAN = nil
+        txVM.leftToPayAmount = nil
+        activateReweDemo()
+        rebuildMenuTitleForDemoMode()
+    }
+
+    /// Baut einen REWE-eBon-Demo-Slot mit Fake-Bons (zeigt die komplette eBon-UI:
+    /// Flyout-Karte, Kategorien-Ring, Einkaufsliste, „Was kaufst du ein?").
+    private func activateReweDemo() {
+        backupSlotsForDemo()
+        let slot = BankSlot(id: "demo-slot-rewe", iban: "", displayName: "REWE",
+                            logoId: "rewe", currency: "EUR", source: .rewe)
+        MultibankingStore.shared.injectDemoSlots([slot])
+        // Fake-Bons in den Receipt-Store schreiben — die eBon-UI liest daraus.
+        let receipts = FakeData.demoReweReceipts(slotId: slot.id, seed: UInt64(truncatingIfNeeded: demoSeed))
+        try? ReweReceiptStore.deleteAll(slotId: slot.id)
+        try? ReweReceiptStore.upsert(receipts)
+        applySlotToViewModel(slot)
+        applyREWEDisplay(slotId: slot.id)   // Saldo = letzter Einkauf
+        updateStatusBalanceTitle()
+        updateMenuBarButton()
+        statusItem.button?.toolTip = "🎭 Demo-Modus: REWE eBon"
+    }
+
+    /// Räumt injizierte Demo-Slots (Single = `demo-slot-0`, Multi = 0..2,
+    /// REWE = `demo-slot-rewe`) ab und stellt die echten Slots wieder her.
     private func tearDownDemoSlots() {
         for i in 0..<3 {
             UserDefaults.standard.removeObject(forKey: "simplebanking.cachedBalance.demo-slot-\(i)")
             BankSlotSettingsStore.delete(slotId: "demo-slot-\(i)")
         }
+        // REWE-eBon-Demo: Cache + Fake-Bons löschen.
+        UserDefaults.standard.removeObject(forKey: "simplebanking.cachedBalance.demo-slot-rewe")
+        try? ReweReceiptStore.deleteAll(slotId: "demo-slot-rewe")
         // Wenn das in-memory Backup leer/korrupt ist, fällt restoreDemoSlots
         // intern auf reloadFromDisk() zurück. UserDefaults bleibt die
         // Source-of-Truth, weil injectDemoSlots nichts persistiert.
@@ -2710,71 +2746,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         
         switch result {
         case .password(let pw):
-            do {
-                if demoMode {
-                    // In demo mode there are no credential files to decrypt.
-                    // Verify the password directly against the Keychain master password.
-                    guard BiometricStore.verifyPasswordDirectly(pw) else {
-                        throw NSError(domain: "simplebanking.auth", code: -1,
-                                      userInfo: [NSLocalizedDescriptionKey: "Wrong password"])
-                    }
-                } else {
-                    _ = try CredentialsStore.load(masterPassword: pw)
-                }
-                masterPassword = pw
-                locked = false
-                isHiddenBalance = false
-                isHoverRevealingBalance = false
-                failedAttempts = 0 // Reset counter on success
-                balancePopover?.performClose(nil)
-                hideLockIcon()
-                applyBalanceDisplayModeConstraints()
+            completeUnlock(password: pw, setupBiometric: false)
 
-                // Touch ID einmalig anbieten nach manuellem Unlock
-                offerBiometricEnrollmentIfNeeded(password: pw)
+        case .passwordSetupBiometric(let pw):
+            // „Touch ID einrichten" geklickt → nach erfolgreichem Unlock direkt aktivieren.
+            completeUnlock(password: pw, setupBiometric: true)
 
-                // Show loading state while refreshing
-                statusItem.button?.title = t("Lädt…", "Loading…")
-                Task {
-                    try? await Task.sleep(for: .milliseconds(100))
-                    await refreshAsync()
-                }
-            } catch {
-                // Wrong password - increment counter
-                failedAttempts += 1
-                
-                // Check if we should reset after X failed attempts
-                if resetAttemptsLimit > 0 && failedAttempts >= resetAttemptsLimit {
-                    // Reset the app
-                    performSecurityReset()
-                    return
-                }
-                
-                // Show error with remaining attempts
-                let alert = NSAlert()
-                alert.messageText = t("Falsches Passwort", "Wrong password")
-                if resetAttemptsLimit > 0 {
-                    let remaining = resetAttemptsLimit - failedAttempts
-                    alert.informativeText = t(
-                        "Das eingegebene Passwort ist nicht korrekt.\n\nNoch \(remaining) Versuch\(remaining == 1 ? "" : "e") bevor alle Daten gelöscht werden.",
-                        "The entered password is incorrect.\n\n\(remaining) attempt\(remaining == 1 ? "" : "s") remaining before all data is deleted."
-                    )
-                } else {
-                    alert.informativeText = t("Das eingegebene Passwort ist nicht korrekt.", "The entered password is incorrect.")
-                }
-                alert.alertStyle = .warning
-                // Set app icon explicitly
-                if let iconPath = Bundle.main.path(forResource: "app_icon", ofType: "png"),
-                   let icon = NSImage(contentsOfFile: iconPath) {
-                    alert.icon = icon
-                }
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-                
-                locked = true
-                showLockIcon()
-            }
-            
         case .reset:
             // Delete all credentials and reset app state
             performSecurityReset()
@@ -2785,7 +2762,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             showLockIcon()
         }
     }
-    
+
+    /// Verifiziert das Master-Passwort und entsperrt. `setupBiometric=true` (vom
+    /// „Touch ID einrichten"-Button) aktiviert Touch ID direkt; sonst wird es nur
+    /// einmalig angeboten.
+    private func completeUnlock(password pw: String, setupBiometric: Bool) {
+        do {
+            if demoMode {
+                guard BiometricStore.verifyPasswordDirectly(pw) else {
+                    throw NSError(domain: "simplebanking.auth", code: -1,
+                                  userInfo: [NSLocalizedDescriptionKey: "Wrong password"])
+                }
+            } else {
+                _ = try CredentialsStore.load(masterPassword: pw)
+            }
+            masterPassword = pw
+            locked = false
+            isHiddenBalance = false
+            isHoverRevealingBalance = false
+            failedAttempts = 0
+            balancePopover?.performClose(nil)
+            hideLockIcon()
+            applyBalanceDisplayModeConstraints()
+
+            if setupBiometric {
+                // Nutzer hat „Touch ID einrichten" explizit geklickt → direkt aktivieren
+                // (kein zusätzlicher Nachfrage-Alert). dismissed/Fehler regelt der Helfer.
+                enableBiometric(password: pw)
+            } else {
+                // Touch ID einmalig anbieten nach manuellem Unlock
+                offerBiometricEnrollmentIfNeeded(password: pw)
+            }
+
+            statusItem.button?.title = t("Lädt…", "Loading…")
+            Task {
+                try? await Task.sleep(for: .milliseconds(100))
+                await refreshAsync()
+            }
+        } catch {
+            failedAttempts += 1
+            if resetAttemptsLimit > 0 && failedAttempts >= resetAttemptsLimit {
+                performSecurityReset()
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = t("Falsches Passwort", "Wrong password")
+            if resetAttemptsLimit > 0 {
+                let remaining = resetAttemptsLimit - failedAttempts
+                alert.informativeText = t(
+                    "Das eingegebene Passwort ist nicht korrekt.\n\nNoch \(remaining) Versuch\(remaining == 1 ? "" : "e") bevor alle Daten gelöscht werden.",
+                    "The entered password is incorrect.\n\n\(remaining) attempt\(remaining == 1 ? "" : "s") remaining before all data is deleted."
+                )
+            } else {
+                alert.informativeText = t("Das eingegebene Passwort ist nicht korrekt.", "The entered password is incorrect.")
+            }
+            alert.alertStyle = .warning
+            if let iconPath = Bundle.main.path(forResource: "app_icon", ofType: "png"),
+               let icon = NSImage(contentsOfFile: iconPath) {
+                alert.icon = icon
+            }
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            locked = true
+            showLockIcon()
+        }
+    }
+
     @AppStorage("biometricOfferDismissed") private var biometricOfferDismissed: Bool = false
 
     private func offerBiometricEnrollmentIfNeeded(password: String) {
@@ -2801,20 +2843,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         alert.alertStyle = .informational
 
         if alert.runModal() == .alertFirstButtonReturn {
-            biometricOfferDismissed = true
-            do {
-                try BiometricStore.save(password: password)
-            } catch {
-                AppLogger.log("Touch ID save failed: \(error.localizedDescription)", category: "Biometric", level: "WARN")
-                let errorAlert = NSAlert()
-                errorAlert.messageText = t("Touch ID konnte nicht aktiviert werden", "Touch ID could not be enabled")
-                errorAlert.informativeText = t("Touch ID kann in den Einstellungen unter \"Sicherheit\" erneut aktiviert werden.", "Touch ID can be enabled again in Settings under \"Security\".")
-                errorAlert.alertStyle = .warning
-                errorAlert.addButton(withTitle: "OK")
-                errorAlert.runModal()
-            }
+            enableBiometric(password: password)   // dismissed nur bei Erfolg, Fehler-Alert inklusive
         } else {
             biometricOfferDismissed = true
+        }
+    }
+
+    /// Aktiviert Touch ID. `biometricOfferDismissed` wird NUR bei erfolgreichem Save
+    /// gesetzt; schlägt das Speichern fehl, kommt eine kurze Meldung und das Angebot
+    /// bleibt offen (dismissed=false).
+    @discardableResult
+    private func enableBiometric(password: String) -> Bool {
+        do {
+            try BiometricStore.save(password: password)
+            biometricOfferDismissed = true
+            return true
+        } catch {
+            AppLogger.log("Touch ID save failed: \(error.localizedDescription)", category: "Biometric", level: "WARN")
+            let errorAlert = NSAlert()
+            errorAlert.messageText = t("Touch ID konnte nicht aktiviert werden", "Touch ID could not be enabled")
+            errorAlert.informativeText = t("Bitte versuche es erneut oder aktiviere Touch ID später in den Einstellungen unter „Sicherheit\".", "Please try again, or enable Touch ID later in Settings under \"Security\".")
+            errorAlert.alertStyle = .warning
+            errorAlert.addButton(withTitle: "OK")
+            errorAlert.runModal()
+            return false
         }
     }
 
@@ -3359,6 +3411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.reweMode = true
         rootView.bankLogoImage = active.receiptLogoImage
         rootView.bankName = active.receiptBrandName
+        rootView.reweNeedsLogin = Self.receiptNeedsLogin(active.id)
 
         let all = (try? ReweReceiptStore.all(slotId: active.id)) ?? []
         // Header-Uhrzeit = letzter Sync (fetchedAt des neuesten Bons).
@@ -4816,6 +4869,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if MultibankingStore.shared.activeSlot?.id == slotId {
                 self?.applyREWEDisplay(slotId: slotId)
             }
+            AppDelegate.setReceiptNeedsLogin(slotId, false)
             NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
         }
     }
@@ -4845,6 +4899,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if MultibankingStore.shared.activeSlot?.id == slotId {
                 self?.applyREWEDisplay(slotId: slotId)
             }
+            AppDelegate.setReceiptNeedsLogin(slotId, false)
             NotificationCenter.default.post(name: .dmReceiptsChanged, object: nil)
             NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
         }
@@ -4874,6 +4929,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if MultibankingStore.shared.activeSlot?.id == slotId {
                 self?.applyREWEDisplay(slotId: slotId)
             }
+            AppDelegate.setReceiptNeedsLogin(slotId, false)
             NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
         }
     }
@@ -4883,6 +4939,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Synchronisiert einen eBon-Slot zuerst **unsichtbar im Hintergrund** (offscreen
     /// WebView, gespeicherte Login-Sitzung). Schlägt das fehl (Login nötig/Timeout)
     /// und `allowWindow` ist true, wird das sichtbare Login-Fenster geöffnet.
+    /// „Login fällig" pro eBon-Slot (Hintergrund-Sync scheiterte am abgelaufenen Login).
+    static func receiptNeedsLogin(_ slotId: String) -> Bool {
+        UserDefaults.standard.bool(forKey: "simplebanking.receiptNeedsLogin.\(slotId)")
+    }
+    static func setReceiptNeedsLogin(_ slotId: String, _ value: Bool) {
+        UserDefaults.standard.set(value, forKey: "simplebanking.receiptNeedsLogin.\(slotId)")
+        NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
+    }
+
     private func syncReceiptSlot(_ slot: BankSlot, allowWindow: Bool) {
         let slotId = slot.id
         let source = slot.source ?? .rewe
@@ -4896,6 +4961,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         let done: (Bool) -> Void = { [weak self] ok in
             guard let self else { return }
+            // „Login fällig"-Status festhalten: Hintergrund-Sync scheitert still, wenn
+            // die gespeicherte Sitzung abgelaufen ist → eBon-Karte zeigt dann den Hinweis.
+            Self.setReceiptNeedsLogin(slotId, !ok)
             if ok {
                 if MultibankingStore.shared.activeSlot?.id == slotId { self.applyREWEDisplay(slotId: slotId) }
                 NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
@@ -5333,6 +5401,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             statusItem.button?.toolTip = t("Verbunden mit \(bank.displayName)", "Connected to \(bank.displayName)")
             Task { await self.refreshAsync() }
 
+        case .merchant(let source):
+            // WICHTIG: den vor dem Wizard aktivierten leeren Bank-Slot NICHT aktiv
+            // lassen — sonst hängt die App auf einem nie gespeicherten Slot-Kontext.
+            SlotContext.activate(slotId: previousSlot?.id ?? "legacy")
+            connectMerchant(source)
+
         case .demoMode, .cancelled:
             // Vorherigen Slot wiederherstellen
             let restoreId = previousSlot?.id ?? "legacy"
@@ -5441,10 +5515,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             runInitialSetupExtensionIfNeeded(slotId: "legacy")
             // After first-time setup: offer to add a second account
             promptAddAnotherAccount()
+        case .merchant(let source):
+            SlotContext.activate(slotId: "legacy")
+            connectMerchant(source)
         case .demoMode:
             self.setDemoSingle()
         case .cancelled:
             break
+        }
+    }
+
+    /// Öffnet das Login-/Sync-Fenster für einen im „Konto hinzufügen"-Dialog
+    /// gewählten Händler (legt den Slot wie die früheren Beta-Menüpunkte an).
+    private func connectMerchant(_ source: SlotSource) {
+        switch source {
+        case .rewe:   openREWEBeta()
+        case .dm:     openDMBeta()
+        case .amazon: openAmazonBeta()
+        case .yaxi:   break
         }
     }
     
@@ -6084,6 +6172,8 @@ private struct StatusBalanceFlyoutCardView: View {
     var reweRingSegments: [ReceiptRingSegment] = []
     /// Datum des letzten Bons (Ring-Mitte).
     var reweLastReceiptDate: Date? = nil
+    /// Hintergrund-Sync scheiterte (Login abgelaufen) → Hinweis statt Uhrzeit.
+    var reweNeedsLogin: Bool = false
     /// 0 = Monat, 1 = Jahr, 2 = Vorjahr.
     @State private var reweRange: Int = 0
 
@@ -6503,8 +6593,13 @@ private struct StatusBalanceFlyoutCardView: View {
                     Image(systemName: "cart.fill").font(.system(size: 16))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
-                Text(formatBankHeader(date: balanceFetchedAt))
-                    .font(.system(size: 14)).foregroundColor(Color(NSColor.secondaryLabelColor))
+                if reweNeedsLogin {
+                    Text("⚠︎ " + L10n.t("Login erneuern", "Sign in again"))
+                        .font(.system(size: 14)).foregroundColor(.orange)
+                } else {
+                    Text(formatBankHeader(date: balanceFetchedAt))
+                        .font(.system(size: 14)).foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
                 Spacer()
             }
             HStack(alignment: .balanceTextCenter, spacing: 12) {
