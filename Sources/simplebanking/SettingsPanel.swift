@@ -514,12 +514,16 @@ struct SettingsView: View {
            (try? CredentialsStore.load(masterPassword: cached)) != nil {
             return cached
         }
-        let panel = MasterPasswordPanel(isUnlock: true)
+        // Re-Auth für eine Einzelaktion → keine Enrollment-Checkbox (würde sonst ins
+        // Leere laufen). Touch ID richtet man unter Settings → Touch ID ein.
+        let panel = MasterPasswordPanel(isUnlock: true, offerBiometricSetup: false)
         let result = panel.runModalWithResult()
-        if case .password(let password) = result {
+        switch result {
+        case .password(let password), .passwordSetupBiometric(let password):
             return password
+        default:
+            return nil
         }
-        return nil
     }
 
     private func publishAPIKeyChanged(_ apiKey: String?) {

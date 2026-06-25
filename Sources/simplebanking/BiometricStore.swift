@@ -101,16 +101,48 @@ enum BiometricStore {
 
     // MARK: - Load
 
-    /// Zeigt Touch ID / Passwort-Dialog und gibt das gespeicherte Passwort zurück.
-    /// Verwendet .deviceOwnerAuthentication (Touch ID mit Passwort-Fallback).
-    static func loadPassword(reason: String) async throws -> String {
+    /// True, wenn das gespeicherte Item ACL-geschützt ist (echter Biometrie-Gate,
+    /// `kSecAttrAccessControl`). Probe ohne Auth-Dialog: ein ACL-Item liefert bei
+    /// `interactionNotAllowed` `errSecInteractionNotAllowed`, ein Soft-Gate-Item
+    /// `errSecSuccess`.
+    private static func isACLProtected() -> Bool {
         let ctx = LAContext()
-        try await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+        ctx.interactionNotAllowed = true
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnData: false,
+            kSecUseAuthenticationContext: ctx
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecInteractionNotAllowed
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
+    /// Zeigt Touch ID / Passwort-Dialog und gibt das gespeicherte Passwort zurück.
+    ///
+    /// **ACL-Item** (signierter Build): der Keychain-Read SELBST löst den Touch-ID-
+    /// Prompt aus (LAContext in der Query). KEIN separates `evaluatePolicy` davor —
+    /// das war der fragile Teil, der auf der notarisierten Release den Prompt
+    /// manchmal verschluckt hat. **Soft-Gate-Item** (ad-hoc): kein ACL → Read würde
+    /// ungeschützt lesen, daher hier weiterhin `evaluatePolicy` als Gate vorschalten.
+    static func loadPassword(reason: String) async throws -> String {
+        if isACLProtected() {
+            let ctx = LAContext()
+            ctx.localizedReason = reason
+            return try await readPassword(context: ctx, prompt: reason)
+        } else {
+            let ctx = LAContext()
+            try await ctx.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+            return try await readPassword(context: ctx, prompt: nil)
+        }
+    }
+
+    /// Liest das Passwort-Item. `context` bindet die (für ACL-Items prompt-auslösende)
+    /// Authentifizierung, `prompt` setzt den Operation-Prompt-Text.
+    private static func readPassword(context ctx: LAContext, prompt: String?) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 var result: CFTypeRef?
-                // First try with the evaluated LAContext
                 var query: [CFString: Any] = [
                     kSecClass: kSecClassGenericPassword,
                     kSecAttrService: service,
@@ -118,11 +150,12 @@ enum BiometricStore {
                     kSecReturnData: true,
                     kSecUseAuthenticationContext: ctx
                 ]
+                if let prompt { query[kSecUseOperationPrompt] = prompt }
                 var status = SecItemCopyMatching(query as CFDictionary, &result)
-                // Items stored without kSecAttrAccessControl don't strictly need the
-                // LAContext for reading — fall back if the context-bound read fails.
-                if status != errSecSuccess {
+                // Soft-Gate-Items brauchen den Context nicht — Fallback ohne ihn.
+                if status != errSecSuccess && status != errSecUserCanceled {
                     query.removeValue(forKey: kSecUseAuthenticationContext)
+                    query.removeValue(forKey: kSecUseOperationPrompt)
                     result = nil
                     status = SecItemCopyMatching(query as CFDictionary, &result)
                 }
