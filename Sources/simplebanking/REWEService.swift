@@ -100,10 +100,14 @@ enum REWEService {
         let zipData = try await fetchZip(cookieHeader: cookieHeader, userAgent: userAgent)
         let pdfs = await ReweZip.extractPDFs(zipData)
 
-        let parsed: [ReweParsedReceipt] = pdfs.compactMap { data in
-            guard let doc = PDFDocument(data: data), let text = doc.string, !text.isEmpty else { return nil }
-            return ReweReceiptParser.parse(text)
-        }
+        // PDFDocument-Textextraktion + Parsing sind CPU-lastig → off-main, damit die
+        // UI bei vielen Bons nicht ruckelt (REWEService ist @MainActor).
+        let parsed: [ReweParsedReceipt] = await Task.detached(priority: .userInitiated) {
+            pdfs.compactMap { data -> ReweParsedReceipt? in
+                guard let doc = PDFDocument(data: data), let text = doc.string, !text.isEmpty else { return nil }
+                return ReweReceiptParser.parse(text)
+            }
+        }.value
 
         let merged = ReweReceiptMerger.merge(list: list, parsed: parsed, fetchedAt: stamp)
         try ReweReceiptStore.upsert(merged, bankId: bankId)

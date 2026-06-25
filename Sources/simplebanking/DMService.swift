@@ -60,17 +60,23 @@ enum DMService {
         let list = try await fetchList(token: token, size: size)
         let alreadyParsed = (try? ReweReceiptStore.parsedIds(slotId: slotId, bankId: bankId)) ?? []
 
-        // Detail nur für noch nicht geparste Bons (Dedup über Sync-Läufe).
-        var details: [String: DMEbonDetail] = [:]
-        var allDans: Set<String> = []
-        for item in list where !alreadyParsed.contains(item.id) {
+        // Detail nur für noch nicht geparste Bons (Dedup über Sync-Läufe). Mit
+        // begrenzter Parallelität laden — sonst summieren sich die Latenzen bei vielen
+        // neuen Bons. 401 bricht ab (Token tot); andere Einzelfehler werden geschluckt.
+        let toFetch = list.filter { !alreadyParsed.contains($0.id) }.map(\.id)
+        let fetched = try await boundedConcurrentMap(toFetch, maxConcurrent: 5) { id -> (String, DMEbonDetail?) in
             do {
-                let d = try await fetchDetail(id: item.id, token: token)
-                details[item.id] = d
-                allDans.formUnion(d.dans)
+                return (id, try await fetchDetail(id: id, token: token))
             } catch DMServiceError.detailFailed(401) {
                 throw DMServiceError.tokenExpired
-            } catch { /* einzelner Bon-Fehler: überspringen, Rest läuft weiter */ }
+            } catch {
+                return (id, nil)   // einzelner Bon-Fehler: überspringen, Rest läuft weiter
+            }
+        }
+        var details: [String: DMEbonDetail] = [:]
+        var allDans: Set<String> = []
+        for (id, d) in fetched {
+            if let d { details[id] = d; allDans.formUnion(d.dans) }
         }
 
         let products = await resolveProducts(dans: Array(allDans))
