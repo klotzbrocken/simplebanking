@@ -5724,6 +5724,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             details: ["diagnostics_enabled": options.diagnosticsEnabled ? "true" : "false"]
         )
 
+        // SCA-Methode an die Fortschritts-UI durchreichen: `handleSCA` (tief in
+        // YaxiService, ohne Zugriff auf `options`) meldet field vs. decoupled, wir
+        // übersetzen das in den passenden Setup-Text. Nach dem Connect wieder lösen.
+        let onProgress = options.onProgress
+        YaxiService.scaMethodReporter = { hint in
+            onProgress?(hint == .fieldInput ? .enteringCode : .requestingApproval)
+        }
+        defer { YaxiService.scaMethodReporter = nil }
+
         do {
             options.onProgress?(.discoveringBank)
             AppLogger.log("Setup step accounts_flow: using pre-discovered bank", category: "Setup")
@@ -5767,11 +5776,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 advice: nil
             )
 
-            // Step 1: accounts() — SCA (einmalige Freigabe per Push-TAN).
+            // Step 1: accounts() — löst die SCA aus. Methode (Tipp-TAN vs. Push-Freigabe)
+            // ist hier noch unbekannt → neutraler Text; `handleSCA` meldet via
+            // `scaMethodReporter` den Typ, sobald er feststeht (.enteringCode/.requestingApproval).
             // Liefert IBAN + connectionData für alle weiteren Aufrufe (recurring consent).
             // Redirect-Flows (z.B. Sparkasse): Nutzer muss sich auf Bank-Website einloggen
             // und SCA bestätigen. Server pollt bis zu 600 s — Swift-Timeout muss größer sein.
-            options.onProgress?(.requestingApproval)
+            options.onProgress?(.authenticating)
             AppLogger.log("Setup step warmup_accounts", category: "Setup")
             let discoveredAccounts = try await runSetupStepWithTimeout(step: "warmup_accounts", timeout: 720, logger: diagnosticsLogger) {
                 try await YaxiService.fetchAccounts(

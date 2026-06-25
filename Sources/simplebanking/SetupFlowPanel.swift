@@ -4,6 +4,10 @@ import Routex
 
 enum SetupProgress: Sendable {
     case discoveringBank
+    /// Neutral, solange die SCA-Methode noch nicht bekannt ist (vor `fetchAccounts`).
+    case authenticating
+    /// Bank verlangt einen Tipp-Code (TAN/PIN) — KEINE App-Freigabe.
+    case enteringCode
     case requestingApproval
     case fetchingBalance
     case requestingTransactionApproval
@@ -13,6 +17,8 @@ enum SetupProgress: Sendable {
     var displayText: String {
         switch self {
         case .discoveringBank: return L10n.t("Bank wird gesucht…", "Searching for bank…")
+        case .authenticating: return L10n.t("Sicherheitsfreigabe…", "Security check…")
+        case .enteringCode: return L10n.t("Code eingeben", "Enter code")
         case .requestingApproval: return L10n.t("Freigabe angefordert…", "Approval requested…")
         case .fetchingBalance: return L10n.t("Kontostand wird abgerufen…", "Fetching balance…")
         case .requestingTransactionApproval: return L10n.t("Umsätze werden geladen…", "Loading transactions…")
@@ -23,6 +29,11 @@ enum SetupProgress: Sendable {
 
     var subtitle: String {
         switch self {
+        case .authenticating:
+            return L10n.t("Bitte folge den Anweisungen deiner Bank", "Please follow your bank's instructions")
+        case .enteringCode:
+            return L10n.t("Bitte gib den von der Bank angeforderten Code in das Feld ein",
+                          "Please enter the code requested by your bank")
         case .requestingApproval:
             return L10n.t("Banking-App öffnen und Freigabe bestätigen", "Open your banking app and confirm the approval")
         default:
@@ -32,12 +43,21 @@ enum SetupProgress: Sendable {
 
     var iconName: String {
         switch self {
+        case .authenticating: return "lock.shield.fill"
+        case .enteringCode: return "keyboard.fill"
         case .requestingApproval: return "bell.circle.fill"
         case .fetchingBalance: return "arrow.triangle.2.circlepath.circle.fill"
         case .requestingTransactionApproval: return "arrow.triangle.2.circlepath"
         default: return "arrow.triangle.2.circlepath.circle.fill"
         }
     }
+}
+
+/// Welche SCA-Methode `handleSCA` gerade anfordert — damit die Setup-UI den
+/// Fortschrittstext passend setzt (Code-Eingabe vs. App-Freigabe).
+enum SCAMethodHint: Sendable {
+    case fieldInput        // Tipp-TAN/PIN → „Code eingeben"
+    case decoupledApproval // Push/Decoupled → „Banking-App öffnen…"
 }
 
 struct SetupConnectOptions: Sendable {

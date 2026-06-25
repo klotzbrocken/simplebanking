@@ -31,6 +31,12 @@ enum YaxiService {
     nonisolated(unsafe) static var fieldInputProvider:
         (@Sendable (SCAFieldInput.Spec) async -> String?)?
 
+    /// Meldet den SCA-Methodentyp, sobald `handleSCA` ihn kennt — damit die Setup-UI
+    /// den Fortschrittstext passend setzt (Code-Eingabe vs. App-Freigabe). Vom
+    /// Setup-Flow gesetzt (mit `defer nil`), sonst nil → kein Effekt.
+    nonisolated(unsafe) static var scaMethodReporter:
+        (@Sendable (SCAMethodHint) -> Void)?
+
     // MARK: - UserDefaults keys (per-slot)
     // "legacy" slot uses the original key names for backward compatibility.
 
@@ -1741,6 +1747,8 @@ enum YaxiService {
                 }
 
             case .confirmation(let context, let pollingDelaySecs):
+                // Push/Decoupled-Freigabe → Setup-UI auf „Banking-App öffnen…" stellen.
+                scaMethodReporter?(.decoupledApproval)
                 if let delay = pollingDelaySecs {
                     // YAXI: pollingDelay set → poll until confirmed
                     AppLogger.log("SCA Confirmation: polling delay=\(delay)s", category: "YaxiService")
@@ -1773,6 +1781,8 @@ enum YaxiService {
                                   category: "YaxiService", level: "WARN")
                     return nil
                 }
+                // Tipp-TAN/PIN → Setup-UI auf „Code eingeben" stellen (nicht App-Freigabe).
+                scaMethodReporter?(.fieldInput)
                 let slotEpochSnapshot = await MainActor.run {
                     MultibankingStore.shared.activeSlotEpoch
                 }
