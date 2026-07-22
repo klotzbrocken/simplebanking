@@ -222,6 +222,13 @@ private struct TransactionsPanelView: View {
 
     private var activePanelBg: Color {
         if roundupView.isActive { return .roundupPanelBackground }
+        // Money-Heat-Themes (Default + Unified): Liste in der Temperaturfarbe des
+        // Kontostands (heller Money-Heat-Ton) — die Money-Heat zieht sich durch, statt
+        // mit dem Bank-Tint (z. B. Sparkasse-Rot) zu kollidieren.
+        if isDefaultTheme || vm.isUnifiedMode {
+            return moneyHeatListTint
+        }
+        // REWE/Legacy-Slots: klassischer Bank-Tint.
         let style = BankTintStyle(rawValue: bankTintStyleRaw) ?? .soft
         switch style {
         case .soft, .cardOnPanel:
@@ -229,6 +236,15 @@ private struct TransactionsPanelView: View {
         case .sidebar:
             return .panelBackground
         }
+    }
+
+    /// Heller Temperatur-Ton (untere Money-Heat-Farbe) für den Listen-Hintergrund,
+    /// damit der Verlauf des Headers nahtlos in die Liste übergeht.
+    private var moneyHeatListTint: Color {
+        let parsed = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
+        let level = BalanceSignal.classify(balance: parsed, thresholds: normalizedBalanceThresholds)
+        let style = BalanceSignal.style(for: level)
+        return BalanceWash.colors(level: level, style: style, dark: activeColorScheme == .dark).bottom
     }
 
     /// Voll-saturierte Bank-Color für Sidebar-Streifen (A) und Border (D).

@@ -3635,7 +3635,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let rippleAlwaysOn = UserDefaults.standard.bool(forKey: "rippleAlwaysOn")
         let hasUnseenTx = latestTxSigBySlot.contains { slotId, sig in !sig.isEmpty && sig != lastSeenTxSig(for: slotId) }
         if rippleAlwaysOn || hasUnseenTx {
-            rootView.rippleTrigger = max(1, flyoutRippleTrigger)
+            // Bei jedem Öffnen frisch hochzählen, damit der Ripple zuverlässig neu feuert.
+            flyoutRippleTrigger += 1
+            rootView.rippleTrigger = flyoutRippleTrigger
         }
         if txVM.transactions.isEmpty {
             let slotSettings = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy")
