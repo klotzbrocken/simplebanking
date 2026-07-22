@@ -26,16 +26,13 @@ struct RoundupOverlay: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // Steuerzeile: „Aufrunden um" Steps · ¢-Toggle (Mode aus).
-            // Konto-Picker liegt eine Zeile darüber (eigene Reihe), damit die Pills Platz haben.
+            // Label + ¢-Toggle (Mode aus) in einer Zeile; die Step-Pills darunter in
+            // EIGENER voller Zeile — sonst wird im schmalen Fenster die 5€-Pille beschnitten.
             HStack(spacing: 10) {
                 Text(L10n.t("Aufrunden um:", "Round up to:"))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.primary)
                     .fixedSize()
-                ScrollView(.horizontal, showsIndicators: false) {
-                    stepPills.padding(.vertical, 1)
-                }
                 Spacer(minLength: 4)
                 Button(action: onClose) {
                     Image(systemName: "centsign.circle.fill")
@@ -44,6 +41,9 @@ struct RoundupOverlay: View {
                 }
                 .buttonStyle(.plain)
                 .help(L10n.t("Sparmodus beenden", "Leave round-up mode"))
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                stepPills.padding(.vertical, 1)
             }
 
             payoutButton

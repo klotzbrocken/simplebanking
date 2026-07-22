@@ -86,9 +86,5 @@ struct RoundupSavingsCard: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.roundupPanelBackground)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.roundupAccent.opacity(0.30), lineWidth: 1)
-        )
     }
 }

@@ -1443,7 +1443,8 @@ private struct TransactionsPanelView: View {
             if multibankingStore.slots.count > 1 {
                 accountDotsBar
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 6)
+                    .padding(.top, 4)
+                    .padding(.bottom, 12)
             }
 
             // Search + Icons — same row. Im Sparmode + REWE-Slot ausgeblendet
@@ -1687,12 +1688,19 @@ private struct TransactionsPanelView: View {
                                 }
                             }
 
-                            // Date Section Header
-                            Text(formatDateDE(group.date))
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                                .padding(.top, 8)
-                                .padding(.bottom, 4)
+                            // Date Section Header — Datum + Trennlinie am Tageswechsel
+                            HStack(spacing: 10) {
+                                Text(formatDateDE(group.date))
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                                    .fixedSize()
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.18))
+                                    .frame(height: 1)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 10)
+                            .padding(.bottom, 6)
 
                             // Transactions for this date
                             ForEach(group.transactions, id: \.stableIdentifier) { t in
@@ -2865,16 +2873,10 @@ private struct TransactionRowNew: View {
     /// • cardOnPanel → cardBackground (weiße Card schwebt auf Bank-getöntem Panel)
     /// • sidebar     → cardBackground (Bank-Akzent nur als 4 px Streifen am Panel)
     private var rowFillColor: Color {
+        // Prototyp „Ton in Ton": keine schwebende Card mehr — nur die Selektion wird
+        // hervorgehoben, sonst scheint der Panel-/Listen-Hintergrund durch.
         if isSelected { return Color.accentColor.opacity(0.12) }
-        if RoundupViewState.shared.isActive {
-            return BankTintProvider.resolveListTint(roundupViewActive: true) ?? Color.cardBackground
-        }
-        switch BankTintStyle.current {
-        case .soft:
-            return BankTintProvider.resolveListTint(roundupViewActive: false) ?? Color.cardBackground
-        case .cardOnPanel, .sidebar:
-            return Color.cardBackground
-        }
+        return .clear
     }
 
     /// Card-Shadow nur im `.cardOnPanel`-Style sichtbar — gibt den Rows

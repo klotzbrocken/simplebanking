@@ -3500,6 +3500,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
 
+        // Beim Öffnen des Flyouts den Aufrunden-/Sparmodus verlassen → normales
+        // Saldo-Flyout statt der Roundup-Hero-Card.
+        if RoundupViewState.shared.isActive {
+            RoundupViewState.shared.deactivate()
+        }
+
         let popover = balancePopover ?? NSPopover()
         popover.behavior = .semitransient
         popover.animates = true
@@ -6420,9 +6426,6 @@ private struct StatusBalanceFlyoutCardView: View {
             }
             .buttonStyle(.plain)
             .help(L10n.t("Schnellüberweisung", "Quick transfer"))
-            // Etwas Luft zur Karten-/Popover-Kante, damit das Icon nicht klebt.
-            .padding(.top, 12)
-            .padding(.trailing, 12)
         }
     }
 
@@ -6478,26 +6481,24 @@ private struct StatusBalanceFlyoutCardView: View {
             .onTapGesture(count: 2) { onDoubleTap?() }
             // Ripple only on the balance card, not the dot row
             .rippleEffect(trigger: rippleTrigger, defaultOrigin: CGPoint(x: 310, y: 130))
-            .overlay(alignment: .topTrailing) {
-                quickSendToggleButton
-                    .padding(.top, bleedDefaultCard ? 12 : 0)
-                    .padding(.trailing, bleedDefaultCard ? 14 : 0)
-            }
 
-            // Konto-Umschalter — adaptiver Segmented Control (Design „4b"),
-            // ersetzt die früheren abstrakten Dots.
+            // Footer-Zeile: Konto-Pillen (links) + Geld-senden (rechtsbündig, kleiner
+            // Randabstand). Der adaptive Segmented Control (Design „4b") ersetzt die Dots.
             if hasDots, let slots = allSlots {
                 let tint = BalanceSignal.style(
                     for: BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)
                 ).amountColor
-                FlyoutSlotSegmentedControl(
-                    slots: slots,
-                    activeIndex: activeSlotIndex,
-                    isUnifiedMode: isUnifiedMode,
-                    activeTint: tint,
-                    colorScheme: activeColorScheme,
-                    onSwitch: { onSwitchToIndex?($0) }
-                )
+                HStack(spacing: 8) {
+                    FlyoutSlotSegmentedControl(
+                        slots: slots,
+                        activeIndex: activeSlotIndex,
+                        isUnifiedMode: isUnifiedMode,
+                        activeTint: tint,
+                        colorScheme: activeColorScheme,
+                        onSwitch: { onSwitchToIndex?($0) }
+                    )
+                    quickSendToggleButton
+                }
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .padding(.bottom, 9)
