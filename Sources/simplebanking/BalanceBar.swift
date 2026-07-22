@@ -220,6 +220,49 @@ final class CredentialsPanel {
     }
 }
 
+/// Randloses Fenster für das aus dem Flyout gezogene Desktop-Widget. Borderless
+/// Fenster sind per Default `canBecomeKey == false` → die Quick-Send-Textfelder
+/// bekämen keinen Tastaturfokus; deshalb hier überschrieben. Rechtsklick öffnet
+/// das Kontextmenü (Vordergrund-Toggle + Schließen).
+final class FlyoutWidgetWindow: NSWindow {
+    /// Liefert das Kontextmenü beim Rechtsklick (vom AppDelegate gesetzt).
+    var contextMenuProvider: (() -> NSMenu)?
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if let menu = contextMenuProvider?(), let view = contentView {
+            let point = view.convert(event.locationInWindow, from: nil)
+            menu.popUp(positioning: nil, at: point, in: view)
+        } else {
+            super.rightMouseDown(with: event)
+        }
+    }
+}
+
+/// Container der Widget-Karte: erkennt Hover (Maus über dem Fenster), um die
+/// Steuer-Icons ein-/auszublenden und den Ruhe-Blur zu schalten.
+final class FlyoutWidgetContainerView: NSView {
+    var onHoverChanged: ((Bool) -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = hoverTrackingArea { removeTrackingArea(t) }
+        let t = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil
+        )
+        addTrackingArea(t)
+        hoverTrackingArea = t
+    }
+
+    override func mouseEntered(with event: NSEvent) { onHoverChanged?(true) }
+    override func mouseExited(with event: NSEvent) { onHoverChanged?(false) }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
@@ -875,6 +918,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var isFlyoutHovered: Bool = false
     private var statusButtonTrackingArea: NSTrackingArea?
     private var isHoverRevealingBalance: Bool = false
+
+    // MARK: Desktop-Widget (aus dem Flyout gezogen)
+    /// Das aus dem Menüleisten-Popover herausgezogene, freistehende Flyout-Fenster.
+    /// Nil solange kein Widget offen ist. Session-only (keine Neustart-Persistenz).
+    private var detachedFlyoutWindow: NSWindow?
+    /// Observer, der `detachedFlyoutWindow` beim Schließen des Fensters aufräumt.
+    private var detachedFlyoutCloseObserver: NSObjectProtocol?
+    /// Host der Widget-Karte — für Live-Refresh (das Fenster nutzt eine Container-
+    /// View als contentView, daher kein Zugriff über contentViewController).
+    private var detachedFlyoutHost: NSHostingController<StatusBalanceFlyoutCardView>?
+    /// Steuer-Icons auf dem Widget (nur bei Hover sichtbar).
+    private weak var widgetPinButton: NSButton?
+    private weak var widgetCloseButton: NSButton?
+    /// Ruhezustand des Widgets: Kontostand wird maskiert (Maus nicht über dem Fenster).
+    private var widgetBalanceHidden = false
+    /// Event-Monitore für das manuelle Fenster-Dragging (Drop auf den Desktop).
+    private var widgetDragMonitors: [Any] = []
+    private static let flyoutWidgetStayOnTopKey = "flyoutWidget.stayOnTop"
+    /// Standard: false = normale Fensterebene (umschaltbar per Rechtsklick-Menü).
+    private var flyoutWidgetStayOnTop: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.flyoutWidgetStayOnTopKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.flyoutWidgetStayOnTopKey)
+            applyFlyoutWidgetLevel()
+        }
+    }
+    private func applyFlyoutWidgetLevel() {
+        detachedFlyoutWindow?.level = flyoutWidgetStayOnTop ? .floating : .normal
+    }
 
     private static let isoDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -3279,6 +3351,247 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         MainActor.assumeIsolated { !flyoutQuickSendOpen }
     }
 
+    // MARK: - Flyout → Desktop-Widget (Drag-to-detach)
+
+    /// Guard: verhindert Mehrfach-Präsentation während eines einzelnen Drags
+    /// (AppKit pollt `popoverShouldDetach` wiederholt).
+    private var pendingWidgetPresentation = false
+
+    /// Der Nutzer zieht das Popover weg → Desktop-Widget. AppKit VOLLENDET
+    /// natives Detach bei Statusbar-Popovers nicht (weder `popoverDidDetach` noch
+    /// ein Detach-Fenster bleiben stehen — verifiziert per Logging). Deshalb
+    /// unterbinden wir das native Detach (return false, damit AppKit auch kein
+    /// eigenes Fenster baut) und nutzen den Aufruf nur als Signal, um das Widget
+    /// SELBST als eigenständiges Fenster zu präsentieren.
+    nonisolated func popoverShouldDetach(_ popover: NSPopover) -> Bool {
+        MainActor.assumeIsolated {
+            guard !flyoutQuickSendOpen, detachedFlyoutWindow == nil,
+                  !pendingWidgetPresentation else { return false }
+            pendingWidgetPresentation = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let dropPoint = NSEvent.mouseLocation
+                let dragEvent = NSApp.currentEvent
+                self.balancePopover?.close()
+                self.showFlyoutWidget(at: dropPoint, initiatingDrag: dragEvent)
+                self.pendingWidgetPresentation = false
+            }
+            return false
+        }
+    }
+
+    /// Baut die randlose Fenster-Hülle für das Desktop-Widget — identisch zum
+    /// zentrierten Hold-to-Show-Flyout (`showCenteredFlyout`), das die Karte
+    /// pixelgenau ohne Fenster-Chrome rendert. Da WIR das Fenster präsentieren
+    /// (kein AppKit-Detach), bleibt es dank `hidesOnDeactivate=false` sichtbar.
+    private func makeFlyoutWidgetWindow(size: NSSize) -> FlyoutWidgetWindow {
+        let window = FlyoutWidgetWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered, defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true
+        window.isMovableByWindowBackground = true
+        window.hidesOnDeactivate = false
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        window.isReleasedWhenClosed = false
+        window.level = flyoutWidgetStayOnTop ? .floating : .normal
+        return window
+    }
+
+    /// Präsentiert das Flyout als eigenständiges Desktop-Widget an `dropPoint`
+    /// (obere-linke Ecke, innerhalb der sichtbaren Bildschirmfläche gehalten).
+    /// Frischer `buildFlyoutHost` als contentViewController → voll verdrahtet und
+    /// von `refreshFlyoutIfVisible` live aktualisiert.
+    private func showFlyoutWidget(at dropPoint: NSPoint, initiatingDrag: NSEvent? = nil) {
+        guard detachedFlyoutWindow == nil else { return }
+
+        let result = buildFlyoutHost(onDoubleTap: { [weak self] in
+            Task { await self?.openTransactionsPanel() }
+        })
+        result.host.sizingOptions = []
+        let size = flyoutContentSize(hasDots: result.hasDots)
+        let window = makeFlyoutWidgetWindow(size: size)
+
+        // Container-View statt contentViewController: trägt Hover-Tracking (Icons +
+        // Blur) und die Steuer-Icons. Der Host wird für den Live-Refresh separat in
+        // `detachedFlyoutHost` gehalten.
+        let container = FlyoutWidgetContainerView(frame: NSRect(origin: .zero, size: size))
+        let hostView = result.host.view
+        hostView.frame = container.bounds
+        hostView.autoresizingMask = [.width, .height]
+        // Gerundete Ecken + dezenter Rahmen am Host-Layer (wie Centered-Flyout).
+        hostView.wantsLayer = true
+        hostView.layer?.cornerRadius = 10
+        hostView.layer?.masksToBounds = true
+        hostView.layer?.borderWidth = 0.5
+        hostView.layer?.borderColor = NSColor.separatorColor.cgColor
+        container.addSubview(hostView)
+
+        // Steuer-Icons oben rechts (nur bei Hover sichtbar), oben-rechts verankert.
+        let pin = makeWidgetIconButton(
+            symbol: flyoutWidgetStayOnTop ? "pin.fill" : "pin",
+            help: L10n.t("Immer im Vordergrund", "Always on top"),
+            action: #selector(toggleFlyoutWidgetStayOnTop))
+        let close = makeWidgetIconButton(
+            symbol: "xmark",
+            help: L10n.t("Schließen", "Close"),
+            action: #selector(closeFlyoutWidget))
+        let btnSize: CGFloat = 20, pad: CGFloat = 6, gap: CGFloat = 4
+        close.frame = NSRect(x: size.width - pad - btnSize, y: size.height - pad - btnSize, width: btnSize, height: btnSize)
+        pin.frame = NSRect(x: close.frame.minX - gap - btnSize, y: close.frame.minY, width: btnSize, height: btnSize)
+        pin.autoresizingMask = [.minXMargin, .minYMargin]
+        close.autoresizingMask = [.minXMargin, .minYMargin]
+        pin.isHidden = true
+        close.isHidden = true
+        container.addSubview(pin)
+        container.addSubview(close)
+        widgetPinButton = pin
+        widgetCloseButton = close
+
+        container.onHoverChanged = { [weak self] hovering in self?.setWidgetHovered(hovering) }
+        window.contentView = container
+        detachedFlyoutHost = result.host
+        window.contextMenuProvider = { [weak self] in
+            self?.makeFlyoutWidgetMenu() ?? NSMenu()
+        }
+
+        // Position: Cursor horizontal mittig, knapp unter der Oberkante — so
+        // „greift" der übergebene Drag das Fenster dort, wo die Maus schon ist.
+        // Innerhalb der sichtbaren Fläche halten (Notch/Menubar/Dock ausgeschlossen).
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(dropPoint) }) ?? NSScreen.main
+        var topLeft = NSPoint(x: dropPoint.x - size.width / 2, y: dropPoint.y + 20)
+        if let visible = screen?.visibleFrame {
+            let maxX = max(visible.minX, visible.maxX - size.width)
+            let minY = visible.minY + size.height
+            topLeft.x = min(max(topLeft.x, visible.minX), maxX)
+            topLeft.y = min(max(topLeft.y, minY), visible.maxY)
+        }
+        window.setFrameTopLeftPoint(topLeft)
+
+        detachedFlyoutWindow = window
+        detachedFlyoutCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            MainActor.assumeIsolated { self.cleanupDetachedFlyout() }
+        }
+        applyFlyoutWidgetLevel()
+        window.makeKeyAndOrderFront(nil)
+        // Anfangszustand aus tatsächlicher Cursor-Position ableiten (Tracking-Area
+        // feuert kein mouseEntered, wenn die Maus beim Erzeugen schon drin ist).
+        setWidgetHovered(window.frame.contains(NSEvent.mouseLocation))
+
+        // Echtes Drag & Drop: solange die Maustaste noch gedrückt ist, das Fenster
+        // dem Cursor folgen lassen bis losgelassen wird. `performDrag` funktioniert
+        // nur während der Live-Verarbeitung eines mouseDown (nicht asynchron), daher
+        // manuelles Tracking per Event-Monitor.
+        if initiatingDrag != nil, NSEvent.pressedMouseButtons != 0 {
+            startWidgetDragTracking(window: window)
+        }
+    }
+
+    /// Manuelles Fenster-Dragging: verschiebt `window` mit dem Cursor bis zum
+    /// nächsten mouseUp. Lokaler + globaler Monitor, damit das Ziehen auch über
+    /// fremde Fenster/den Desktop hinweg funktioniert.
+    private func startWidgetDragTracking(window: NSWindow) {
+        stopWidgetDragTracking()
+        let mouse = NSEvent.mouseLocation
+        let origin = window.frame.origin
+        let grab = NSSize(width: mouse.x - origin.x, height: mouse.y - origin.y)
+        let move: () -> Void = { [weak window] in
+            guard let window else { return }
+            let m = NSEvent.mouseLocation
+            window.setFrameOrigin(NSPoint(x: m.x - grab.width, y: m.y - grab.height))
+        }
+        let localDrag = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged]) { e in move(); return e }
+        let localUp = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] e in
+            self?.stopWidgetDragTracking(); return e
+        }
+        let globalDrag = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { _ in move() }
+        let globalUp = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
+            self?.stopWidgetDragTracking()
+        }
+        widgetDragMonitors = [localDrag, localUp, globalDrag, globalUp].compactMap { $0 }
+    }
+
+    private func stopWidgetDragTracking() {
+        for m in widgetDragMonitors { NSEvent.removeMonitor(m) }
+        widgetDragMonitors = []
+    }
+
+    /// Kontextmenü des Desktop-Widgets: Vordergrund-Toggle + Schließen.
+    private func makeFlyoutWidgetMenu() -> NSMenu {
+        let menu = NSMenu()
+        let onTop = NSMenuItem(
+            title: L10n.t("Immer im Vordergrund", "Always on top"),
+            action: #selector(toggleFlyoutWidgetStayOnTop), keyEquivalent: "")
+        onTop.target = self
+        onTop.state = flyoutWidgetStayOnTop ? .on : .off
+        menu.addItem(onTop)
+        menu.addItem(.separator())
+        let close = NSMenuItem(
+            title: L10n.t("Schließen", "Close"),
+            action: #selector(closeFlyoutWidget), keyEquivalent: "w")
+        close.target = self
+        menu.addItem(close)
+        return menu
+    }
+
+    /// Kleiner runder Icon-Button für die Widget-Steuerung (Pin / Schließen).
+    private func makeWidgetIconButton(symbol: String, help: String, action: Selector) -> NSButton {
+        let button = NSButton(frame: .zero)
+        button.bezelStyle = .regularSquare
+        button.isBordered = false
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 10
+        button.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.28).cgColor
+        let config = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)?
+            .withSymbolConfiguration(config)
+        button.imagePosition = .imageOnly
+        button.contentTintColor = .white
+        button.target = self
+        button.action = action
+        button.toolTip = help
+        return button
+    }
+
+    /// Hover-Zustand: Steuer-Icons ein-/ausblenden + Kontostand-Maske schalten
+    /// (im Ruhezustand — Maus NICHT über dem Widget — wird nur der Saldo durch
+    /// `•••.•• €` ersetzt, damit er nicht lesbar ist; bei Hover echter Betrag).
+    private func setWidgetHovered(_ hovering: Bool) {
+        widgetPinButton?.isHidden = !hovering
+        widgetCloseButton?.isHidden = !hovering
+        widgetBalanceHidden = !hovering
+        refreshFlyoutIfVisible()   // wendet die Maske im Widget-Zweig an
+    }
+
+    @objc private func toggleFlyoutWidgetStayOnTop() {
+        flyoutWidgetStayOnTop.toggle()
+        widgetPinButton?.image = NSImage(
+            systemSymbolName: flyoutWidgetStayOnTop ? "pin.fill" : "pin",
+            accessibilityDescription: L10n.t("Immer im Vordergrund", "Always on top"))
+    }
+
+    @objc private func closeFlyoutWidget() {
+        detachedFlyoutWindow?.close()   // löst willClose → cleanupDetachedFlyout aus
+    }
+
+    private func cleanupDetachedFlyout() {
+        stopWidgetDragTracking()
+        if let obs = detachedFlyoutCloseObserver {
+            NotificationCenter.default.removeObserver(obs)
+            detachedFlyoutCloseObserver = nil
+        }
+        detachedFlyoutHost = nil
+        widgetPinButton = nil
+        widgetCloseButton = nil
+        detachedFlyoutWindow = nil
+    }
+
     // MARK: - Quick-Send (Flyout-Drawer)
 
     /// Ob der Quick-Send-Drawer im Flyout gerade aufgeklappt ist. Treibt die
@@ -3343,6 +3656,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             frame.size = size
             frame.origin.y -= delta   // oben verankert nach unten wachsen lassen
             content.animator().setFrame(frame, display: true)
+        }
+        if let widget = detachedFlyoutWindow {
+            var frame = widget.frame
+            let delta = size.height - frame.size.height
+            frame.size = size
+            frame.origin.y -= delta   // oben verankert nach unten wachsen lassen
+            widget.animator().setFrame(frame, display: true)
         }
     }
 
@@ -3940,7 +4260,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }()
         let centeredHost = centeredFlyoutContentWindow?.contentViewController
             as? NSHostingController<StatusBalanceFlyoutCardView>
-        guard popoverHost != nil || centeredHost != nil else { return }
+        let widgetHost = detachedFlyoutHost
+        guard popoverHost != nil || centeredHost != nil || widgetHost != nil else { return }
         let store = MultibankingStore.shared
         let idx = store.activeIndex
         let count = store.slots.count
@@ -4024,6 +4345,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 content.setFrame(frame, display: true)
             }
             centeredHost.rootView = rootView
+        }
+
+        if let widget = detachedFlyoutWindow, let widgetHost {
+            // Oben verankert nach unten wachsen lassen — Widget-Position beibehalten
+            // (kein Re-Center wie beim zentrierten Flyout).
+            if widget.frame.size != newSize {
+                var frame = widget.frame
+                let delta = newSize.height - frame.size.height
+                frame.size = newSize
+                frame.origin.y -= delta
+                widget.setFrame(frame, display: true)
+            }
+            // Ruhezustand: nur den Kontostand maskieren (Wert-Semantik → betrifft
+            // Popover/Centered oben nicht).
+            var widgetView = rootView
+            widgetView.balanceTextOverride = widgetBalanceHidden ? hiddenBalanceMaskTitle() : nil
+            widgetHost.rootView = widgetView
         }
     }
 
@@ -6234,6 +6572,9 @@ private struct FlyoutVibrancyBackground: NSViewRepresentable {
 private struct StatusBalanceFlyoutCardView: View {
     @AppStorage("balanceMoodEmojiEnabled") private var emojiEnabled: Bool = false
     let balanceText: String
+    /// Optionaler Ersatz für den Kontostand (Desktop-Widget-Ruhezustand: Maske).
+    var balanceTextOverride: String? = nil
+    private var effectiveBalanceText: String { balanceTextOverride ?? balanceText }
     let balanceValue: Double?
     let thresholds: BalanceSignalThresholds
     let isDefaultTheme: Bool
@@ -6617,7 +6958,7 @@ private struct StatusBalanceFlyoutCardView: View {
             // Right side: mini account bar stack replaces GreenZoneRing (same 72pt height)
             HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(balanceText)
+                    Text(effectiveBalanceText)
                         .font(.system(size: 38, weight: .bold, design: .default))
                         .tracking(-0.6)
                         .monospacedDigit()
@@ -6717,7 +7058,7 @@ private struct StatusBalanceFlyoutCardView: View {
             }
             HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(balanceText)
+                    Text(effectiveBalanceText)
                         .font(.system(size: 30, weight: .bold, design: .default))
                         .foregroundColor(.primary)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
@@ -6778,7 +7119,7 @@ private struct StatusBalanceFlyoutCardView: View {
     private var defaultThemeCard: some View {
         let level = BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)
         let style = BalanceSignal.style(for: level)
-        let displayBalance = balanceValue == nil ? "--,-- €" : balanceText
+        let displayBalance = balanceValue == nil ? "--,-- €" : effectiveBalanceText
         let dark = activeColorScheme == .dark
         let wash = washColors(level: level, style: style, dark: dark)
         let nameColor: Color = dark ? Color(NSColor.labelColor) : (Color(hex: "1d1d1f") ?? .primary)
@@ -6831,7 +7172,7 @@ private struct StatusBalanceFlyoutCardView: View {
     }
 
     private var legacyCard: some View {
-        let displayBalance = balanceValue == nil ? "--,-- €" : balanceText
+        let displayBalance = balanceValue == nil ? "--,-- €" : effectiveBalanceText
         let balColor: Color = (balanceValue ?? 0) < 0 ? .expenseRed : ((balanceValue ?? 0) > 0 ? .incomeGreen : .primary)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
