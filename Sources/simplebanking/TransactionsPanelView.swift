@@ -8,6 +8,12 @@ private struct TransactionsPanelView: View {
     @ObservedObject var accountNav: AccountNavModel
     /// Öffnet das einheitliche Dashboard am gewünschten Tab (löst die Einzel-Sheets ab).
     var onOpenDashboard: ((DashboardTab) -> Void)? = nil
+    // Fenster-Chrome jetzt im SwiftUI-Header (statt NSToolbar) — damit die Money-Heat
+    // bis ganz oben hinter Ampel/Icons reicht. Refresh/Pin/Einstellungen als Buttons.
+    var onSettings: (() -> Void)? = nil
+    var onTogglePin: (() -> Void)? = nil
+    var isPinnedProvider: (() -> Bool)? = nil
+    @State private var isPinnedLocal: Bool = false
     @ObservedObject private var logoStore = BankLogoStore.shared
     @ObservedObject private var multibankingStore = MultibankingStore.shared
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
@@ -410,8 +416,6 @@ private struct TransactionsPanelView: View {
     /// Shows total/per-slot sum prominently, then a compact slot icon strip below.
     private var unifiedBalanceCard: some View {
         let slots = multibankingStore.slots
-        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.60)
-        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.35)
 
         // Compute per-slot balances for display
         let slotBalances: [(slot: BankSlot, balance: Double?)] = slots.map { slot in
@@ -435,8 +439,12 @@ private struct TransactionsPanelView: View {
             mediumUpperBound: normalizedBalanceThresholds.mediumUpperBound * Double(slotCount),
             veryGoodLowerBound: normalizedBalanceThresholds.veryGoodLowerBound * Double(slotCount)
         )
-        // Aggregated view uses neutral grey — no signal coloring for combined balance
-        let totalSignalColor: Color = .primary
+        // Money-Heat für die Aggregat-Summe (Temperatur des Gesamtsaldos).
+        let uDark = activeColorScheme == .dark
+        let uLevel = BalanceSignal.classify(balance: totalBalance, thresholds: aggregatedThresholds)
+        let uStyle = BalanceSignal.style(for: uLevel)
+        let uWash = BalanceWash.colors(level: uLevel, style: uStyle, dark: uDark)
+        let totalSignalColor: Color = uWash.balance
 
         let leftContent = VStack(alignment: .leading, spacing: 8) {
             // Row 1: slot icons strip — mirrors single-account card's logo+timestamp row
@@ -491,10 +499,11 @@ private struct TransactionsPanelView: View {
                         .font(.system(size: 22, weight: .bold))
                         .foregroundColor(totalSignalColor)
                     Text(formatBalance(total, currency: displayCurrency))
-                        .font(.system(size: 32, weight: .bold, design: .default))
+                        .font(.system(size: 38, weight: .bold, design: .default))
+                        .tracking(-0.6)
                         .foregroundColor(totalSignalColor)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+                        .minimumScaleFactor(0.6)
                 }
                     .padding(.trailing, 0)
             } else if slotBalances.isEmpty || slotBalances.allSatisfy({ $0.balance == nil }) {
@@ -548,16 +557,22 @@ private struct TransactionsPanelView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 16)
+        // Randlose Money-Heat wie die Einzelkonto-Karte (Aggregat-Temperatur), oben bis
+        // hinter die Titelleiste, unten weicher Fade in den Listen-Hintergrund.
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(LinearGradient(colors: [Color.primary.opacity(0.10), .clear],
-                                        startPoint: .topLeading, endPoint: .bottomTrailing))
-            }
+            LinearGradient(
+                stops: [
+                    .init(color: uWash.top, location: 0.0),
+                    .init(color: uWash.bottom, location: 0.68),
+                    .init(color: activePanelBg, location: 1.0)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea(.container, edges: .top)
         )
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(borderColor, lineWidth: 1))
     }
 
     private var defaultThemeBalanceCard: some View {
@@ -565,8 +580,9 @@ private struct TransactionsPanelView: View {
         let level = BalanceSignal.classify(balance: parsedBalance, thresholds: normalizedBalanceThresholds)
         let style = BalanceSignal.style(for: level)
         let displayBalance = parsedBalance == nil ? "--,-- €" : (vm.currentBalance ?? "--,-- €")
-        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.60)
-        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.35)
+        // Flyout-Look: Temperatur-Wash (randlos) statt Glas-Karte. Ring bleibt (Punkt 3.1).
+        let dark = activeColorScheme == .dark
+        let wash = BalanceWash.colors(level: level, style: style, dark: dark)
 
         let balanceBrand = BankLogoAssets.resolve(displayName: vm.connectedBankDisplayName,
                                                    logoID: vm.connectedBankLogoID,
@@ -605,8 +621,11 @@ private struct TransactionsPanelView: View {
             }
 
             Text(displayBalance)
-                .font(.system(size: 32, weight: .bold, design: .default))
-                .foregroundColor(style.amountColor)
+                .font(.system(size: 38, weight: .bold, design: .default))
+                .tracking(-0.6)
+                .foregroundColor(wash.balance)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
 
             leftToPaySubtitle
         }
@@ -636,24 +655,22 @@ private struct TransactionsPanelView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: panelIsWide)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 16)
+        // Randlose Money-Heat bis an ALLE Fensterkanten — oben hinter der Titelleiste
+        // (Ampel/Icons sitzen darauf). Unten läuft sie als 3-Stop-Verlauf weich in den
+        // Listen-Hintergrund aus → fließender Übergang zur Umsatzliste (kein harter Rand).
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(glassColor)
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [style.gradientBaseColor.opacity(0.10), .clear],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(borderColor, lineWidth: 1)
+            LinearGradient(
+                stops: [
+                    .init(color: wash.top, location: 0.0),
+                    .init(color: wash.bottom, location: 0.68),
+                    .init(color: activePanelBg, location: 1.0)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea(.container, edges: .top)
         )
     }
 
@@ -1292,43 +1309,103 @@ private struct TransactionsPanelView: View {
     /// Konto-Indikatoren (Slot-Dots + „Alle Konten"). Von Normal- und Sparmode-Layout
     /// geteilt (im Sparmode in der RoundupOverlay-Steuerzeile, sonst eigene Zeile).
     @ViewBuilder
+    /// Temperaturfarbe des aktiven Kontos (wie der Balance-Wash) — Tönung der aktiven Pille.
+    private var headerTint: Color {
+        let parsed = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
+        let level = BalanceSignal.classify(balance: parsed, thresholds: normalizedBalanceThresholds)
+        let style = BalanceSignal.style(for: level)
+        return BalanceWash.colors(level: level, style: style, dark: activeColorScheme == .dark).balance
+    }
+
+    /// Fenster-Chrome (ersetzt die NSToolbar): Refresh · Pin · Einstellungen, oben
+    /// rechts im Titelleisten-Streifen auf der Money-Heat.
+    private var headerControls: some View {
+        HStack(spacing: 15) {
+            Button { Task { await onRefresh() } } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help(L10n.t("Aktuelles Konto aktualisieren", "Refresh current account"))
+            Button {
+                onTogglePin?()
+                isPinnedLocal.toggle()
+            } label: {
+                Image(systemName: isPinnedLocal ? "pin.fill" : "pin")
+                    .foregroundColor(isPinnedLocal ? Color.themeAccent : .secondary)
+            }
+            .help(L10n.t("Oben halten", "Keep on top"))
+            Button { onSettings?() } label: {
+                Image(systemName: "gearshape")
+            }
+            .help(L10n.t("Einstellungen", "Settings"))
+        }
+        .font(.system(size: 13, weight: .medium))
+        .foregroundColor(.secondary)
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func slotLogoTile(_ slot: BankSlot, size: CGFloat) -> some View {
+        let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId,
+                                           iban: slot.isReceiptSlot ? nil : slot.iban)
+        if let img = logoStore.image(for: brand) {
+            Image(nsImage: img).resizable().scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(slotDisplayColor(for: slot))
+                .frame(width: size, height: size)
+                .overlay(Text(String((slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName).prefix(1)).uppercased())
+                    .font(.system(size: size * 0.55, weight: .bold)).foregroundColor(.white))
+        }
+    }
+
+    /// Konto-Umschalter als Logo-Pillen (wie im Flyout): aktive gefüllte Pille + kleinere
+    /// Logo-Pillen; „Alle Konten" als kleine Icon-Pille (nur bei ≥2 echten Konten).
     private var accountDotsBar: some View {
-        HStack(spacing: 8) {
-            // One dot per slot
+        let tint = headerTint
+        let activeFill = activeColorScheme == .dark ? Color.white.opacity(0.16) : Color.white
+        let inactiveFill = activeColorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+        return HStack(spacing: 6) {
             ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
                 let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
-                let color = slotDisplayColor(for: slot)
-                Button {
-                    guard !isActive else { return }
-                    if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
-                    accountNav.onSwitchToIndex?(idx)
-                } label: {
-                    Capsule()
-                        .fill(isActive ? color : Color(NSColor.tertiaryLabelColor))
-                        .frame(width: isActive ? 24 : 8, height: 8)
-                        .animation(.easeInOut(duration: 0.3), value: isActive)
-                        .frame(height: 24)
-                        .contentShape(Rectangle())
+                if isActive {
+                    HStack(spacing: 5) {
+                        slotLogoTile(slot, size: 16)
+                        Text(slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundColor(tint)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Capsule(style: .continuous).fill(activeFill)
+                        .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1))
+                } else {
+                    slotLogoTile(slot, size: 15)
+                        .padding(5)
+                        .background(Capsule(style: .continuous).fill(inactiveFill))
+                        .contentShape(Capsule())
+                        .onTapGesture {
+                            if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
+                            accountNav.onSwitchToIndex?(idx)
+                        }
                 }
-                .buttonStyle(.plain)
             }
-            // "Alle Konten" dot — nur bei >=2 ECHTEN Konten (eBon-Slots zählen nicht).
             if multibankingStore.realSlotCount > 1 {
                 let unifiedActive = vm.unifiedModeEnabled
-                Button {
-                    guard !unifiedActive else { return }
-                    vm.unifiedModeEnabled = true
-                } label: {
-                    Capsule()
-                        .fill(unifiedActive ? Color(NSColor.secondaryLabelColor) : Color(NSColor.tertiaryLabelColor))
-                        .frame(width: unifiedActive ? 24 : 8, height: 8)
-                        .animation(.easeInOut(duration: 0.3), value: unifiedActive)
-                        .frame(height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(unifiedActive ? tint : Color(NSColor.secondaryLabelColor))
+                    .frame(width: 26, height: 26)
+                    .background(Capsule(style: .continuous).fill(unifiedActive ? activeFill : inactiveFill))
+                    .contentShape(Capsule())
+                    .onTapGesture { if !unifiedActive { vm.unifiedModeEnabled = true } }
             }
+            Spacer(minLength: 0)
         }
+        .animation(.easeInOut(duration: 0.2), value: multibankingStore.activeIndex)
+        .animation(.easeInOut(duration: 0.2), value: vm.unifiedModeEnabled)
     }
 
     var body: some View {
@@ -1349,8 +1426,10 @@ private struct TransactionsPanelView: View {
             }
             .rippleEffect(trigger: vm.rippleTrigger,
                           defaultOrigin: CGPoint(x: 190, y: 65))
-            .padding(.horizontal, 16)
-            .padding(.top, -9)
+            // Default-Bank-Header bekommt den randlosen Wash (0 Außen-Padding, Wash bis
+            // an die Fensterkanten). Andere Karten (REWE/Roundup/Unified/Legacy) behalten 16.
+            .padding(.horizontal, ((isDefaultTheme || vm.isUnifiedMode) && !receiptActive && !roundupView.isActive) ? 0 : 16)
+            .padding(.top, ((isDefaultTheme || vm.isUnifiedMode) && !receiptActive && !roundupView.isActive) ? 0 : -9)
             .padding(.bottom, multibankingStore.slots.count > 1 ? 4 : 6)
 
             // Account dot indicators — slot dots + "Alle Konten" dot. Eigene Zeile in
@@ -1358,6 +1437,7 @@ private struct TransactionsPanelView: View {
             // nicht beschnitten werden).
             if multibankingStore.slots.count > 1 {
                 accountDotsBar
+                    .padding(.horizontal, 16)
                     .padding(.bottom, 6)
             }
 
@@ -1565,6 +1645,10 @@ private struct TransactionsPanelView: View {
                 ScrollViewReader { scrollProxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
+                        // Erzwingt Overlay-Scroller mit Autohide (on-demand) auf der
+                        // umschließenden NSScrollView — unabhängig von System-Pref/Maus.
+                        OverlayScrollerConfigurator()
+                            .frame(width: 0, height: 0)
                         Color.clear
                             .frame(height: 0)
                             .background(
@@ -1777,8 +1861,8 @@ private struct TransactionsPanelView: View {
             
             Spacer(minLength: 0)
 
-            // Pagination Footer — flacher single-row HStack wie v1.3.4
-            HStack {
+            // Footer — schmal. Icons linksbündig, „Mehr ▾" ganz rechts.
+            HStack(spacing: 16) {
                 if !infiniteScrollEnabled && vm.page > 0 {
                     Button(action: { vm.prevPage() }) {
                         HStack(spacing: 4) {
@@ -1792,70 +1876,74 @@ private struct TransactionsPanelView: View {
                     .foregroundColor(.primary)
                 }
 
-                Spacer()
-
-                HStack(spacing: 16) {
-                    // simplesend — erster Eintrag im Footer.
-                    // Toggle in Einstellungen → Verhalten („simplesend anzeigen")
-                    // blendet ihn aus; UpsellSheet hat denselben Toggle als Checkbox.
-                    if simplesendVisible {
-                        Button(action: {
-                            NotificationCenter.default.post(
-                                name: Notification.Name("simplebanking.openTransferSheet"),
-                                object: nil)
-                        }) {
-                            Image(systemName: "paperplane")
-                                .font(.system(size: 15))
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
-                    }
-
-                    // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
-                    // (Abos/Fixkosten/Kalender/Financial Health/Money Age sind dort Tabs).
-                    Button(action: { onOpenDashboard?(.overview) }) {
-                        Image(systemName: "square.grid.2x2")
+                // simplesend — Geld senden
+                if simplesendVisible {
+                    Button(action: {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("simplebanking.openTransferSheet"),
+                            object: nil)
+                    }) {
+                        Image(systemName: "paperplane")
                             .font(.system(size: 15))
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("Dashboard", "Dashboard"))
+                    .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
+                }
 
-                    // Inbox mit Badge — nur wenn vom User aktiviert (Setting in
-                    // SettingsPanel). Die Detector-Logik läuft bei deaktiviertem
-                    // Toggle gar nicht erst, sodass keine Cards gesammelt werden.
-                    if attentionInboxEnabled {
-                        Button(action: {
-                            recomputeAttentionInbox()
-                            showAttentionInbox = true
-                        }) {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: attentionCards.isEmpty ? "bell" : "bell.fill")
-                                    .font(.system(size: 15))
-                                    .foregroundColor(attentionCards.isEmpty ? .secondary : .primary)
-                                if !attentionCards.isEmpty {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.sbOrangeStrong)
-                                            .frame(width: 14, height: 14)
-                                        Text("\(min(attentionCards.count, 9))")
-                                            .font(.system(size: 8, weight: .bold))
-                                            .foregroundColor(.white)
-                                    }
-                                    .offset(x: 6, y: -6)
+                // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
+                Button(action: { onOpenDashboard?(.overview) }) {
+                    Image(systemName: "square.grid.2x2")
+                        .font(.system(size: 15))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(L10n.t("Dashboard", "Dashboard"))
+
+                // Inbox mit Badge
+                if attentionInboxEnabled {
+                    Button(action: {
+                        recomputeAttentionInbox()
+                        showAttentionInbox = true
+                    }) {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: attentionCards.isEmpty ? "bell" : "bell.fill")
+                                .font(.system(size: 15))
+                                .foregroundColor(attentionCards.isEmpty ? .secondary : .primary)
+                            if !attentionCards.isEmpty {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.sbOrangeStrong)
+                                        .frame(width: 14, height: 14)
+                                    Text("\(min(attentionCards.count, 9))")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.white)
                                 }
+                                .offset(x: 6, y: -6)
                             }
                         }
-                        .buttonStyle(PlainButtonStyle())
-                        .help(L10n.t("Attention Inbox", "Attention Inbox"))
                     }
+                    .buttonStyle(PlainButtonStyle())
+                    .help(L10n.t("Attention Inbox", "Attention Inbox"))
+                }
 
-                    // (Financial Health / Kalender / Fixkosten / Money Age leben jetzt
-                    //  im Dashboard — kein eigener Toolbar-/Menüeintrag mehr.)
+                Spacer()
 
-                    // Mehr ▾
-                    Menu {
+                if !infiniteScrollEnabled && vm.page < vm.totalPages - 1 {
+                    Button(action: { vm.nextPage() }) {
+                        HStack(spacing: 4) {
+                            Text("Ältere")
+                                .font(.system(size: 14))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .foregroundColor(.primary)
+                }
+
+                // Mehr ▾ — ganz rechts
+                Menu {
                         Button(action: { markAllTransactionsRead() }) {
                             Label(L10n.t("Alle als gelesen markieren", "Mark all as read"), systemImage: "checkmark.circle")
                         }
@@ -1898,30 +1986,23 @@ private struct TransactionsPanelView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .tint(.primary) // Menu-Item-Icons monochrom statt Accent-Blau
-                }
-
-                Spacer()
-
-                if !infiniteScrollEnabled && vm.page < vm.totalPages - 1 {
-                    Button(action: { vm.nextPage() }) {
-                        HStack(spacing: 4) {
-                            Text("Ältere")
-                                .font(.system(size: 14))
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .foregroundColor(.primary)
-                }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 28)
-            .padding(.bottom, 4)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
             .background(activePanelBg)
         }
-        .frame(minWidth: 420, idealWidth: 420, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
+        .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
         .background { activePanelBg.ignoresSafeArea(.all, edges: .top) } // extends panel-bg into titlebar/toolbar area (theme-aware)
+        // Fenster-Chrome oben rechts im Titelleisten-Streifen (auf der Money-Heat),
+        // ersetzt die entfernte NSToolbar. ignoresSafeArea → sitzt im Titel-Bereich.
+        .overlay(alignment: .topTrailing) {
+            headerControls
+                .padding(.top, 9)
+                .padding(.trailing, 16)
+                .ignoresSafeArea(.container, edges: .top)
+        }
+        .onAppear { isPinnedLocal = isPinnedProvider?() ?? false }
         .tint(Color.themeAccent)
         .preferredColorScheme(colorScheme)
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { newWidth in
@@ -2073,7 +2154,18 @@ private struct TransactionsPanelView: View {
                     .fill(color)
                     .frame(width: 4)
                     .frame(maxHeight: .infinity)
-                    .padding(.bottom, 52)
+                    // Oben weich ausfaden (Übergang in die Money-Heat), unten bis an die
+                    // echte Fensterkante durch — unabhängig von Frame/Footer.
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .black, location: 0.30)
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .ignoresSafeArea(.all, edges: .vertical)
                     .allowsHitTesting(false)
             }
         }
@@ -2965,6 +3057,36 @@ private struct TransactionRowNew: View {
     }
 }
 
+/// Erzwingt Overlay-Scroller mit Autohide auf der umschließenden NSScrollView —
+/// unabhängig von System-Einstellung/angeschlossener Maus. Dadurch blendet die
+/// vertikale Scrollbar wieder on-demand aus (wie früher) statt dauerhaft zu bleiben.
+private struct OverlayScrollerConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView(frame: .zero)
+        configure(from: v)
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        configure(from: nsView)
+    }
+    private func configure(from view: NSView, attempt: Int = 0) {
+        // Die umschließende NSScrollView hängt beim ersten Layout evtl. noch nicht in
+        // der Hierarchie → ein paar verzögerte Versuche, bis sie gefunden wird.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double(attempt) * 0.15) { [weak view] in
+            guard let view else { return }
+            var node: NSView? = view.superview
+            while let cur = node, !(cur is NSScrollView) { node = cur.superview }
+            if let scroll = node as? NSScrollView {
+                scroll.scrollerStyle = .overlay
+                scroll.autohidesScrollers = true
+                scroll.verticalScroller?.alphaValue = 0
+            } else if attempt < 6 {
+                configure(from: view, attempt: attempt + 1)
+            }
+        }
+    }
+}
+
 // MARK: - Trackpad Horizontal Swipe Overlay (2-finger scrollWheel → offset)
 
 /// NSView overlay that intercepts horizontal-dominant 2-finger trackpad swipes
@@ -3580,7 +3702,7 @@ private struct ChatOverlaySheet: View {
             .padding(.vertical, 12)
             .background(Color.panelBackground)
         }
-        .frame(minWidth: 420, idealWidth: 420, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
+        .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
         .background(Color.panelBackground)
     }
 }
@@ -3614,7 +3736,9 @@ final class AccountNavModel: ObservableObject {
     private let vm: TransactionsViewModel
     let accountNav: AccountNavModel
 
-    nonisolated static let narrowWidth: CGFloat = 420
+    // Umsatzliste startet so schmal wie der Flyout (348); grüner Zoom-Button
+    // togglet auf breit (840) und zurück — wie früher, nur schmaler als Default.
+    nonisolated static let narrowWidth: CGFloat = 348
     nonisolated static let wideWidth:   CGFloat = 840
     nonisolated static let panelHeight: CGFloat = 620
     /// Window-Identifier des Umsatz-Panels — der Scroll-Monitor reagiert nur auf dieses Fenster.
@@ -3655,8 +3779,8 @@ final class AccountNavModel: ObservableObject {
         self.onOpenDashboard = onOpenDashboard
         self.accountNav = AccountNavModel()
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 620),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 348, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -3680,9 +3804,9 @@ final class AccountNavModel: ObservableObject {
         }
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
-        if #available(macOS 11.0, *) {
-            panel.toolbarStyle = .unifiedCompact
-        }
+        // Transparente Titelleiste ohne Trennlinie — die SwiftUI-Money-Heat füllt den
+        // oberen Streifen (keine NSToolbar mehr, s. configureTitlebar()).
+        panel.titlebarSeparatorStyle = .none
 
         // Fullscreen deaktivieren — grüner Button wird zum Breiten-Toggle
         panel.collectionBehavior = [.fullScreenNone, .managed]
@@ -3690,6 +3814,8 @@ final class AccountNavModel: ObservableObject {
         let h = Self.panelHeight
         let w = Self.narrowWidth
         panel.setContentSize(NSSize(width: w, height: h))
+        // Start schmal fix; der grüne Zoom-Button + windowDidResize passen min/max
+        // dann an die jeweilige Breite (schmal/breit) an.
         panel.minSize = NSSize(width: w, height: h)
         panel.maxSize = NSSize(width: w, height: h)
 
@@ -3699,7 +3825,10 @@ final class AccountNavModel: ObservableObject {
         applyWindowLevel()   // restore persisted stay-on-top state
         configureTitlebar()
         let host = NSHostingView(rootView: TransactionsPanelView(
-            vm: vm, onRefresh: onRefresh, accountNav: accountNav, onOpenDashboard: onOpenDashboard
+            vm: vm, onRefresh: onRefresh, accountNav: accountNav, onOpenDashboard: onOpenDashboard,
+            onSettings: onSettings,
+            onTogglePin: { [weak self] in self?.isPinned.toggle() },
+            isPinnedProvider: { [weak self] in self?.isPinned ?? false }
         ))
         host.translatesAutoresizingMaskIntoConstraints = false
 
@@ -3724,6 +3853,30 @@ final class AccountNavModel: ObservableObject {
         }
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        configureOverlayScrollers(retriesLeft: 10)
+    }
+
+    /// Erzwingt Overlay-Scroller mit Autohide auf ALLEN NSScrollViews im Fenster —
+    /// überstimmt die System-Einstellung „Bildlaufleisten: Immer". SwiftUI legt die
+    /// ScrollView erst beim Layout an → ein paar verzögerte Versuche.
+    private func configureOverlayScrollers(retriesLeft: Int) {
+        guard let content = panel.contentView else { return }
+        var found = false
+        func walk(_ v: NSView) {
+            if let s = v as? NSScrollView {
+                s.scrollerStyle = .overlay
+                s.autohidesScrollers = true
+                s.verticalScroller?.alphaValue = 0
+                found = true
+            }
+            v.subviews.forEach(walk)
+        }
+        walk(content)
+        if !found && retriesLeft > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.configureOverlayScrollers(retriesLeft: retriesLeft - 1)
+            }
+        }
     }
 
     func close() {
@@ -3733,13 +3886,13 @@ final class AccountNavModel: ObservableObject {
     // MARK: - NSWindowDelegate: Zoom-Toggle (grüner Button)
 
     nonisolated func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        // Block manual edge-drag resizing — only the green zoom button (which goes
-        // through windowWillUseStandardFrame + setFrame) can change window size.
+        // Block manual edge-drag resizing — nur der grüne Zoom-Button (über
+        // windowWillUseStandardFrame + setFrame) ändert die Größe (Breiten-Toggle).
         return sender.frame.size
     }
 
+    /// Grüner Zoom-Button: Breiten-Toggle schmal (348) ↔ breit (wideWidth), Höhe bleibt.
     nonisolated func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame: NSRect) -> NSRect {
-        // AppKit guarantees window delegate callbacks on the main thread.
         MainActor.assumeIsolated {
             let narrow = TransactionsPanel.narrowWidth
             let wide   = TransactionsPanel.wideWidth
@@ -3766,6 +3919,7 @@ final class AccountNavModel: ObservableObject {
         guard let window = notification.object as? NSWindow else { return }
         // AppKit guarantees window delegate callbacks on the main thread.
         MainActor.assumeIsolated {
+            // Auf die aktuelle Breite (schmal/breit) einrasten, Höhe fix.
             let narrow = TransactionsPanel.narrowWidth
             let wide   = TransactionsPanel.wideWidth
             let snap: CGFloat = window.frame.width > (narrow + wide) / 2 ? wide : narrow
@@ -3776,20 +3930,10 @@ final class AccountNavModel: ObservableObject {
     }
 
     private func configureTitlebar() {
-        let toolbar = NSToolbar(identifier: NSToolbar.Identifier("simplebanking.transactions.toolbar"))
-        toolbar.showsBaselineSeparator = false
-        toolbar.displayMode = .iconOnly
-        let delegate = TransactionsPanelToolbarDelegate(
-            onSettings: onSettings,
-            onTogglePin: { [weak self] in self?.togglePin() },
-            onRefresh: { NotificationCenter.default.post(name: .transactionsPanelHeaderRefresh, object: nil) },
-            isPinnedProvider: { [weak self] in self?.isPinned ?? false }
-        )
-        toolbar.delegate = delegate
-        toolbar.allowsUserCustomization = false
-        toolbar.autosavesConfiguration = false
-        panel.toolbar = toolbar
-        toolbarDelegate = delegate
+        // Money-Heat bis ganz oben: KEINE NSToolbar mehr — ihr Material verdeckte den
+        // Wash im oberen Streifen. Refresh/Pin/Einstellungen leben jetzt als
+        // SwiftUI-Buttons im Header (auf der Money-Heat), die Ampel sitzt darauf.
+        panel.toolbar = nil
     }
 
     // Clippy-Easter-Egg in v1.5.0 entfernt — Header-Click ist jetzt no-op.

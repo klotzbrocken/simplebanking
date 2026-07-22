@@ -29,6 +29,32 @@ struct BalanceSignalStyle {
     }
 }
 
+/// Temperatur-„Wash" nach Kontostand (Prototyp 4b/1c): 160°-Verlauf hinter dem
+/// Header/Balance-Block. Geteilt von Flyout UND Umsatzlisten-Header, damit die
+/// Farben nicht driften. 3 Zustände, gemappt aus 7 Signal-Leveln. Light-Mode =
+/// exakte Prototyp-Hexes; Dark-Mode = dezente Hue-Tönung aus der Signal-Farbe.
+enum BalanceWash {
+    static func colors(level: BalanceSignalLevel, style: BalanceSignalStyle, dark: Bool)
+        -> (top: Color, bottom: Color, balance: Color, detail: Color) {
+        func hx(_ s: String) -> Color { Color(hex: s) ?? .gray }
+        if dark {
+            return (style.gradientBaseColor.opacity(0.20), style.gradientBaseColor.opacity(0.06),
+                    style.amountColor, Color(NSColor.secondaryLabelColor))
+        }
+        switch level {
+        case .deepOverdraft, .overdraft:
+            return (hx("fbeeee"), hx("f5e2e2"), hx("b0242c"), hx("9a6060"))
+        case .low, .medium:
+            return (hx("f7f3e8"), hx("f1ece0"), hx("8a6d1e"), hx("8a7d5f"))
+        case .good, .veryGood:
+            return (hx("eef7f1"), hx("e3f1e9"), hx("177046"), hx("5f8974"))
+        case .unknown:
+            return (Color(white: 0.96), Color(white: 0.93),
+                    Color(NSColor.secondaryLabelColor), Color(NSColor.secondaryLabelColor))
+        }
+    }
+}
+
 // MARK: - Live-Preview Skala (Settings)
 
 /// Horizontale 6-Band-Skala die zeigt wie die User-Schwellen die Tier-Farben aufteilen.

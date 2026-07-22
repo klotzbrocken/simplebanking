@@ -516,7 +516,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 balanceText: balText,
                 isNegative: balance.map { $0 < 0 } ?? false,
                 barColor: barColor,
-                nickname: slot.nickname
+                nickname: slot.nickname,
+                name: slot.displayName
             )
         }
     }
@@ -3303,7 +3304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     /// Popover-/Overlay-Größe inkl. evtl. offenem Quick-Send-Drawer.
     private func flyoutContentSize(hasDots: Bool) -> NSSize {
-        let base: CGFloat = hasDots ? 192 : 170
+        let base: CGFloat = hasDots ? 178 : 140
         let extra: CGFloat = flyoutQuickSendOpen ? QuickSendDrawerView.totalDrawerHeight : 0
         return NSSize(width: 348, height: base + extra)
     }
@@ -3311,7 +3312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Vom Drawer-Toggle gerufen — fährt die aktive Flyout-Präsentation hoch/runter.
     fileprivate func setFlyoutQuickSendOpen(_ open: Bool) {
         flyoutQuickSendOpen = open
-        let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
+        let hasDots = MultibankingStore.shared.slots.count >= 1 && (!demoMode || isMultiDemo)
         let size = flyoutContentSize(hasDots: hasDots)
         if let popover = balancePopover, popover.isShown {
             // Solange der Drawer offen ist, bleibt das Flyout offen+aktiv, damit man
@@ -3661,7 +3662,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
         applyQuickSendWiring(to: &rootView)
-        let hasDots = MultibankingStore.shared.slots.count > 1 && (!demoMode || isMultiDemo)
+        let hasDots = MultibankingStore.shared.slots.count >= 1 && (!demoMode || isMultiDemo)
         let host = NSHostingController(rootView: rootView)
         host.view.wantsLayer = true
         host.view.layer?.backgroundColor = BankTintProvider.currentTintNSColor()?.cgColor
@@ -3738,7 +3739,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // (manuelles setFrame in setFlyoutQuickSendOpen) — preferredContentSize würde
         // das Auto-Resizing übernehmen und mit der Top-Verankerung kollidieren.
         result.host.sizingOptions = []
-        let contentHeight: CGFloat = result.hasDots ? 192 : 170
+        let contentHeight: CGFloat = result.hasDots ? 178 : 140
         let contentWidth: CGFloat = 348
         let content = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight),
@@ -3989,7 +3990,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
         applyQuickSendWiring(to: &rootView)
-        let hasDots = store.slots.count > 1 && (!demoMode || isMultiDemo)
+        let hasDots = store.slots.count >= 1 && (!demoMode || isMultiDemo)
         let newSize = flyoutContentSize(hasDots: hasDots)
 
         if let popover = balancePopover, popover.isShown {
@@ -4018,7 +4019,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Populates dot-indicator data on a flyout rootView.
     private func applyFlyoutDots(to rootView: inout StatusBalanceFlyoutCardView) {
         let store = MultibankingStore.shared
-        guard store.slots.count > 1, (!demoMode || isMultiDemo) else { return }
+        guard store.slots.count >= 1, (!demoMode || isMultiDemo) else { return }
         rootView.allSlots = computeFlyoutSlots()
         rootView.activeSlotIndex = store.activeIndex
         rootView.isUnifiedMode = txVM.isUnifiedMode
@@ -6114,6 +6115,97 @@ private struct FlyoutSlotItem {
     var isNegative: Bool
     var barColor: Color
     var nickname: String?
+    /// Kurzlabel für das Segmented-Control-Segment (Nickname, sonst Bankname).
+    var name: String = ""
+
+    /// Monogramm-Fallback (erster Buchstabe) für die Logo-Kachel, wenn kein Bild da ist.
+    var monogram: String {
+        let base = (nickname?.isEmpty == false ? nickname! : name)
+        return String(base.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased()
+    }
+}
+
+/// Konto-Umschalter als Logo-Pillen (Prototyp 3b): aktives Konto als gefüllte,
+/// beschriftete Pille (Temperaturfarbe), weitere Konten als kleinere Logo-Pillen.
+/// Linksbündig, ohne umschließenden Track. Ersetzt die früheren abstrakten Dots.
+private struct FlyoutSlotSegmentedControl: View {
+    let slots: [FlyoutSlotItem]
+    let activeIndex: Int
+    let isUnifiedMode: Bool
+    /// Tönung der aktiven Pille = Balance-Temperaturfarbe (folgt dem Kontostand).
+    let activeTint: Color
+    let colorScheme: ColorScheme
+    var onSwitch: (Int) -> Void
+
+    private var activeFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.16) : .white
+    }
+    private var inactiveFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
+                let active = !isUnifiedMode && idx == activeIndex
+                if active {
+                    activePill(item)
+                } else {
+                    iconPill(item)
+                        .contentShape(Capsule())
+                        .onTapGesture { onSwitch(idx) }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .animation(.easeInOut(duration: 0.2), value: activeIndex)
+        .animation(.easeInOut(duration: 0.2), value: isUnifiedMode)
+    }
+
+    /// Aktive Pille: Logo + Name, gefüllt, Text in Temperaturfarbe.
+    private func activePill(_ item: FlyoutSlotItem) -> some View {
+        HStack(spacing: 5) {
+            logoTile(item, size: 16)
+            Text(item.nickname?.isEmpty == false ? item.nickname! : item.name)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundColor(activeTint)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            Capsule(style: .continuous)
+                .fill(activeFill)
+                .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1)
+        )
+    }
+
+    /// Kleinere Pille für weitere Konten: nur Logo.
+    private func iconPill(_ item: FlyoutSlotItem) -> some View {
+        logoTile(item, size: 15)
+            .padding(5)
+            .background(Capsule(style: .continuous).fill(inactiveFill))
+    }
+
+    @ViewBuilder
+    private func logoTile(_ item: FlyoutSlotItem, size: CGFloat) -> some View {
+        if let logo = item.logo {
+            Image(nsImage: logo)
+                .resizable().scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(item.barColor)
+                .frame(width: size, height: size)
+                .overlay(
+                    Text(item.monogram)
+                        .font(.system(size: size * 0.55, weight: .bold))
+                        .foregroundColor(.white)
+                )
+        }
+    }
+
 }
 
 /// Liquid-glass backdrop — blurs the desktop behind the popover (behindWindow).
@@ -6213,7 +6305,8 @@ private struct StatusBalanceFlyoutCardView: View {
         forcedColorScheme ?? environmentColorScheme
     }
 
-    private var hasDots: Bool { (allSlots?.count ?? 0) > 1 }
+    // Pillen-Switcher zeigt sich schon ab EINEM Konto (immer die aktive Pille).
+    private var hasDots: Bool { (allSlots?.count ?? 0) >= 1 }
 
     private static let leftToPayFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -6268,6 +6361,14 @@ private struct StatusBalanceFlyoutCardView: View {
         quickSendAvailable && !roundupView.isActive && unifiedSlots == nil
     }
 
+    /// Nur die Default-Theme-Saldo-Karte bekommt den randlosen Temperatur-Wash
+    /// (Prototyp 4b): kein Außen-Padding, Wash bis an die Flyout-Kanten. Andere
+    /// Karten (Roundup/REWE/Unified/Legacy) behalten ihr klassisches Inset-Layout.
+    private var bleedDefaultCard: Bool {
+        // Money-Heat-Karten (Default + Unified) bekommen den randlosen Verlauf.
+        !roundupView.isActive && !reweMode && (isDefaultTheme || unifiedSlots != nil)
+    }
+
     /// Hartgrenze für Quick-Send = Saldo + Dispo-Rahmen (gleiche Logik wie `TransferSheet`).
     /// `nil` wenn der Saldo unbekannt ist → keine Sperre.
     private var quickSendAvailableLimit: Decimal? {
@@ -6279,7 +6380,9 @@ private struct StatusBalanceFlyoutCardView: View {
     /// unabhängig davon, ob der Quick-Send-Drawer offen ist. Entspricht der
     /// Basis-Höhe, die der Host (BalanceBar.flyoutContentSize) als Popover-Größe
     /// im eingeklappten Zustand setzt.
-    private var cardRegionHeight: CGFloat { hasDots ? 192 : 170 }
+    // Prototyp 4b (ringlos): kompaktere Karte. Einzelkonto = reiner Wash-Block (140);
+    // Multibanking = Wash-Block + weißer Abstand + Segmented-Control (~178).
+    private var cardRegionHeight: CGFloat { hasDots ? 178 : 140 }
 
     /// 26×26 Toggle in der Kartenkopfzeile: Papierflieger (zu) ↔ Chevron-up (offen, invertiert).
     /// Liegt in-flow am rechten Ende der Header-HStack (nach dem Emoji), damit
@@ -6304,17 +6407,15 @@ private struct StatusBalanceFlyoutCardView: View {
                 // Immer Papierflieger; offen invertiert (heller Flieger auf dunklem
                 // Grund). Rahmen in beiden Zuständen, damit der „Geld senden"-Button
                 // klar als Button lesbar ist.
+                // Prototyp: geschlossener Zustand transparent (nur Icon, kein Kasten);
+                // offener Zustand invertiert gefüllt als aktive Affordance.
                 Image(systemName: "paperplane")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(showSend ? Color.panelBackground : Color.sbTextPrimary)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(showSend ? Color.panelBackground : Color.sbTextSecondary)
                     .frame(width: 26, height: 26)
                     .background(
                         RoundedRectangle(cornerRadius: 7)
-                            .fill(showSend ? Color.sbTextPrimary : Color.sbSurface)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7)
-                            .stroke(showSend ? Color.sbTextPrimary : Color.sbBorder, lineWidth: 1)
+                            .fill(showSend ? Color.sbTextPrimary : Color.clear)
                     )
             }
             .buttonStyle(.plain)
@@ -6367,49 +6468,35 @@ private struct StatusBalanceFlyoutCardView: View {
                     legacyCard
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 14)
-            .padding(.bottom, hasDots ? 2 : 14)
+            .padding(.horizontal, bleedDefaultCard ? 0 : 14)
+            .padding(.top, bleedDefaultCard ? 0 : 14)
+            .padding(.bottom, bleedDefaultCard ? 0 : (hasDots ? 2 : 14))
             .onTapGesture(count: 2) { onDoubleTap?() }
             // Ripple only on the balance card, not the dot row
             .rippleEffect(trigger: rippleTrigger, defaultOrigin: CGPoint(x: 310, y: 130))
-            .overlay(alignment: .topTrailing) { quickSendToggleButton }
+            .overlay(alignment: .topTrailing) {
+                quickSendToggleButton
+                    .padding(.top, bleedDefaultCard ? 12 : 0)
+                    .padding(.trailing, bleedDefaultCard ? 14 : 0)
+            }
 
-            // Account dot indicators
+            // Konto-Umschalter — adaptiver Segmented Control (Design „4b"),
+            // ersetzt die früheren abstrakten Dots.
             if hasDots, let slots = allSlots {
-                HStack(spacing: 8) {
-                    ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
-                        let isActive = !isUnifiedMode && idx == activeSlotIndex
-                        Button {
-                            guard !isActive else { return }
-                            onSwitchToIndex?(idx)
-                        } label: {
-                            Capsule()
-                                .fill(isActive ? item.barColor : Color(NSColor.tertiaryLabelColor))
-                                .frame(width: isActive ? 24 : 8, height: 8)
-                                .animation(.easeInOut(duration: 0.3), value: isActive)
-                                .frame(height: 24)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    // "Alle Konten" dot → shows unified aggregated view in flyout
-                    let unifiedActive = isUnifiedMode
-                    Button {
-                        guard !unifiedActive else { return }
-                        onActivateUnified?()
-                    } label: {
-                        Capsule()
-                            .fill(unifiedActive ? Color(NSColor.secondaryLabelColor) : Color(NSColor.tertiaryLabelColor))
-                            .frame(width: unifiedActive ? 24 : 8, height: 8)
-                            .animation(.easeInOut(duration: 0.3), value: unifiedActive)
-                            .frame(height: 24)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.top, 2)
-                .padding(.bottom, 8)
+                let tint = BalanceSignal.style(
+                    for: BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)
+                ).amountColor
+                FlyoutSlotSegmentedControl(
+                    slots: slots,
+                    activeIndex: activeSlotIndex,
+                    isUnifiedMode: isUnifiedMode,
+                    activeTint: tint,
+                    colorScheme: activeColorScheme,
+                    onSwitch: { onSwitchToIndex?($0) }
+                )
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 9)
             }
             }
             .frame(height: cardRegionHeight, alignment: .top)
@@ -6481,8 +6568,19 @@ private struct StatusBalanceFlyoutCardView: View {
 
     private var unifiedCard: some View {
         let slots = unifiedSlots ?? []
-        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
-        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
+        // Money-Heat für die Aggregat-Summe: Temperatur des Gesamtsaldos (Schwellen
+        // × Kontozahl, damit die Stimmung konsistent zu Einzelkarten bleibt).
+        let dark = activeColorScheme == .dark
+        let n = max(1, slots.count)
+        let scaledThresholds = BalanceSignalThresholds(
+            deepOverdraftThreshold: thresholds.deepOverdraftThreshold * Double(n),
+            lowUpperBound: thresholds.lowUpperBound * Double(n),
+            mediumUpperBound: thresholds.mediumUpperBound * Double(n),
+            veryGoodLowerBound: thresholds.veryGoodLowerBound * Double(n)
+        )
+        let uLevel = BalanceSignal.classify(balance: unifiedTotalBalance ?? balanceValue, thresholds: scaledThresholds)
+        let uStyle = BalanceSignal.style(for: uLevel)
+        let wash = washColors(level: uLevel, style: uStyle, dark: dark)
 
         // Determine unified header: "Alle Konten · 8 Uhr" (mirrors bank name + time in defaultThemeCard)
         let headerText: String = {
@@ -6510,11 +6608,12 @@ private struct StatusBalanceFlyoutCardView: View {
             HStack(alignment: .balanceTextCenter, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(balanceText)
-                        .font(.system(size: 30, weight: .bold, design: .default))
+                        .font(.system(size: 38, weight: .bold, design: .default))
+                        .tracking(-0.6)
                         .monospacedDigit()
-                        .foregroundColor(.primary)
+                        .foregroundColor(wash.balance)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+                        .minimumScaleFactor(0.6)
                         .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
                     leftToPaySubtitle
                 }
@@ -6554,21 +6653,14 @@ private struct StatusBalanceFlyoutCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
+        // Randlose Money-Heat wie die Einzelkonto-Karte (Aggregat-Temperatur).
+        .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: [Color.primary.opacity(0.10), .clear],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-            }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(borderColor, lineWidth: 1)
+            LinearGradient(colors: [wash.top, wash.bottom],
+                           startPoint: .topTrailing, endPoint: .bottomLeading)
         )
     }
 
@@ -6650,75 +6742,81 @@ private struct StatusBalanceFlyoutCardView: View {
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(borderColor, lineWidth: 1))
     }
 
+    /// Temperatur-Wash nach Kontostand (Spezifikation §4, Prototyp 4b/1c): 160°-Verlauf
+    /// hinter dem Header/Balance-Block. 3 Zustände, gemappt aus 7 Signal-Leveln.
+    /// Light-Mode = exakte Prototyp-Hexes; Dark-Mode = dezente Hue-Tönung.
+    private func washColors(level: BalanceSignalLevel, style: BalanceSignalStyle, dark: Bool)
+        -> (top: Color, bottom: Color, balance: Color, detail: Color) {
+        BalanceWash.colors(level: level, style: style, dark: dark)
+    }
+
+    /// Nur der Kontoname (Nickname → Bankname), ohne Zeitanteil.
+    private var headerNameOnly: String {
+        if let nick = nickname?.trimmingCharacters(in: .whitespacesAndNewlines), !nick.isEmpty { return nick }
+        if let bn = bankName?.trimmingCharacters(in: .whitespacesAndNewlines), !bn.isEmpty { return bn }
+        return L10n.t("Kontostand", "Balance")
+    }
+    /// „ · 6 Uhr" (oder leer, wenn kein Zeitstempel).
+    private func headerTimeSuffix(_ date: Date?) -> String {
+        guard let date else { return "" }
+        let hour = Calendar.current.component(.hour, from: date)
+        return L10n.t(" · \(hour) Uhr", " · \(hour):00")
+    }
+
+    // Prototyp 4b: warmer Temperatur-Wash hinter Balance, KEIN Ring (Datum wandert in
+    // die Kopfzeile), Balance groß mit Bühne. Zwei-Ton-Kopfzeile (Name dunkel, Zeit hell).
     private var defaultThemeCard: some View {
         let level = BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)
         let style = BalanceSignal.style(for: level)
         let displayBalance = balanceValue == nil ? "--,-- €" : balanceText
-        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
-        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
+        let dark = activeColorScheme == .dark
+        let wash = washColors(level: level, style: style, dark: dark)
+        let nameColor: Color = dark ? Color(NSColor.labelColor) : (Color(hex: "1d1d1f") ?? .primary)
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let img = bankLogoImage {
-                    let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: bankLogoBrandId ?? "")
+                    let invertActive = dark && BankLogoAssets.isDark(brandId: bankLogoBrandId ?? "")
                     if invertActive {
-                        Image(nsImage: img)
-                            .resizable().scaledToFit()
-                            .frame(width: 18, height: 18)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                        Image(nsImage: img).resizable().scaledToFit()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                             .colorInvert()
                     } else {
-                        Image(nsImage: img)
-                            .resizable().scaledToFit()
-                            .frame(width: 18, height: 18)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                        Image(nsImage: img).resizable().scaledToFit()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                     }
                 } else {
                     Image(systemName: "wallet.pass")
                         .font(.system(size: 16))
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .foregroundColor(wash.detail)
                 }
-                Text(formatBankHeader(date: balanceFetchedAt))
-                    .font(.system(size: 14))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                (Text(headerNameOnly).font(.system(size: 14, weight: .semibold)).foregroundColor(nameColor)
+                 + Text(headerTimeSuffix(balanceFetchedAt)).font(.system(size: 13)).foregroundColor(wash.detail))
+                    .lineLimit(1)
                 Spacer()
             }
 
-            HStack(alignment: .balanceTextCenter, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(displayBalance)
-                        .font(.system(size: 30, weight: .bold, design: .default))
-                        .foregroundColor(style.amountColor)
-                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+            Text(displayBalance)
+                .font(.system(size: 38, weight: .bold, design: .default))
+                .tracking(-0.6)
+                .foregroundColor(wash.balance)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
 
-                    leftToPaySubtitle
-                }
-                Spacer()
-                if greenZoneRingEnabled {
-                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit, showDispo: greenZoneShowDispo)
-                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
-                }
-            }
+            leftToPaySubtitle
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
+        // Randlos: Wash füllt die Karte bis an die Flyout-Kanten (Popover rundet die
+        // Ecken). Im Einzelkonto-Modus füllt die Karte die gesamte Popover-Höhe.
+        .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(glassColor)
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [style.gradientBaseColor.opacity(0.10), .clear],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(borderColor, lineWidth: 1)
+            LinearGradient(colors: [wash.top, wash.bottom],
+                           startPoint: .topTrailing, endPoint: .bottomLeading)
         )
     }
 

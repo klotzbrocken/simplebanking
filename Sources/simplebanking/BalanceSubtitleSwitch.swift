@@ -77,18 +77,12 @@ struct BalanceSubtitleSwitch: View {
             if !forceClassic {
                 // Als kleine Pille darstellen, damit klar ist: das ist ein Umschalter.
                 Button(action: toggle) {
+                    // Prototyp: transparenter Umschalter (nur Icon, kein Kasten/Rahmen).
                     Image(systemName: currentModeIcon)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
-                        .frame(width: 22, height: 16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(Color.sbInputTint)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                        .stroke(Color.sbBorder, lineWidth: 0.5)
-                                )
-                        )
+                        .frame(width: 18, height: 16)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(L10n.t(

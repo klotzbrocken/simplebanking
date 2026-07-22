@@ -2,6 +2,13 @@
 
 ## [Unreleased] (1.7.0)
 
+### Geändert
+
+- **UI-Refresh „Money-Heat" für Flyout und Umsatzliste** — Flyout und Umsatz-Header teilen jetzt dieselbe randlose, kontostandsabhängige Farbfläche (grün = gesund, gelb = neutral, rot = kritisch; geteilter `BalanceWash`-Helper, keine Farb-Drift).
+  - **Flyout:** ringlose Saldo-Karte mit vollflächiger Money-Heat, große Balance (38 px), zwei-tönige Kopfzeile (Name fett, Zeit gedämpft), transparenter Papierflieger- und Untertitel-Toggle. Konto-Umschalter jetzt als **Logo-Pillen** (aktive gefüllte Pille + kleinere Logo-Pillen; auch bei nur einem Konto) statt abstrakter Dots.
+  - **Umsatzliste:** Fenster jetzt so schmal wie der Flyout (348 px, grüner Zoom-Button togglet weiterhin auf breit). Money-Heat reicht bis an alle Fensterkanten (oben hinter Ampel/Toolbar-Icons — die frühere NSToolbar ist durch SwiftUI-Buttons im Header ersetzt), unten weicher Fade in die Umsatzliste. **Ring bleibt** (Datum im Ring). Footer schmaler: Icons links, „Mehr ▾" rechts. Vertikale Scrollbar wieder on-demand (Overlay-Autohide erzwungen). Der Sidebar-Streifen fadet oben in die Money-Heat und läuft bis zur unteren Fensterkante durch.
+  - **Aggregat-/„Alle Konten"-Ansicht** (Flyout + Umsatzliste) nutzt jetzt ebenfalls die vollflächige Money-Heat in der Temperatur der Gesamtsumme.
+
 ## [1.6.1]
 
 ### Geändert
