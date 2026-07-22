@@ -173,15 +173,20 @@ private struct TransactionsPanelView: View {
         // rechnen → fachlich falsch. Deshalb im Unified-Mode Classic erzwingen.
         // Im Aufrunden-Modus wird die ganze Balance-Card durch RoundupSavingsCard
         // ersetzt — dieser Subtitle läuft dann gar nicht.
-        BalanceSubtitleSwitch(
-            balance: AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance),
+        let parsed = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
+        let level = BalanceSignal.classify(balance: parsed, thresholds: normalizedBalanceThresholds)
+        let style = BalanceSignal.style(for: level)
+        let detail = BalanceWash.colors(level: level, style: style, dark: activeColorScheme == .dark).detail
+        return BalanceSubtitleSwitch(
+            balance: parsed,
             leftToPayAmount: vm.leftToPayAmount,
             salaryDay: activeSlotSettings.effectiveSalaryDay,
             salaryToleranceBefore: activeSlotSettings.salaryDayToleranceBefore,
             salaryToleranceAfter: activeSlotSettings.salaryDayToleranceAfter,
             cycleEndOverride: vm.leftToPayCycleEnd,
             style: $panelSubtitleStyle,
-            forceClassic: vm.isUnifiedMode
+            forceClassic: vm.isUnifiedMode,
+            detailColor: detail
         )
     }
 

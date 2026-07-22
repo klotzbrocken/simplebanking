@@ -28,6 +28,9 @@ struct BalanceSubtitleSwitch: View {
     /// `true` reicht das Compact-Flag an `BalanceSubMetricsLabel` weiter, damit der schmale
     /// Flyout-Container kein Truncation-Wording zeigt. Default: false (breite Container).
     var compact: Bool = false
+    /// Temperaturabhängige Detailfarbe (Prototyp §4: #5f8974 / #8a7d5f / #9a6060) für die
+    /// „Noch offen"-Zeile + Toggle-Icon auf der Money-Heat. Nil → Standard-Sekundärgrau.
+    var detailColor: Color? = nil
 
     private static let classicFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -80,7 +83,7 @@ struct BalanceSubtitleSwitch: View {
                     // Prototyp: transparenter Umschalter (nur Icon, kein Kasten/Rahmen).
                     Image(systemName: currentModeIcon)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(detailColor ?? .secondary)
                         .frame(width: 18, height: 16)
                         .contentShape(Rectangle())
                 }
@@ -140,7 +143,7 @@ struct BalanceSubtitleSwitch: View {
                 : L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
             Text(text)
                 .font(.system(size: 13, weight: .regular))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .foregroundColor(detailColor ?? Color(NSColor.secondaryLabelColor))
                 .lineLimit(1)
         } else {
             // Placeholder reserves vertical space while value is computing

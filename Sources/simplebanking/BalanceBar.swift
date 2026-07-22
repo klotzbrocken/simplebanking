@@ -6432,7 +6432,10 @@ private struct StatusBalanceFlyoutCardView: View {
         // ersetzt — dieser Subtitle läuft dann gar nicht.
         // Unified-Mode: leftToPay ist pro-Slot aggregiert → Sub-Metrics würden gegen
         // einen einzelnen Gehaltstag rechnen und wären fachlich inkonsistent.
-        BalanceSubtitleSwitch(
+        let level = BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)
+        let style = BalanceSignal.style(for: level)
+        let detail = washColors(level: level, style: style, dark: activeColorScheme == .dark).detail
+        return BalanceSubtitleSwitch(
             balance: balanceValue,
             leftToPayAmount: leftToPayAmount,
             salaryDay: salaryDay,
@@ -6441,7 +6444,8 @@ private struct StatusBalanceFlyoutCardView: View {
             cycleEndOverride: leftToPayCycleEnd,
             style: $flyoutSubtitleStyle,
             forceClassic: isUnifiedMode,
-            compact: true
+            compact: true,
+            detailColor: detail
         )
     }
 
