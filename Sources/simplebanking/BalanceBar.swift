@@ -911,6 +911,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.log("Application did finish launching")
+        // Ripple standardmäßig an (Aufruf + neue Bewegungen) — direkte
+        // UserDefaults.bool-Reads ignorieren den @AppStorage-Default, daher registrieren.
+        UserDefaults.standard.register(defaults: ["rippleAlwaysOn": true])
         YaxiService.migrateCredentialsModelIfNeeded()
 
         // TAN/SCA state callback → update menu bar and transactions panel

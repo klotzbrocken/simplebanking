@@ -571,7 +571,7 @@ private struct TransactionsPanelView: View {
             LinearGradient(
                 stops: [
                     .init(color: uWash.top, location: 0.0),
-                    .init(color: uWash.bottom, location: 0.68),
+                    .init(color: uWash.bottom, location: 0.52),
                     .init(color: activePanelBg, location: 1.0)
                 ],
                 startPoint: .top, endPoint: .bottom
@@ -670,7 +670,7 @@ private struct TransactionsPanelView: View {
             LinearGradient(
                 stops: [
                     .init(color: wash.top, location: 0.0),
-                    .init(color: wash.bottom, location: 0.68),
+                    .init(color: wash.bottom, location: 0.52),
                     .init(color: activePanelBg, location: 1.0)
                 ],
                 startPoint: .top, endPoint: .bottom
@@ -1889,21 +1889,6 @@ private struct TransactionsPanelView: View {
                     .foregroundColor(.primary)
                 }
 
-                // simplesend — Geld senden
-                if simplesendVisible {
-                    Button(action: {
-                        NotificationCenter.default.post(
-                            name: Notification.Name("simplebanking.openTransferSheet"),
-                            object: nil)
-                    }) {
-                        Image(systemName: "paperplane")
-                            .font(.system(size: 15))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
-                }
-
                 // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
                 Button(action: { onOpenDashboard?(.overview) }) {
                     Image(systemName: "square.grid.2x2")
@@ -1940,22 +1925,7 @@ private struct TransactionsPanelView: View {
                     .help(L10n.t("Attention Inbox", "Attention Inbox"))
                 }
 
-                Spacer()
-
-                if !infiniteScrollEnabled && vm.page < vm.totalPages - 1 {
-                    Button(action: { vm.nextPage() }) {
-                        HStack(spacing: 4) {
-                            Text("Ältere")
-                                .font(.system(size: 14))
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .foregroundColor(.primary)
-                }
-
-                // Mehr ▾ — ganz rechts
+                // Mehr ▾ — links, neben der Glocke/Inbox
                 Menu {
                         Button(action: { markAllTransactionsRead() }) {
                             Label(L10n.t("Alle als gelesen markieren", "Mark all as read"), systemImage: "checkmark.circle")
@@ -1999,6 +1969,36 @@ private struct TransactionsPanelView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .tint(.primary) // Menu-Item-Icons monochrom statt Accent-Blau
+
+                Spacer()
+
+                if !infiniteScrollEnabled && vm.page < vm.totalPages - 1 {
+                    Button(action: { vm.nextPage() }) {
+                        HStack(spacing: 4) {
+                            Text("Ältere")
+                                .font(.system(size: 14))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .foregroundColor(.primary)
+                }
+
+                // simplesend — Geld senden, ganz rechts (wie im Flyout-Footer)
+                if simplesendVisible {
+                    Button(action: {
+                        NotificationCenter.default.post(
+                            name: Notification.Name("simplebanking.openTransferSheet"),
+                            object: nil)
+                    }) {
+                        Image(systemName: "paperplane")
+                            .font(.system(size: 15))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 10)

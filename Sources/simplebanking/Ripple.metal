@@ -34,8 +34,13 @@ half4 ripple(
     // Displace the sample position.
     float2 newPosition = position + rippleAmount * n;
 
-    // Sample the layer at the displaced position.
-    half4 color = layer.sample(newPosition);
+    // Sample the layer at the displaced position. Wenn der verschobene Sample
+    // ausserhalb des Inhalts landet (a≈0 → transparent), würde der Fenster-/Panel-
+    // Hintergrund durchscheinen. In dem Fall auf den Original-Pixel zurückfallen,
+    // gewichtet nach Alpha — so bleibt die Welle im Inneren, ohne Löcher am Rand.
+    half4 displaced = layer.sample(newPosition);
+    half4 original  = layer.sample(position);
+    half4 color = mix(original, displaced, displaced.a);
 
     // Brighten/darken based on wave direction — this is the "liquid glass" look.
     color.rgb += 0.3 * (rippleAmount / amplitude) * color.a;

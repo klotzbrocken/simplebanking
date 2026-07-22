@@ -239,7 +239,7 @@ struct SettingsView: View {
     @AppStorage("balanceSignalMediumUpperBound") private var balanceSignalMediumUpperBound: Int = 2000
     @AppStorage("balanceSignalVeryGoodLowerBound") private var balanceSignalVeryGoodLowerBound: Int = 5000
     @AppStorage("confettiIncomeThreshold") private var confettiIncomeThreshold: Int = 50
-    @AppStorage("rippleAlwaysOn") private var rippleAlwaysOn: Bool = false
+    @AppStorage("rippleAlwaysOn") private var rippleAlwaysOn: Bool = true
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
 
     // Sicherheit
