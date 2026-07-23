@@ -7,7 +7,10 @@
     <true/>
     <key>com.apple.security.personal-information.user-notifications</key>
     <true/>
-    <!-- EventKit: read/write Reminders.app (for transaction reminders) -->
+    <!-- EventKit: read/write Reminders.app (for transaction reminders).
+         Reminders benötigt den EIGENEN Key — .calendars deckt Reminders NICHT ab. -->
+    <key>com.apple.security.personal-information.reminders</key>
+    <true/>
     <key>com.apple.security.personal-information.calendars</key>
     <true/>
 </dict>
