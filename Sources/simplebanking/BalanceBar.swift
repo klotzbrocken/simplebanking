@@ -417,7 +417,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     // Returns the bank logo (16×16, template) for the menu bar, or nil if none available.
     // When nil, "€" is used as text fallback instead.
     private func menuBarLogoImage() -> NSImage? {
-        if demoMode {
+        // Demo nutzt dieselbe Logo-Auflösung wie der Normalbetrieb (die Demo-Bank
+        // setzt connectedBankLogoID via applySlotToViewModel) → echtes Bank-Icon
+        // statt generischem wallet.pass. Fallback (wallet.pass) nur, wenn nichts
+        // auflösbar ist.
+        if demoMode && connectedBankLogoID.isEmpty
+            && !(MultibankingStore.shared.activeSlot?.isReceiptSlot == true)
+            && !(MultibankingStore.shared.activeSlot?.isPayPal == true) {
             let img = NSImage(systemSymbolName: "wallet.pass", accessibilityDescription: "Demo")
             img?.isTemplate = true
             return img
@@ -3838,8 +3844,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Setzt die eBon-Flyout-Karte (Letzter Einkauf + Mini-Warenkorb), wenn der
     /// aktive Slot ein eBon-Slot (REWE/dm) ist. No-op sonst. An beiden rootView-Bau-
     /// Stellen aufgerufen (buildFlyoutHost + refreshFlyoutIfVisible).
+    /// Setzt die PayPal-Untertitel-Daten (letzte Buchung + Monatsausgaben) auf den
+    /// Flyout-Root. Nur für PayPal-Slots.
+    private func applyPayPalFlyout(to rootView: inout StatusBalanceFlyoutCardView) {
+        guard !txVM.isUnifiedMode,
+              MultibankingStore.shared.activeSlot?.isPayPal == true else { return }
+        rootView.isPayPalCard = true
+        if let last = txVM.transactions.first {
+            let amt = last.amount.flatMap { Double($0.amount) } ?? 0
+            let name = (last.creditor?.name ?? last.debtor?.name ?? "").trimmingCharacters(in: .whitespaces)
+            let amtStr = formatEURWithCents(abs(amt))
+            rootView.paypalLastBooking = name.isEmpty ? amtStr : "\(amtStr) · \(name)"
+        }
+        let cal = Calendar.current, now = Date()
+        let ym = String(format: "%04d-%02d", cal.component(.year, from: now), cal.component(.month, from: now))
+        let spend = txVM.transactions
+            .filter { ($0.bookingDate ?? "").hasPrefix(ym) }
+            .compactMap { $0.amount.flatMap { Double($0.amount) } }
+            .filter { $0 < 0 }
+            .reduce(0, +)
+        rootView.paypalMonthSpend = formatEURWithCents(abs(spend))
+        let f = DateFormatter(); f.locale = Locale(identifier: "de_DE"); f.dateFormat = "LLLL"
+        rootView.paypalMonthLabel = f.string(from: now)
+    }
+
     private func applyREWEFlyout(to rootView: inout StatusBalanceFlyoutCardView) {
-        guard let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot else { return }
+        // Im Aggregat-Modus KEIN Händler-Layout (sonst blieben REWE-Farbe + Ring
+        // stehen, obwohl „Alle Konten" aktiv ist).
+        guard !txVM.isUnifiedMode,
+              let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot else { return }
         rootView.reweMode = true
         rootView.reweSource = active.source ?? .rewe
         rootView.reweBudgetEuro = BankSlotSettingsStore.load(slotId: active.id).merchantMonthlyBudget
@@ -4099,6 +4132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
         }
         applyREWEFlyout(to: &rootView)
+        applyPayPalFlyout(to: &rootView)
         let rippleAlwaysOn = UserDefaults.standard.bool(forKey: "rippleAlwaysOn")
         let hasUnseenTx = latestTxSigBySlot.contains { slotId, sig in !sig.isEmpty && sig != lastSeenTxSig(for: slotId) }
         if rippleAlwaysOn || hasUnseenTx {
@@ -4468,6 +4502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
         }
         applyREWEFlyout(to: &rootView)
+        applyPayPalFlyout(to: &rootView)
         rootView.rippleTrigger = flyoutRippleTrigger
         rootView.greenZoneFraction = computeGreenZoneFraction()
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
@@ -4525,6 +4560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.allSlots = computeFlyoutSlots()
         rootView.activeSlotIndex = store.activeIndex
         rootView.isUnifiedMode = txVM.isUnifiedMode
+        rootView.canAggregate = store.realSlotCount > 1
         rootView.onSwitchToIndex = { [weak self] i in
             guard let self else { return }
             self.txVM.unifiedModeEnabled = false
@@ -4534,6 +4570,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             guard let self else { return }
             self.txVM.unifiedModeEnabled = true
             self.refreshFlyoutIfVisible()
+            // @AppStorage-Propagation greift beim synchronen Rebuild manchmal noch
+            // nicht → zweiter Refresh im nächsten Runloop, damit es beim ERSTEN Klick
+            // wirkt (sonst brauchte es zwei Klicks).
+            DispatchQueue.main.async { [weak self] in self?.refreshFlyoutIfVisible() }
         }
     }
 
@@ -6724,6 +6764,9 @@ private struct FlyoutSlotSegmentedControl: View {
     let activeTint: Color
     let colorScheme: ColorScheme
     var onSwitch: (Int) -> Void
+    /// Zeigt die „Alle Konten"-Pille (Aggregat) — nur bei ≥2 echten Konten.
+    var showUnified: Bool = false
+    var onActivateUnified: (() -> Void)? = nil
 
     private var activeFill: Color {
         colorScheme == .dark ? Color.white.opacity(0.16) : .white
@@ -6743,6 +6786,16 @@ private struct FlyoutSlotSegmentedControl: View {
                         .contentShape(Capsule())
                         .onTapGesture { onSwitch(idx) }
                 }
+            }
+            if showUnified {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(isUnifiedMode ? activeTint : Color(NSColor.secondaryLabelColor))
+                    .frame(width: 26, height: 26)
+                    .background(Capsule(style: .continuous).fill(isUnifiedMode ? activeFill : inactiveFill))
+                    .contentShape(Capsule())
+                    .onTapGesture { if !isUnifiedMode { onActivateUnified?() } }
+                    .help(L10n.t("Alle Konten", "All accounts"))
             }
             Spacer(minLength: 0)
         }
@@ -6837,6 +6890,7 @@ private struct StatusBalanceFlyoutCardView: View {
     var allSlots: [FlyoutSlotItem]? = nil
     var activeSlotIndex: Int = 0
     var isUnifiedMode: Bool = false
+    var canAggregate: Bool = false   // ≥2 echte Konten → „Alle Konten"-Pille im Switcher
     var onSwitchToIndex: ((Int) -> Void)? = nil
     var onActivateUnified: (() -> Void)? = nil
     var leftToPayAmount: Double? = nil
@@ -6854,6 +6908,13 @@ private struct StatusBalanceFlyoutCardView: View {
     /// Wenn true, wird statt der Saldo-Karte die REWE-Karte im Bank-Layout
     /// gezeigt (Header „REWE · Uhrzeit", großer Betrag letzter Einkauf, kein Ring,
     /// darunter Einkäufe Monat/Jahr mit Toggle).
+    // MARK: PayPal-Untertitel (Toggle letzte Buchung / Ausgaben diesen Monat)
+    var isPayPalCard: Bool = false
+    var paypalLastBooking: String? = nil   // "23,99 € McDonald's"
+    var paypalMonthSpend: String? = nil    // "312,80 €"
+    var paypalMonthLabel: String = ""      // "Juli"
+    @State private var paypalSubtitleRange: Int = 0   // 0 = letzte Buchung, 1 = Monatsausgaben
+
     var reweMode: Bool = false
     /// Quelle des aktiven Receipt-Slots — bestimmt den Marken-Wash (REWE/Amazon/dm).
     var reweSource: SlotSource = .rewe
@@ -7019,7 +7080,28 @@ private struct StatusBalanceFlyoutCardView: View {
         }
     }
 
+    /// PayPal-Untertitel: Toggle zwischen letzter Buchung und Monatsausgaben
+    /// (ersetzt „Noch offen/Verfügbar", das für PayPal keinen Sinn ergibt).
     @ViewBuilder
+    private func paypalSubtitle(detail: Color) -> some View {
+        let text: String = paypalSubtitleRange == 0
+            ? (paypalLastBooking.map { L10n.t("Letzte Buchung: \($0)", "Last: \($0)") }
+                ?? L10n.t("Keine Buchung", "No transaction"))
+            : "\(L10n.t("Ausgaben", "Spending")) \(paypalMonthLabel): \(paypalMonthSpend ?? "—")"
+        Button {
+            paypalSubtitleRange = paypalSubtitleRange == 0 ? 1 : 0
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                Text(text).font(.system(size: 12)).lineLimit(1)
+            }
+            .foregroundColor(detail)
+        }
+        .buttonStyle(.plain)
+        .help(L10n.t("Tippen: letzte Buchung / Ausgaben diesen Monat",
+                     "Tap: last transaction / spending this month"))
+    }
+
     private var leftToPaySubtitle: some View {
         // Im Aufrunden-Modus wird die ganze Flyout-Card durch RoundupSavingsCard
         // ersetzt — dieser Subtitle läuft dann gar nicht.
@@ -7085,7 +7167,9 @@ private struct StatusBalanceFlyoutCardView: View {
                         isUnifiedMode: isUnifiedMode,
                         activeTint: tint,
                         colorScheme: activeColorScheme,
-                        onSwitch: { onSwitchToIndex?($0) }
+                        onSwitch: { onSwitchToIndex?($0) },
+                        showUnified: canAggregate,
+                        onActivateUnified: { onActivateUnified?() }
                     )
                     quickSendToggleButton
                 }
@@ -7173,7 +7257,9 @@ private struct StatusBalanceFlyoutCardView: View {
             mediumUpperBound: thresholds.mediumUpperBound * Double(n),
             veryGoodLowerBound: thresholds.veryGoodLowerBound * Double(n)
         )
-        let uLevel = BalanceSignal.classify(balance: unifiedTotalBalance ?? balanceValue, thresholds: scaledThresholds)
+        // Aggregat bewusst NEUTRAL färben (keine grün/orange-Money-Heat) — die
+        // Temperatur springt sonst beim Wechsel Einzelkonto↔Aggregat.
+        let uLevel: BalanceSignalLevel = .unknown
         let uStyle = BalanceSignal.style(for: uLevel)
         let wash = washColors(level: uLevel, style: uStyle, dark: dark)
 
@@ -7198,54 +7284,15 @@ private struct StatusBalanceFlyoutCardView: View {
                 Spacer()
             }
 
-            // Balance row — same HStack structure as defaultThemeCard
-            // Right side: mini account bar stack replaces GreenZoneRing (same 72pt height)
-            HStack(alignment: .balanceTextCenter, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(effectiveBalanceText)
-                        .font(.system(size: 38, weight: .bold, design: .default))
-                        .tracking(-0.6)
-                        .monospacedDigit()
-                        .foregroundColor(wash.balance)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
-                    leftToPaySubtitle
-                }
-                Spacer()
-                // Mini account bars — same 72pt height as GreenZoneRing
-                VStack(alignment: .trailing, spacing: 4) {
-                    ForEach(Array(slots.prefix(4).enumerated()), id: \.offset) { _, item in
-                        HStack(spacing: 5) {
-                            if let img = item.logo {
-                                let invert = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: item.brandId ?? "")
-                                Group {
-                                    if invert {
-                                        Image(nsImage: img).resizable().scaledToFit()
-                                            .frame(width: 14, height: 14)
-                                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                                            .colorInvert()
-                                    } else {
-                                        Image(nsImage: img).resizable().scaledToFit()
-                                            .frame(width: 14, height: 14)
-                                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                                    }
-                                }
-                            } else {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(item.barColor.opacity(0.40))
-                                    .frame(width: 14, height: 14)
-                            }
-                            Text(item.balanceText)
-                                .font(.system(size: 10)).monospacedDigit()
-                                .foregroundColor(item.isNegative ? Color(hex: "C4614D") : Color(NSColor.secondaryLabelColor))
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .frame(width: 72, height: 72, alignment: .center)
-                .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
-            }
+            // Nur der Gesamt-Saldo (keine Konten-Aufschlüsselung rechts).
+            Text(effectiveBalanceText)
+                .font(.system(size: 38, weight: .bold, design: .default))
+                .tracking(-0.6)
+                .monospacedDigit()
+                .foregroundColor(wash.balance)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            leftToPaySubtitle
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
@@ -7416,7 +7463,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            leftToPaySubtitle
+            if isPayPalCard { paypalSubtitle(detail: wash.detail) } else { leftToPaySubtitle }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)

@@ -166,7 +166,52 @@ private struct TransactionsPanelView: View {
 
     @AppStorage("balanceSubtitleStyle.panel") private var panelSubtitleStyle: Int = 0
 
+    // MARK: PayPal-Untertitel (Umsatzliste): Toggle letzte Buchung / Monatsausgaben
+    @State private var paypalSubtitleRange: Int = 0
+
+    private func eurFormatted(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE"); f.numberStyle = .currency; f.currencyCode = "EUR"
+        return f.string(from: NSNumber(value: v)) ?? String(format: "%.2f €", v)
+    }
+
+    private var paypalLastBookingText: String {
+        guard let last = vm.transactions.first else { return L10n.t("Keine Buchung", "No transaction") }
+        let amt = last.amount.flatMap { Double($0.amount) } ?? 0
+        let name = (last.creditor?.name ?? last.debtor?.name ?? "").trimmingCharacters(in: .whitespaces)
+        let base = name.isEmpty ? eurFormatted(abs(amt)) : "\(eurFormatted(abs(amt))) · \(name)"
+        return L10n.t("Letzte Buchung: \(base)", "Last: \(base)")
+    }
+
+    private var paypalMonthSpendText: String {
+        let cal = Calendar.current, now = Date()
+        let ym = String(format: "%04d-%02d", cal.component(.year, from: now), cal.component(.month, from: now))
+        let spend = vm.transactions
+            .filter { ($0.bookingDate ?? "").hasPrefix(ym) }
+            .compactMap { $0.amount.flatMap { Double($0.amount) } }
+            .filter { $0 < 0 }
+            .reduce(0, +)
+        let f = DateFormatter(); f.locale = Locale(identifier: "de_DE"); f.dateFormat = "LLLL"
+        return "\(L10n.t("Ausgaben", "Spending")) \(f.string(from: now)): \(eurFormatted(abs(spend)))"
+    }
+
     @ViewBuilder
+    private func panelPayPalSubtitle(detail: Color) -> some View {
+        Button {
+            paypalSubtitleRange = paypalSubtitleRange == 0 ? 1 : 0
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                Text(paypalSubtitleRange == 0 ? paypalLastBookingText : paypalMonthSpendText)
+                    .font(.system(size: 12)).lineLimit(1)
+            }
+            .foregroundColor(detail)
+        }
+        .buttonStyle(.plain)
+        .help(L10n.t("Tippen: letzte Buchung / Ausgaben diesen Monat",
+                     "Tap: last transaction / spending this month"))
+    }
+
     private var leftToPaySubtitle: some View {
         // Im Unified-Mode ist leftToPay pro-Slot aggregiert (jeder Slot mit eigenem
         // Gehaltstag). Sub-Metrics würden diese Summe gegen EINEN Gehaltstag
@@ -227,10 +272,13 @@ private struct TransactionsPanelView: View {
         // Zweig — sonst würde der (als cachedBalance gespeicherte) Letzt-Bon-Betrag
         // fälschlich wie ein Saldo klassifiziert und die Liste saldo-getönt.
         if receiptActive { return MerchantWash.colors(for: receiptSource).bottom }
-        // Money-Heat-Themes (Default + Unified): Liste in der Temperaturfarbe des
-        // Kontostands (heller Money-Heat-Ton) — die Money-Heat zieht sich durch, statt
-        // mit dem Bank-Tint (z. B. Sparkasse-Rot) zu kollidieren.
-        if isDefaultTheme || vm.isUnifiedMode {
+        // Aggregat: neutral (passend zur neutralen Aggregat-Karte).
+        if vm.isUnifiedMode {
+            return BalanceWash.colors(level: .unknown, style: BalanceSignal.style(for: .unknown),
+                                      dark: activeColorScheme == .dark).bottom
+        }
+        // Money-Heat-Theme (Default): Liste in der Temperaturfarbe des Kontostands.
+        if isDefaultTheme {
             return moneyHeatListTint
         }
         // REWE/Legacy-Slots: klassischer Bank-Tint.
@@ -465,73 +513,35 @@ private struct TransactionsPanelView: View {
             mediumUpperBound: normalizedBalanceThresholds.mediumUpperBound * Double(slotCount),
             veryGoodLowerBound: normalizedBalanceThresholds.veryGoodLowerBound * Double(slotCount)
         )
-        // Money-Heat für die Aggregat-Summe (Temperatur des Gesamtsaldos).
+        // Aggregat bewusst NEUTRAL (keine grün/orange-Money-Heat) — sonst springt
+        // die Farbe beim Wechsel Einzelkonto↔Aggregat.
         let uDark = activeColorScheme == .dark
-        let uLevel = BalanceSignal.classify(balance: totalBalance, thresholds: aggregatedThresholds)
+        let uLevel: BalanceSignalLevel = .unknown
         let uStyle = BalanceSignal.style(for: uLevel)
         let uWash = BalanceWash.colors(level: uLevel, style: uStyle, dark: uDark)
         let totalSignalColor: Color = uWash.balance
 
         let leftContent = VStack(alignment: .leading, spacing: 8) {
-            // Row 1: slot icons strip — mirrors single-account card's logo+timestamp row
-            HStack(spacing: 10) {
-                ForEach(slotBalances, id: \.slot.id) { item in
-                    let slot = item.slot
-                    let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.iban)
-                    let barColor = slotDisplayColor(for: slot)
-                    HStack(spacing: 6) {
-                        if let img = logoStore.image(for: brand) {
-                            let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: brand?.id ?? "")
-                            if invertActive {
-                                Image(nsImage: img).resizable().scaledToFit()
-                                    .frame(width: 16, height: 16)
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                                    .colorInvert()
-                            } else {
-                                Image(nsImage: img).resizable().scaledToFit()
-                                    .frame(width: 16, height: 16)
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                            }
-                        } else {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(barColor.opacity(0.30))
-                                .frame(width: 16, height: 16)
-                        }
-                        if let nick = slot.nickname {
-                            Text(nick)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color(NSColor.secondaryLabelColor))
-                                .lineLimit(1)
-                        }
-                        if let b = item.balance {
-                            Text(formatBalance(b, currency: slot.currency ?? "EUR"))
-                                .font(.system(size: 11))
-                                .foregroundColor(b < 0 ? Color.expenseRed : Color(NSColor.secondaryLabelColor))
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(barColor.opacity(0.10)))
-                    .overlay(Capsule().stroke(barColor.opacity(0.30), lineWidth: 0.5))
-                }
+            // Row 1: „Alle Konten"-Header (harmonisiert mit der Einzelkarte —
+            // keine Konten-Aufschlüsselung/Pillen mehr, nur der Gesamt-Saldo).
+            HStack(spacing: 8) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                Text(L10n.t("Alle Konten", "All accounts"))
+                    .font(.system(size: 13))
+                    .foregroundColor(Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
 
-            // Row 2: aggregated balance — same 32pt bold as single-account card
+            // Row 2: aggregated balance — same 38pt bold as single-account card
             if let total = totalBalance {
-                HStack(spacing: 6) {
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(totalSignalColor)
-                    Text(formatBalance(total, currency: displayCurrency))
-                        .font(.system(size: 38, weight: .bold, design: .default))
-                        .tracking(-0.6)
-                        .foregroundColor(totalSignalColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                }
-                    .padding(.trailing, 0)
+                Text(formatBalance(total, currency: displayCurrency))
+                    .font(.system(size: 38, weight: .bold, design: .default))
+                    .tracking(-0.6)
+                    .foregroundColor(totalSignalColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             } else if slotBalances.isEmpty || slotBalances.allSatisfy({ $0.balance == nil }) {
                 Text("--,-- €")
                     .font(.system(size: 32, weight: .bold, design: .default))
@@ -550,10 +560,11 @@ private struct TransactionsPanelView: View {
                 }
                 .padding(.trailing, 0)
             }
-
-            leftToPaySubtitle
+            // Kein leftToPay-Untertitel im Aggregat: pro-Slot-Summen gegen EINEN
+            // Gehaltstag zu rechnen ist fachlich falsch (zeigte fälschlich „alles
+            // gebucht", obwohl einzelne Konten Vormerkungen haben).
         }
-        .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 90, alignment: .topLeading)   // wie Einzelkarte → Pillen darunter auf gleicher Höhe
 
         let ringVisible = monthRingEnabled && !vm.isUnifiedMode
         return Group {
@@ -655,11 +666,11 @@ private struct TransactionsPanelView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            leftToPaySubtitle
+            if isPayPal { panelPayPalSubtitle(detail: wash.detail) } else { leftToPaySubtitle }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        let ringVisible = monthRingEnabled && !vm.isUnifiedMode
+        let ringVisible = monthRingEnabled && !vm.isUnifiedMode && !isPayPal   // PayPal: kein Ring
         return HStack(alignment: .center, spacing: 0) {
             leftContent
                 // Oben ausgerichtet, damit Header/Betrag NICHT springen, wenn der
@@ -1425,6 +1436,7 @@ private struct TransactionsPanelView: View {
             ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
                 let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
                 if isActive {
+                    // Aktive Pille ausgeschrieben (Logo + Name) — wie im Flyout.
                     HStack(spacing: 5) {
                         slotLogoTile(slot, size: 16)
                         Text(slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName)
@@ -1550,7 +1562,7 @@ private struct TransactionsPanelView: View {
                 .help(showCategories
                       ? L10n.t("Kategorien ausblenden", "Hide categories")
                       : L10n.t("Kategorien anzeigen", "Show categories"))
-                if !vm.isUnifiedMode && !receiptActive {
+                if !vm.isUnifiedMode && !receiptActive && multibankingStore.activeSlot?.isPayPal != true {
                     Button(action: { toggleRoundupView() }) {
                         Image(systemName: roundupView.isActive ? "centsign.circle.fill" : "centsign.circle")
                             .font(.system(size: 15))
@@ -2118,6 +2130,11 @@ private struct TransactionsPanelView: View {
                 roundupView.setTransactions(vm.transactions)
             }
         }
+        // Slot-Wechsel: Ring neu rechnen, auch wenn die Transaktions-ANZAHL zufällig
+        // gleich bleibt (z. B. PayPal/REWE → Bank) — sonst bleibt der gecachte
+        // Ring-Wert des vorigen Slots stehen.
+        .onChange(of: multibankingStore.activeIndex) { _ in recomputeGreenZone() }
+        .onChange(of: vm.currentBalance) { _ in recomputeGreenZone() }
         .onChange(of: infiniteScrollEnabled) { _ in
             resetInfiniteWindowIfNeeded()
         }
@@ -2443,6 +2460,8 @@ private struct TransactionsPanelView: View {
     // MARK: - Roundup View Toggle
 
     private func toggleRoundupView() {
+        // Aufrunden ist für PayPal deaktiviert (nicht sinnvoll).
+        if multibankingStore.activeSlot?.isPayPal == true { return }
         if roundupView.isActive {
             roundupView.deactivate()
         } else if let slotId = multibankingStore.activeSlot?.id {
