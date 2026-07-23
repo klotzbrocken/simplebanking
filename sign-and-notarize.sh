@@ -11,8 +11,12 @@ STAGE_DIR="$OUTDIR/.dmg-stage-$TIMESTAMP"
 APP_BASENAME="$(basename "$APP" .app)"
 DMG_PATH="$OUTDIR/${APP_BASENAME}-${TIMESTAMP}.dmg"
 
-SIGN_IDENTITY="${SIGN_IDENTITY:-}"
-NOTARY_PROFILE="${NOTARY_PROFILE:-}"
+# Defaults auf die tatsächlich vorhandenen Artefakte dieser Maschine:
+#  - Developer ID: "…(FTJLR8JRNS)" (SHA-1 53CF9A…), Private Key vorhanden.
+#  - Notary: das geteilte Keychain-Profil "Retromac" (simplebanking-notary fehlt
+#    seit dem Mac-Umzug; "Retromac" nutzt dieselbe Apple-ID/Team FTJLR8JRNS).
+SIGN_IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Maik Klotz (FTJLR8JRNS)}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-Retromac}"
 BUILD_FIRST="${BUILD_FIRST:-1}"
 SKIP_APPCAST="${SKIP_APPCAST:-0}"
 

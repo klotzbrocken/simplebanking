@@ -20,10 +20,13 @@ bash build-app.sh
 # → SimpleBankingBuild/simplebanking.app
 
 # Full release pipeline: build + sign with Developer ID + notarize + DMG + delta + appcast
-SIGN_IDENTITY="Developer ID Application: Maik Klotz (FTJLR8JRNS)" \
-NOTARY_PROFILE="simplebanking-notary" \
+# Defaults are already correct for this machine (cert FTJLR8JRNS / 53CF9A, notary
+# profile "Retromac"), so a bare call works:
 bash sign-and-notarize.sh
+# Override if needed: SIGN_IDENTITY=… NOTARY_PROFILE=… bash sign-and-notarize.sh
 # Useful flags: BUILD_FIRST=0 (skip rebuild), SKIP_APPCAST=1
+# Notary profile: the app's own "simplebanking-notary" was lost in the Mac move;
+# we reuse the shared "Retromac" profile (same Apple ID / team FTJLR8JRNS).
 
 # Run the built app
 open SimpleBankingBuild/simplebanking.app
@@ -105,6 +108,17 @@ BalanceBar
 `/Users/maik/.claude/projects/-Users-maik/memory/MEMORY.md` (loaded automatically) has long-lived feedback memos — testing style, BalanceBar/Flyout height invariants, Sparkle release-bump rule, and a running log of project states by version. Check it before tackling anything tagged "geparkt".
 
 ## Sparkle release process
+
+**⚠️ Signing-key migration (one-time, next release):** the old EdDSA key (public
+`BOcdIyAH…`) was **lost** — its private key is gone. `sparkle-public-key.txt` now
+holds the **new** key (`uXP0XBQg…`; private key at `~/Documents/RetroMac-Sparkle-Key/`,
+shared with RetroMac). Existing 1.6.x installs carry the OLD public key and **cannot
+verify** any new-key-signed update. So the first new-key release needs an
+**informational appcast item** (like RetroMac 2.2): a `<sparkle:version>`-gated entry
+with a link to the GitHub release page and **no `<enclosure>`** (hence no signature) —
+it nudges old-key users to download the new build manually. Once on the new build
+(new key), normal signed auto-update resumes at the following version. Sign the DMG
+with the new key: `.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file ~/Documents/RetroMac-Sparkle-Key/sparkle-private-key.txt <DMG>`.
 
 1. Bump `VERSION_BASE` in `build-app.sh`.
 2. `BUILD_FIRST=1 SKIP_APPCAST=1 SIGN_IDENTITY=… NOTARY_PROFILE=… bash sign-and-notarize.sh` → DMG + delta files in `SimpleBankingBuild/`.
