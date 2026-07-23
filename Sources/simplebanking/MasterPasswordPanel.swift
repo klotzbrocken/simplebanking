@@ -223,9 +223,20 @@ final class MasterPasswordPanel {
     }
 
     func runModalWithResult() -> MasterPasswordResult {
+        // `.accessory`-Apps (LSUIElement) können unter macOS 26 ihr Modal-Panel
+        // nicht zuverlässig Key werden lassen: `NSApp.activate` bringt die App nicht
+        // in den Vordergrund, das Panel bekommt keinen Tastaturfokus → Passwort ist
+        // nicht eingebbar, die App steckt in `runModal` fest (Menü/Beenden/Entsperren
+        // reagieren nicht). Für die Dauer des Modals temporär auf `.regular` wechseln
+        // (App aktiviert, Panel wird Key), danach wieder auf die vorige Policy.
+        let previousPolicy = NSApp.activationPolicy()
+        if previousPolicy != .regular { NSApp.setActivationPolicy(.regular) }
+        defer { if previousPolicy != .regular { NSApp.setActivationPolicy(previousPolicy) } }
+
         NSApp.activate(ignoringOtherApps: true)
         panel.center()
         panel.makeKeyAndOrderFront(nil)
+        panel.makeKey()
 
         // Touch ID automatisch starten, sobald das Panel sichtbar ist
         if isUnlock && BiometricStore.isAvailable && BiometricStore.hasSavedPassword {
