@@ -422,19 +422,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img?.isTemplate = true
             return img
         }
-        // PayPal: echtes Marken-Logo (farbig).
-        if let active = MultibankingStore.shared.activeSlot, active.isPayPal,
-           let logo = PayPalLogoAsset.image?.resized(to: NSSize(width: 16, height: 16)) {
-            logo.isTemplate = false
-            return logo
-        }
-        // eBon-Slot (REWE/dm): echtes Marken-Logo (farbig, nicht-Template). Ohne
-        // Logo UND ohne Saldo-Titel (isShort-Default) wäre das Status-Item null-breit.
-        if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
-            let asset = active.receiptLogoImage
-            if let logo = asset?.resized(to: NSSize(width: 16, height: 16)) {
-                logo.isTemplate = false
-                return logo
+        // PayPal + eBon-Slots (REWE/dm/Amazon): MONOCHROMES Template-Logo für die
+        // Menüleiste (isTemplate → passt sich Hell/Dunkel an). Farbig bleibt es nur
+        // im Flyout/Umsatzliste. Fallback (cart.fill), damit das Status-Item nie
+        // null-breit wird.
+        if let active = MultibankingStore.shared.activeSlot,
+           let source = active.source, active.isReceiptSlot || active.isPayPal {
+            if let tpl = MenuBarLogoAssets.forSource(source) {
+                return tpl
             }
             let cfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
             let img = NSImage(systemSymbolName: "cart.fill", accessibilityDescription: active.displayName)?
