@@ -667,6 +667,23 @@ struct SettingsView: View {
         NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
     }
 
+    /// Binding für das Monatsbudget eines Händler-Slots (in Euro). Speichert direkt
+    /// und stößt den Flyout-/Panel-Refresh an (.slotSettingsChanged).
+    private func merchantBudgetBinding(for slot: BankSlot) -> Binding<String> {
+        Binding(
+            get: {
+                let v = BankSlotSettingsStore.load(slotId: slot.id).merchantMonthlyBudget
+                return v > 0 ? String(v) : ""
+            },
+            set: { newValue in
+                var s = BankSlotSettingsStore.load(slotId: slot.id)
+                s.merchantMonthlyBudget = Int(newValue.filter { $0.isNumber }) ?? 0
+                BankSlotSettingsStore.save(s, slotId: slot.id)
+                NotificationCenter.default.post(name: .slotSettingsChanged, object: nil)
+            }
+        )
+    }
+
     @ViewBuilder
     private func creditLimitApiStatusRow(slotId: String, dispoLimit: Int) -> some View {
         let key = "simplebanking.bankReportsCreditLimitIncluded.\(slotId)"
@@ -1224,6 +1241,19 @@ struct SettingsView: View {
                                                 .foregroundColor(Color(NSColor.secondaryLabelColor))
                                         }
                                     }
+                                }
+                                if slot.isReceiptSlot {
+                                    HStack(spacing: 5) {
+                                        Text(t("Monatsbudget", "Monthly budget"))
+                                            .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                        TextField("0", text: merchantBudgetBinding(for: slot))
+                                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                                            .font(ThemeFonts.body(size: 11))
+                                            .frame(width: 52)
+                                        Text("€").font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+                                    }
+                                    .help(t("Legt die Ausgaben-Ampel fest: grün unter 75 %, amber bis 100 %, rot darüber. Leer = keine Ampel.",
+                                            "Sets the spend heat: green under 75%, amber up to 100%, red above. Empty = off."))
                                 }
                                 if !slot.iban.isEmpty {
                                     HStack(spacing: 4) {
@@ -2168,13 +2198,16 @@ struct SettingsView: View {
 
             Divider()
 
+            // Money-Heat ist der feste Listen-Standard. Die früheren Füll-Stile
+            // (Sanft/Karten) wurden davon überdeckt und sind entfernt — es bleibt
+            // nur der Bankfarben-Seitenstreifen als optionale Ergänzung.
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(t("Umsatzliste in Bankfarbe einfärben",
-                           "Tint transaction list in bank color"))
+                    Text(t("Bank-Farbstreifen in der Umsatzliste",
+                           "Bank color stripe in the transaction list"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Sanfter Bankfarben-Hintergrund hilft, die aktive Bank sofort zu erkennen. Im Aufrunden-Modus greift die Mint-Färbung. Im Aggregiert-Mode aus.",
-                           "Subtle bank color background helps you spot the active bank at a glance. Round-up view uses its own mint tint. Disabled in unified mode."))
+                    Text(t("Schmaler Streifen in der Bankfarbe am linken Rand — hilft, die aktive Bank sofort zu erkennen. Die Liste selbst bleibt in der Money-Heat-Temperaturfarbe. Im Aufrunden-Modus aus.",
+                           "Thin stripe in the bank color on the left edge — helps you spot the active bank. The list itself keeps the money-heat temperature color. Off in round-up mode."))
                         .font(ThemeFonts.body(size: 11))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2184,69 +2217,13 @@ struct SettingsView: View {
                     get: { bankTintEnabled },
                     set: { newValue in
                         bankTintEnabled = newValue
+                        // Einzige verbleibende Darstellung ist der Seitenstreifen.
+                        if newValue { bankTintStyleRaw = BankTintStyle.sidebar.rawValue }
                         NotificationCenter.default.post(name: .bankTintChanged, object: nil)
                     }
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
-            }
-
-            // Intensity-Slider (nur sichtbar wenn Bank-Tint an)
-            if bankTintEnabled {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(t("Sättigung", "Saturation"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Text(t("Wie stark die Bankfarbe durchschlägt. 0 % = nahezu unsichtbar, 100 % = volle Bankfarbe.",
-                               "How strongly the bank color shows through. 0% = nearly invisible, 100% = full bank color."))
-                            .font(ThemeFonts.body(size: 11))
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer()
-                    Slider(
-                        value: Binding(
-                            get: { bankTintIntensity },
-                            set: { newValue in
-                                bankTintIntensity = newValue
-                                NotificationCenter.default.post(name: .bankTintChanged, object: nil)
-                            }
-                        ),
-                        in: 0.0 ... 1.0
-                    )
-                    .frame(width: 160)
-                    Text("\(Int((bankTintIntensity * 100).rounded())) %")
-                        .font(ThemeFonts.body(size: 12).monospacedDigit())
-                        .foregroundColor(.secondary)
-                        .frame(width: 44, alignment: .trailing)
-                }
-
-                // --- Bankfarben-Stil (Sanft / Streifen / Karten) ---
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(t("Stil", "Style"))
-                            .font(ThemeFonts.body(size: 13, weight: .medium))
-                        Text(t("Wie die Bankfarbe in der Umsatzliste dargestellt wird.",
-                               "How the bank color appears in the transaction list."))
-                            .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { bankTintStyleRaw },
-                        set: { newValue in
-                            bankTintStyleRaw = newValue
-                            NotificationCenter.default.post(name: .bankTintChanged, object: nil)
-                        }
-                    )) {
-                        Text(t("Sanft", "Soft")).tag(BankTintStyle.soft.rawValue)
-                        Text(t("Streifen", "Stripe")).tag(BankTintStyle.sidebar.rawValue)
-                        Text(t("Karten", "Cards")).tag(BankTintStyle.cardOnPanel.rawValue)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 240)
-                }
             }
 
             Divider()

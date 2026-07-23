@@ -222,6 +222,11 @@ private struct TransactionsPanelView: View {
 
     private var activePanelBg: Color {
         if roundupView.isActive { return .roundupPanelBackground }
+        // Händler-/eBon-Slots: Liste im Marken-Ton (untere Wash-Farbe), damit der
+        // Marken-Header nahtlos in die Liste übergeht. WICHTIG: vor dem Money-Heat-
+        // Zweig — sonst würde der (als cachedBalance gespeicherte) Letzt-Bon-Betrag
+        // fälschlich wie ein Saldo klassifiziert und die Liste saldo-getönt.
+        if receiptActive { return MerchantWash.colors(for: receiptSource).bottom }
         // Money-Heat-Themes (Default + Unified): Liste in der Temperaturfarbe des
         // Kontostands (heller Money-Heat-Ton) — die Money-Heat zieht sich durch, statt
         // mit dem Bank-Tint (z. B. Sparkasse-Rot) zu kollidieren.
@@ -580,7 +585,7 @@ private struct TransactionsPanelView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
-        .padding(.bottom, 16)
+        .padding(.bottom, 8)
         // Randlose Money-Heat wie die Einzelkonto-Karte (Aggregat-Temperatur), oben bis
         // hinter die Titelleiste, unten weicher Fade in den Listen-Hintergrund.
         .background(
@@ -655,7 +660,9 @@ private struct TransactionsPanelView: View {
         let ringVisible = monthRingEnabled && !vm.isUnifiedMode
         return HStack(alignment: .center, spacing: 0) {
             leftContent
-                .frame(minHeight: 108)
+                // Oben ausgerichtet, damit Header/Betrag NICHT springen, wenn der
+                // Inhalt unterschiedlich hoch ist (Bank-Untertitel vs. Händler-Toggle).
+                .frame(minHeight: 90, alignment: .top)
             if panelIsWide {
                 PaycheckRightZoneView(
                     salaryDay: activeSlotSettings.effectiveSalaryDay,
@@ -678,7 +685,7 @@ private struct TransactionsPanelView: View {
         .animation(.easeInOut(duration: 0.2), value: panelIsWide)
         .padding(.horizontal, 16)
         .padding(.top, 16)
-        .padding(.bottom, 16)
+        .padding(.bottom, 8)
         // Randlose Money-Heat bis an ALLE Fensterkanten — oben hinter der Titelleiste
         // (Ampel/Icons sitzen darauf). Unten läuft sie als 3-Stop-Verlauf weich in den
         // Listen-Hintergrund aus → fließender Übergang zur Umsatzliste (kein harter Rand).
@@ -768,8 +775,17 @@ private struct TransactionsPanelView: View {
     /// Kategorien-Ring rechts, darunter Einkäufe Monat/Jahr/Vorjahr-Toggle).
     /// Gleiche minHeight (108).
     private var reweBalanceCard: some View {
-        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.05) : Color.white.opacity(0.60)
-        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.10) : Color.white.opacity(0.35)
+        // Marken-Wash (REWE/Amazon/dm) statt Glas, randlos mit 3-Stop-Übergang in die
+        // Liste (wie defaultThemeBalanceCard). Ausgaben-Heat auf der Monatssumme.
+        let wash = MerchantWash.colors(for: receiptSource)
+        let budgetCents = activeSlotSettings.merchantMonthlyBudget * 100
+        let spendLevel = SpendSignal.classify(spentCents: reweMonthCents, budgetCents: budgetCents)
+        let heat = SpendSignal.heatColor(spendLevel)
+        let showHeat = reweRange == 0 && spendLevel != .noBudget
+        let toggleColor: Color = showHeat ? heat : Color(NSColor.secondaryLabelColor)
+        let budgetBadge = reweRange == 0
+            ? SpendSignal.badge(spentCents: reweMonthCents, budgetCents: budgetCents, level: spendLevel)
+            : nil
         let leftContent = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let logo = receiptLogo {
@@ -788,35 +804,49 @@ private struct TransactionsPanelView: View {
                 Spacer()
             }
             Text(vm.currentBalance ?? "--,-- €")
-                .font(.system(size: 32, weight: .bold, design: .default))
-                .foregroundColor(.primary)
+                .font(.system(size: 38, weight: .bold, design: .default))
+                .tracking(-0.6)
+                .foregroundColor(wash.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Button { cycleReweRange() } label: {
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
                     Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
                         .font(.system(size: 12))
+                    if let badge = budgetBadge {
+                        Text(badge)
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Capsule().fill(heat.opacity(0.15)))
+                            .foregroundColor(heat)
+                    }
                 }
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .foregroundColor(toggleColor)
             }
             .buttonStyle(.plain)
             .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         return HStack(alignment: .center, spacing: 0) {
-            leftContent.frame(minHeight: 108)
+            leftContent.frame(minHeight: 90, alignment: .top)   // wie Bank-Karte: oben ausgerichtet
             ReceiptCategoryRing(segments: reweRingSegments, date: reweLastReceiptDate)
                 .padding(.leading, 12)
         }
-            .padding(16)
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(LinearGradient(colors: [Color.primary.opacity(0.10), .clear],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+        .background(
+            LinearGradient(
+                stops: [
+                    .init(color: wash.top, location: 0.0),
+                    .init(color: wash.bottom, location: 0.52),
+                    .init(color: activePanelBg, location: 1.0)
+                ],
+                startPoint: .top, endPoint: .bottom
             )
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(borderColor, lineWidth: 1))
+            .ignoresSafeArea(.container, edges: .top)
+        )
     }
 
     /// Einkaufsliste im Bank-Umsatz-Look, nach TAGEN gruppiert (Datums-Header
@@ -1368,7 +1398,9 @@ private struct TransactionsPanelView: View {
     private func slotLogoTile(_ slot: BankSlot, size: CGFloat) -> some View {
         let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId,
                                            iban: slot.isReceiptSlot ? nil : slot.iban)
-        if let img = logoStore.image(for: brand) {
+        // Händler-Slots: Marken-Logo direkt (wird nicht über BankLogoAssets aufgelöst).
+        let img: NSImage? = slot.isReceiptSlot ? slot.receiptLogoImage : logoStore.image(for: brand)
+        if let img {
             Image(nsImage: img).resizable().scaledToFit()
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
@@ -1447,10 +1479,12 @@ private struct TransactionsPanelView: View {
             }
             .rippleEffect(trigger: vm.rippleTrigger,
                           defaultOrigin: CGPoint(x: 190, y: 65))
-            // Default-Bank-Header bekommt den randlosen Wash (0 Außen-Padding, Wash bis
-            // an die Fensterkanten). Andere Karten (REWE/Roundup/Unified/Legacy) behalten 16.
-            .padding(.horizontal, ((isDefaultTheme || vm.isUnifiedMode) && !receiptActive && !roundupView.isActive) ? 0 : 16)
-            .padding(.top, ((isDefaultTheme || vm.isUnifiedMode) && !receiptActive && !roundupView.isActive) ? 0 : -9)
+            // Randloser Wash (0 Außen-Padding, Wash bis an die Fensterkanten) für die
+            // Money-Heat-Bankkarte UND die Händler-Marken-Karte — beide müssen sich
+            // exakt gleich verankern, sonst springt der Inhalt beim Wechsel. Nur
+            // Roundup/Legacy behalten die 16/-9-Inset-Variante.
+            .padding(.horizontal, (!roundupView.isActive && (receiptActive || isDefaultTheme || vm.isUnifiedMode)) ? 0 : 16)
+            .padding(.top, (!roundupView.isActive && (receiptActive || isDefaultTheme || vm.isUnifiedMode)) ? 0 : -9)
             .padding(.bottom, multibankingStore.slots.count > 1 ? 4 : 6)
 
             // Account dot indicators — slot dots + "Alle Konten" dot. Eigene Zeile in
@@ -2480,7 +2514,8 @@ private struct TransactionsPanelView: View {
                 try TransactionsDatabase.setReminderId(txID: txID, slotId: slotId, bankId: bankId, reminderId: id)
                 await MainActor.run { vm.loadEnrichmentData(bankId: bankId) }
             } catch {
-                // Permission denied or EventKit error — user will see Reminders.app permission dialog
+                // Permission denied oder EventKit-Fehler — sichtbar machen statt still schlucken.
+                AppLogger.log("Reminder-Erstellung fehlgeschlagen: \(error)", category: "Reminder", level: "WARN")
             }
         }
     }

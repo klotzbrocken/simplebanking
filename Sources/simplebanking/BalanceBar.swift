@@ -514,7 +514,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         return store.slots.map { slot in
             let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.isReceiptSlot ? nil : slot.iban)
             BankLogoStore.shared.preload(brand: brand)
-            let logo = BankLogoStore.shared.image(for: brand)
+            // Händler-Slots: das Marken-Logo (ReweLogoAsset/…) direkt nutzen — es
+            // wird NICHT über BankLogoAssets aufgelöst.
+            let logo = slot.isReceiptSlot ? slot.receiptLogoImage : BankLogoStore.shared.image(for: brand)
             let balance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double
             let currency = slot.currency ?? "EUR"
             let symbol: String
@@ -546,6 +548,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             let barColor: Color
             if let hex = slot.customColor, let c = Color(hex: hex) {
                 barColor = c
+            } else if slot.isReceiptSlot, let c = Color(hex: MerchantWash.brandHex(for: slot.source ?? .rewe)) {
+                barColor = c   // Marken-Farbe (REWE/Amazon/dm) für den Pillen-Streifen
             } else if let logoId = slot.logoId,
                       let hex = BankLogoAssets.primaryColor(forLogoId: logoId),
                       let c = Color(hex: hex) {
@@ -935,6 +939,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var widgetBalanceHidden = false
     /// Event-Monitore für das manuelle Fenster-Dragging (Drop auf den Desktop).
     private var widgetDragMonitors: [Any] = []
+    /// Monitor, der einen Drag IRGENDWO auf dem Flyout-Popover erkennt (ganzes
+    /// Fenster „greifbar" → Desktop-Widget). Aktiv nur solange das Popover offen ist.
+    private var flyoutDetachMonitor: Any?
+    private var flyoutDetachStart: NSPoint?
     private static let flyoutWidgetStayOnTopKey = "flyoutWidget.stayOnTop"
     /// Standard: false = normale Fensterebene (umschaltbar per Rechtsklick-Menü).
     private var flyoutWidgetStayOnTop: Bool {
@@ -3339,6 +3347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             AppLogger.log("popoverWillClose qsOpen=\(flyoutQuickSendOpen)", category: "Flyout")
             flyoutClosedByClickAt = Date()
             flyoutQuickSendOpen = false
+            removeFlyoutDetachMonitor()
         }
     }
 
@@ -3363,21 +3372,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// unterbinden wir das native Detach (return false, damit AppKit auch kein
     /// eigenes Fenster baut) und nutzen den Aufruf nur als Signal, um das Widget
     /// SELBST als eigenständiges Fenster zu präsentieren.
-    nonisolated func popoverShouldDetach(_ popover: NSPopover) -> Bool {
-        MainActor.assumeIsolated {
-            guard !flyoutQuickSendOpen, detachedFlyoutWindow == nil,
-                  !pendingWidgetPresentation else { return false }
-            pendingWidgetPresentation = true
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let dropPoint = NSEvent.mouseLocation
-                let dragEvent = NSApp.currentEvent
-                self.balancePopover?.close()
-                self.showFlyoutWidget(at: dropPoint, initiatingDrag: dragEvent)
-                self.pendingWidgetPresentation = false
+    // Natives AppKit-Detach wird NICHT genutzt (bei Statusbar-Popovers unzuverlässig)
+    // — stattdessen erkennt `flyoutDetachMonitor` einen Drag irgendwo auf dem Flyout.
+    nonisolated func popoverShouldDetach(_ popover: NSPopover) -> Bool { false }
+
+    /// Installiert den Drag-Monitor, der das GANZE Flyout greifbar macht: ein
+    /// Links-Drag > 6 px irgendwo im Popover-Fenster löst das Abdocken zum
+    /// Desktop-Widget aus (reiner Klick bleibt Klick → Pillen/Buttons funktionieren).
+    private func installFlyoutDetachMonitor() {
+        removeFlyoutDetachMonitor()
+        flyoutDetachStart = nil
+        flyoutDetachMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged]
+        ) { [weak self] event in
+            guard let self else { return event }
+            // NSEvent ist nicht Sendable → nur Sendable-Werte in die MainActor-Closure.
+            let type = event.type
+            let loc = NSEvent.mouseLocation
+            var swallow = false
+            MainActor.assumeIsolated {
+                guard let popover = self.balancePopover, popover.isShown,
+                      !self.flyoutQuickSendOpen, self.detachedFlyoutWindow == nil,
+                      let popWindow = popover.contentViewController?.view.window,
+                      popWindow.frame.contains(loc) else {
+                    if type == .leftMouseDown { self.flyoutDetachStart = nil }
+                    return
+                }
+                switch type {
+                case .leftMouseDown:
+                    self.flyoutDetachStart = loc
+                case .leftMouseDragged:
+                    if let start = self.flyoutDetachStart, !self.pendingWidgetPresentation,
+                       hypot(loc.x - start.x, loc.y - start.y) > 6 {
+                        self.pendingWidgetPresentation = true
+                        self.flyoutDetachStart = nil
+                        self.removeFlyoutDetachMonitor()
+                        self.balancePopover?.close()
+                        self.showFlyoutWidget(at: loc, startDragTracking: true)
+                        self.pendingWidgetPresentation = false
+                        swallow = true   // kein Tap auf Pille/Button durchreichen
+                    }
+                default: break
+                }
             }
-            return false
+            return swallow ? nil : event
         }
+    }
+
+    private func removeFlyoutDetachMonitor() {
+        if let m = flyoutDetachMonitor { NSEvent.removeMonitor(m); flyoutDetachMonitor = nil }
+        flyoutDetachStart = nil
     }
 
     /// Baut die randlose Fenster-Hülle für das Desktop-Widget — identisch zum
@@ -3405,7 +3449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// (obere-linke Ecke, innerhalb der sichtbaren Bildschirmfläche gehalten).
     /// Frischer `buildFlyoutHost` als contentViewController → voll verdrahtet und
     /// von `refreshFlyoutIfVisible` live aktualisiert.
-    private func showFlyoutWidget(at dropPoint: NSPoint, initiatingDrag: NSEvent? = nil) {
+    private func showFlyoutWidget(at dropPoint: NSPoint, startDragTracking: Bool = false) {
         guard detachedFlyoutWindow == nil else { return }
 
         let result = buildFlyoutHost(onDoubleTap: { [weak self] in
@@ -3488,7 +3532,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // dem Cursor folgen lassen bis losgelassen wird. `performDrag` funktioniert
         // nur während der Live-Verarbeitung eines mouseDown (nicht asynchron), daher
         // manuelles Tracking per Event-Monitor.
-        if initiatingDrag != nil, NSEvent.pressedMouseButtons != 0 {
+        if startDragTracking, NSEvent.pressedMouseButtons != 0 {
             startWidgetDragTracking(window: window)
         }
     }
@@ -3733,6 +3777,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func applyREWEFlyout(to rootView: inout StatusBalanceFlyoutCardView) {
         guard let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot else { return }
         rootView.reweMode = true
+        rootView.reweSource = active.source ?? .rewe
+        rootView.reweBudgetEuro = BankSlotSettingsStore.load(slotId: active.id).merchantMonthlyBudget
         rootView.bankLogoImage = active.receiptLogoImage
         rootView.bankName = active.receiptBrandName
         rootView.reweNeedsLogin = Self.receiptNeedsLogin(active.id)
@@ -3815,6 +3861,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// Wash-Farbe am oberen Kartenrand (dort wo der Popover-Pfeil ansetzt) für den
+    /// aktuellen Slot — Money-Heat (Bank) bzw. Marken-Wash (Händler).
+    private func currentFlyoutWashTopNSColor() -> NSColor {
+        let dark = (NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
+        if let slot = MultibankingStore.shared.activeSlot, slot.isReceiptSlot {
+            return NSColor(MerchantWash.colors(for: slot.source ?? .rewe).top)
+        }
+        let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        let cfg = BankSlotSettingsStore.load(slotId: slotId)
+        let thresholds = BalanceSignal.normalizedThresholds(
+            deepOverdraft: cfg.balanceSignalDeepOverdraftThreshold,
+            low: cfg.balanceSignalLowUpperBound,
+            medium: cfg.balanceSignalMediumUpperBound,
+            veryGood: cfg.balanceSignalVeryGoodLowerBound)
+        let level = BalanceSignal.classify(balance: lastBalance, thresholds: thresholds)
+        let style = BalanceSignal.style(for: level)
+        return NSColor(BalanceWash.colors(level: level, style: style, dark: dark).top)
+    }
+
+    /// Färbt die Popover-„Nase" (Pfeil) im Wash-Ton. AppKit bietet dafür keine
+    /// offizielle API — best-effort über den Layer der privaten Rahmen-View
+    /// (sicher: kein KVC, kein Crash-Risiko; wirkt nur, wenn die View einen Layer hat).
+    private func tintFlyoutPopoverArrow() {
+        guard let window = balancePopover?.contentViewController?.view.window,
+              let frameView = window.contentView?.superview else { return }
+        frameView.wantsLayer = true
+        frameView.layer?.backgroundColor = currentFlyoutWashTopNSColor().cgColor
+    }
+
     private func showBalanceFlyout() {
         guard let button = statusItem?.button else { return }
 
@@ -3854,6 +3929,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         popover.contentViewController = host
         balancePopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        installFlyoutDetachMonitor()   // ganzes Flyout per Drag greifbar (#4)
+        // Pfeil/Nase im Wash-Ton (nächster Runloop: Popover-Fenster existiert dann).
+        DispatchQueue.main.async { [weak self] in self?.tintFlyoutPopoverArrow() }
 
         // "Noch offen" aus dem lokalen 90-Tage-Cache neu berechnen (kein Bank-Call) —
         // hält den Wert frisch und schreibt bei aktivem Logging die Posten-
@@ -4327,6 +4405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         if let popover = balancePopover, popover.isShown {
             popover.contentSize = newSize
+            tintFlyoutPopoverArrow()   // Pfeil-Ton bei Slot-/Wash-Wechsel aktualisieren
         }
         popoverHost?.rootView = rootView
 
@@ -4606,6 +4685,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // aber mit eBon-Balance-Card + Einkaufsliste (im Panel via receiptActive-
         // Zweig). Kein Bank-Fetch.
         if MultibankingStore.shared.activeSlot?.isReceiptSlot == true {
+            // Händler-Slots brauchen keinen Bank-Unlock — einen evtl. stehen
+            // gebliebenen „Unlock required"-Fehler eines vorher aktiven Bank-Slots
+            // löschen, sonst erscheint er unter den Händler-Pillen.
+            txVM.error = nil
             txPanel?.show()
             return
         }
@@ -6616,6 +6699,10 @@ private struct StatusBalanceFlyoutCardView: View {
     /// gezeigt (Header „REWE · Uhrzeit", großer Betrag letzter Einkauf, kein Ring,
     /// darunter Einkäufe Monat/Jahr mit Toggle).
     var reweMode: Bool = false
+    /// Quelle des aktiven Receipt-Slots — bestimmt den Marken-Wash (REWE/Amazon/dm).
+    var reweSource: SlotSource = .rewe
+    /// Monatsbudget in Euro (0 = keins → kein Ausgaben-Heat).
+    var reweBudgetEuro: Int = 0
     var reweMonthLabel: String = ""       // "Juni"
     var reweMonthTotalCents: Int = 0
     var reweYearLabel: String = ""        // "2026"
@@ -6717,8 +6804,9 @@ private struct StatusBalanceFlyoutCardView: View {
     /// (Prototyp 4b): kein Außen-Padding, Wash bis an die Flyout-Kanten. Andere
     /// Karten (Roundup/REWE/Unified/Legacy) behalten ihr klassisches Inset-Layout.
     private var bleedDefaultCard: Bool {
-        // Money-Heat-Karten (Default + Unified) bekommen den randlosen Verlauf.
-        !roundupView.isActive && !reweMode && (isDefaultTheme || unifiedSlots != nil)
+        // Money-Heat-Karten (Default + Unified) UND Händler-Karten (Marken-Wash)
+        // bekommen den randlosen Verlauf.
+        !roundupView.isActive && (reweMode || isDefaultTheme || unifiedSlots != nil)
     }
 
     /// Hartgrenze für Quick-Send = Saldo + Dispo-Rahmen (gleiche Logik wie `TransferSheet`).
@@ -7035,14 +7123,27 @@ private struct StatusBalanceFlyoutCardView: View {
     }
 
     private var reweCard: some View {
-        let glassColor = activeColorScheme == .dark ? Color.white.opacity(0.12) : Color.white.opacity(0.50)
-        let borderColor = activeColorScheme == .dark ? Color.white.opacity(0.18) : Color.white.opacity(0.40)
+        // Marken-Wash (REWE-Rot / Amazon-Orange / dm-Blau) statt Glas — randlos wie
+        // die Money-Heat-Karte. Ausgaben-Heat auf der Monatssumme vs. Budget.
+        let wash = MerchantWash.colors(for: reweSource)
+        let budgetCents = reweBudgetEuro * 100
+        let spendLevel = SpendSignal.classify(spentCents: reweMonthTotalCents, budgetCents: budgetCents)
+        let heat = SpendSignal.heatColor(spendLevel)
+        let showHeat = reweRange == 0 && spendLevel != .noBudget      // Heat nur im Monats-Bereich
+        let toggleColor: Color = showHeat ? heat : Color(NSColor.secondaryLabelColor)
+        let budgetBadge = reweRange == 0
+            ? SpendSignal.badge(spentCents: reweMonthTotalCents, budgetCents: budgetCents, level: spendLevel)
+            : nil
+        // Struktur bewusst identisch zur Bank-Karte (defaultThemeCard): Header, dann
+        // Betrag direkt darunter — damit Name/Betrag beim Wechsel Bank↔Händler NICHT
+        // springen. Der Kategorien-Ring liegt als Overlay rechts und treibt die
+        // Kartenhöhe NICHT (sonst wäre die Händler-Karte höher → Pillen versetzt).
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let img = bankLogoImage {
                     Image(nsImage: img).resizable().scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 } else {
                     Image(systemName: "cart.fill").font(.system(size: 16))
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
@@ -7056,41 +7157,44 @@ private struct StatusBalanceFlyoutCardView: View {
                 }
                 Spacer()
             }
-            HStack(alignment: .balanceTextCenter, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(effectiveBalanceText)
-                        .font(.system(size: 30, weight: .bold, design: .default))
-                        .foregroundColor(.primary)
-                        .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
-                    Button { cycleReweRange() } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
-                            Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
-                                .font(.system(size: 12))
-                        }
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+            Text(effectiveBalanceText)
+                .font(.system(size: 38, weight: .bold, design: .default))
+                .tracking(-0.6)
+                .foregroundColor(wash.accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Button { cycleReweRange() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                    Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
+                        .font(.system(size: 12))
+                    if let badge = budgetBadge {
+                        Text(badge)
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Capsule().fill(heat.opacity(0.15)))
+                            .foregroundColor(heat)
                     }
-                    .buttonStyle(.plain)
-                    .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
                 }
-                Spacer()
-                // Kategorien-Ring (Top-4 des letzten Bons) — füllt die 72×72-Fläche
-                // des Bank-Rings, damit die Karte EXAKT gleich hoch bleibt.
-                ReceiptCategoryRing(segments: reweRingSegments, date: reweLastReceiptDate)
-                    .alignmentGuide(.balanceTextCenter) { d in d.height / 2 }
+                .foregroundColor(toggleColor)
             }
+            .buttonStyle(.plain)
+            .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        // Ring als Overlay rechts, vertikal an der Betrags-Zeile ausgerichtet.
+        .overlay(alignment: .trailing) {
+            ReceiptCategoryRing(segments: reweRingSegments, date: reweLastReceiptDate)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
+        // Randlos: Marken-Wash bis an die Flyout-Kanten (Popover rundet die Ecken).
+        .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous).fill(glassColor)
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(LinearGradient(colors: [Color.primary.opacity(0.10), .clear],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-            }
+            LinearGradient(colors: [wash.top, wash.bottom],
+                           startPoint: .topTrailing, endPoint: .bottomLeading)
         )
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(borderColor, lineWidth: 1))
     }
 
     /// Temperatur-Wash nach Kontostand (Spezifikation §4, Prototyp 4b/1c): 160°-Verlauf

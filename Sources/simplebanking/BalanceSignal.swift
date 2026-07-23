@@ -55,6 +55,108 @@ enum BalanceWash {
     }
 }
 
+// MARK: - Merchant-Wash & Ausgaben-Heat (Händler-Slots)
+
+/// Marken-„Wash" für Händler-/eBon-Slots (REWE/Amazon/dm) — analog zu
+/// `BalanceWash`, aber aus der Markenfarbe gespeist statt aus einem Saldo-Level.
+/// `top`/`bottom` = weiche Verlaufs-Stops (bottom dient als nahtlose Listenfarbe),
+/// `accent` = kräftiger Markenton für die große Zahl. Auto light/dark.
+enum MerchantWash {
+    /// Markenfarbe je Quelle (ohne #). An EINER Stelle justierbar.
+    static func brandHex(for source: SlotSource) -> String {
+        switch source {
+        case .rewe:   return "E30613"   // REWE-Rot
+        case .amazon: return "FF9900"   // Amazon-Orange
+        case .dm:     return "0A4EA2"   // dm-Blau
+        case .yaxi:   return "8E8E93"   // Fallback (kein Receipt-Slot)
+        }
+    }
+
+    /// Dynamische Karten-Farben (adaptieren automatisch an Light/Dark).
+    static func colors(for source: SlotSource) -> (top: Color, bottom: Color, accent: Color) {
+        let hex = brandHex(for: source)
+        return (Color(nsColor: washNSColor(hex: hex, lightBlend: 0.16, darkBlend: 0.22)),
+                Color(nsColor: washNSColor(hex: hex, lightBlend: 0.10, darkBlend: 0.10)),
+                Color(nsColor: accentNSColor(hex: hex)))
+    }
+
+    /// Weicher Verlaufs-Stop: Basis-BG mit der Markenfarbe geblendet — gleiche
+    /// Mathematik wie `BankTintProvider.softNSColor`.
+    private static func washNSColor(hex: String, lightBlend: CGFloat, darkBlend: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            let brand = AppTheme.color(from: hex, fallback: .controlBackgroundColor)
+            let bg: NSColor = isDark
+                ? NSColor(srgbRed: 0.090, green: 0.090, blue: 0.090, alpha: 1.0)
+                : NSColor(srgbRed: 0.976, green: 0.976, blue: 0.976, alpha: 1.0)
+            return bg.blended(withFraction: isDark ? darkBlend : lightBlend, of: brand) ?? brand
+        }
+    }
+
+    /// Kräftiger Markenton für die große Zahl — Light abgedunkelt, Dark aufgehellt.
+    private static func accentNSColor(hex: String) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            let brand = AppTheme.color(from: hex, fallback: .labelColor)
+            return isDark
+                ? (brand.blended(withFraction: 0.25, of: .white) ?? brand)
+                : (brand.blended(withFraction: 0.12, of: .black) ?? brand)
+        }
+    }
+}
+
+/// Ausgaben-„Temperatur" eines Händler-Slots relativ zum festen Monatsbudget.
+enum SpendLevel: Equatable {
+    case underBudget   // < 75 %
+    case nearBudget    // 75 – <100 %
+    case overBudget    // ≥ 100 %
+    case noBudget      // kein Budget gesetzt → kein Heat
+}
+
+/// Analog zu `BalanceSignal`, aber für Händler-Ausgaben vs. Monatsbudget.
+/// Reine Funktionen (testbar); Farben spiegeln die Money-Heat-Palette.
+enum SpendSignal {
+    static func classify(spentCents: Int, budgetCents: Int) -> SpendLevel {
+        guard budgetCents > 0 else { return .noBudget }
+        let ratio = Double(spentCents) / Double(budgetCents)
+        if ratio < 0.75 { return .underBudget }
+        if ratio < 1.0 { return .nearBudget }
+        return .overBudget
+    }
+
+    /// Prozent des Budgets (gerundet). `nil` wenn kein Budget.
+    static func percentOfBudget(spentCents: Int, budgetCents: Int) -> Int? {
+        guard budgetCents > 0 else { return nil }
+        return Int((Double(spentCents) / Double(budgetCents) * 100).rounded())
+    }
+
+    static func heatColor(_ level: SpendLevel) -> Color {
+        switch level {
+        case .underBudget: return dyn(light: "177046", dark: "67B487")   // grün
+        case .nearBudget:  return dyn(light: "8a6d1e", dark: "E4BA78")   // amber
+        case .overBudget:  return dyn(light: "b0242c", dark: "D77979")   // rot
+        case .noBudget:    return Color(nsColor: .labelColor)
+        }
+    }
+
+    /// Kompakte Budget-Pille — `nil` wenn kein Budget gesetzt.
+    static func badge(spentCents: Int, budgetCents: Int, level: SpendLevel) -> String? {
+        guard let pct = percentOfBudget(spentCents: spentCents, budgetCents: budgetCents) else { return nil }
+        if level == .overBudget {
+            let over = pct - 100
+            return L10n.t("über Budget · +\(over) %", "over budget · +\(over)%")
+        }
+        return L10n.t("im Budget · \(pct) %", "on budget · \(pct)%")
+    }
+
+    private static func dyn(light: String, dark: String) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            return AppTheme.color(from: isDark ? dark : light, fallback: .labelColor)
+        })
+    }
+}
+
 // MARK: - Live-Preview Skala (Settings)
 
 /// Horizontale 6-Band-Skala die zeigt wie die User-Schwellen die Tier-Farben aufteilen.

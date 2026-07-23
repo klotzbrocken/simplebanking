@@ -5,6 +5,9 @@ import Foundation
 struct BankSlotSettings: Codable {
     var salaryDay: Int = 1
     var dispoLimit: Int = 0
+    /// Monatsbudget für Händler-/eBon-Slots (REWE/Amazon/dm) in **Euro** (nicht
+    /// Cent — konsistent mit `dispoLimit`). 0 = kein Budget → kein Ausgaben-Heat.
+    var merchantMonthlyBudget: Int = 0
     var targetBuffer: Int = 500
     var targetSavingsRate: Int = 20
     var fetchDays: Int = 60
