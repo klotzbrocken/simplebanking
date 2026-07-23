@@ -613,9 +613,11 @@ private struct TransactionsPanelView: View {
         let balanceBrand = BankLogoAssets.resolve(displayName: vm.connectedBankDisplayName,
                                                    logoID: vm.connectedBankLogoID,
                                                    iban: vm.connectedBankIBAN)
+        let isPayPal = multibankingStore.activeSlot?.isPayPal == true
+        let headerName = isPayPal ? "PayPal" : vm.connectedBankDisplayName
         let leftContent = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let img = vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
+                if let img = (isPayPal ? PayPalLogoAsset.image : nil) ?? vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
                     let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: balanceBrand?.id ?? "")
                     if invertActive {
                         Image(nsImage: img)
@@ -638,7 +640,7 @@ private struct TransactionsPanelView: View {
                 }
                 Text(formatBankHeader(
                     nickname: vm.connectedBankNickname,
-                    bankName: vm.connectedBankDisplayName,
+                    bankName: headerName,
                     date: vm.currentBalanceFetchedAt
                 ))
                     .font(.system(size: 13))
@@ -1398,8 +1400,8 @@ private struct TransactionsPanelView: View {
     private func slotLogoTile(_ slot: BankSlot, size: CGFloat) -> some View {
         let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId,
                                            iban: slot.isReceiptSlot ? nil : slot.iban)
-        // Händler-Slots: Marken-Logo direkt (wird nicht über BankLogoAssets aufgelöst).
-        let img: NSImage? = slot.isReceiptSlot ? slot.receiptLogoImage : logoStore.image(for: brand)
+        // Händler-/PayPal-Slots: Marken-Logo direkt (nicht über BankLogoAssets).
+        let img: NSImage? = slot.brandLogoImage ?? logoStore.image(for: brand)
         if let img {
             Image(nsImage: img).resizable().scaledToFit()
                 .frame(width: size, height: size)

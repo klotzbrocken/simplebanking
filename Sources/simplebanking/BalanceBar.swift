@@ -422,6 +422,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img?.isTemplate = true
             return img
         }
+        // PayPal: echtes Marken-Logo (farbig).
+        if let active = MultibankingStore.shared.activeSlot, active.isPayPal,
+           let logo = PayPalLogoAsset.image?.resized(to: NSSize(width: 16, height: 16)) {
+            logo.isTemplate = false
+            return logo
+        }
         // eBon-Slot (REWE/dm): echtes Marken-Logo (farbig, nicht-Template). Ohne
         // Logo UND ohne Saldo-Titel (isShort-Default) wäre das Status-Item null-breit.
         if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
@@ -515,9 +521,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         return store.slots.map { slot in
             let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId, iban: slot.isReceiptSlot ? nil : slot.iban)
             BankLogoStore.shared.preload(brand: brand)
-            // Händler-Slots: das Marken-Logo (ReweLogoAsset/…) direkt nutzen — es
-            // wird NICHT über BankLogoAssets aufgelöst.
-            let logo = slot.isReceiptSlot ? slot.receiptLogoImage : BankLogoStore.shared.image(for: brand)
+            // Händler-/PayPal-Slots: das Marken-Logo direkt nutzen — wird NICHT über
+            // BankLogoAssets aufgelöst.
+            let logo = slot.brandLogoImage ?? BankLogoStore.shared.image(for: brand)
             let balance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double
             let currency = slot.currency ?? "EUR"
             let symbol: String
@@ -549,8 +555,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             let barColor: Color
             if let hex = slot.customColor, let c = Color(hex: hex) {
                 barColor = c
-            } else if slot.isReceiptSlot, let c = Color(hex: MerchantWash.brandHex(for: slot.source ?? .rewe)) {
-                barColor = c   // Marken-Farbe (REWE/Amazon/dm) für den Pillen-Streifen
+            } else if slot.isReceiptSlot || slot.isPayPal, let c = Color(hex: MerchantWash.brandHex(for: slot.source ?? .rewe)) {
+                barColor = c   // Marken-Farbe (REWE/Amazon/dm/PayPal) für den Pillen-Streifen
             } else if let logoId = slot.logoId,
                       let hex = BankLogoAssets.primaryColor(forLogoId: logoId),
                       let c = Color(hex: hex) {
@@ -4091,6 +4097,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             rootView.nickname = MultibankingStore.shared.activeSlot?.nickname
             rootView.bankName = txVM.connectedBankDisplayName
             rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
+            if MultibankingStore.shared.activeSlot?.isPayPal == true {
+                rootView.bankLogoImage = PayPalLogoAsset.image
+                rootView.bankLogoBrandId = nil
+                if (rootView.nickname ?? "").isEmpty { rootView.bankName = "PayPal" }
+            }
         }
         applyREWEFlyout(to: &rootView)
         let rippleAlwaysOn = UserDefaults.standard.bool(forKey: "rippleAlwaysOn")
@@ -4455,6 +4466,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             rootView.nickname = MultibankingStore.shared.activeSlot?.nickname
             rootView.bankName = txVM.connectedBankDisplayName
             rootView.balanceFetchedAt = txVM.currentBalanceFetchedAt
+            if MultibankingStore.shared.activeSlot?.isPayPal == true {
+                rootView.bankLogoImage = PayPalLogoAsset.image
+                rootView.bankLogoBrandId = nil
+                if (rootView.nickname ?? "").isEmpty { rootView.bankName = "PayPal" }
+            }
         }
         applyREWEFlyout(to: &rootView)
         rootView.rippleTrigger = flyoutRippleTrigger

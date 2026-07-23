@@ -58,6 +58,13 @@ struct BankSlot: Codable, Identifiable, Equatable {
         }
     }
 
+    /// Marken-Logo für Menüleiste/Flyout/Pillen — deckt Receipt-Slots UND PayPal ab
+    /// (PayPal ist kein Receipt-Slot, hat aber ein eigenes eingebettetes Logo).
+    var brandLogoImage: NSImage? {
+        if source == .paypal { return PayPalLogoAsset.image }
+        return isReceiptSlot ? receiptLogoImage : nil
+    }
+
     static func makeNew(iban: String, displayName: String, logoId: String?) -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: iban, displayName: displayName, logoId: logoId)
     }
