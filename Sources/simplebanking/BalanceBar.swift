@@ -353,6 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Cancellable task for the current slot switch — ensures only the last click wins.
     private var switchTask: Task<Void, Never>?
     private var isHBCICallInFlight: Bool = false    // guard against concurrent HBCI calls (balance + transactions)
+    private var isPayPalCallInFlight: Bool = false  // PayPal-Provider (kein HBCI-Mutex nötig)
     private var isTanPending: Bool = false
 
     private var isHiddenBalance: Bool = false
@@ -878,6 +879,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         updateStatusBalanceTitle()
         refreshFlyoutIfVisible()
+    }
+
+    // MARK: - PayPal (NVP-Provider)
+
+    /// Lädt die PayPal-API-Signatur-Zugangsdaten des Slots (entschlüsselt) inkl.
+    /// Sandbox/Live-Flag.
+    private func paypalCredentials(masterPassword pw: String, slotId: String) -> PayPalService.Credentials? {
+        guard let creds = try? CredentialsStore.load(masterPassword: pw),
+              let user = creds.paypalUser?.nilIfEmpty,
+              let pwd = creds.paypalPwd?.nilIfEmpty,
+              let sig = creds.paypalSignature?.nilIfEmpty else { return nil }
+        let sandbox = UserDefaults.standard.bool(forKey: "simplebanking.paypal.sandbox.\(slotId)")
+        return PayPalService.Credentials(user: user, pwd: pwd, signature: sig, sandbox: sandbox)
+    }
+
+    /// Schreibt den echten PayPal-Saldo in die Menüleiste/Flyout (Muster wie
+    /// `applyREWEDisplay`, aber echter Kontostand).
+    private func applyPayPalDisplay(_ bal: Double, slotId: String) {
+        UserDefaults.standard.set(bal, forKey: "simplebanking.cachedBalance.\(slotId)")
+        lastBalance = bal
+        txVM.currentBalance = formatEURWithCents(bal)
+        updateStatusBalanceTitle()
+        refreshFlyoutIfVisible()
+    }
+
+    /// Refresh eines PayPal-Slots: Saldo (GetBalance) + Umsätze (TransactionSearch)
+    /// → normale Transaktions-DB. Kein HBCI-Mutex (eigener Provider).
+    private func refreshPayPal(slotId: String) async {
+        guard !isPayPalCallInFlight else { return }
+        isPayPalCallInFlight = true
+        defer { isPayPalCallInFlight = false }
+
+        guard let pw = masterPassword else {
+            if locked { promptUnlockIfNeeded() }
+            txVM.error = "Unlock required"
+            return
+        }
+        guard let creds = paypalCredentials(masterPassword: pw, slotId: slotId) else {
+            txVM.error = L10n.t("PayPal-Zugangsdaten fehlen — bitte neu einrichten.",
+                                "PayPal credentials missing — please set up again.")
+            return
+        }
+        do {
+            let bal = try await PayPalService.fetchBalance(creds: creds)
+            applyPayPalDisplay(bal, slotId: slotId)
+
+            let days = BankSlotSettingsStore.load(slotId: slotId).displayDays
+            let txs = try await PayPalService.fetchTransactions(days: days, slotId: slotId, creds: creds)
+            if !txs.isEmpty {
+                let sorted = sortTransactionsNewestFirst(txs)
+                try? TransactionsDatabase.upsert(transactions: sorted)
+                if let persisted = try? TransactionsDatabase.loadTransactions(days: days) {
+                    txVM.transactions = sortTransactionsNewestFirst(persisted)
+                    txVM.loadEnrichmentData(bankId: "primary")
+                    txVM.resetPaging()
+                }
+            }
+            txVM.error = nil
+        } catch {
+            txVM.error = error.localizedDescription
+            AppLogger.log("PayPal-Refresh fehlgeschlagen: \(error)", category: "PayPal", level: "WARN")
+        }
     }
 
     private func updateConnectedBankState(_ bank: DiscoveredBank, iban: String? = nil) {
@@ -4480,6 +4543,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             applyREWEDisplay(slotId: active.id)
             return
         }
+        // PayPal: eigener API-Provider (NVP), kein YAXI/HBCI. Echter Saldo + echte
+        // Umsätze in die normale DB → normale Umsatzliste.
+        if let active = MultibankingStore.shared.activeSlot, active.isPayPal {
+            await refreshPayPal(slotId: active.id)
+            return
+        }
         // Prevent concurrent HBCI calls — banks like Volksbank fail with "Fehlender Dialogkontext"
         // when two simultaneous requests hit the same HBCI connection.
         guard !isHBCICallInFlight else {
@@ -4690,6 +4759,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // löschen, sonst erscheint er unter den Händler-Pillen.
             txVM.error = nil
             txPanel?.show()
+            return
+        }
+        // PayPal: kein YAXI-Fetch. Panel zeigen, Umsätze aus der normalen DB laden
+        // (die normale Liste rendert sie) und über den eigenen Provider refreshen.
+        if let active = MultibankingStore.shared.activeSlot, active.isPayPal {
+            txPanel?.show()
+            let days = BankSlotSettingsStore.load(slotId: active.id).displayDays
+            if let cached = try? TransactionsDatabase.loadTransactions(days: days), !cached.isEmpty {
+                txVM.transactions = sortTransactionsNewestFirst(cached)
+                txVM.resetPaging()
+            }
+            await refreshPayPal(slotId: active.id)
             return
         }
         let epochAtStart = slotEpoch
@@ -5958,6 +6039,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// PayPal einrichten: API-Signatur-Zugangsdaten abfragen, Slot anlegen,
+    /// verschlüsselt speichern und ersten Refresh auslösen.
+    @objc private func openPayPalSetup() {
+        guard let pw = masterPassword else {
+            let a = NSAlert()
+            a.messageText = L10n.t("App-Schutz nötig", "App protection required")
+            a.informativeText = L10n.t(
+                "Richte zuerst ein Bankkonto bzw. ein App-Passwort ein — dann können die PayPal-Zugangsdaten verschlüsselt gespeichert werden.",
+                "Set up a bank account or app password first — then PayPal credentials can be stored encrypted.")
+            a.runModal()
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = L10n.t("PayPal verbinden", "Connect PayPal")
+        alert.informativeText = L10n.t(
+            "Erzeuge bei PayPal unter Kontoeinstellungen → API-Zugriff → NVP/SOAP → API-Signatur die drei Werte und trage sie hier ein.\n\n⚠️ Private PayPal-Konten nutzen eine veraltete Schnittstelle, die PayPal künftig abschalten kann.",
+            "In PayPal under 'Account Settings → API access → NVP/SOAP → API signature' generate the three values and paste them here.\n\n⚠️ Personal PayPal accounts use a deprecated interface that PayPal may disable in the future.")
+        alert.addButton(withTitle: L10n.t("Verbinden", "Connect"))
+        alert.addButton(withTitle: L10n.t("Abbrechen", "Cancel"))
+
+        func mkLabel(_ s: String, y: CGFloat) -> NSTextField {
+            let l = NSTextField(labelWithString: s)
+            l.font = .systemFont(ofSize: 10); l.textColor = .secondaryLabelColor
+            l.frame = NSRect(x: 0, y: y, width: 340, height: 13)
+            return l
+        }
+        let sandboxCheck = NSButton(checkboxWithTitle: L10n.t("Sandbox (Test-Zugangsdaten)", "Sandbox (test credentials)"), target: nil, action: nil)
+        sandboxCheck.frame = NSRect(x: 0, y: 128, width: 340, height: 18)
+        let userField = NSTextField(frame: NSRect(x: 0, y: 92, width: 340, height: 22))
+        let pwdField = NSSecureTextField(frame: NSRect(x: 0, y: 44, width: 340, height: 22))
+        let sigField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 22))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 150))
+        container.addSubview(sandboxCheck)
+        container.addSubview(mkLabel("API Username", y: 114)); container.addSubview(userField)
+        container.addSubview(mkLabel("API Password", y: 66)); container.addSubview(pwdField)
+        container.addSubview(mkLabel("API Signature", y: 22)); container.addSubview(sigField)
+        alert.accessoryView = container
+        alert.window.initialFirstResponder = userField
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // Robust gegen Copy-&-Paste-Artefakte: ALLE Whitespaces/Zeilenumbrüche
+        // entfernen (API-Zugangsdaten enthalten nie Leerzeichen).
+        func clean(_ s: String) -> String { s.components(separatedBy: .whitespacesAndNewlines).joined() }
+        let user = clean(userField.stringValue)
+        let pwd = clean(pwdField.stringValue)
+        let sig = clean(sigField.stringValue)
+        guard !user.isEmpty, !pwd.isEmpty, !sig.isEmpty else { return }
+
+        let slot = BankSlot.makePayPal()
+        MultibankingStore.shared.addSlot(slot, makeActive: true, autoUnified: false)
+        SlotContext.activate(slotId: slot.id)
+        UserDefaults.standard.set(sandboxCheck.state == .on, forKey: "simplebanking.paypal.sandbox.\(slot.id)")
+
+        var creds = (try? CredentialsStore.load(masterPassword: pw))
+            ?? StoredCredentials(iban: "", userId: "", password: "")
+        creds.paypalUser = user; creds.paypalPwd = pwd; creds.paypalSignature = sig
+        do { try CredentialsStore.save(creds, masterPassword: pw) }
+        catch { AppLogger.log("PayPal-Credentials speichern fehlgeschlagen: \(error)", category: "PayPal", level: "WARN") }
+
+        Task { await refreshPayPal(slotId: slot.id) }
+    }
+
     /// Öffnet das Login-/Sync-Fenster für einen im „Konto hinzufügen"-Dialog
     /// gewählten Händler (legt den Slot wie die früheren Beta-Menüpunkte an).
     private func connectMerchant(_ source: SlotSource) {
@@ -5965,6 +6109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         case .rewe:   openREWEBeta()
         case .dm:     openDMBeta()
         case .amazon: openAmazonBeta()
+        case .paypal: openPayPalSetup()
         case .yaxi:   break
         }
     }

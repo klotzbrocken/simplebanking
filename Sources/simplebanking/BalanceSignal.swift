@@ -68,6 +68,7 @@ enum MerchantWash {
         case .rewe:   return "E30613"   // REWE-Rot
         case .amazon: return "FF9900"   // Amazon-Orange
         case .dm:     return "0A4EA2"   // dm-Blau
+        case .paypal: return "0070BA"   // PayPal-Blau
         case .yaxi:   return "8E8E93"   // Fallback (kein Receipt-Slot)
         }
     }

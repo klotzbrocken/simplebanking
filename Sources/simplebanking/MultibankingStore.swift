@@ -11,6 +11,7 @@ enum SlotSource: String, Codable {
     case rewe
     case dm
     case amazon
+    case paypal
 }
 
 struct BankSlot: Codable, Identifiable, Equatable {
@@ -31,6 +32,10 @@ struct BankSlot: Codable, Identifiable, Equatable {
     var isDM: Bool { source == .dm }
     /// True für Amazon-Bestell-Slots.
     var isAmazon: Bool { source == .amazon }
+    /// True für PayPal-Slots. PayPal ist KEIN Receipt-Slot: es hat einen echten
+    /// Kontostand und echte Transaktionen (normale DB + normale Umsatzliste),
+    /// nur der Auth-/Refresh-Pfad läuft über einen eigenen Provider (nicht YAXI).
+    var isPayPal: Bool { source == .paypal }
     /// True für jeden eBon-/Kassenbon-/Bestell-Slot (REWE, dm, Amazon): kein
     /// YAXI/IBAN, kein Auto-Refresh, Anzeige aus lokal gespeicherten Bons.
     /// Bank-Aggregat- und YAXI-Pfade müssen diese Slots überspringen.
@@ -73,6 +78,12 @@ struct BankSlot: Codable, Identifiable, Equatable {
     static func makeAmazon(displayName: String = "Amazon") -> BankSlot {
         BankSlot(id: UUID().uuidString, iban: "", displayName: displayName,
                  logoId: "amazon", currency: "EUR", source: .amazon)
+    }
+
+    /// Erzeugt einen PayPal-Slot (echtes Konto via NVP-API, kein IBAN/YAXI).
+    static func makePayPal(displayName: String = "PayPal") -> BankSlot {
+        BankSlot(id: UUID().uuidString, iban: "", displayName: displayName,
+                 logoId: "paypal", currency: "EUR", source: .paypal)
     }
 }
 

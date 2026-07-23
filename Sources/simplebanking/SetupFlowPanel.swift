@@ -816,13 +816,14 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         // „Oder Händler-Konto verbinden" — REWE / Amazon / dm (statt der früheren
         // drei Menüpunkte). Klick schließt den Dialog mit outcome .merchant.
-        let merchantLabel = NSTextField(labelWithString: t("Oder Händler-Konto verbinden:", "Or connect a merchant account:"))
+        let merchantLabel = NSTextField(labelWithString: t("Oder Händler / PayPal verbinden:", "Or connect a merchant / PayPal account:"))
         merchantLabel.font = .systemFont(ofSize: 12)
         merchantLabel.textColor = .secondaryLabelColor
         let merchantRow = NSStackView(views: [
             merchantButton(title: "REWE", image: ReweLogoAsset.image, action: #selector(onAddRewe)),
             merchantButton(title: "Amazon", image: AmazonLogoAsset.image, action: #selector(onAddAmazon)),
             merchantButton(title: "dm", image: DMLogoAsset.image, action: #selector(onAddDM)),
+            merchantButton(title: "PayPal", image: NSImage(systemSymbolName: "p.circle.fill", accessibilityDescription: "PayPal"), action: #selector(onAddPayPal)),
         ])
         merchantRow.orientation = .horizontal
         merchantRow.distribution = .fillEqually
@@ -1347,6 +1348,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     }
 
     @objc private func onAddRewe()   { outcome = .merchant(.rewe);   NSApp.stopModal(withCode: .stop) }
+    @objc private func onAddPayPal() { outcome = .merchant(.paypal); NSApp.stopModal(withCode: .stop) }
     @objc private func onAddDM()     { outcome = .merchant(.dm);     NSApp.stopModal(withCode: .stop) }
     @objc private func onAddAmazon() { outcome = .merchant(.amazon); NSApp.stopModal(withCode: .stop) }
 

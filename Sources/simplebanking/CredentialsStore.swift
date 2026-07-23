@@ -9,6 +9,10 @@ struct StoredCredentials: Codable {
     var anthropicApiKey: String? = nil
     var mistralApiKey: String? = nil
     var openaiApiKey: String? = nil
+    // PayPal (NVP-API-Signatur) — nur für PayPal-Slots gesetzt.
+    var paypalUser: String? = nil
+    var paypalPwd: String? = nil
+    var paypalSignature: String? = nil
 }
 
 enum CredentialsStoreError: Error, LocalizedError {

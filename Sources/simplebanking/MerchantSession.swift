@@ -13,7 +13,7 @@ enum MerchantSession {
         case .rewe:   return ["rewe.de"]
         case .dm:     return ["dm.de", "dmtech.com"]
         case .amazon: return ["amazon.de"]
-        case .yaxi:   return []
+        case .yaxi, .paypal: return []   // PayPal nutzt API, keine WebKit-Sitzung
         }
     }
 
