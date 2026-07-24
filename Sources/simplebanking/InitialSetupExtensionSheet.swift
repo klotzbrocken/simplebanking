@@ -665,9 +665,12 @@ struct InitialSetupExtensionSheet: View {
     /// Trägt simplebanking in Claude Desktops MCP-Config ein. Logik analog
     /// `SettingsPanel.autoSetupMCP` (dort bleibt die User-trigger-Variante).
     private func autoSetupMCP() {
+        try? MCPInstaller.install()   // stabilen Symlink-Pfad anlegen
         let configURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
-        let mcpPath = Bundle.main.bundlePath + "/Contents/MacOS/simplebanking-mcp"
+        let mcpPath = MCPInstaller.isInstalled
+            ? MCPInstaller.symlinkURL.path
+            : Bundle.main.bundlePath + "/Contents/MacOS/simplebanking-mcp"
 
         var config: [String: Any] = [:]
         var existingData: Data? = nil

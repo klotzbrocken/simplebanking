@@ -5,6 +5,8 @@ enum SQLGuardError: LocalizedError {
     case notSelect
     case multipleStatements
     case forbiddenKeyword(String)
+    case forbiddenIdentifier(String)
+    case tableNotAllowed
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +18,10 @@ enum SQLGuardError: LocalizedError {
             return "Nur ein einzelnes SQL-Statement ist erlaubt."
         case .forbiddenKeyword(let keyword):
             return "Nicht erlaubtes SQL-Schlüsselwort: \(keyword)."
+        case .forbiddenIdentifier(let ident):
+            return "Nicht erlaubte Spalte/Tabelle: \(ident)."
+        case .tableNotAllowed:
+            return "Nur Abfragen auf die Sicht `llm_tx` sind erlaubt."
         }
     }
 }
@@ -61,6 +67,28 @@ enum SQLGuard {
         }
 
         return candidate
+    }
+
+    // MARK: - LLM-Query-Härtung
+    //
+    // Für LLM-**generiertes** SQL, dessen Ergebnis an einen externen KI-Anbieter
+    // geht: zusätzlich zur Read-Only-Prüfung eine harte Tabellen-/Spalten-Grenze.
+    // Der System-Prompt ist KEINE Sicherheitsgrenze — hier wird erzwungen, dass nur
+    // die minimierte, slot-gefilterte Sicht `llm_tx` abgefragt werden kann und
+    // sensible Bezeichner (IBAN, Rohdaten, Absender, Basistabelle) nie vorkommen.
+    static let llmAllowedTable = "llm_tx"
+    static let llmForbiddenIdentifiers = ["transactions", "raw_json", "iban", "absender"]
+
+    static func validatedLLMQuery(_ sql: String, defaultLimit: Int = 200) throws -> String {
+        let base = try validatedReadOnlySQL(sql, defaultLimit: defaultLimit)
+        let lower = base.lowercased()
+        for ident in llmForbiddenIdentifiers where containsWord(ident, in: lower) {
+            throw SQLGuardError.forbiddenIdentifier(ident.uppercased())
+        }
+        guard containsWord(llmAllowedTable, in: lower) else {
+            throw SQLGuardError.tableNotAllowed
+        }
+        return base
     }
 
     private static func containsWord(_ word: String, in text: String) -> Bool {

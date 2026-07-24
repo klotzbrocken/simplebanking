@@ -1061,6 +1061,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.log("Application did finish launching")
+        // Stabilen MCP-Symlink nach App-Move/Update auf das aktuelle Bundle nachziehen,
+        // damit eine bereits geschriebene Claude-Config gültig bleibt (No-op, wenn nicht
+        // installiert oder Ziel bereits korrekt).
+        MCPInstaller.refreshIfInstalled()
         // Ripple standardmäßig an (Aufruf + neue Bewegungen) — direkte
         // UserDefaults.bool-Reads ignorieren den @AppStorage-Default, daher registrieren.
         UserDefaults.standard.register(defaults: ["rippleAlwaysOn": true])
@@ -2886,18 +2890,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func promptUnlockIfNeeded() {
         guard locked else { return }
         guard !isPromptingUnlock else { return }  // prevent modal stacking during nested event loop
-        isPromptingUnlock = true
-        defer { isPromptingUnlock = false }
+        isPromptingUnlock = true  // Ownership dieses Flags liegt jetzt hier; die Helfer
+                                  // (showPasswordUnlockPanel / der Biometrie-Task) geben es
+                                  // frei — NICHT erneut guard-en, sonst bailt der Helfer sofort.
         showLockIcon()
 
-        // MasterPasswordPanel uses .floating level + isFloatingPanel, so it
-        // appears above all windows without needing .regular activation policy
-        // (which would show a Dock icon).
+        // Touch ID ZUERST — und zwar VOR jedem Modal-Panel. `NSApp.runModal` pumpt die
+        // Runloop im Modal-Mode, in dem weder `DispatchQueue.main` noch Swift-Concurrency
+        // laufen; ein Touch-ID-Prompt aus dem Panel heraus bliebe hängen. Hier läuft der
+        // async Keychain-Read in der normalen Runloop → der Systemprompt erscheint sofort.
+        if BiometricStore.isAvailable && BiometricStore.hasSavedPassword {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let pw = try await BiometricStore.loadPassword(reason: "simplebanking entsperren")
+                    self.isPromptingUnlock = false
+                    self.completeUnlock(password: pw, setupBiometric: false)
+                } catch {
+                    // Biometrie abgebrochen/fehlgeschlagen → Passwort-Panel als Fallback,
+                    // ohne erneuten (im Modal wirkungslosen) Touch-ID-Button. Flag bleibt
+                    // gesetzt; showPasswordUnlockPanel gibt es via defer frei.
+                    self.showPasswordUnlockPanel(suppressBiometricButton: true)
+                }
+            }
+            return
+        }
+
+        // Keine gespeicherte Biometrie → direkt Passwort-Panel (bietet ggf. Enrollment an).
+        showPasswordUnlockPanel(suppressBiometricButton: false)
+    }
+
+    /// Zeigt das Passwort-Entsperr-Panel (Modal). Getrennt von `promptUnlockIfNeeded`,
+    /// damit der Touch-ID-Pfad davor async laufen kann. **Erwartet, dass der Aufrufer
+    /// `isPromptingUnlock` bereits gesetzt hat** — gibt es hier via defer wieder frei.
+    private func showPasswordUnlockPanel(suppressBiometricButton: Bool) {
+        defer { isPromptingUnlock = false }
+        guard locked else { return }
+
+        // MasterPasswordPanel ist ein nonactivating .floating-Panel → wird Key ohne
+        // App-Aktivierung (macOS 26 aktiviert Accessory-Apps nicht mehr).
         NSApp.activate(ignoringOtherApps: true)
 
-        let panel = MasterPasswordPanel(isUnlock: true)
+        let panel = MasterPasswordPanel(isUnlock: true, suppressBiometricButton: suppressBiometricButton)
         let result = panel.runModalWithResult()
-        
+
         switch result {
         case .password(let pw):
             completeUnlock(password: pw, setupBiometric: false)
@@ -2909,7 +2945,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         case .reset:
             // Delete all credentials and reset app state
             performSecurityReset()
-            
+
         case .cancelled:
             // User cancelled - stay locked
             locked = true
@@ -6110,6 +6146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             "In PayPal under 'Account Settings → API access → NVP/SOAP → API signature' generate the three values and paste them here.\n\n⚠️ Personal PayPal accounts use a deprecated interface that PayPal may disable in the future.")
         alert.addButton(withTitle: L10n.t("Verbinden", "Connect"))
         alert.addButton(withTitle: L10n.t("Abbrechen", "Cancel"))
+        // Dritter Button = Hilfe. Öffnet die FAQ, ohne den Dialog zu schließen (Schleife
+        // unten) — die bereits eingegebenen Werte bleiben erhalten (gleiche Alert-Instanz).
+        alert.addButton(withTitle: L10n.t("Wo bekomme ich das?", "Where do I get this?"))
 
         func mkLabel(_ s: String, y: CGFloat) -> NSTextField {
             let l = NSTextField(labelWithString: s)
@@ -6130,7 +6169,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         alert.accessoryView = container
         alert.window.initialFirstResponder = userField
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        var resp = alert.runModal()
+        while resp == .alertThirdButtonReturn {
+            if let url = URL(string: "https://www.simplebanking.de/paypalapi") {
+                NSWorkspace.shared.open(url)
+            }
+            resp = alert.runModal()
+        }
+        guard resp == .alertFirstButtonReturn else { return }
         // Robust gegen Copy-&-Paste-Artefakte: ALLE Whitespaces/Zeilenumbrüche
         // entfernen (API-Zugangsdaten enthalten nie Leerzeichen).
         func clean(_ s: String) -> String { s.components(separatedBy: .whitespacesAndNewlines).joined() }

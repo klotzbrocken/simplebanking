@@ -89,35 +89,35 @@ enum LLMService {
         """
     }
 
-    static func ask(question: String, apiKey: String) async throws -> LLMAnswer {
+    static func ask(question: String, apiKey: String, slotId: String) async throws -> LLMAnswer {
         let normalizedQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedQuestion.isEmpty else { throw LLMServiceError.emptyQuestion }
 
         let normalizedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedKey.isEmpty else { throw LLMServiceError.missingAPIKey }
 
-        let plan = ruleBasedPlan(for: normalizedQuestion)
-        let sql = if let plan {
-            plan.sql
-        } else {
-            try await generateSQL(for: normalizedQuestion, apiKey: normalizedKey)
+        // Rule-based Intents laufen KOMPLETT LOKAL: eigenes SQL, Rendering im Client,
+        // KEIN externer Aufruf. Sie dürfen daher auf die volle `transactions`-Tabelle
+        // (inkl. Merchant-/Suchtext-Ausdrücke) zugreifen — es verlässt nichts den Mac.
+        if let plan = ruleBasedPlan(for: normalizedQuestion) {
+            let safeSQL = try SQLGuard.validatedReadOnlySQL(plan.sql, defaultLimit: 200)
+            let rows = try TransactionsDatabase.executeReadOnlyQuery(sql: safeSQL)
+            return LLMAnswer(sql: safeSQL, resultRows: rows, answerText: plan.renderAnswer(rows))
         }
 
-        let safeSQL = try SQLGuard.validatedReadOnlySQL(sql, defaultLimit: 200)
-        let rows = try TransactionsDatabase.executeReadOnlyQuery(sql: safeSQL)
-
-        let answer: String
-        if let plan, !rows.isEmpty {
-            answer = plan.renderAnswer(rows)
-        } else {
-            answer = try await generateAnswer(
-                question: normalizedQuestion,
-                sql: safeSQL,
-                rows: rows,
-                apiKey: normalizedKey
-            )
-        }
-
+        // Freitext-Frage → externer KI-Anbieter. Hier gilt Datensparsamkeit + Slot-Scope:
+        // Das Modell generiert SQL nur gegen die minimierte Sicht `llm_tx` (keine IBAN/
+        // Rohdaten/Absender, nur aktives Konto), der Guard erzwingt das technisch, und
+        // die Ergebniszeilen werden vor dem Versand redigiert.
+        let rawSQL = try await generateSQL(for: normalizedQuestion, apiKey: normalizedKey)
+        let safeSQL = try SQLGuard.validatedLLMQuery(rawSQL, defaultLimit: 200)
+        let rows = try TransactionsDatabase.executeLLMQuery(sql: safeSQL, slotId: slotId)
+        let answer = try await generateAnswer(
+            question: normalizedQuestion,
+            sql: safeSQL,
+            rows: rows,
+            apiKey: normalizedKey
+        )
         return LLMAnswer(sql: safeSQL, resultRows: rows, answerText: answer)
     }
 
@@ -706,6 +706,7 @@ enum LLMService {
         Du bist ein SQL-Generator für eine lokale SQLite-Datenbank.
         Gib ausschließlich EIN SQL-Statement zurück, ohne Markdown, ohne Erklärungen.
         Erlaubt ist nur SELECT (oder WITH ... SELECT), keine Writes.
+        Frage AUSSCHLIESSLICH die Sicht `llm_tx` ab (andere Tabellen sind gesperrt).
         Bevorzuge aussagekräftige Aggregationen für Finanzfragen.
 
         Wichtige Datenrealität:
@@ -713,27 +714,19 @@ enum LLMService {
         - Der eigentliche Händler steckt oft in `verwendungszweck`.
         - Für Händlerfragen NICHT nur auf `empfaenger` filtern.
 
-        Verfügbares Schema:
-        CREATE TABLE transactions (
-            tx_id TEXT PRIMARY KEY,
-            end_to_end_id TEXT,
-            datum TEXT NOT NULL,
-            buchungsdatum TEXT NOT NULL,
-            betrag REAL NOT NULL,
-            waehrung TEXT NOT NULL DEFAULT 'EUR',
+        Verfügbares Schema (nur diese Sicht/Spalten sind erlaubt):
+        CREATE VIEW llm_tx (
+            tx_id TEXT,
+            datum TEXT,
+            buchungsdatum TEXT,
+            betrag REAL,
+            waehrung TEXT,
             empfaenger TEXT,
-            absender TEXT,
-            iban TEXT,
             verwendungszweck TEXT,
             kategorie TEXT,
-            additional_information TEXT,
             effective_merchant TEXT,
             normalized_merchant TEXT,
-            merchant_source TEXT,
-            merchant_confidence REAL,
-            search_text TEXT,
-            raw_json TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            search_text TEXT
         );
 
         Nutze bei Händlerfragen primär `effective_merchant` und ergänzend `normalized_merchant`/`search_text`.

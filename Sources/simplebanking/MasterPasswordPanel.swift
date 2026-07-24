@@ -9,6 +9,15 @@ enum MasterPasswordResult {
     case cancelled
 }
 
+/// NSPanel-Subklasse, die Key/Main-Status erzwingt. Zusammen mit `.nonactivatingPanel`
+/// kann das Passwort-Panel so den Tastaturfokus bekommen, OHNE dass die (Accessory-)
+/// App in den Vordergrund aktiviert werden muss — genau der Fall, der auf macOS 26
+/// mit `NSApp.activate` scheiterte (App wurde nie aktiv → Panel nie Key → Lockout).
+private final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class MasterPasswordPanel {
     private let panel: NSPanel
@@ -31,29 +40,41 @@ final class MasterPasswordPanel {
     /// das Passwort für eine Einzelaktion ab) — dort würde ein Haken ins Leere laufen,
     /// weil der Aufrufer kein `BiometricStore.save` ausführt. Einrichtung passiert nur
     /// beim echten Start-Entsperren bzw. in Settings → Touch ID.
-    init(isUnlock: Bool, offerBiometricSetup: Bool = true) {
+    /// `suppressBiometricButton`: unterdrückt den „Mit Touch ID entsperren"-Button
+    /// (und Auto-Prompt). Genutzt, wenn das Panel als **Fallback** erscheint, NACHDEM
+    /// Touch ID bereits vor dem Panel versucht wurde (und abgelehnt/fehlgeschlagen ist)
+    /// — dann wäre ein erneuter Biometrie-Button sinnlos und liefe im Modal-Mode ohnehin
+    /// ins Leere. Reine Passwort-Eingabe.
+    init(isUnlock: Bool, offerBiometricSetup: Bool = true, suppressBiometricButton: Bool = false) {
         self.isUnlock = isUnlock
 
         // Schon eingerichtet (nur Unlock): „Mit Touch ID entsperren"-Button + Auto-Prompt.
         // Noch nicht eingerichtet, Hardware da, Enrollment erlaubt: Checkbox zur
         // Einrichtung bei der Passwort-Eingabe — Touch ID wird beim Tippen mit aktiviert.
-        let alreadyEnrolled = isUnlock && BiometricStore.isAvailable && BiometricStore.hasSavedPassword
-        let canEnroll = offerBiometricSetup && BiometricStore.isAvailable && !alreadyEnrolled
+        let alreadyEnrolled = isUnlock && !suppressBiometricButton && BiometricStore.isAvailable && BiometricStore.hasSavedPassword
+        // Enrollment-Checkbox nur, wenn noch NICHTS gespeichert ist (unabhängig vom
+        // Suppress-Fallback — sonst würde sie nach abgelehnter Biometrie fälschlich
+        // wieder erscheinen, obwohl bereits ein Passwort gespeichert ist).
+        let canEnroll = offerBiometricSetup && BiometricStore.isAvailable && !BiometricStore.hasSavedPassword
         self.canEnroll = canEnroll
         let panelHeight: CGFloat = {
             if isUnlock { return (alreadyEnrolled || canEnroll) ? 350 : 280 }
             return canEnroll ? 430 : 380
         }()
         
-        panel = NSPanel(
+        panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: 400, height: panelHeight),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.title = isUnlock ? "simplebanking entsperren" : "Master-Passwort festlegen"
         panel.isFloatingPanel = true
         panel.level = .floating
+        // Sofort Key werden (nicht erst bei Klick in ein Feld) und beim Verlust der
+        // App-Aktivierung nicht verschwinden — das Panel muss im Hintergrund tippbar sein.
+        panel.becomesKeyOnlyIfNeeded = false
+        panel.hidesOnDeactivate = false
 
         let content = NSView()
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -223,27 +244,24 @@ final class MasterPasswordPanel {
     }
 
     func runModalWithResult() -> MasterPasswordResult {
-        // `.accessory`-Apps (LSUIElement) können unter macOS 26 ihr Modal-Panel
-        // nicht zuverlässig Key werden lassen: `NSApp.activate` bringt die App nicht
-        // in den Vordergrund, das Panel bekommt keinen Tastaturfokus → Passwort ist
-        // nicht eingebbar, die App steckt in `runModal` fest (Menü/Beenden/Entsperren
-        // reagieren nicht). Für die Dauer des Modals temporär auf `.regular` wechseln
-        // (App aktiviert, Panel wird Key), danach wieder auf die vorige Policy.
-        let previousPolicy = NSApp.activationPolicy()
-        if previousPolicy != .regular { NSApp.setActivationPolicy(.regular) }
-        defer { if previousPolicy != .regular { NSApp.setActivationPolicy(previousPolicy) } }
-
-        NSApp.activate(ignoringOtherApps: true)
+        // `.accessory`-Apps (LSUIElement) können unter macOS 26 NICHT mehr per
+        // `NSApp.activate` in den Vordergrund gebracht werden (kooperatives
+        // Aktivierungsmodell → App bleibt inaktiv, `active=false`). Ein zuvor
+        // versuchter `.regular`-Policy-Switch half nicht (Diagnose: App wurde trotzdem
+        // nicht aktiv) und ließ nur das Dock-Icon aufblitzen.
+        //
+        // Lösung: Das Panel ist ein `.nonactivatingPanel` (KeyablePanel) → es wird Key
+        // und nimmt Tastatureingaben an, OHNE dass die App aktiv werden muss. Kein
+        // Policy-Switch, kein `NSApp.activate` nötig.
+        NSApp.activate(ignoringOtherApps: true)   // best effort; schadet nicht
         panel.center()
         panel.makeKeyAndOrderFront(nil)
+        panel.orderFrontRegardless()
         panel.makeKey()
-
-        // Touch ID automatisch starten, sobald das Panel sichtbar ist
-        if isUnlock && BiometricStore.isAvailable && BiometricStore.hasSavedPassword {
-            DispatchQueue.main.async { [weak self] in
-                self?.onTouchID()
-            }
-        }
+        // Kein Auto-Touch-ID mehr hier drin: Biometrie läuft VOR dem Panel (async,
+        // außerhalb der Modal-Schleife). `NSApp.runModal` pumpt die Runloop im
+        // Modal-Mode, in dem `DispatchQueue.main`/Swift-Concurrency NICHT laufen — ein
+        // Touch-ID-Task würde hier steckenbleiben.
 
         _ = NSApp.runModal(for: panel)
         touchIDTask?.cancel()

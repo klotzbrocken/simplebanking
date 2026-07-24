@@ -2812,15 +2812,24 @@ private struct TransactionsPanelView: View {
         chatMessages.append(ChatMessage(role: .user, text: question))
         chatState = .loading
 
+        // Consent-Gate (default aus): Freitext-Fragen senden Umsatzdaten des aktiven
+        // Kontos an den gewählten KI-Anbieter — nur mit expliziter Freigabe.
+        guard UserDefaults.standard.bool(forKey: "aiChatEnabled") else {
+            chatState = .failed("Die KI-Chat-Funktion ist deaktiviert. Aktiviere sie in den Einstellungen → KI-Assistent. Dabei werden Umsatzdaten des aktiven Kontos an den gewählten KI-Anbieter gesendet.")
+            return
+        }
+
         let key = vm.anthropicApiKey?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let apiKey = key, !apiKey.isEmpty else {
             chatState = .failed("API-Key ist noch nicht verfügbar. Öffne die Umsatzliste nach dem Entsperren erneut oder setze den Key in den Einstellungen.")
             return
         }
 
+        let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+
         Task {
             do {
-                let answer = try await LLMService.ask(question: question, apiKey: apiKey)
+                let answer = try await LLMService.ask(question: question, apiKey: apiKey, slotId: slotId)
                 await MainActor.run {
                     chatMessages.append(ChatMessage(role: .assistant, text: answer.answerText))
                     lastLLMSQL = answer.sql

@@ -104,21 +104,29 @@ struct BankingTools {
     // MARK: - get_accounts
 
     private static func getAccounts() -> (String, Bool) {
+        let prefs = UserDefaults(suiteName: appDomain)
+
+        // Demo-Modus: Die App injiziert Demo-Slots nur IN-MEMORY (nicht persistiert),
+        // ihre Namen sind für den MCP daher unsichtbar. Deshalb die Konten aus
+        // denselben `demo-slot-*`-Cached-Balance-Keys ableiten, die `get_balance` nutzt
+        // — so stimmen die IDs zwischen get_accounts und get_balance garantiert überein
+        // (der frühere hartkodierte Demo-Zweig lieferte `demo-main/daily/bills`, die zu
+        // keinem anderen Tool passten).
         if isDemoMode {
-            return (jsonString([
-                ["id": "demo-main",  "iban": "DE89200400600284202600", "name": "Klotzbrocken AG",   "nickname": "Hauptkonto", "currency": "EUR"],
-                ["id": "demo-daily", "iban": "DE89370400440532013000", "name": "Payment & Banking",  "nickname": "Alltag",     "currency": "EUR"],
-                ["id": "demo-bills", "iban": "DE89500400600284202601", "name": "Fliegenfranz GmbH", "nickname": "Kosten",     "currency": "EUR"]
-            ]), false)
+            let prefix = "simplebanking.cachedBalance.demo-slot-"
+            let demoIds = (prefs?.dictionaryRepresentation() ?? [:]).keys
+                .filter { $0.hasPrefix(prefix) }
+                .map { String($0.dropFirst("simplebanking.cachedBalance.".count)) }
+                .sorted()
+            let result: [[String: Any]] = demoIds.map { id in
+                ["id": id, "iban": "", "name": demoAccountName(id), "nickname": demoAccountName(id), "currency": "EUR"]
+            }
+            return (jsonString(result), false)
         }
 
-        let prefsPath = FileManager.default.homeDirectoryForCurrentUser.path
-            + "/Library/Preferences/tech.yaxi.simplebanking.plist"
-
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: prefsPath)),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let slotsData = plist["simplebanking.multibanking.slots"] as? Data
-        else {
+        // Echte Konten: Slots über cfprefsd lesen (nicht die evtl. veraltete plist-Datei
+        // direkt — dieselbe Staleness-Klasse wie beim Demo-Flag).
+        guard let slotsData = prefs?.data(forKey: "simplebanking.multibanking.slots") else {
             return ("[]", false)
         }
 
@@ -143,9 +151,22 @@ struct BankingTools {
         return (jsonString(result), false)
     }
 
+    /// Sprechender Name für einen Demo-Slot (App-Demo-Namen sind zufällig + nur
+    /// in-memory, daher hier stabile Ersatznamen).
+    private static func demoAccountName(_ id: String) -> String {
+        switch id {
+        case "demo-slot-0":    return "Demokonto — Hauptkonto"
+        case "demo-slot-1":    return "Demokonto — Alltag"
+        case "demo-slot-2":    return "Demokonto — Kosten"
+        case "demo-slot-rewe": return "REWE (Demo)"
+        default:               return "Demokonto (\(id))"
+        }
+    }
+
     // MARK: - get_transactions
 
     private static func getTransactions(args: [String: Any]) -> (String, Bool) {
+      do {
         let days      = args["days"]       as? Int    ?? 30
         let accountId = args["account_id"] as? String
         let category  = args["category"]   as? String
@@ -176,7 +197,7 @@ struct BankingTools {
             LIMIT 500
             """
 
-        let rows = query(sql: sql, binds: binds) { stmt -> [String: Any] in
+        let rows = try query(sql: sql, binds: binds) { stmt -> [String: Any] in
             // DB-Identität ist seit Migration v19 (tx_id, slot_id) als Composite-PK.
             // Zwei Slots dürfen denselben tx_id haben (Bank-Fingerprint kann kollidieren).
             // `id` muss daher global eindeutig sein → slot_id|tx_id. Den Bank-tx_id
@@ -202,11 +223,15 @@ struct BankingTools {
         }
 
         return (jsonString(rows), false)
+      } catch {
+        return errorResult(error)
+      }
     }
 
     // MARK: - get_spending_summary
 
     private static func getSpendingSummary(args: [String: Any]) -> (String, Bool) {
+      do {
         let days      = args["days"]       as? Int    ?? 30
         let accountId = args["account_id"] as? String
         let cutoff    = cutoffDate(daysBack: days)
@@ -226,29 +251,37 @@ struct BankingTools {
             ORDER BY total ASC
             """
 
-        let rows = query(sql: sql, binds: binds) { stmt -> [String: Any] in [
+        let rows = try query(sql: sql, binds: binds) { stmt -> [String: Any] in [
             "category": col(stmt, 0) ?? "Sonstiges",
             "count":    Int(sqlite3_column_int64(stmt, 1)),
             "total":    sqlite3_column_double(stmt, 2)
         ]}
 
         return (jsonString(rows), false)
+      } catch {
+        return errorResult(error)
+      }
     }
 
     // MARK: - get_monthly_overview
 
     private static func getMonthlyOverview(args: [String: Any]) -> (String, Bool) {
-        let months    = args["months"]     as? Int    ?? 6
+      do {
+        let months    = clampMonths(args["months"] as? Int ?? 6)
         let accountId = args["account_id"] as? String
-        let cutoff    = cutoffDate(daysBack: months * 31)
+        // Kalender-Monatsanfang (nicht months*31 Tage) → korrekte Monatsgrenzen.
+        let cutoff    = monthCutoffDate(monthsBack: months)
 
-        var conditions = ["(datum >= ? OR buchungsdatum >= ?)"]
-        var binds: [BindValue] = [.text(cutoff), .text(cutoff)]
+        // Durchgehend `buchungsdatum`: Filter UND Gruppierung nutzen dasselbe
+        // kanonische Datum, sonst kann eine Buchung im Zeitraum liegen aber unter
+        // dem Monat ihres abweichenden Wertstellungsdatums (`datum`) erscheinen.
+        var conditions = ["buchungsdatum >= ?"]
+        var binds: [BindValue] = [.text(cutoff)]
 
         if let aid = accountId { conditions.append("slot_id = ?"); binds.append(.text(aid)) }
 
         let sql = """
-            SELECT strftime('%Y-%m', datum) as month,
+            SELECT strftime('%Y-%m', buchungsdatum) as month,
                    SUM(CASE WHEN betrag > 0 THEN betrag ELSE 0 END) as income,
                    SUM(CASE WHEN betrag < 0 THEN betrag ELSE 0 END) as expenses,
                    SUM(betrag) as net,
@@ -259,7 +292,7 @@ struct BankingTools {
             ORDER BY month DESC
             """
 
-        let rows = query(sql: sql, binds: binds) { stmt -> [String: Any] in [
+        let rows = try query(sql: sql, binds: binds) { stmt -> [String: Any] in [
             "month":             col(stmt, 0) ?? "",
             "income":            sqlite3_column_double(stmt, 1),
             "expenses":          sqlite3_column_double(stmt, 2),
@@ -268,24 +301,27 @@ struct BankingTools {
         ]}
 
         return (jsonString(rows), false)
+      } catch {
+        return errorResult(error)
+      }
     }
 
     // MARK: - get_balance
 
     private static func getBalance(args: [String: Any]) -> (String, Bool) {
+      do {
         let accountId = args["account_id"] as? String
 
-        // Load cached (real) balances from the app's UserDefaults plist.
+        // Cached (echte) Salden aus den App-Preferences lesen — über cfprefsd
+        // (`UserDefaults(suiteName:)`), NICHT durch direktes Parsen der plist-Datei.
+        // Sonst drohen dieselben veralteten Werte wie beim Demo-Flag (Datei lagt cfprefsd).
         // Im Demo-Mode nur Demo-Slots zurückgeben, sonst Demo-Slots ausschließen — sonst
         // mischt MCP Live-Konten mit Demo-Daten, was insbesondere für Claude-Antworten
         // verwirrend wäre.
         let demo = isDemoMode
-        let prefsPath = FileManager.default.homeDirectoryForCurrentUser.path
-            + "/Library/Preferences/tech.yaxi.simplebanking.plist"
         var cachedBalances: [String: Double] = [:]
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: prefsPath)),
-           let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-            for (key, value) in plist {
+        if let prefs = UserDefaults(suiteName: appDomain)?.dictionaryRepresentation() {
+            for (key, value) in prefs {
                 if key.hasPrefix("simplebanking.cachedBalance."),
                    let balance = value as? Double {
                     let slotId = String(key.dropFirst("simplebanking.cachedBalance.".count))
@@ -308,7 +344,7 @@ struct BankingTools {
             GROUP BY slot_id
             """
 
-        let dbRows = query(sql: sql, binds: binds) { stmt -> (String, Int) in
+        let dbRows = try query(sql: sql, binds: binds) { stmt -> (String, Int) in
             (col(stmt, 0) ?? "", Int(sqlite3_column_int64(stmt, 1)))
         }
         let txCounts = Dictionary(uniqueKeysWithValues: dbRows)
@@ -322,7 +358,7 @@ struct BankingTools {
             slotIds = Array(Set(cachedBalances.keys).union(txCounts.keys))
         }
 
-        let rows: [[String: Any]] = slotIds.compactMap { sid in
+        let rows: [[String: Any]] = try slotIds.compactMap { sid in
             guard cachedBalances[sid] != nil || txCounts[sid] != nil else { return nil }
             var row: [String: Any] = ["account_id": sid]
             if let real = cachedBalances[sid] {
@@ -331,7 +367,7 @@ struct BankingTools {
             } else {
                 // Fallback: compute from DB
                 let fallbackSQL = "SELECT SUM(betrag) FROM transactions WHERE slot_id = ?"
-                let sum = query(sql: fallbackSQL, binds: [.text(sid)]) { stmt -> Double in
+                let sum = try query(sql: fallbackSQL, binds: [.text(sid)]) { stmt -> Double in
                     sqlite3_column_double(stmt, 0)
                 }.first ?? 0.0
                 row["balance"] = sum
@@ -342,6 +378,9 @@ struct BankingTools {
         }.sorted { ($0["account_id"] as? String ?? "") < ($1["account_id"] as? String ?? "") }
 
         return (jsonString(rows), false)
+      } catch {
+        return errorResult(error)
+      }
     }
 
     // MARK: - prepare_transfer
@@ -485,13 +524,18 @@ struct BankingTools {
 
     // MARK: - Demo Mode
 
+    static let appDomain = "tech.yaxi.simplebanking"
+
+    /// Demo-Modus **über cfprefsd** lesen (nicht die plist-Datei direkt parsen).
+    ///
+    /// Grund: `~/Library/Preferences/<domain>.plist` wird von cfprefsd nur verzögert
+    /// auf die Platte geschrieben. Ein direkter Datei-Read kann daher einen VERALTETEN
+    /// Wert sehen (z.B. `demoMode=true`, während die App längst `false` ist) — dann
+    /// liefert der MCP die leere Demo-DB statt der echten Kontodaten. `UserDefaults`
+    /// mit der App-Domain geht über cfprefsd und liefert exakt den Wert, den die App
+    /// via `UserDefaults.standard` sieht → MCP und App bleiben konsistent.
     private static var isDemoMode: Bool {
-        let prefsPath = FileManager.default.homeDirectoryForCurrentUser.path
-            + "/Library/Preferences/tech.yaxi.simplebanking.plist"
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: prefsPath)),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-        else { return false }
-        return plist["demoMode"] as? Bool ?? false
+        UserDefaults(suiteName: appDomain)?.bool(forKey: "demoMode") ?? false
     }
 
     // MARK: - SQLite helpers
@@ -513,14 +557,74 @@ struct BankingTools {
         case real(Double)
     }
 
-    private static func query<T>(sql: String, binds: [BindValue], row: (OpaquePointer) -> T) -> [T] {
+    // MARK: - Query error surface
+    //
+    // Finanz-Antworten dürfen einen DB-Fehler NICHT als „keine Umsätze" tarnen.
+    // `query` wirft daher strukturiert; die Tool-Funktionen fangen und geben ein
+    // MCP-Fehlerobjekt (isError=true) zurück, statt ein leeres Ergebnis.
+    enum QueryError: LocalizedError {
+        case dbMissing(String)
+        case schemaIncompatible
+        case open(Int32, String)
+        case prepare(Int32, String)
+        case step(Int32, String)
+
+        var errorDescription: String? {
+            switch self {
+            case .dbMissing(let p):     return "Datenbank nicht gefunden: \(p)"
+            case .schemaIncompatible:   return "DB-Schema inkompatibel: Tabelle 'transactions' fehlt."
+            case .open(let c, let m):   return "DB konnte nicht geöffnet werden (SQLite \(c): \(m))."
+            case .prepare(let c, let m): return "SQL-Prepare fehlgeschlagen (SQLite \(c): \(m))."
+            case .step(let c, let m):   return "SQL-Ausführung fehlgeschlagen (SQLite \(c): \(m))."
+            }
+        }
+
+        var sqliteCode: Int32 {
+            switch self {
+            case .open(let c, _), .prepare(let c, _), .step(let c, _): return c
+            case .dbMissing, .schemaIncompatible: return -1
+            }
+        }
+    }
+
+    /// Baut ein MCP-Fehlerergebnis (isError=true) aus einem geworfenen Fehler.
+    private static func errorResult(_ error: Error) -> (String, Bool) {
+        let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        let code = (error as? QueryError)?.sqliteCode ?? -1
+        return (jsonString(["error": message, "sqlite_code": code]), true)
+    }
+
+    private static func ensureTransactionsTable(_ db: OpaquePointer) throws {
+        var stmt: OpaquePointer?
+        let sql = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='transactions' LIMIT 1"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt = stmt else {
+            throw QueryError.schemaIncompatible
+        }
+        defer { sqlite3_finalize(stmt) }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { throw QueryError.schemaIncompatible }
+    }
+
+    private static func query<T>(sql: String, binds: [BindValue], row: (OpaquePointer) -> T) throws -> [T] {
+        guard FileManager.default.fileExists(atPath: activeDbPath) else {
+            throw QueryError.dbMissing(activeDbPath)
+        }
+
         var db: OpaquePointer?
-        guard sqlite3_open_v2(activeDbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
-              let db = db else { return [] }
+        let openRC = sqlite3_open_v2(activeDbPath, &db, SQLITE_OPEN_READONLY, nil)
+        guard openRC == SQLITE_OK, let db = db else {
+            let msg = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            sqlite3_close(db)
+            throw QueryError.open(openRC, msg)
+        }
         defer { sqlite3_close(db) }
 
+        try ensureTransactionsTable(db)
+
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt = stmt else { return [] }
+        let prepRC = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
+        guard prepRC == SQLITE_OK, let stmt = stmt else {
+            throw QueryError.prepare(prepRC, String(cString: sqlite3_errmsg(db)))
+        }
         defer { sqlite3_finalize(stmt) }
 
         for (i, bind) in binds.enumerated() {
@@ -532,8 +636,11 @@ struct BankingTools {
         }
 
         var results: [T] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            results.append(row(stmt))
+        while true {
+            let rc = sqlite3_step(stmt)
+            if rc == SQLITE_ROW { results.append(row(stmt)); continue }
+            if rc == SQLITE_DONE { break }
+            throw QueryError.step(rc, String(cString: sqlite3_errmsg(db)))
         }
         return results
     }
@@ -557,5 +664,21 @@ struct BankingTools {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
         return fmt.string(from: date)
+    }
+
+    /// Begrenzt die angefragte Monatszahl auf einen sinnvollen Bereich.
+    static func clampMonths(_ raw: Int) -> Int { min(max(raw, 1), 24) }
+
+    /// Kalender-Cutoff: erster Tag des Monats, der `monthsBack` Monate vor dem
+    /// aktuellen Monat liegt (statt `monthsBack * 31` Tage). `reference` injizierbar
+    /// für Tests. Rückgabe als `yyyy-MM-dd` (POSIX, lokale Zeitzone).
+    static func monthCutoffDate(monthsBack: Int, reference: Date = Date()) -> String {
+        let cal = Calendar.current
+        let startOfThisMonth = cal.date(from: cal.dateComponents([.year, .month], from: reference)) ?? reference
+        let cutoff = cal.date(byAdding: .month, value: -monthsBack, to: startOfThisMonth) ?? startOfThisMonth
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: cutoff)
     }
 }

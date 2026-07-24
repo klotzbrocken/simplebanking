@@ -262,9 +262,14 @@ struct SettingsView: View {
     @State private var notificationStatus: String = ""
     @State private var touchIDAvailable: Bool = false
     @State private var touchIDEnabled: Bool = false
+    @State private var touchIDMessage: String = ""
     @AppStorage("biometricOfferDismissed") private var biometricOfferDismissed: Bool = false
     @State private var anthropicAPIKeyInput: String = ""
     @State private var aiStatusMessage: String = ""
+    /// Opt-in für die Freitext-Chat-Funktion (default aus). Anders als die
+    /// Kategorisierung sendet der Chat Ergebniszeilen an den KI-Anbieter — daher
+    /// eigener Schalter statt „Key vorhanden reicht".
+    @AppStorage("aiChatEnabled") private var aiChatEnabled: Bool = false
     @ObservedObject private var licenseManager = LicenseManager.shared
     @State private var licenseKeyInput: String = ""
     @State private var licenseStatusMessage: String = ""
@@ -287,6 +292,8 @@ struct SettingsView: View {
     @State private var logoCacheClearStatus: String = ""
     @State private var mcpConfigCopied: Bool = false
     @State private var mcpSetupState: MCPSetupState = .idle
+    @State private var claudeCodeCmdCopied: Bool = false
+    @State private var claudeCodeSetupState: MCPSetupState = .idle
     @State private var cliInstalled: Bool = CLIInstaller.isInstalled
     @State private var cliStatusMessage: String = ""
     @State private var cliStatusIsError: Bool = false
@@ -523,6 +530,45 @@ struct SettingsView: View {
             return password
         default:
             return nil
+        }
+    }
+
+    /// Aktiviert Touch ID direkt, solange die App entsperrt ist (Master-Passwort im
+    /// Speicher bzw. Auto-Unlock-Cache). `BiometricStore.save` legt das ACL-geschützte
+    /// Keychain-Item an (kein Prompt beim Speichern — der Touch-ID-Prompt kommt erst
+    /// beim späteren Entsperren). Ohne verfügbares Passwort: Fallback auf „beim nächsten
+    /// Entsperren anbieten".
+    private func activateTouchIDNow() {
+        touchIDMessage = ""
+        let demo = UserDefaults.standard.bool(forKey: "demoMode")
+        // Passwort beschaffen: In-Memory (App entsperrt) → Auto-Unlock-Cache.
+        let candidate = SettingsPanel.masterPasswordProvider?() ?? BiometricStore.loadAutoUnlockPassword()
+        guard let pw = candidate, !pw.isEmpty else {
+            // App ohne bekanntes Passwort → beim nächsten Entsperren anbieten.
+            biometricOfferDismissed = false
+            touchIDMessage = t("Wird beim nächsten Entsperren eingerichtet.",
+                               "Will be set up on next unlock.")
+            return
+        }
+        // Passwort verifizieren (Demo: Direktvergleich, sonst Credentials entschlüsseln).
+        let ok = demo ? BiometricStore.verifyPasswordDirectly(pw)
+                      : ((try? CredentialsStore.load(masterPassword: pw)) != nil)
+        guard ok else {
+            biometricOfferDismissed = false
+            touchIDMessage = t("Konnte nicht automatisch aktivieren — beim nächsten Entsperren anbieten.",
+                               "Couldn't enable automatically — will offer on next unlock.")
+            return
+        }
+        do {
+            try BiometricStore.save(password: pw)
+            touchIDEnabled = true
+            biometricOfferDismissed = true
+            touchIDMessage = t("Touch ID ist aktiviert.", "Touch ID is enabled.")
+        } catch {
+            AppLogger.log("Touch ID activate (settings) failed: \(error.localizedDescription)",
+                          category: "Biometric", level: "WARN")
+            touchIDMessage = t("Touch ID konnte nicht aktiviert werden.",
+                               "Touch ID could not be enabled.")
         }
     }
 
@@ -1090,9 +1136,25 @@ struct SettingsView: View {
                     .font(ThemeFonts.body(size: 11))
                     .foregroundColor(.secondary)
             }
+
+            Divider()
+
+            // Freitext-Chat: eigener Opt-in + ehrliche Offenlegung, was genau gesendet wird.
+            Toggle(isOn: $aiChatEnabled) {
+                Text(t("KI-Chat für Freitext-Fragen", "AI chat for free-text questions"))
+                    .font(ThemeFonts.body(size: 13))
+            }
+            .toggleStyle(.switch)
+
+            Text(t(
+                "Bei Freitext-Fragen in der Umsatzliste werden Ergebniszeilen des AKTIVEN Kontos (Empfänger, Verwendungszweck, Betrag, Kategorie, Datum) an den gewählten KI-Anbieter gesendet — KEINE IBAN und KEINE Rohdaten. Vordefinierte Auswertungen (Ausgaben, Fixkosten, …) bleiben vollständig lokal.",
+                "Free-text questions in the transaction list send result rows of the ACTIVE account (recipient, reference, amount, category, date) to the selected AI provider — NO IBAN and NO raw data. Predefined summaries (spending, fixed costs, …) stay fully local."
+            ))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
         }
     }
-    
+
     // MARK: - Accounts Settings
 
     private var accountsSettings: some View {
@@ -2318,10 +2380,8 @@ struct SettingsView: View {
                         Text(t("Touch ID ist deaktiviert.", "Touch ID is disabled."))
                             .font(ThemeFonts.body(size: 12))
                             .foregroundColor(.secondary)
-                        Button(action: {
-                            biometricOfferDismissed = false
-                        }) {
-                            Text(t("Beim nächsten Entsperren anbieten", "Offer on next unlock"))
+                        Button(action: { activateTouchIDNow() }) {
+                            Text(t("Touch ID aktivieren", "Enable Touch ID"))
                                 .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
@@ -2329,6 +2389,11 @@ struct SettingsView: View {
                                 .cornerRadius(8)
                         }
                         .buttonStyle(PlainButtonStyle())
+                        if !touchIDMessage.isEmpty {
+                            Text(touchIDMessage)
+                                .font(ThemeFonts.body(size: 11))
+                                .foregroundColor(.secondary)
+                        }
                     }
                 } else {
                     Text(t("Touch ID ist auf diesem Gerät nicht verfügbar.", "Touch ID is not available on this device."))
@@ -3132,7 +3197,7 @@ struct SettingsView: View {
                     mcpSettings
                         .padding(.top, 8)
                 } label: {
-                    Label(t("Claude Desktop (MCP)", "Claude Desktop (MCP)"), systemImage: "server.rack")
+                    Label(t("Claude (MCP)", "Claude (MCP)"), systemImage: "server.rack")
                         .font(ThemeFonts.body(size: 13, weight: .medium))
                 }
 
@@ -3181,13 +3246,26 @@ struct SettingsView: View {
 
     // MARK: - MCP Settings
 
+    /// Bevorzugt den stabilen Symlink-Pfad (`~/.local/bin/simplebanking-mcp`), der
+    /// App-Moves/Updates übersteht; fällt auf den Bundle-Pfad zurück, falls der
+    /// Symlink (noch) nicht installiert ist.
+    private var mcpCommandPath: String {
+        MCPInstaller.isInstalled
+            ? MCPInstaller.symlinkURL.path
+            : Bundle.main.bundlePath + "/Contents/MacOS/simplebanking-mcp"
+    }
+
+    /// Fertiger `claude mcp add`-Befehl für Claude Code (User-Scope).
+    private var claudeCodeAddCommand: String {
+        "claude mcp add -s user simplebanking \"\(mcpCommandPath)\""
+    }
+
     private var mcpConfigJSON: String {
-        let mcpPath = Bundle.main.bundlePath + "/Contents/MacOS/simplebanking-mcp"
-        return """
+        """
         {
           "mcpServers": {
             "simplebanking": {
-              "command": "\(mcpPath)"
+              "command": "\(mcpCommandPath)"
             }
           }
         }
@@ -3195,9 +3273,10 @@ struct SettingsView: View {
     }
 
     private func autoSetupMCP() {
+        try? MCPInstaller.install()   // stabilen Pfad sicherstellen
         let configURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
-        let mcpPath = Bundle.main.bundlePath + "/Contents/MacOS/simplebanking-mcp"
+        let mcpPath = mcpCommandPath
 
         var config: [String: Any] = [:]
         var existingData: Data? = nil
@@ -3234,6 +3313,56 @@ struct SettingsView: View {
         }
         mcpSetupState = .success
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { mcpSetupState = .idle }
+    }
+
+    /// Sucht das `claude`-CLI-Binary an den üblichen Orten (GUI-Apps erben den
+    /// Shell-PATH nicht). Gibt den ersten ausführbaren Treffer zurück.
+    private func locateClaudeBinary() -> String? {
+        let fm = FileManager.default
+        var candidates: [String] = []
+        if let pathEnv = ProcessInfo.processInfo.environment["PATH"] {
+            for dir in pathEnv.split(separator: ":") {
+                candidates.append("\(dir)/claude")
+            }
+        }
+        let home = fm.homeDirectoryForCurrentUser.path
+        candidates += [
+            "\(home)/.local/bin/claude",
+            "\(home)/.claude/local/claude",
+            "/opt/homebrew/bin/claude",
+            "/usr/local/bin/claude",
+        ]
+        return candidates.first { fm.isExecutableFile(atPath: $0) }
+    }
+
+    /// Best-effort Claude-Code-Einrichtung: `claude mcp add -s user simplebanking <path>`.
+    /// Findet das `claude`-Binary nicht → Fallback: Befehl ins Pasteboard + Hinweis.
+    private func autoSetupClaudeCode() {
+        try? MCPInstaller.install()
+        guard let claude = locateClaudeBinary() else {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(claudeCodeAddCommand, forType: .string)
+            claudeCodeSetupState = .error(t("claude nicht gefunden — Befehl kopiert",
+                                            "claude not found — command copied"))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { claudeCodeSetupState = .idle }
+            return
+        }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: claude)
+        proc.arguments = ["mcp", "add", "-s", "user", "simplebanking", mcpCommandPath]
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            // Exit 0 = neu angelegt; ein bereits vorhandener Eintrag liefert bei
+            // manchen Versionen != 0 — beides als „eingerichtet" behandeln.
+            claudeCodeSetupState = proc.terminationStatus == 0 ? .success : .alreadySet
+        } catch {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(claudeCodeAddCommand, forType: .string)
+            claudeCodeSetupState = .error(t("Fehlgeschlagen — Befehl kopiert",
+                                            "Failed — command copied"))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { claudeCodeSetupState = .idle }
     }
 
     private var mcpSettings: some View {
@@ -3309,6 +3438,62 @@ struct SettingsView: View {
 
             Divider().padding(.vertical, 4)
 
+            // ── Claude Code ─────────────────────────────────────────────
+            Text(t("Claude Code (Terminal)", "Claude Code (terminal)"))
+                .font(ThemeFonts.body(size: 12, weight: .medium))
+            Text(t(
+                "Für Claude Code genügt ein Befehl.",
+                "For Claude Code a single command is enough."
+            ))
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
+
+            Text(claudeCodeAddCommand)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.primary.opacity(0.8))
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.05))
+                .cornerRadius(6)
+
+            HStack(spacing: 8) {
+                Spacer()
+                Button {
+                    try? MCPInstaller.install()
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(claudeCodeAddCommand, forType: .string)
+                    claudeCodeCmdCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { claudeCodeCmdCopied = false }
+                } label: {
+                    Label(
+                        claudeCodeCmdCopied ? t("Kopiert!", "Copied!") : t("Befehl kopieren", "Copy command"),
+                        systemImage: claudeCodeCmdCopied ? "checkmark" : "doc.on.doc"
+                    )
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    autoSetupClaudeCode()
+                } label: {
+                    switch claudeCodeSetupState {
+                    case .idle:
+                        Label(t("Automatisch einrichten", "Set up automatically"), systemImage: "sparkles")
+                    case .success:
+                        Label(t("Eingerichtet!", "Done!"), systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.sbGreenStrong)
+                    case .alreadySet:
+                        Label(t("Bereits eingerichtet", "Already configured"), systemImage: "checkmark")
+                    case .error(let msg):
+                        Label(msg, systemImage: "xmark.circle")
+                            .foregroundColor(.sbOrangeStrong)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(claudeCodeSetupState != .idle)
+            }
+
+            Divider().padding(.vertical, 4)
+
             SettingsToggleRow(
                 title: t("`prepare_transfer`-Drafts annehmen", "Accept `prepare_transfer` drafts"),
                 subtitle: t(
@@ -3318,6 +3503,9 @@ struct SettingsView: View {
                 isOn: $mcpDraftsEnabled
             )
         }
+        // Stabilen Symlink-Pfad anlegen, sobald der Nutzer den MCP-Bereich öffnet —
+        // so zeigt die angezeigte/kopierte Config direkt auf den beständigen Pfad.
+        .onAppear { try? MCPInstaller.install() }
     }
 
     private func resetApp() {

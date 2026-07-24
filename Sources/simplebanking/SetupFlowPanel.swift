@@ -833,6 +833,18 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.addArrangedSubview(merchantRow)
         rootStack.setCustomSpacing(6, after: merchantLabel)
 
+        // Allgemeiner Hilfe-Link zum eBon-Abruf. Schließt den Dialog NICHT (anders als
+        // die Merchant-Buttons) — öffnet nur die FAQ.
+        let ebonHelpLink = NSButton(title: t("Wie funktioniert das Abrufen von eBons?",
+                                             "How does e-receipt fetching work?"),
+                                    target: self, action: #selector(openEbonHelp))
+        ebonHelpLink.isBordered = false
+        ebonHelpLink.bezelStyle = .inline
+        ebonHelpLink.font = .systemFont(ofSize: 12)
+        ebonHelpLink.contentTintColor = .controlAccentColor
+        rootStack.addArrangedSubview(ebonHelpLink)
+        rootStack.setCustomSpacing(8, after: merchantRow)
+
         rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(buttonRow.stack)
 
@@ -1883,6 +1895,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     @objc private func openYaxiWebsite() {
         NSWorkspace.shared.open(URL(string: "https://yaxi.tech")!)
+    }
+
+    @objc private func openEbonHelp() {
+        NSWorkspace.shared.open(URL(string: "https://www.simplebanking.de/ebons")!)
     }
 
     @objc private func openSupportMail() {

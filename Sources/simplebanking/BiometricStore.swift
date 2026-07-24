@@ -70,19 +70,27 @@ enum BiometricStore {
         //    Prompt — ein ACL-Item wäre so nicht lesbar.
         let allowACL = !UserDefaults.standard.bool(forKey: "demoMode")
         var acError: Unmanaged<CFError>?
-        if allowACL, let access = SecAccessControlCreateWithFlags(
-            nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .userPresence, &acError) {
-            let aclQuery: [CFString: Any] = [
-                kSecClass: kSecClassGenericPassword,
-                kSecAttrService: service,
-                kSecAttrAccount: account,
-                kSecAttrAccessControl: access,
-                kSecValueData: data,
-                kSecUseAuthenticationUI: kSecUseAuthenticationUISkip
-            ]
-            let aclStatus = SecItemAdd(aclQuery as CFDictionary, nil)
-            if aclStatus == errSecSuccess { return }
-            AppLogger.log("Touch ID ACL save fell back (status \(aclStatus)) → soft gate", category: "Biometric")
+        if allowACL {
+            if let access = SecAccessControlCreateWithFlags(
+                nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .userPresence, &acError) {
+                let aclQuery: [CFString: Any] = [
+                    kSecClass: kSecClassGenericPassword,
+                    kSecAttrService: service,
+                    kSecAttrAccount: account,
+                    kSecAttrAccessControl: access,
+                    kSecValueData: data,
+                    kSecUseAuthenticationUI: kSecUseAuthenticationUISkip
+                ]
+                let aclStatus = SecItemAdd(aclQuery as CFDictionary, nil)
+                if aclStatus == errSecSuccess { return }
+                // macOS legt biometrische SecAccessControl-Items nur in der
+                // Data-Protection-Keychain an; in der Legacy-Keychain liefert der Add
+                // errSecParam (-50). Bewusster, funktionierender Fallback: Soft Gate
+                // (ACL-frei, Schutz via evaluatePolicy beim Lesen).
+                AppLogger.log("Touch ID ACL save fell back (status \(aclStatus)) → soft gate", category: "Biometric")
+            } else {
+                AppLogger.log("Touch ID SecAccessControlCreateWithFlags failed → soft gate", category: "Biometric", level: "WARN")
+            }
         }
 
         // 2) Fallback: ACL-frei (z.B. ad-hoc-Builds). Schutz nur via evaluatePolicy.

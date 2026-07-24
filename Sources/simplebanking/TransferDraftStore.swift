@@ -36,6 +36,11 @@ enum TransferDraftStore {
     static let directoryName = "transfer-drafts"
     /// Drafts älter als 5 Minuten werden ignoriert + beim Scan gelöscht.
     static let ttlSeconds: TimeInterval = 5 * 60
+    /// Toleranz für Uhrzeit-Drift zwischen Schreiber (z.B. MCP) und App.
+    static let clockSkew: TimeInterval = 60
+    /// Erlaubte `source`-Werte. Ein extern geschriebener Draft mit unbekannter
+    /// Quelle wird verworfen (Härtung gegen manipulierte/fremde Dateien).
+    static let allowedSources: Set<String> = ["mcp", "app", "cli"]
 
     /// Frischer Formatter pro Aufruf — ISO8601DateFormatter ist nicht Sendable,
     /// die Instanz ist billig genug für jedes Read/Write.
@@ -56,41 +61,63 @@ enum TransferDraftStore {
         try directoryURL().appendingPathComponent("\(id).json")
     }
 
-    /// Liest und parst alle Drafts. Abgelaufene werden verworfen (und gelöscht).
-    /// Sortierung: jüngster zuerst.
-    static func loadAll() -> [TransferDraft] {
+    /// Prüft einen Draft rein (ohne Filesystem) gegen Dateinamen + Zeitfenster.
+    /// SICHERHEIT: `id` muss ein UUID sein UND exakt dem Dateinamen-Stamm entsprechen
+    /// — so kann eine manipulierte `id` (z.B. mit `../`) nie als Pfadbestandteil
+    /// wiederverwendet werden, und ein Draft muss zu genau seiner Datei gehören.
+    /// Zusätzlich: bekannte Quelle, parsebare Zeitstempel, `createdAt <= now+skew`,
+    /// `expiresAt > createdAt`, TTL-Obergrenze, und noch nicht abgelaufen.
+    static func isValid(_ draft: TransferDraft, filenameStem: String, now: Date = Date()) -> Bool {
+        guard UUID(uuidString: draft.id) != nil, draft.id == filenameStem else { return false }
+        guard allowedSources.contains(draft.source) else { return false }
+        let iso = makeISOFormatter()
+        guard let created = iso.date(from: draft.createdAt),
+              let expires = iso.date(from: draft.expiresAt) else { return false }
+        guard created <= now.addingTimeInterval(clockSkew) else { return false }
+        guard expires > created else { return false }
+        guard expires.timeIntervalSince(created) <= ttlSeconds + clockSkew else { return false }
+        guard expires > now else { return false }  // nicht abgelaufen
+        return true
+    }
+
+    /// Liest, parst und **validiert** alle Drafts und gibt sie mit ihrer echten
+    /// Datei-URL zurück (jüngster zuerst). Defekte/ungültige/abgelaufene Dateien
+    /// werden über ihre **aufgelistete** URL gelöscht — nie über einen aus JSON
+    /// neu berechneten Pfad.
+    static func loadAllWithURLs(now: Date = Date()) -> [(draft: TransferDraft, url: URL)] {
         guard let dir = try? directoryURL() else { return [] }
         guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
             return []
         }
-        let now = Date()
         let decoder = JSONDecoder()
-        var drafts: [TransferDraft] = []
+        var result: [(draft: TransferDraft, url: URL)] = []
         for url in files where url.pathExtension == "json" {
+            let stem = url.deletingPathExtension().lastPathComponent
             guard let data = try? Data(contentsOf: url),
-                  let draft = try? decoder.decode(TransferDraft.self, from: data) else {
-                // Defekte Datei wegräumen, damit der Watcher nicht ewig daran nagt.
+                  let draft = try? decoder.decode(TransferDraft.self, from: data),
+                  isValid(draft, filenameStem: stem, now: now) else {
+                // Defekt / ungültig / abgelaufen → aufgelistete Datei wegräumen.
                 try? FileManager.default.removeItem(at: url)
                 continue
             }
-            if let expires = makeISOFormatter().date(from: draft.expiresAt), expires < now {
-                try? FileManager.default.removeItem(at: url)
-                continue
-            }
-            drafts.append(draft)
+            result.append((draft, url))
         }
-        return drafts.sorted { lhs, rhs in
-            (makeISOFormatter().date(from: lhs.createdAt) ?? .distantPast) >
-            (makeISOFormatter().date(from: rhs.createdAt) ?? .distantPast)
+        return result.sorted { lhs, rhs in
+            (makeISOFormatter().date(from: lhs.draft.createdAt) ?? .distantPast) >
+            (makeISOFormatter().date(from: rhs.draft.createdAt) ?? .distantPast)
         }
     }
 
-    /// Konsumiert (= löscht) den Draft. One-shot — verhindert, dass derselbe
-    /// Draft beim nächsten App-Start nochmal aufpoppt.
-    static func consume(id: String) {
-        if let url = try? draftURL(id: id) {
-            try? FileManager.default.removeItem(at: url)
-        }
+    /// Convenience: nur die validierten Drafts (ohne URLs).
+    static func loadAll() -> [TransferDraft] {
+        loadAllWithURLs().map { $0.draft }
+    }
+
+    /// Konsumiert (= löscht) einen Draft über seine **aufgelistete** URL. One-shot —
+    /// verhindert, dass derselbe Draft beim nächsten App-Start nochmal aufpoppt.
+    /// Nimmt bewusst die URL (nicht die JSON-`id`), um Pfadmanipulation auszuschließen.
+    static func consume(url: URL) {
+        try? FileManager.default.removeItem(at: url)
     }
 
     /// Wandelt einen Draft in ein validiertes TransferRequest. Wirft, wenn die

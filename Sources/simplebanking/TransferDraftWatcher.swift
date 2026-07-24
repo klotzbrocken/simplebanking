@@ -63,8 +63,8 @@ final class TransferDraftWatcher {
     }
 
     private func processPendingDrafts() {
-        let drafts = TransferDraftStore.loadAll()
-        guard let newest = drafts.first else { return }
+        let entries = TransferDraftStore.loadAllWithURLs()
+        guard let newest = entries.first else { return }
 
         // User-Toggle „MCP-Drafts annehmen" (Default aus — opt-in). Wenn aus:
         // alle Drafts verwerfen und kein Sheet öffnen — verhindert dass ein im
@@ -72,26 +72,26 @@ final class TransferDraftWatcher {
         // TransferSheets öffnet.
         let mcpDraftsEnabled = (UserDefaults.standard.object(forKey: "mcpDraftsEnabled") as? Bool) ?? false
         guard mcpDraftsEnabled else {
-            for d in drafts { TransferDraftStore.consume(id: d.id) }
+            for e in entries { TransferDraftStore.consume(url: e.url) }
             return
         }
 
         // One-shot: löschen sofort, bevor Notification gepostet wird.
         // Sonst könnte ein nachfolgender vnode-Event denselben Draft nochmal
         // einliefern, während BalanceBar das Sheet schon aufmacht.
-        TransferDraftStore.consume(id: newest.id)
+        TransferDraftStore.consume(url: newest.url)
 
         // Älteren parallel liegenden Drafts ebenfalls weg — der Nutzer sieht nur
         // den jüngsten. Sind eh nur Edge-Cases (mehrere Aufrufe in 1s).
-        for d in drafts.dropFirst() {
-            TransferDraftStore.consume(id: d.id)
+        for e in entries.dropFirst() {
+            TransferDraftStore.consume(url: e.url)
         }
 
         NSApp.activate(ignoringOtherApps: true)
         NotificationCenter.default.post(
             name: Self.openSheetNotification,
             object: nil,
-            userInfo: [Self.draftUserInfoKey: newest]
+            userInfo: [Self.draftUserInfoKey: newest.draft]
         )
     }
 }

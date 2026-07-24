@@ -837,6 +837,50 @@ enum TransactionsDatabase {
         }
     }
 
+    // MARK: - LLM-Query (minimiert + slot-gefiltert)
+
+    /// Spalten, die dem LLM-generierten SQL über die Sicht `llm_tx` überhaupt
+    /// zugänglich sind. Bewusst OHNE `iban`, `raw_json`, `absender`.
+    static let llmAllowlistColumns = [
+        "tx_id", "datum", "buchungsdatum", "betrag", "waehrung",
+        "empfaenger", "verwendungszweck", "kategorie",
+        "effective_merchant", "normalized_merchant", "search_text"
+    ]
+    /// Backstop: diese Keys werden aus JEDER Ergebniszeile entfernt, bevor sie den
+    /// Rechner Richtung KI-Anbieter verlassen — auch falls sie je auftauchen sollten.
+    static let llmRedactColumns: Set<String> = ["iban", "raw_json", "absender"]
+
+    /// Führt LLM-generiertes SQL gegen eine **temporäre, slot-gefilterte und
+    /// spalten-reduzierte** Sicht `llm_tx` aus. Die Basistabelle `transactions`
+    /// bleibt zwar erreichbar, wird aber von `SQLGuard.validatedLLMQuery` blockiert;
+    /// `llm_tx` gibt es nur mit den erlaubten Spalten und nur für `slotId`. Zusätzlich
+    /// werden sensible Keys aus den Zeilen redigiert (Defense-in-Depth).
+    static func executeLLMQuery(sql: String, slotId: String, bankId: String = "primary") throws -> [[String: String]] {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        let cols = llmAllowlistColumns.joined(separator: ", ")
+        // slotId ist app-generiert (UUID/"legacy"); Hochkommas dennoch escapen.
+        let escapedSlot = slotId.replacingOccurrences(of: "'", with: "''")
+
+        return try queue.write { db in
+            try db.execute(sql: "DROP VIEW IF EXISTS llm_tx")
+            try db.execute(sql: """
+                CREATE TEMP VIEW llm_tx AS
+                SELECT \(cols) FROM transactions WHERE slot_id = '\(escapedSlot)'
+                """)
+            defer { try? db.execute(sql: "DROP VIEW IF EXISTS llm_tx") }
+
+            let rows = try Row.fetchAll(db, sql: sql)
+            return rows.map { row in
+                var map: [String: String] = [:]
+                for columnName in row.columnNames where !llmRedactColumns.contains(columnName.lowercased()) {
+                    map[columnName] = stringValue(for: row[columnName])
+                }
+                return map
+            }
+        }
+    }
+
     static func refreshEffectiveMerchantData(bankId: String = "primary") throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)

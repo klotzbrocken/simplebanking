@@ -2,6 +2,18 @@
 
 ## [Unreleased] (1.7.0)
 
+### Sicherheit / Datenschutz
+
+- **KI-Chat: Datensparsamkeit + Slot-Scope erzwungen** — Freitext-Fragen an den KI-Anbieter laufen jetzt nur noch über eine minimierte, slot-gefilterte Sicht `llm_tx` (keine `iban`, keine `raw_json`, kein `absender`; nur das aktive Konto). Der `SQLGuard` erzwingt das technisch (Tabellen-/Spalten-Allowlist, nicht nur der System-Prompt), Ergebniszeilen werden vor dem Versand redigiert. Neuer expliziter Opt-in-Schalter **„KI-Chat für Freitext-Fragen"** (Einstellungen → KI-Assistent, default aus) mit ehrlicher Offenlegung, welche Felder gesendet werden. Vordefinierte Auswertungen bleiben vollständig lokal.
+- **MCP: DB-Fehler werden nicht mehr als „keine Umsätze" getarnt** — fehlende/inkompatible/gesperrte Datenbank liefert jetzt einen strukturierten Fehler statt eines leeren Ergebnisses (irreführend bei Finanzdaten).
+- **Transfer-Drafts gehärtet** — Draft-IDs müssen UUIDs sein und zum Dateinamen passen; gelöscht wird nur die tatsächlich aufgelistete Datei (nie ein aus JSON neu gebauter Pfad → keine Pfadmanipulation). Ungültige/unplausible Zeitstempel (nicht parsebar, weit in der Zukunft, überlange Gültigkeit) und unbekannte Quellen werden verworfen.
+
+### Behoben
+
+- **MCP-Monatsübersicht** — filterte nach `datum`/`buchungsdatum` gemischt und näherte Monate als `Monate × 31` Tage an; nutzt jetzt durchgehend `buchungsdatum` (Filter + Gruppierung) und echte Kalender-Monatsgrenzen, `months` auf 1–24 begrenzt.
+- **MCP konnte leere Demo-Daten statt echter Konten liefern** — die Demo-Erkennung (und die Cached-Salden) las die `~/Library/Preferences`-plist direkt; cfprefsd schreibt diese Datei aber nur verzögert, sodass ein veraltetes `demoMode=true` den MCP auf die leere Demo-Datenbank umlenkte (Claude sah 0 Umsätze, obwohl die App echte Daten zeigte). Der MCP liest Demo-Flag, Salden und Kontenliste jetzt über cfprefsd (`UserDefaults(suiteName:)`) — identisch zu dem, was die App sieht.
+- **MCP: Konto-IDs zwischen `get_accounts` und `get_balance` inkonsistent (Demo)** — `get_accounts` lieferte im Demo-Modus hartkodierte IDs (`demo-main/daily/bills`), während Salden/Umsätze die echten Demo-Slot-IDs (`demo-slot-0/1/2`) nutzten → Claude konnte Salden keinen Konten zuordnen. `get_accounts` leitet die Demo-Konten jetzt aus denselben Quellen ab → IDs stimmen über alle Tools überein.
+
 ### Geändert
 
 - **UI-Refresh „Money-Heat" für Flyout und Umsatzliste** — Flyout und Umsatz-Header teilen jetzt dieselbe randlose, kontostandsabhängige Farbfläche (grün = gesund, gelb = neutral, rot = kritisch; geteilter `BalanceWash`-Helper, keine Farb-Drift).
