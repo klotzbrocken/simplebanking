@@ -28,17 +28,19 @@ enum IbanClipboardScanner {
         guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
         else { return nil }
         let nsRange = NSRange(text.startIndex..., in: text)
-        guard let m = re.firstMatch(in: text, options: [], range: nsRange),
-              let r = Range(m.range, in: text)
-        else { return nil }
-
-        let normalized = String(text[r])
-            .uppercased()
-            .replacingOccurrences(of: " ", with: "")
-
-        // Mod-97 + Country-Length-Check über die existierende Validierung.
-        if (try? TransferRequest.validateIban(normalized)) != nil {
-            return normalized
+        // ALLE Treffer prüfen, nicht nur den ersten: in Zeilen wie
+        // „Sparkasse Siegen IBAN DE83… BIC WELADED1SIE" kann der erste (greedy)
+        // Treffer Nachbartext einschließen und an mod-97 scheitern — dann wäre
+        // die eigentlich vorhandene IBAN verloren.
+        for m in re.matches(in: text, options: [], range: nsRange) {
+            guard let r = Range(m.range, in: text) else { continue }
+            let normalized = String(text[r])
+                .uppercased()
+                .replacingOccurrences(of: " ", with: "")
+            // Mod-97 + Country-Length-Check über die existierende Validierung.
+            if (try? TransferRequest.validateIban(normalized)) != nil {
+                return normalized
+            }
         }
         return nil
     }

@@ -2,6 +2,12 @@
 
 ## [Unreleased] (1.7.0)
 
+### Neu
+
+- **Rechnung aufs Flyout ziehen → Überweisung vorbefüllt** — das gesamte Flyout (und zusätzlich das große Überweisungsfenster) ist Drop-Zone für PDFs und Bilder. Ausgelesen wird zuerst die **PDF-Textebene** (exakt, sofort), nur bei Scans/Fotos läuft **Apple Vision** als On-device-OCR — beides ohne Netz, ohne zusätzliche Abhängigkeit. Der erkannte Text geht durch denselben Parser wie die Zwischenablage; der Schnellüberweisungs-Drawer klappt vorbefüllt auf. Bestätigung + SCA bleiben unverändert davor.
+- **Zwischenablage-Erkennung für ganze Blöcke** — neuer `TransferClipboardParser` erkennt Name, IBAN, Betrag und Verwendungszweck auch dann, wenn alles in einem Rutsch kopiert wurde (mit und ohne Labels, deutsches wie englisches Zahlenformat). Im großen Fenster als „Alles einfügen"-Banner, im Flyout-Drawer als Vorbefüllung beim Öffnen (nur bei leerem Formular und erkannter IBAN).
+- **Autocomplete auch im Flyout-Drawer** — Empfängervorschläge aus der Umsatzhistorie; bei Auswahl werden zusätzlich häufigster Betrag und letzter Verwendungszweck übernommen (bisher nur Name + IBAN).
+
 ### Sicherheit / Datenschutz
 
 - **KI-Chat: Datensparsamkeit + Slot-Scope erzwungen** — Freitext-Fragen an den KI-Anbieter laufen jetzt nur noch über eine minimierte, slot-gefilterte Sicht `llm_tx` (keine `iban`, keine `raw_json`, kein `absender`; nur das aktive Konto). Der `SQLGuard` erzwingt das technisch (Tabellen-/Spalten-Allowlist, nicht nur der System-Prompt), Ergebniszeilen werden vor dem Versand redigiert. Neuer expliziter Opt-in-Schalter **„KI-Chat für Freitext-Fragen"** (Einstellungen → KI-Assistent, default aus) mit ehrlicher Offenlegung, welche Felder gesendet werden. Vordefinierte Auswertungen bleiben vollständig lokal.
@@ -12,10 +18,19 @@
 
 - **MCP-Monatsübersicht** — filterte nach `datum`/`buchungsdatum` gemischt und näherte Monate als `Monate × 31` Tage an; nutzt jetzt durchgehend `buchungsdatum` (Filter + Gruppierung) und echte Kalender-Monatsgrenzen, `months` auf 1–24 begrenzt.
 - **MCP konnte leere Demo-Daten statt echter Konten liefern** — die Demo-Erkennung (und die Cached-Salden) las die `~/Library/Preferences`-plist direkt; cfprefsd schreibt diese Datei aber nur verzögert, sodass ein veraltetes `demoMode=true` den MCP auf die leere Demo-Datenbank umlenkte (Claude sah 0 Umsätze, obwohl die App echte Daten zeigte). Der MCP liest Demo-Flag, Salden und Kontenliste jetzt über cfprefsd (`UserDefaults(suiteName:)`) — identisch zu dem, was die App sieht.
+- **Vorlagen ließen sich nicht anlegen** — der Vorlagen-Editor lag im **konto-spezifischen** Einstellungs-Tab, der Flyout-„+"-Sprung landete aber im „Allgemein"-Tab; die Sektion war damit praktisch unauffindbar. Vorlagen sind kontoübergreifend und liegen jetzt unter „Konten → Allgemein"; der Sprung setzt den Sub-Tab mit. Zusätzlich Hinweise, warum der Button ggf. inaktiv ist (max. 4 Vorlagen, ungültige IBAN).
+- **Flyout bei offener Schnellüberweisung blockiert** — es ließ sich weder schließen noch als Widget herausziehen. Schließen geht jetzt in einem Schritt; das Herausziehen ist oberhalb des Drawers möglich (im Formular bleibt Ziehen = Textauswahl).
+- **Bei aktiver Schnellüberweisung** werden die übrigen Konto-Pillen ausgeblendet — kein versehentlicher Kontowechsel mitten im Vorgang.
 - **MCP: Konto-IDs zwischen `get_accounts` und `get_balance` inkonsistent (Demo)** — `get_accounts` lieferte im Demo-Modus hartkodierte IDs (`demo-main/daily/bills`), während Salden/Umsätze die echten Demo-Slot-IDs (`demo-slot-0/1/2`) nutzten → Claude konnte Salden keinen Konten zuordnen. `get_accounts` leitet die Demo-Konten jetzt aus denselben Quellen ab → IDs stimmen über alle Tools überein.
 
 ### Geändert
 
+- **Themes wirken jetzt nur noch in Flyout + Umsatzliste** — vorher färbten sie auch Einstellungen, Überweisungsfenster, Dashboard usw. Die globalen Farb-/Schrift-Tokens sind auf das Default-Theme fixiert; Flyout und Liste nutzen dedizierte Theme-Accessoren.
+- **Aktive Themes: vollflächige Farbe statt Rahmen** — bisher fiel jedes Nicht-Default-Theme auf eine eingerückte, gerahmte Karte zurück (daher „Rahmen", verrutschtes Format, Pillen zu tief). Themes rendern jetzt über dieselbe randlose Geometrie wie das Default-Theme; **Money-Heat bleibt dem Default vorbehalten**, Themes zeigen ihre flache Theme-Farbe. Konto-Pillen und Flyout-Ränder folgen dem Theme.
+- **Themes „Ocean" und „Norton Commander" entfernt**; **Game Boy** auf die authentische DMG-4-Ton-Palette umgestellt (monochromes LCD-Grün, Theme-Schrift im Flyout). Ausgemusterte Theme-Dateien werden beim Start aufgeräumt.
+- **PayPal-Einrichtung ohne „Sandbox"** — die Option ist entfernt; Zugänge laufen immer live. Ein evtl. gespeichertes Alt-Flag wird bereinigt (sonst wären Bestandsinstallationen dauerhaft auf der Sandbox geblieben).
+- **simplesend wieder sichtbar** — `transferMoneyEnabled` stand lokal (uncommittet) auf `false` und blendete alle Einstiegspunkte außerhalb des Demo-Modus aus; steht wieder auf dem produktiven Wert. Der Transfer-Scope wird weiterhin über die Lizenz freigeschaltet (`YaxiTicketMaker` nutzt dann das Transfer-Key-Paar).
+- **Bank-Logo-Katalog aktualisiert** — Snapshot von `https://logos.yaxi.tech/banks/catalog.json` neu gezogen: **172 → 192 Banken** (mehr Logos + Brand-Farben; gleiches Schema).
 - **UI-Refresh „Money-Heat" für Flyout und Umsatzliste** — Flyout und Umsatz-Header teilen jetzt dieselbe randlose, kontostandsabhängige Farbfläche (grün = gesund, gelb = neutral, rot = kritisch; geteilter `BalanceWash`-Helper, keine Farb-Drift).
   - **Flyout:** ringlose Saldo-Karte mit vollflächiger Money-Heat, große Balance (38 px), zwei-tönige Kopfzeile (Name fett, Zeit gedämpft), transparenter Papierflieger- und Untertitel-Toggle. Konto-Umschalter jetzt als **Logo-Pillen** (aktive gefüllte Pille + kleinere Logo-Pillen; auch bei nur einem Konto) statt abstrakter Dots.
   - **Umsatzliste:** Fenster jetzt so schmal wie der Flyout (348 px, grüner Zoom-Button togglet weiterhin auf breit). Money-Heat reicht bis an alle Fensterkanten (oben hinter Ampel/Toolbar-Icons — die frühere NSToolbar ist durch SwiftUI-Buttons im Header ersetzt), unten weicher Fade in die Umsatzliste. **Ring bleibt** (Datum im Ring). Footer schmaler: Icons links, „Mehr ▾" rechts. Vertikale Scrollbar wieder on-demand (Overlay-Autohide erzwungen). Der Sidebar-Streifen fadet oben in die Money-Heat und läuft bis zur unteren Fensterkante durch.

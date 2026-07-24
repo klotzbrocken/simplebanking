@@ -908,6 +908,9 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openQuickSendTemplates)) { _ in
             UserDefaults.standard.removeObject(forKey: "settingsScrollToQuickSend")
             selectedTab = 1
+            // Vorlagen liegen im „Allgemein"-Sub-Tab — ohne dieses Reset landet der
+            // Sprung bei einem ausgewählten Konto und die Sektion bleibt unsichtbar.
+            selectedSettingsSlotId = nil
             scrollToQuickSend = true
         }
         .onChange(of: launchAtLogin) { newValue in
@@ -1460,6 +1463,11 @@ struct SettingsView: View {
                 .padding(.trailing, 14)
             }
 
+            // Schnellüberweisung + Vorlagen — kontoübergreifend (globaler
+            // `quickSendFavorites`-Store), daher im „Allgemein"-Sub-Tab. Lag vorher
+            // im Konto-spezifischen Tab und war dadurch praktisch unauffindbar (der
+            // Flyout-„+"-Sprung landete in „Allgemein", wo es die Sektion nicht gab).
+            quickSendSettings
         }
     }
 
@@ -1939,9 +1947,6 @@ struct SettingsView: View {
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
-
-            // Schnellüberweisung — aus „Labs" hierher (zu „Konten") verschoben.
-            quickSendSettings
         }
     }
 
@@ -3039,6 +3044,11 @@ struct SettingsView: View {
 
             if quickSendFavorites.canAddMore {
                 quickSendFavoriteAdder
+            } else {
+                Text(t("Maximal 4 Vorlagen — lösche eine, um Platz zu schaffen.",
+                       "Maximum of 4 templates — delete one to make room."))
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -3065,6 +3075,13 @@ struct SettingsView: View {
             }
             .disabled(qsNewName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       || !QuickSendFormatting.isValidIban(qsNewIban))
+            // Warum der Button ggf. deaktiviert ist (vorher stiller toter Button).
+            if qsNewName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(t("Name eingeben.", "Enter a name.")).font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+            } else if !QuickSendFormatting.isValidIban(qsNewIban) {
+                Text(t("IBAN unvollständig oder ungültig.", "IBAN incomplete or invalid."))
+                    .font(ThemeFonts.body(size: 11)).foregroundColor(.secondary)
+            }
         }
         .textFieldStyle(RoundedBorderTextFieldStyle())
         .font(ThemeFonts.body(size: 12))
@@ -3089,7 +3106,10 @@ struct SettingsView: View {
     /// `.id("quickSendTemplates")` ist das Scroll-Ziel für den Flyout-„+"-Sprung.
     @ViewBuilder
     private var quickSendSettings: some View {
-        if FeatureFlags.transferMoneyEnabled {
+        // Auch im Demo-Modus sichtbar — konsistent zur Flyout-Schnellüberweisung, die
+        // via `|| demoMode` eingeblendet wird. Sonst springt der Flyout-„+"-Button in
+        // eine Sektion, die es nicht gibt → „Vorlagen lassen sich nicht anlegen".
+        if FeatureFlags.transferMoneyEnabled || UserDefaults.standard.bool(forKey: "demoMode") {
             VStack(alignment: .leading, spacing: 16) {
                 Divider()
                 SettingsToggleRow(

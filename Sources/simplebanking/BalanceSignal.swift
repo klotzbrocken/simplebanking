@@ -37,6 +37,8 @@ enum BalanceWash {
     static func colors(level: BalanceSignalLevel, style: BalanceSignalStyle, dark: Bool)
         -> (top: Color, bottom: Color, balance: Color, detail: Color) {
         func hx(_ s: String) -> Color { Color(hex: s) ?? .gray }
+        // Money-Heat gilt nur fürs Default-Theme (grün/gelb/rot). Aktive Themes rendern
+        // die Fläche flach in ihrer eigenen Farbe (siehe Flyout/Umsatzliste-Cards).
         if dark {
             return (style.gradientBaseColor.opacity(0.20), style.gradientBaseColor.opacity(0.06),
                     style.amountColor, Color(NSColor.secondaryLabelColor))

@@ -20,6 +20,13 @@ struct AppTheme: Identifiable, Equatable {
     let positiveDarkHex: String?
     let negativeLightHex: String?
     let negativeDarkHex: String?
+    // Optionale „Ink"-Farbe (große Zahl + Text) für die vollflächige Theme-Fläche in
+    // Flyout/Umsatzliste. nil → automatischer Luminanz-Kontrast zur Surface (cardColor).
+    let inkLightHex: String?
+    let inkDarkHex: String?
+
+    /// True für das eingebaute Default-Theme (nutzt Money-Heat statt flacher Theme-Farbe).
+    var isDefault: Bool { id == ThemeManager.defaultThemeID }
 
     static let fallback = AppTheme(
         id: "default",
@@ -36,8 +43,31 @@ struct AppTheme: Identifiable, Equatable {
         positiveLightHex: "#4F8A6A", // Green Strong light
         positiveDarkHex: "#67B487",  // Green Strong dark
         negativeLightHex: "#C65A5A", // Red Strong light
-        negativeDarkHex: "#D77979"   // Red Strong dark
+        negativeDarkHex: "#D77979",  // Red Strong dark
+        inkLightHex: nil,
+        inkDarkHex: nil
     )
+
+    // MARK: - Themed Flyout/Umsatzliste (flache Fläche statt Money-Heat)
+
+    /// Vollflächige, flache Theme-Farbe für Flyout + Umsatzliste (= card-Farbe).
+    func surfaceColor(dark: Bool) -> NSColor { dark ? cardDarkColor : cardLightColor }
+
+    /// Vordergrund (große Zahl + Text) auf der Theme-Fläche. Explizit via ink*Hex,
+    /// sonst automatischer Luminanz-Kontrast (dunkle Schrift auf heller Fläche etc.).
+    func inkColor(dark: Bool) -> NSColor {
+        if let hex = dark ? inkDarkHex : inkLightHex, let c = Optional(Self.color(from: hex, fallback: .labelColor)) {
+            return c
+        }
+        return Self.contrastingInk(on: surfaceColor(dark: dark))
+    }
+
+    /// Schwarz oder Weiß je nach Helligkeit der Fläche (WCAG-nahe Luminanz).
+    static func contrastingInk(on bg: NSColor) -> NSColor {
+        let c = bg.usingColorSpace(.sRGB) ?? bg
+        let lum = 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+        return lum > 0.55 ? NSColor(white: 0.10, alpha: 1) : NSColor(white: 0.97, alpha: 1)
+    }
 
     var accentColor: NSColor { Self.color(from: accentHex, fallback: .controlAccentColor) }
     var positiveColor: NSColor { Self.color(from: positiveHex, fallback: .systemGreen) }
@@ -114,6 +144,13 @@ final class ThemeManager: @unchecked Sendable {
                 let target = directory.appendingPathComponent(filename)
                 // Always overwrite built-in themes so updates from app upgrades apply
                 try content.write(to: target, atomically: true, encoding: .utf8)
+            }
+            // Ausgemusterte Built-in-Themes (Ocean, Norton Commander) entfernen.
+            for retired in Self.retiredThemeFiles {
+                let stale = directory.appendingPathComponent(retired)
+                if fileManager.fileExists(atPath: stale.path) {
+                    try? fileManager.removeItem(at: stale)
+                }
             }
         } catch {
             print("[Theme] Failed to ensure themes directory: \(error.localizedDescription)")
@@ -208,7 +245,9 @@ final class ThemeManager: @unchecked Sendable {
             positiveLightHex: values["positivelight"],
             positiveDarkHex: values["positivedark"],
             negativeLightHex: values["negativelight"],
-            negativeDarkHex: values["negativedark"]
+            negativeDarkHex: values["negativedark"],
+            inkLightHex: values["inklight"],
+            inkDarkHex: values["inkdark"]
         )
     }
 
@@ -245,64 +284,60 @@ final class ThemeManager: @unchecked Sendable {
         panelLight=#F4E2D0
         panelDark=#2A2018
         """,
-        "ocean.cfg": """
-        # simplebanking Theme
-        id=ocean
-        name=Ocean
-        bodyFont=Helvetica Neue
-        headingFont=Helvetica Neue Bold
-        accent=#1F6F8B
-        positive=#2A9D8F
-        negative=#D1495B
-        cardLight=#F2FAFD
-        cardDark=#1F2A30
-        panelLight=#DDEBF1
-        panelDark=#141C21
-        """,
-        "norton-commander.cfg": """
-        # simplebanking Theme
-        id=norton-commander
-        name=Norton Commander
-        bodyFont=Menlo
-        headingFont=Menlo Bold
-        accent=#00CCCC
-        positive=#00CC00
-        negative=#FF3333
-        cardLight=#D6E4FF
-        cardDark=#0000AA
-        panelLight=#B8CEFF
-        panelDark=#000077
-        """,
         "gameboy.cfg": """
-        # simplebanking Theme — Game Boy (Mockup palette)
+        # simplebanking Theme — Game Boy (authentische DMG-4-Ton-Palette)
+        # Original Game-Boy-LCD: 4 Grüntöne, KEIN Rot. Flyout/Umsatzliste rendern
+        # vollflächig flach in LCD-Grün (keine Money-Heat), Schrift im dunkelsten Grün.
+        # Appearance-unabhängig (LCD sieht in Light/Dark gleich aus).
+        #   #0F380F dunkelstes Grün · #306230 · #8BAC0F · #9BBC0F hellstes Grün
         id=gameboy
         name=Game Boy
-        bodyFont=Courier New
-        headingFont=Courier New Bold
-        accent=#8CC040
-        positive=#8CC040
-        negative=#D06850
-        # Light mode: dark amounts on sage green for readability
-        positiveLight=#2A5820
-        negativeLight=#8B2A18
-        # Dark mode: bright lime / coral on dark olive (matches mockup)
-        positiveDark=#8CC040
-        negativeDark=#D06850
-        cardLight=#D4E8B0
-        cardDark=#2B3A18
-        panelLight=#C0D49C
-        panelDark=#3A4B28
+        bodyFont=Menlo
+        headingFont=Menlo Bold
+        accent=#306230
+        # Beträge monochrom (Vorzeichen unterscheidet Ein/Aus) — dunkelstes Grün auf Screen.
+        positive=#0F380F
+        negative=#0F380F
+        positiveLight=#0F380F
+        negativeLight=#0F380F
+        positiveDark=#0F380F
+        negativeDark=#0F380F
+        # Flächen = LCD-Grün (flache Theme-Farbe für Flyout/Liste).
+        cardLight=#9BBC0F
+        cardDark=#8BAC0F
+        panelLight=#8BAC0F
+        panelDark=#306230
+        # Ink = große Zahl + Text auf der Fläche (dunkelstes DMG-Grün).
+        inkLight=#0F380F
+        inkDark=#0F380F
         """
     ]
+
+    /// Früher ausgelieferte Built-in-Themes, die es nicht mehr gibt. Werden beim Start
+    /// aus dem User-Theme-Verzeichnis entfernt (sonst blieben sie bei Bestands-
+    /// installationen liegen, weil `ensureThemeFiles` nur schreibt, nie löscht).
+    static let retiredThemeFiles = ["ocean.cfg", "norton-commander.cfg"]
 }
 
 enum ThemeFonts {
+    // Themes wirken NUR in Flyout + Umsatzliste. Die globalen `body`/`heading` sind
+    // daher bewusst NICHT mehr theme-abhängig (sonst leckte z.B. Game Boys Menlo in
+    // Settings/TransferSheet). Für die theme-getönten Stellen: `flyoutHeading/flyoutBody`.
     static func body(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        themedFont(named: ThemeManager.shared.currentTheme.bodyFontName, size: size, weight: weight)
+        .system(size: size, weight: weight)
     }
 
     static func heading(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight)
+    }
+
+    /// Theme-Schrift für die große Saldo-Zahl / Kopfzeile im Flyout (theme-abhängig).
+    static func flyoutHeading(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         themedFont(named: ThemeManager.shared.currentTheme.headingFontName, size: size, weight: weight)
+    }
+
+    static func flyoutBody(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        themedFont(named: ThemeManager.shared.currentTheme.bodyFontName, size: size, weight: weight)
     }
 
     private static func themedFont(named name: String, size: CGFloat, weight: Font.Weight) -> Font {
@@ -317,41 +352,57 @@ enum ThemeFonts {
 }
 
 extension Color {
+    // Globale Tokens sind bewusst auf das DEFAULT-Theme fixiert (nicht `currentTheme`),
+    // damit Themes NUR in Flyout + Umsatzliste wirken. Die theme-getönten Varianten für
+    // Flyout/Liste heißen `themedSurface/themedInk/themedIncome/themedExpense/themedAccent`.
+    private static func defaultDynamic(_ light: NSColor, _ dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil ? dark : light
+        })
+    }
+
     static var expenseRed: Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let theme = ThemeManager.shared.currentTheme
-            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
-                ? theme.negativeDarkColor
-                : theme.negativeLightColor
-        })
+        defaultDynamic(AppTheme.fallback.negativeLightColor, AppTheme.fallback.negativeDarkColor)
     }
-
     static var incomeGreen: Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let theme = ThemeManager.shared.currentTheme
-            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
-                ? theme.positiveDarkColor
-                : theme.positiveLightColor
-        })
+        defaultDynamic(AppTheme.fallback.positiveLightColor, AppTheme.fallback.positiveDarkColor)
     }
-
     static var cardBackground: Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            let theme = ThemeManager.shared.currentTheme
-            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
-                ? theme.cardDarkColor
-                : theme.cardLightColor
-        })
+        defaultDynamic(AppTheme.fallback.cardLightColor, AppTheme.fallback.cardDarkColor)
+    }
+    static var panelBackground: Color {
+        defaultDynamic(AppTheme.fallback.panelLightColor, AppTheme.fallback.panelDarkColor)
     }
 
-    static var panelBackground: Color {
+    // MARK: - Theme-getönte Farben — NUR für Flyout + Umsatzliste
+
+    /// Vollflächige, flache Theme-Farbe (ersetzt Money-Heat bei aktivem Theme).
+    static var themedSurface: Color {
         Color(nsColor: NSColor(name: nil) { appearance in
-            let theme = ThemeManager.shared.currentTheme
-            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
-                ? theme.panelDarkColor
-                : theme.panelLightColor
+            let dark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            return ThemeManager.shared.currentTheme.surfaceColor(dark: dark)
         })
     }
+    /// Vordergrund (große Zahl + Text) auf der Theme-Fläche.
+    static var themedInk: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            return ThemeManager.shared.currentTheme.inkColor(dark: dark)
+        })
+    }
+    static var themedIncome: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let t = ThemeManager.shared.currentTheme
+            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil ? t.positiveDarkColor : t.positiveLightColor
+        })
+    }
+    static var themedExpense: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let t = ThemeManager.shared.currentTheme
+            return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil ? t.negativeDarkColor : t.negativeLightColor
+        })
+    }
+    static var themedAccent: Color { Color(nsColor: ThemeManager.shared.currentTheme.accentColor) }
 
     /// Mint-Hintergrund für die Aufrunden-Ansicht — überschreibt Bank-Tint
     /// wenn der View-Mode aktiv ist (Phase B-3).
@@ -370,8 +421,10 @@ extension Color {
         })
     }
 
+    /// Globaler Akzent — auf Default fixiert (Themes wirken nur in Flyout/Liste; dort
+    /// `themedAccent`).
     static var themeAccent: Color {
-        Color(nsColor: ThemeManager.shared.currentTheme.accentColor)
+        Color(nsColor: AppTheme.fallback.accentColor)
     }
 
     // MARK: - Semantic Color Tokens (Color Harmony Palette)

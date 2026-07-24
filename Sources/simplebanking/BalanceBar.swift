@@ -890,15 +890,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     // MARK: - PayPal (NVP-Provider)
 
-    /// Lädt die PayPal-API-Signatur-Zugangsdaten des Slots (entschlüsselt) inkl.
-    /// Sandbox/Live-Flag.
+    /// Lädt die PayPal-API-Signatur-Zugangsdaten des Slots (entschlüsselt).
+    /// Immer Live: die Sandbox-Option wurde aus dem Setup entfernt. Ein evtl. noch
+    /// gesetztes Alt-Flag wird aufgeräumt, damit Bestandsinstallationen nicht
+    /// dauerhaft gegen die Sandbox laufen.
     private func paypalCredentials(masterPassword pw: String, slotId: String) -> PayPalService.Credentials? {
         guard let creds = try? CredentialsStore.load(masterPassword: pw),
               let user = creds.paypalUser?.nilIfEmpty,
               let pwd = creds.paypalPwd?.nilIfEmpty,
               let sig = creds.paypalSignature?.nilIfEmpty else { return nil }
-        let sandbox = UserDefaults.standard.bool(forKey: "simplebanking.paypal.sandbox.\(slotId)")
-        return PayPalService.Credentials(user: user, pwd: pwd, signature: sig, sandbox: sandbox)
+        UserDefaults.standard.removeObject(forKey: "simplebanking.paypal.sandbox.\(slotId)")
+        return PayPalService.Credentials(user: user, pwd: pwd, signature: sig, sandbox: false)
     }
 
     /// Schreibt den echten PayPal-Saldo in die Menüleiste/Flyout (Muster wie
@@ -3463,7 +3465,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// wird dann gezielt: Drawer einklappen (Chevron) oder nach erfolgreichem
     /// Versand (onQuickSendSent setzt flyoutQuickSendOpen vorher auf false).
     nonisolated func popoverShouldClose(_ popover: NSPopover) -> Bool {
-        MainActor.assumeIsolated { !flyoutQuickSendOpen }
+        // Früher: `!flyoutQuickSendOpen` — das Flyout ließ sich bei offenem
+        // Schnellüberweisungs-Drawer gar nicht schließen (erst Drawer zu, dann Flyout).
+        // Das war in der Praxis lästiger als der Schutz wert; ein halb ausgefülltes
+        // Formular ist schnell neu getippt, SCA/Bestätigung liegen ohnehin dahinter.
+        true
     }
 
     // MARK: - Flyout → Desktop-Widget (Drag-to-detach)
@@ -3498,9 +3504,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             var swallow = false
             MainActor.assumeIsolated {
                 guard let popover = self.balancePopover, popover.isShown,
-                      !self.flyoutQuickSendOpen, self.detachedFlyoutWindow == nil,
+                      self.detachedFlyoutWindow == nil,
                       let popWindow = popover.contentViewController?.view.window,
                       popWindow.frame.contains(loc) else {
+                    if type == .leftMouseDown { self.flyoutDetachStart = nil }
+                    return
+                }
+                // Bei offenem Schnellüberweisungs-Drawer nur oberhalb davon abdocken:
+                // im Formular ist ein Drag eine Text-Auswahl, kein Abdock-Wunsch.
+                // Der Drawer sitzt am unteren Rand des Popovers.
+                if self.flyoutQuickSendOpen,
+                   loc.y < popWindow.frame.minY + QuickSendDrawerView.totalDrawerHeight {
                     if type == .leftMouseDown { self.flyoutDetachStart = nil }
                     return
                 }
@@ -6156,13 +6170,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             l.frame = NSRect(x: 0, y: y, width: 340, height: 13)
             return l
         }
-        let sandboxCheck = NSButton(checkboxWithTitle: L10n.t("Sandbox (Test-Zugangsdaten)", "Sandbox (test credentials)"), target: nil, action: nil)
-        sandboxCheck.frame = NSRect(x: 0, y: 128, width: 340, height: 18)
         let userField = NSTextField(frame: NSRect(x: 0, y: 92, width: 340, height: 22))
         let pwdField = NSSecureTextField(frame: NSRect(x: 0, y: 44, width: 340, height: 22))
         let sigField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 22))
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 150))
-        container.addSubview(sandboxCheck)
+        // Container endet direkt über dem obersten Label — die frühere Sandbox-Checkbox
+        // ist entfernt (PayPal-Zugänge sind produktiv).
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 130))
         container.addSubview(mkLabel("API Username", y: 114)); container.addSubview(userField)
         container.addSubview(mkLabel("API Password", y: 66)); container.addSubview(pwdField)
         container.addSubview(mkLabel("API Signature", y: 22)); container.addSubview(sigField)
@@ -6188,7 +6201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let slot = BankSlot.makePayPal()
         MultibankingStore.shared.addSlot(slot, makeActive: true, autoUnified: false)
         SlotContext.activate(slotId: slot.id)
-        UserDefaults.standard.set(sandboxCheck.state == .on, forKey: "simplebanking.paypal.sandbox.\(slot.id)")
 
         var creds = (try? CredentialsStore.load(masterPassword: pw))
             ?? StoredCredentials(iban: "", userId: "", password: "")
@@ -6813,12 +6825,23 @@ private struct FlyoutSlotSegmentedControl: View {
     /// Zeigt die „Alle Konten"-Pille (Aggregat) — nur bei ≥2 echten Konten.
     var showUnified: Bool = false
     var onActivateUnified: (() -> Void)? = nil
+    /// Während einer aktiven Schnellüberweisung nur die aktive Konto-Pille zeigen
+    /// (kein Konto-Wechsel mitten im Transfer, kein „Alle Konten").
+    var soloActiveOnly: Bool = false
 
     private var activeFill: Color {
-        colorScheme == .dark ? Color.white.opacity(0.16) : .white
+        // Bei aktivem Theme: gefüllte Pille in einer Ink-Tönung (statt Weiß, das auf der
+        // Theme-Fläche fremd wirkt).
+        if !ThemeManager.shared.currentTheme.isDefault {
+            return Color.themedInk.opacity(colorScheme == .dark ? 0.30 : 0.18)
+        }
+        return colorScheme == .dark ? Color.white.opacity(0.16) : .white
     }
     private var inactiveFill: Color {
-        colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+        if !ThemeManager.shared.currentTheme.isDefault {
+            return Color.themedInk.opacity(0.08)
+        }
+        return colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
     }
 
     var body: some View {
@@ -6827,13 +6850,13 @@ private struct FlyoutSlotSegmentedControl: View {
                 let active = !isUnifiedMode && idx == activeIndex
                 if active {
                     activePill(item)
-                } else {
+                } else if !soloActiveOnly {
                     iconPill(item)
                         .contentShape(Capsule())
                         .onTapGesture { onSwitch(idx) }
                 }
             }
-            if showUnified {
+            if showUnified && !soloActiveOnly {
                 Image(systemName: "square.stack.3d.up.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(isUnifiedMode ? activeTint : Color(NSColor.secondaryLabelColor))
@@ -6997,6 +7020,74 @@ private struct StatusBalanceFlyoutCardView: View {
     var onQuickSendSent: (() -> Void)? = nil
     /// simplesend noch nicht freigeschaltet → Klick öffnet Upsell statt Drawer.
     var quickSendNeedsUnlock: Bool = false
+
+    // MARK: Dokument-Drop (Rechnung aufs Flyout ziehen)
+    /// Aus einem gedroppten PDF/Bild erkannte Überweisungsdaten — werden an den
+    /// Quick-Send-Drawer durchgereicht.
+    @State private var droppedPrefill: TransferClipboardParser.Parsed? = nil
+    @State private var isDocumentDropTargeted = false
+    @State private var isScanningDroppedDocument = false
+    @State private var droppedScanFailed = false
+
+    /// Nimmt eine gedroppte Rechnung an: Textebene bzw. On-device-OCR → Parser →
+    /// Quick-Send-Drawer öffnen und vorbefüllen.
+    private func handleFlyoutDocumentDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard quickSendAvailable, !quickSendNeedsUnlock, let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url, TransferDocumentScanner.isSupported(url) else { return }
+            Task { @MainActor in
+                isScanningDroppedDocument = true
+                let text = await TransferDocumentScanner.extractText(from: url)
+                let parsed = text.map(TransferClipboardParser.parse)
+                isScanningDroppedDocument = false
+                if let parsed, parsed.isUseful {
+                    droppedPrefill = parsed
+                    if !showSend {          // Drawer aufklappen, damit man das Ergebnis sieht
+                        showSend = true
+                        onQuickSendToggle?(true)
+                    }
+                } else {
+                    droppedScanFailed = true
+                    try? await Task.sleep(for: .seconds(3))
+                    droppedScanFailed = false
+                }
+            }
+        }
+        return true
+    }
+
+    @ViewBuilder
+    private var documentDropOverlay: some View {
+        if isDocumentDropTargeted || isScanningDroppedDocument || droppedScanFailed {
+            let failed = droppedScanFailed
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(failed ? Color.sbOrangeStrong : Color.sbBlueStrong,
+                                  style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .background(RoundedRectangle(cornerRadius: 12)
+                        .fill((failed ? Color.sbOrangeSoft : Color.sbBlueSoft).opacity(0.6)))
+                VStack(spacing: 6) {
+                    if isScanningDroppedDocument {
+                        ProgressView().controlSize(.small)
+                        Text(L10n.t("Rechnung wird gelesen …", "Reading invoice …"))
+                    } else if failed {
+                        Image(systemName: "doc.questionmark").font(.system(size: 22, weight: .light))
+                        Text(L10n.t("Keine Überweisungsdaten gefunden.", "No transfer details found."))
+                    } else {
+                        Image(systemName: "doc.text.viewfinder").font(.system(size: 22, weight: .light))
+                        Text(L10n.t("Rechnung ablegen", "Drop invoice"))
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundColor(failed ? .sbOrangeStrong : .sbBlueStrong)
+                .padding(.horizontal, 12)
+            }
+            .padding(6)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
     var onQuickSendUpsell: (() -> Void)? = nil
     var onQuickSendAddTemplate: (() -> Void)? = nil
     @State private var showSend: Bool = false
@@ -7067,9 +7158,9 @@ private struct StatusBalanceFlyoutCardView: View {
     /// (Prototyp 4b): kein Außen-Padding, Wash bis an die Flyout-Kanten. Andere
     /// Karten (Roundup/REWE/Unified/Legacy) behalten ihr klassisches Inset-Layout.
     private var bleedDefaultCard: Bool {
-        // Money-Heat-Karten (Default + Unified) UND Händler-Karten (Marken-Wash)
-        // bekommen den randlosen Verlauf.
-        !roundupView.isActive && (reweMode || isDefaultTheme || unifiedSlots != nil)
+        // Alle Saldo-Karten (Default-Money-Heat, aktive Themes, Händler-Wash, Unified)
+        // sind randlos vollflächig. Nur der Roundup-View behält sein Inset-Layout.
+        !roundupView.isActive
     }
 
     /// Hartgrenze für Quick-Send = Saldo + Dispo-Rahmen (gleiche Logik wie `TransferSheet`).
@@ -7187,10 +7278,10 @@ private struct StatusBalanceFlyoutCardView: View {
                     reweCard
                 } else if unifiedSlots != nil {
                     unifiedCard
-                } else if isDefaultTheme {
-                    defaultThemeCard
                 } else {
-                    legacyCard
+                    // Default = Money-Heat, aktive Themes = flache Theme-Farbe — beide
+                    // über dieselbe randlose Full-Bleed-Geometrie (kein Inset/Rahmen mehr).
+                    defaultThemeCard
                 }
             }
             .padding(.horizontal, bleedDefaultCard ? 0 : 14)
@@ -7203,9 +7294,10 @@ private struct StatusBalanceFlyoutCardView: View {
             // Footer-Zeile: Konto-Pillen (links) + Geld-senden (rechtsbündig, kleiner
             // Randabstand). Der adaptive Segmented Control (Design „4b") ersetzt die Dots.
             if hasDots, let slots = allSlots {
-                let tint = BalanceSignal.style(
-                    for: BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)
-                ).amountColor
+                // Aktive Pille: bei Theme in Ink-Farbe, sonst Balance-Temperaturfarbe.
+                let tint = isDefaultTheme
+                    ? BalanceSignal.style(for: BalanceSignal.classify(balance: balanceValue, thresholds: thresholds)).amountColor
+                    : Color.themedInk
                 HStack(spacing: 8) {
                     FlyoutSlotSegmentedControl(
                         slots: slots,
@@ -7215,7 +7307,8 @@ private struct StatusBalanceFlyoutCardView: View {
                         colorScheme: activeColorScheme,
                         onSwitch: { onSwitchToIndex?($0) },
                         showUnified: canAggregate,
-                        onActivateUnified: { onActivateUnified?() }
+                        onActivateUnified: { onActivateUnified?() },
+                        soloActiveOnly: quickSendActive && showSend
                     )
                     quickSendToggleButton
                 }
@@ -7243,7 +7336,8 @@ private struct StatusBalanceFlyoutCardView: View {
                         onQuickSendToggle?(false)
                         onQuickSendSent?()
                     },
-                    onAddTemplate: { onQuickSendAddTemplate?() }
+                    onAddTemplate: { onQuickSendAddTemplate?() },
+                    prefill: droppedPrefill
                 )
                 .frame(height: QuickSendDrawerView.totalDrawerHeight, alignment: .top)
                 .disabled(!showSend)
@@ -7267,7 +7361,16 @@ private struct StatusBalanceFlyoutCardView: View {
             .frame(maxHeight: .infinity)
             .overlay(alignment: .top) { flyoutColumn }
             .clipped()
-            .background(roundupView.isActive ? Color.roundupPanelBackground : Color.panelBackground)
+            // Bei aktivem Theme füllt die flache Theme-Farbe auch Footer/Kanten (sonst
+            // blitzt am unteren Rand die Default-Panelfarbe durch → „Rahmen").
+            .background(roundupView.isActive ? Color.roundupPanelBackground
+                        : (isDefaultTheme ? Color.panelBackground : Color.themedSurface))
+            // Das GANZE Flyout ist Drop-Zone: Rechnung (PDF/Bild) darauf ziehen →
+            // Textebene/OCR → Quick-Send-Drawer öffnet sich vorbefüllt.
+            .onDrop(of: [.fileURL], isTargeted: $isDocumentDropTargeted) { providers in
+                handleFlyoutDocumentDrop(providers)
+            }
+            .overlay { documentDropOverlay }
             .preferredColorScheme(forcedColorScheme)
             .onHover { hovering in onHoverChanged?(hovering) }
     }
@@ -7475,7 +7578,20 @@ private struct StatusBalanceFlyoutCardView: View {
         let displayBalance = balanceValue == nil ? "--,-- €" : effectiveBalanceText
         let dark = activeColorScheme == .dark
         let wash = washColors(level: level, style: style, dark: dark)
-        let nameColor: Color = dark ? Color(NSColor.labelColor) : (Color(hex: "1d1d1f") ?? .primary)
+        // Aktives Theme (nicht Default): Money-Heat AUS → flache Theme-Fläche + Ink +
+        // Theme-Schrift. Default: unveränderte Money-Heat.
+        let themed = !isDefaultTheme
+        let fillTop:    Color = themed ? .themedSurface : wash.top
+        let fillBottom: Color = themed ? .themedSurface : wash.bottom
+        let balanceColor: Color = themed ? .themedInk : wash.balance
+        let detailColor:  Color = themed ? Color.themedInk.opacity(0.72) : wash.detail
+        let nameColor: Color = themed ? .themedInk
+            : (dark ? Color(NSColor.labelColor) : (Color(hex: "1d1d1f") ?? .primary))
+        let balanceFont: Font = themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
+                                        : .system(size: 38, weight: .bold, design: .default)
+        let nameFont: Font = themed ? ThemeFonts.flyoutHeading(size: 14, weight: .semibold)
+                                     : .system(size: 14, weight: .semibold)
+        let timeFont: Font = themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 13)
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
@@ -7494,64 +7610,33 @@ private struct StatusBalanceFlyoutCardView: View {
                 } else {
                     Image(systemName: "wallet.pass")
                         .font(.system(size: 16))
-                        .foregroundColor(wash.detail)
+                        .foregroundColor(detailColor)
                 }
-                (Text(headerNameOnly).font(.system(size: 14, weight: .semibold)).foregroundColor(nameColor)
-                 + Text(headerTimeSuffix(balanceFetchedAt)).font(.system(size: 13)).foregroundColor(wash.detail))
+                (Text(headerNameOnly).font(nameFont).foregroundColor(nameColor)
+                 + Text(headerTimeSuffix(balanceFetchedAt)).font(timeFont).foregroundColor(detailColor))
                     .lineLimit(1)
                 Spacer()
             }
 
             Text(displayBalance)
-                .font(.system(size: 38, weight: .bold, design: .default))
+                .font(balanceFont)
                 .tracking(-0.6)
-                .foregroundColor(wash.balance)
+                .foregroundColor(balanceColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            if isPayPalCard { paypalSubtitle(detail: wash.detail) } else { leftToPaySubtitle }
+            if isPayPalCard { paypalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 16)
-        // Randlos: Wash füllt die Karte bis an die Flyout-Kanten (Popover rundet die
+        // Randlos: Fläche füllt die Karte bis an die Flyout-Kanten (Popover rundet die
         // Ecken). Im Einzelkonto-Modus füllt die Karte die gesamte Popover-Höhe.
         .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            LinearGradient(colors: [wash.top, wash.bottom],
+            LinearGradient(colors: [fillTop, fillBottom],
                            startPoint: .topTrailing, endPoint: .bottomLeading)
-        )
-    }
-
-    private var legacyCard: some View {
-        let displayBalance = balanceValue == nil ? "--,-- €" : effectiveBalanceText
-        let balColor: Color = (balanceValue ?? 0) < 0 ? .expenseRed : ((balanceValue ?? 0) > 0 ? .incomeGreen : .primary)
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "creditcard")
-                    .font(.system(size: 16))
-                    .foregroundColor(.secondary)
-                Text(formatBankHeader(date: balanceFetchedAt))
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-            }
-
-            HStack(alignment: .center, spacing: 12) {
-                Text(displayBalance)
-                    .font(.system(size: 30, weight: .bold, design: .default))
-                    .foregroundColor(balColor)
-                Spacer()
-                if greenZoneRingEnabled {
-                    GreenZoneRing(fraction: greenZoneFraction, balance: balanceValue, dispoLimit: dispoLimit, showDispo: greenZoneShowDispo)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.cardBackground)
         )
     }
 }

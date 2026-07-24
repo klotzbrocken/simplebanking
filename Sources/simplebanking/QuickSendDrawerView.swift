@@ -31,6 +31,9 @@ struct QuickSendDrawerView: View {
     var onClose: (() -> Void)? = nil
     /// „+“ im Vorlagen-Bereich → springt in die Einstellungen (Vorlagen-Editor).
     var onAddTemplate: (() -> Void)? = nil
+    /// Aus einer aufs Flyout gezogenen Rechnung erkannte Daten (PDF-Textebene/OCR).
+    /// Wird beim Eintreffen in die Felder übernommen.
+    var prefill: TransferClipboardParser.Parsed? = nil
 
     @ObservedObject private var favorites = QuickSendFavoritesStore.shared
 
@@ -46,6 +49,12 @@ struct QuickSendDrawerView: View {
 
     /// Läuft gerade ein realer Versand (aus der Confirm-Stufe heraus)?
     @State private var isSending = false
+    /// Empfänger-Vorschläge aus der Umsatzhistorie (Autocomplete).
+    @State private var recipientCandidates: [TransferRecipientCandidate] = []
+    /// Nach einer Auswahl die Liste geschlossen halten, bis der Name wieder editiert wird.
+    @State private var acPicked = false
+    /// Zuletzt per Autocomplete übernommener Name (unterscheidet Pick von Tippen).
+    @State private var lastPickedName: String? = nil
 
     enum Phase: Equatable {
         case idle
@@ -98,7 +107,109 @@ struct QuickSendDrawerView: View {
             .frame(height: Self.contentHeight, alignment: .top)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .task {
+            loadRecipientCandidates()
+            applyClipboardIfEmpty()
+        }
+        // Nach einer Auswahl bleibt die Liste zu; sobald der Nutzer den Namen wieder
+        // ändert, schlagen wir erneut vor.
+        .onChange(of: name) { newValue in
+            if newValue != lastPickedName { acPicked = false }
+        }
+        // Aufs Flyout gezogene Rechnung → Felder übernehmen (überschreibt bewusst,
+        // weil der Drop eine explizite Nutzeraktion ist).
+        .onChange(of: prefill) { newValue in
+            guard let p = newValue else { return }
+            if let i = p.iban { ibanText = QuickSendFormatting.groupIban(i) }
+            if let n = p.name { name = n; lastPickedName = n; acPicked = true }
+            if let a = p.amount { amountInput = QuickSendFormatting.sanitizeAmountInput(a) }
+            if let pu = p.purpose { purpose = pu }
+        }
         .frame(height: Self.totalDrawerHeight)
+    }
+
+    // MARK: Autocomplete (Empfänger aus der Umsatzhistorie)
+
+    /// Treffer nach Name, häufigste zuerst — gleiche Logik wie im großen TransferSheet.
+    private var acMatches: [TransferRecipientCandidate] {
+        let q = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard q.count >= 2, !acPicked else { return [] }
+        return recipientCandidates
+            .filter { $0.creditorName.lowercased().contains(q) }
+            .sorted { $0.frequency > $1.frequency }
+            .prefix(3)
+            .map { $0 }
+    }
+
+    @ViewBuilder
+    private var autocompleteOverlay: some View {
+        if !acMatches.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(acMatches.enumerated()), id: \.offset) { _, c in
+                    Button { pickCandidate(c) } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(c.creditorName)
+                                .font(.system(size: 11.5, weight: .medium))
+                                .lineLimit(1)
+                            Text(QuickSendFormatting.maskedIban(c.creditorIban))
+                                .font(.system(size: 10).monospacedDigit())
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.sbSurface))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.sbBorder, lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.16), radius: 6, y: 3)
+            .offset(y: 33)
+        }
+    }
+
+    /// Übernimmt Name + IBAN und schlägt Betrag/Zweck aus der Historie vor.
+    private func pickCandidate(_ c: TransferRecipientCandidate) {
+        name = c.creditorName
+        ibanText = QuickSendFormatting.groupIban(c.creditorIban)
+        if amountInput.trimmingCharacters(in: .whitespaces).isEmpty, let a = c.mostFrequentAmount {
+            let value = NSDecimalNumber(decimal: a).doubleValue
+            amountInput = QuickSendFormatting.sanitizeAmountInput(
+                String(format: "%.2f", value).replacingOccurrences(of: ".", with: ",")
+            )
+        }
+        if purpose.trimmingCharacters(in: .whitespaces).isEmpty,
+           let last = c.lastRemittance?.trimmingCharacters(in: .whitespacesAndNewlines), !last.isEmpty {
+            purpose = last
+        }
+        lastPickedName = c.creditorName
+        acPicked = true   // Liste schließen, bis der Nutzer den Namen wieder ändert
+    }
+
+    private func loadRecipientCandidates() {
+        let bankId = UserDefaults.standard.bool(forKey: "demoMode") ? "demo" : "primary"
+        recipientCandidates = (try? TransferRecipientStore.loadCandidates(
+            slotId: sourceSlotId, bankId: bankId
+        )) ?? []
+    }
+
+    /// Übernimmt Überweisungsdaten aus der Zwischenablage (Name/IBAN/Betrag/Zweck —
+    /// auch als zusammenhängend kopierter Block). Bewusst konservativ: nur beim
+    /// Öffnen, nur wenn das Formular NOCH LEER ist und eine gültige IBAN erkannt
+    /// wurde — sonst würde die Zwischenablage ungefragt ins Zahlungsformular tropfen.
+    private func applyClipboardIfEmpty() {
+        guard name.isEmpty, ibanText.isEmpty, amountInput.isEmpty, purpose.isEmpty else { return }
+        guard let raw = NSPasteboard.general.string(forType: .string) else { return }
+        let parsed = TransferClipboardParser.parse(raw)
+        guard let detectedIban = parsed.iban else { return }
+
+        ibanText = QuickSendFormatting.groupIban(detectedIban)
+        if let n = parsed.name { name = n }
+        if let a = parsed.amount { amountInput = QuickSendFormatting.sanitizeAmountInput(a) }
+        if let p = parsed.purpose { purpose = p }
     }
 
     // MARK: Form
@@ -114,6 +225,8 @@ struct QuickSendDrawerView: View {
                     .frame(height: 30)
                     .frame(maxWidth: .infinity)
                     .background(fieldBackground())
+                    // Autocomplete aus der Umsatzhistorie — wie im großen TransferSheet.
+                    .overlay(alignment: .topLeading) { autocompleteOverlay }
 
                 HStack(spacing: 4) {
                     TextField(L10n.t("Betrag", "Amount"), text: $amountInput)
@@ -137,6 +250,9 @@ struct QuickSendDrawerView: View {
                          ? L10n.t("Betrag übersteigt den verfügbaren Rahmen", "Amount exceeds available limit")
                          : ""))
             }
+            // Die Vorschlagsliste ragt über die Zeile hinaus — der zIndex muss an die
+            // ZEILE (Geschwister im VStack), sonst übermalen IBAN/Betreff sie.
+            .zIndex(10)
 
             // Reihe 2: IBAN + grüner Haken
             HStack(spacing: 8) {

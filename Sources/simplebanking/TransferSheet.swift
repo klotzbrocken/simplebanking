@@ -66,6 +66,11 @@ struct TransferSheet: View {
     // Clipboard-IBAN-Hinweis: erkannte IBAN aus Pasteboard, wird als
     // dismissable Banner gezeigt solange iban-Feld leer ist.
     @State private var clipboardIbanCandidate: String? = nil
+    /// Vollständig geparste Zwischenablage/OCR-Daten (Name, IBAN, Betrag, Zweck).
+    @State private var clipboardParsed: TransferClipboardParser.Parsed? = nil
+    @State private var isDropTargeted = false
+    @State private var isScanningDocument = false
+    @State private var documentScanFailed = false
 
     // Sendeverzögerung
     @State private var delayRemaining: Int = 0
@@ -303,6 +308,12 @@ struct TransferSheet: View {
         .frame(width: 480)
         .frame(maxHeight: .infinity)
         .background(Color.panelBackground)
+        // Drop-Zone: PDF/Bild einer Rechnung ablegen → Textebene bzw. On-device-OCR
+        // → dieselbe Erkennung wie bei der Zwischenablage.
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDocumentDrop(providers)
+        }
+        .overlay { documentDropOverlay }
         .task { await loadInitial() }
         .onChange(of: ibanClean) { _, _ in
             schedulePreviewBank()
@@ -342,8 +353,8 @@ struct TransferSheet: View {
                 if prefill != nil {
                     assistantBadge
                 }
-                if let candidate = clipboardIbanCandidate, ibanClean.isEmpty {
-                    clipboardIbanBanner(candidate: candidate)
+                if let parsed = clipboardParsed, parsed.isUseful, ibanClean.isEmpty {
+                    clipboardBanner(parsed: parsed)
                 }
                 empfaengerSection
                 betragSection
@@ -362,29 +373,108 @@ struct TransferSheet: View {
         }
     }
 
-    private func clipboardIbanBanner(candidate: String) -> some View {
-        let formatted = formatIbanGroups(candidate)
+    // MARK: - Dokument-Drop (PDF/Bild → Text/OCR → Felder)
+
+    @ViewBuilder
+    private var documentDropOverlay: some View {
+        if isDropTargeted || isScanningDocument || documentScanFailed {
+            let failed = documentScanFailed
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(failed ? Color.sbOrangeStrong : Color.sbBlueStrong,
+                                  style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .background(RoundedRectangle(cornerRadius: 10)
+                        .fill((failed ? Color.sbOrangeSoft : Color.sbBlueSoft).opacity(0.55)))
+                VStack(spacing: 6) {
+                    if isScanningDocument {
+                        ProgressView().controlSize(.small)
+                        Text(L10n.t("Beleg wird gelesen …", "Reading document …"))
+                    } else if failed {
+                        Image(systemName: "doc.questionmark").font(.system(size: 26, weight: .light))
+                        Text(L10n.t("Keine Überweisungsdaten im Beleg gefunden.",
+                                    "No transfer details found in the document."))
+                    } else {
+                        Image(systemName: "doc.text.viewfinder").font(.system(size: 26, weight: .light))
+                        Text(L10n.t("Rechnung (PDF oder Bild) hier ablegen",
+                                    "Drop an invoice (PDF or image) here"))
+                    }
+                }
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(failed ? .sbOrangeStrong : .sbBlueStrong)
+            }
+            .padding(8)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
+    }
+
+    private func handleDocumentDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url, TransferDocumentScanner.isSupported(url) else { return }
+            Task { @MainActor in
+                isScanningDocument = true
+                let text = await TransferDocumentScanner.extractText(from: url)
+                let parsed = text.map(TransferClipboardParser.parse)
+                isScanningDocument = false
+                if let parsed, parsed.isUseful {
+                    // Gleicher Bestätigungsschritt wie bei der Zwischenablage —
+                    // nie ungefragt in die Felder schreiben.
+                    clipboardParsed = parsed
+                } else {
+                    documentScanFailed = true
+                    try? await Task.sleep(for: .seconds(3))
+                    documentScanFailed = false
+                }
+            }
+        }
+        return true
+    }
+
+    /// Übernimmt die erkannten Felder — überschreibt nur, was der Nutzer noch nicht
+    /// selbst ausgefüllt hat (IBAN ausgenommen: die ist der Anker der Erkennung).
+    private func applyParsedClipboard(_ p: TransferClipboardParser.Parsed) {
+        if let n = p.name, name.trimmingCharacters(in: .whitespaces).isEmpty { name = n }
+        if let i = p.iban { iban = formatIbanGroups(i); ibanTouched = true }
+        if let a = p.amount, amountInput.trimmingCharacters(in: .whitespaces).isEmpty {
+            amountInput = QuickSendFormatting.sanitizeAmountInput(a)
+        }
+        if let pu = p.purpose, purpose.trimmingCharacters(in: .whitespaces).isEmpty { purpose = pu }
+        clipboardParsed = nil
+        clipboardIbanCandidate = nil
+    }
+
+    /// Banner für erkannte Überweisungsdaten aus der Zwischenablage (oder einem
+    /// gedroppten PDF/Bild via OCR). Übernimmt ALLE erkannten Felder auf einmal.
+    private func clipboardBanner(parsed: TransferClipboardParser.Parsed) -> some View {
+        let formattedIban = parsed.iban.map(formatIbanGroups)
+        // Kurzfassung dessen, was erkannt wurde — damit klar ist, was eingefügt wird.
+        var parts: [String] = []
+        if let n = parsed.name { parts.append(n) }
+        if let f = formattedIban { parts.append(shortIbanFormatted(f)) }
+        if let a = parsed.amount { parts.append("\(a) €") }
+        if let p = parsed.purpose { parts.append(p) }
+        let summary = parts.joined(separator: " · ")
+        let multi = parts.count > 1
+
         return HStack(spacing: 10) {
             Image(systemName: "doc.on.clipboard")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.sbBlueStrong)
             VStack(alignment: .leading, spacing: 1) {
-                Text(L10n.t("IBAN aus Zwischenablage erkannt",
-                            "IBAN detected on clipboard"))
+                Text(multi
+                     ? L10n.t("Überweisungsdaten erkannt", "Transfer details detected")
+                     : L10n.t("IBAN aus Zwischenablage erkannt", "IBAN detected on clipboard"))
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundColor(.sbTextPrimary)
-                Text(shortIbanFormatted(formatted))
+                Text(summary)
                     .font(.system(size: 10.5).monospacedDigit())
                     .foregroundColor(.sbTextSecondary)
                     .lineLimit(1)
             }
             Spacer()
-            Button(action: {
-                iban = formatted
-                ibanTouched = true
-                clipboardIbanCandidate = nil
-            }) {
-                Text(L10n.t("Einfügen", "Paste"))
+            Button(action: { applyParsedClipboard(parsed) }) {
+                Text(multi ? L10n.t("Alles einfügen", "Paste all") : L10n.t("Einfügen", "Paste"))
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
@@ -392,7 +482,7 @@ struct TransferSheet: View {
                     .background(Capsule().fill(Color.sbBlueStrong))
             }
             .buttonStyle(.plain)
-            Button(action: { clipboardIbanCandidate = nil }) {
+            Button(action: { clipboardParsed = nil; clipboardIbanCandidate = nil }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.sbTextSecondary.opacity(0.6))
@@ -1557,6 +1647,21 @@ struct TransferSheet: View {
         iban = formatIbanGroups(c.creditorIban)
         ibanTouched = true     // gefüllter Wert ist per Definition gültig
         nameFocused = false    // blurrt; User kann zum Betrag tabben
+        // Häufigsten Betrag + letzten Verwendungszweck mit anbieten (werden von
+        // `loadOutgoingRecipientCandidates` ohnehin geliefert). Nur füllen, wenn der
+        // Nutzer die Felder noch nicht selbst angefasst hat — nie überschreiben.
+        if amountInput.trimmingCharacters(in: .whitespaces).isEmpty,
+           let amount = c.mostFrequentAmount {
+            let value = NSDecimalNumber(decimal: amount).doubleValue
+            amountInput = QuickSendFormatting.sanitizeAmountInput(
+                String(format: "%.2f", value).replacingOccurrences(of: ".", with: ",")
+            )
+        }
+        if purpose.trimmingCharacters(in: .whitespaces).isEmpty,
+           let last = c.lastRemittance?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !last.isEmpty {
+            purpose = last
+        }
         // Spec: nach Pick darauf folgender Tab geht zu IBAN, das bereits
         // gefüllt ist; User tabbt erneut zu Amount. Wir lassen die
         // Browser-Default-Tab-Order so wie sie ist.
@@ -1582,12 +1687,18 @@ struct TransferSheet: View {
             slotId: slotId, bankId: bankId
         )) ?? []
         let detectedIban = IbanClipboardScanner.detectIban()
+        // Ganzen Block parsen (Name/IBAN/Betrag/Zweck) — auch wenn alles in einem
+        // Rutsch kopiert wurde. Kein Logging: Pasteboard kann sensibel sein.
+        let parsedClipboard = NSPasteboard.general.string(forType: .string)
+            .map(TransferClipboardParser.parse)
+            .flatMap { $0.isUseful ? $0 : nil }
         await MainActor.run {
             self.allRecipients = loaded
             // Banner nur einblenden wenn der User noch nichts ins IBAN-Feld
             // getippt hat — sonst nervig. detectedIban ist syntaktisch valide.
             if self.ibanClean.isEmpty {
                 self.clipboardIbanCandidate = detectedIban
+                self.clipboardParsed = parsedClipboard
             }
         }
     }

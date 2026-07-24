@@ -281,14 +281,8 @@ private struct TransactionsPanelView: View {
         if isDefaultTheme {
             return moneyHeatListTint
         }
-        // REWE/Legacy-Slots: klassischer Bank-Tint.
-        let style = BankTintStyle(rawValue: bankTintStyleRaw) ?? .soft
-        switch style {
-        case .soft, .cardOnPanel:
-            return BankTintProvider.resolveListTint(roundupViewActive: false) ?? .panelBackground
-        case .sidebar:
-            return .panelBackground
-        }
+        // Aktives Theme (nicht Default): flache Theme-Farbe über die ganze Liste.
+        return .themedSurface
     }
 
     /// Heller Temperatur-Ton (untere Money-Heat-Farbe) für den Listen-Hintergrund,
@@ -620,6 +614,16 @@ private struct TransactionsPanelView: View {
         // Flyout-Look: Temperatur-Wash (randlos) statt Glas-Karte. Ring bleibt (Punkt 3.1).
         let dark = activeColorScheme == .dark
         let wash = BalanceWash.colors(level: level, style: style, dark: dark)
+        // Aktives Theme (nicht Default): Money-Heat AUS → flache Theme-Fläche + Ink + Font.
+        let themed = !isDefaultTheme
+        let fillTop:    Color = themed ? .themedSurface : wash.top
+        let fillMid:    Color = themed ? .themedSurface : wash.bottom
+        let balanceColor: Color = themed ? .themedInk : wash.balance
+        let detailColor:  Color = themed ? Color.themedInk.opacity(0.72) : wash.detail
+        let headerColor:  Color = themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor)
+        let balanceFont: Font = themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
+                                        : .system(size: 38, weight: .bold, design: .default)
+        let headerFont:  Font = themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 13)
 
         let balanceBrand = BankLogoAssets.resolve(displayName: vm.connectedBankDisplayName,
                                                    logoID: vm.connectedBankLogoID,
@@ -647,26 +651,26 @@ private struct TransactionsPanelView: View {
                 } else {
                     Image(systemName: "wallet.pass")
                         .font(.system(size: 16))
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .foregroundColor(detailColor)
                 }
                 Text(formatBankHeader(
                     nickname: vm.connectedBankNickname,
                     bankName: headerName,
                     date: vm.currentBalanceFetchedAt
                 ))
-                    .font(.system(size: 13))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .font(headerFont)
+                    .foregroundColor(headerColor)
                 Spacer()
             }
 
             Text(displayBalance)
-                .font(.system(size: 38, weight: .bold, design: .default))
+                .font(balanceFont)
                 .tracking(-0.6)
-                .foregroundColor(wash.balance)
+                .foregroundColor(balanceColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            if isPayPal { panelPayPalSubtitle(detail: wash.detail) } else { leftToPaySubtitle }
+            if isPayPal { panelPayPalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -699,14 +703,15 @@ private struct TransactionsPanelView: View {
         .padding(.horizontal, 16)
         .padding(.top, 16)
         .padding(.bottom, 8)
-        // Randlose Money-Heat bis an ALLE Fensterkanten — oben hinter der Titelleiste
+        // Randlose Fläche bis an ALLE Fensterkanten — oben hinter der Titelleiste
         // (Ampel/Icons sitzen darauf). Unten läuft sie als 3-Stop-Verlauf weich in den
         // Listen-Hintergrund aus → fließender Übergang zur Umsatzliste (kein harter Rand).
+        // Bei aktivem Theme sind alle Stops die flache Theme-Farbe.
         .background(
             LinearGradient(
                 stops: [
-                    .init(color: wash.top, location: 0.0),
-                    .init(color: wash.bottom, location: 0.52),
+                    .init(color: fillTop, location: 0.0),
+                    .init(color: fillMid, location: 0.52),
                     .init(color: activePanelBg, location: 1.0)
                 ],
                 startPoint: .top, endPoint: .bottom
@@ -1016,36 +1021,6 @@ private struct TransactionsPanelView: View {
         .padding(.horizontal, 12).padding(.vertical, 9)
     }
 
-    private var legacyBalanceCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "creditcard")
-                    .font(.system(size: 16))
-                    .foregroundColor(.secondary)
-                Text(formatBankHeader(
-                    nickname: vm.connectedBankNickname,
-                    bankName: vm.connectedBankDisplayName,
-                    date: vm.currentBalanceFetchedAt
-                ))
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-            }
-
-            if let balance = vm.currentBalance {
-                let balanceValue = AmountParser.parseCurrencyDisplay(balance)
-                Text(balance)
-                    .font(.system(size: 32, weight: .bold, design: .default))
-                    .foregroundColor(balanceValue < 0 ? .expenseRed : (balanceValue > 0 ? .incomeGreen : .primary))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.cardBackground)
-        )
-    }
-    
     @ViewBuilder
     private func bankNavLogoView(_ logo: NSImage?, brandId: String?, chevron: String) -> some View {
         HStack(alignment: .center, spacing: 3) {
@@ -1429,9 +1404,16 @@ private struct TransactionsPanelView: View {
     /// Konto-Umschalter als Logo-Pillen (wie im Flyout): aktive gefüllte Pille + kleinere
     /// Logo-Pillen; „Alle Konten" als kleine Icon-Pille (nur bei ≥2 echten Konten).
     private var accountDotsBar: some View {
-        let tint = headerTint
-        let activeFill = activeColorScheme == .dark ? Color.white.opacity(0.16) : Color.white
-        let inactiveFill = activeColorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
+        // Bei aktivem Theme folgen Pillen + Text der Theme-Fläche (statt Weiß, das auf
+        // der flachen Theme-Farbe fremd wirkt) — analog zum Flyout.
+        let themed = !isDefaultTheme
+        let tint = themed ? Color.themedInk : headerTint
+        let activeFill = themed
+            ? Color.themedInk.opacity(activeColorScheme == .dark ? 0.30 : 0.18)
+            : (activeColorScheme == .dark ? Color.white.opacity(0.16) : Color.white)
+        let inactiveFill = themed
+            ? Color.themedInk.opacity(0.08)
+            : (activeColorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
         return HStack(spacing: 6) {
             ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
                 let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
@@ -1485,20 +1467,18 @@ private struct TransactionsPanelView: View {
                     RoundupSavingsCard(compact: false)
                 } else if vm.isUnifiedMode {
                     unifiedBalanceCard
-                } else if isDefaultTheme {
-                    defaultThemeBalanceCard
                 } else {
-                    legacyBalanceCard
+                    // Default = Money-Heat, aktive Themes = flache Theme-Farbe — beide
+                    // randlos über dieselbe Geometrie (kein Inset/Rahmen bei Themes mehr).
+                    defaultThemeBalanceCard
                 }
             }
             .rippleEffect(trigger: vm.rippleTrigger,
                           defaultOrigin: CGPoint(x: 190, y: 65))
-            // Randloser Wash (0 Außen-Padding, Wash bis an die Fensterkanten) für die
-            // Money-Heat-Bankkarte UND die Händler-Marken-Karte — beide müssen sich
-            // exakt gleich verankern, sonst springt der Inhalt beim Wechsel. Nur
-            // Roundup/Legacy behalten die 16/-9-Inset-Variante.
-            .padding(.horizontal, (!roundupView.isActive && (receiptActive || isDefaultTheme || vm.isUnifiedMode)) ? 0 : 16)
-            .padding(.top, (!roundupView.isActive && (receiptActive || isDefaultTheme || vm.isUnifiedMode)) ? 0 : -9)
+            // Randlos (0 Außen-Padding) für alle Saldo-/Marken-Karten; nur Roundup
+            // behält das 16/-9-Inset-Layout.
+            .padding(.horizontal, !roundupView.isActive ? 0 : 16)
+            .padding(.top, !roundupView.isActive ? 0 : -9)
             .padding(.bottom, multibankingStore.slots.count > 1 ? 4 : 6)
 
             // Account dot indicators — slot dots + "Alle Konten" dot. Eigene Zeile in
