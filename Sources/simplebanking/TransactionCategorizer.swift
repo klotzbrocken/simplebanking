@@ -104,16 +104,55 @@ enum TransactionCategorizer {
 
     private struct Rule {
         let category: TransactionCategory
-        let keywords: [String]
+        /// Deutsche Wortstämme — Treffer am Wortanfang genügt, damit Komposita greifen
+        /// („versicherung" → „Versicherungsbeitrag", „miete" → „Mietvertrag").
+        let generic: [String]
+        /// Markennamen — nur als ganzes Wort. Marken stehen im Verwendungszweck
+        /// immer als eigenes Token, nie als Wortbestandteil.
+        let merchants: [String]
+
+        init(category: TransactionCategory, generic: [String], merchants: [String] = []) {
+            self.category = category
+            self.generic = generic
+            self.merchants = merchants
+        }
+
+        /// Fallback-Regeln (ohne generic/merchant-Trennung) behalten das Wortstamm-Verhalten.
+        init(category: TransactionCategory, keywords: [String]) {
+            self.init(category: category, generic: keywords)
+        }
 
         func matches(haystack: String) -> Bool {
-            for keyword in keywords where !keyword.isEmpty {
-                if haystack.contains(keyword) {
-                    return true
-                }
+            for keyword in generic where !keyword.isEmpty {
+                // Kurze Stämme sind Abkürzungen, keine Kompositum-Wurzeln („gas", „kfz",
+                // „auto", „abo") — sie brauchen dieselbe volle Wortgrenze wie Marken,
+                // sonst wird „Gaststätte" zu Energiekosten und „automatisch" zu Mobilität.
+                let hit = keyword.count <= 4
+                    ? TransactionCategorizer.matchesAsWord(haystack, keyword)
+                    : TransactionCategorizer.matchesAtWordStart(haystack, keyword)
+                if hit { return true }
+            }
+            for keyword in merchants where !keyword.isEmpty {
+                if TransactionCategorizer.matchesAsWord(haystack, keyword) { return true }
             }
             return false
         }
+    }
+
+    /// Treffer nur am WORTANFANG — Wortende bleibt offen (Komposita).
+    static func matchesAtWordStart(_ haystack: String, _ needle: String) -> Bool {
+        WordMatch.atWordStart(haystack, needle)
+    }
+
+    /// Treffer nur als GANZES WORT.
+    ///
+    /// Ersetzt das frühere blanke `contains`, an dem kurze Tokens mitten in längeren
+    /// Wörtern zündeten. Real beobachtet: eine PayPal-Lastschrift mit Verwendungszweck
+    /// „J.P. Morgan Mobility Payments Solutions" wurde als Baumarkt-Einkauf verbucht,
+    /// weil „obi" in „M-obi-lity" steckt. Weil `normalize()` zusätzlich Diakritika
+    /// faltet, traf „uber" auch jedes „Überweisung".
+    static func matchesAsWord(_ haystack: String, _ needle: String) -> Bool {
+        WordMatch.asWord(haystack, needle)
     }
 
     private static let categoryOrder: [String] = [
@@ -366,7 +405,11 @@ enum TransactionCategorizer {
             return resourceURL
         }
 
-        return nil
+        // SPM-Resource-Bundle. Im App-Bundle greift schon `Bundle.main`; hier zählt der
+        // Testprozess, dessen `Bundle.main` der xctest-Runner ist — ohne diesen Zweig
+        // fiele die Kategorisierung in Tests still auf `fallbackRules` zurück und
+        // Regressionen im echten Keyword-Katalog blieben unentdeckt.
+        return Bundle.module.url(forResource: "categories_de", withExtension: "json")
     }
 
     private static func loadRulesFromJSON(at url: URL) -> [Rule]? {
@@ -385,12 +428,15 @@ enum TransactionCategorizer {
                 continue
             }
 
-            let words = ((entry.keywords.generic ?? []) + (entry.keywords.merchants ?? []))
-                .map(normalizeKeyword)
-                .filter { !$0.isEmpty }
+            // generic und merchants bleiben getrennt: Wortstämme dürfen in Komposita
+            // greifen, Markennamen nur als ganzes Wort (siehe `Rule.matches`).
+            let generic = (entry.keywords.generic ?? []).map(normalizeKeyword).filter { !$0.isEmpty }
+            let merchants = (entry.keywords.merchants ?? []).map(normalizeKeyword).filter { !$0.isEmpty }
 
-            guard !words.isEmpty else { continue }
-            loadedRules.append(Rule(category: category, keywords: Array(Set(words))))
+            guard !generic.isEmpty || !merchants.isEmpty else { continue }
+            loadedRules.append(Rule(category: category,
+                                    generic: Array(Set(generic)),
+                                    merchants: Array(Set(merchants))))
         }
 
         return loadedRules.isEmpty ? nil : loadedRules

@@ -426,6 +426,14 @@ enum TransactionsDatabase {
                 """)
             try db.execute(sql: "CREATE INDEX IF NOT EXISTS idx_rewe_receipts_slot ON rewe_receipts(slot_id, timestamp)")
         }
+        migrator.registerMigration("v25_recompute_merchant_word_boundaries") { db in
+            // Die Alias-Auflösung matchte bis 4b256b3 (2026-06-18) per blankem `contains`:
+            // „obi" traf in „J.P. Morgan Mobility Payments", „otto" in „Lotto24". Seitdem
+            // prüft `MerchantResolver.canonicalMerchant` Wortgrenzen — aber `effective_merchant`
+            // wird beim Import persistiert, und die letzte Recompute-Migration (v11) ist älter
+            // als der Fix. Alle vorher importierten Buchungen tragen den falschen Namen bis heute.
+            try backfillMerchantColumns(db: db)
+        }
         return migrator
     }
 
