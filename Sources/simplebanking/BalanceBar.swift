@@ -3792,7 +3792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Vom Drawer-Toggle gerufen — fährt die aktive Flyout-Präsentation hoch/runter.
     fileprivate func setFlyoutQuickSendOpen(_ open: Bool) {
         flyoutQuickSendOpen = open
-        let hasDots = MultibankingStore.shared.slots.count >= 1 && (!demoMode || isMultiDemo)
+        let hasDots = flyoutHasDots
         let size = flyoutContentSize(hasDots: hasDots)
         if let popover = balancePopover, popover.isShown {
             // Solange der Drawer offen ist, bleibt das Flyout offen+aktiv, damit man
@@ -4224,7 +4224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
         applyQuickSendWiring(to: &rootView)
-        let hasDots = MultibankingStore.shared.slots.count >= 1 && (!demoMode || isMultiDemo)
+        let hasDots = flyoutHasDots
         let host = NSHostingController(rootView: rootView)
         host.view.wantsLayer = true
         host.view.layer?.backgroundColor = BankTintProvider.currentTintNSColor()?.cgColor
@@ -4559,7 +4559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
         applyQuickSendWiring(to: &rootView)
-        let hasDots = store.slots.count >= 1 && (!demoMode || isMultiDemo)
+        let hasDots = flyoutHasDots
         let newSize = flyoutContentSize(hasDots: hasDots)
 
         if let popover = balancePopover, popover.isShown {
@@ -4603,10 +4603,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// EINZIGE Quelle für „das Flyout hat eine Footer-Zeile" (Konto-Pillen +
+    /// Papierflieger). Host-Größe und View-Rendering MÜSSEN dieselbe Bedingung nutzen —
+    /// sonst dimensioniert der Host das Popover kleiner als die View zeichnet und der
+    /// Footer wird samt Senden-Button abgeschnitten (unterer Rand „fehlt").
+    private var flyoutHasDots: Bool { MultibankingStore.shared.slots.count >= 1 }
+
     /// Populates dot-indicator data on a flyout rootView.
     private func applyFlyoutDots(to rootView: inout StatusBalanceFlyoutCardView) {
         let store = MultibankingStore.shared
-        guard store.slots.count >= 1, (!demoMode || isMultiDemo) else { return }
+        // Früher zusätzlich `(!demoMode || isMultiDemo)`: im Single-Bank-Demo blieb
+        // `allSlots` dadurch nil → `hasDots` false → die komplette Footer-Zeile fehlte,
+        // inklusive Papierflieger. Damit war Simplesend im Demo-Flyout unerreichbar.
+        // Demo verhält sich jetzt wie eine echte Einzelbank (eine aktive Pille + Senden).
+        guard store.slots.count >= 1 else { return }
         rootView.allSlots = computeFlyoutSlots()
         rootView.activeSlotIndex = store.activeIndex
         rootView.isUnifiedMode = txVM.isUnifiedMode
