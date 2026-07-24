@@ -1614,9 +1614,20 @@ private struct TransactionsPanelView: View {
                         .foregroundColor(.expenseRed)
                     Spacer(minLength: 0)
                     Button {
-                        Task { await onRefresh() }
+                        // Bei abgelehnten Zugangsdaten wäre ein weiterer Abruf nur der
+                        // nächste Fehlversuch bei der Bank — hier führt der Weg zum
+                        // Zugangsdaten-Dialog statt zu einem erneuten Login.
+                        if vm.errorNeedsCredentialUpdate {
+                            NotificationCenter.default.post(name: .changeBankCredentials, object: nil)
+                        } else {
+                            Task { await onRefresh() }
+                        }
                     } label: {
-                        if vm.errorNeedsReconnect {
+                        if vm.errorNeedsCredentialUpdate {
+                            Text(L10n.t("Zugangsdaten aktualisieren", "Update credentials"))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.expenseRed)
+                        } else if vm.errorNeedsReconnect {
                             Text(L10n.t("Erneut verbinden", "Reconnect"))
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.expenseRed)
@@ -1627,9 +1638,11 @@ private struct TransactionsPanelView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .help(vm.errorNeedsReconnect
-                          ? L10n.t("Erneut verbinden und Freigabe bestätigen", "Reconnect and confirm authorization")
-                          : L10n.t("Aktualisieren", "Refresh"))
+                    .help(vm.errorNeedsCredentialUpdate
+                          ? L10n.t("Neuen Anmeldenamen / neue PIN hinterlegen", "Store new login name / PIN")
+                          : vm.errorNeedsReconnect
+                            ? L10n.t("Erneut verbinden und Freigabe bestätigen", "Reconnect and confirm authorization")
+                            : L10n.t("Aktualisieren", "Refresh"))
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)

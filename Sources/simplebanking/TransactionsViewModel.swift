@@ -40,6 +40,10 @@ final class TransactionsViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var error: String? = nil
     @Published var errorNeedsReconnect: Bool = false
+    /// Die Bank hat die gespeicherten Zugangsdaten abgelehnt. Ein weiterer Abruf
+    /// würde nur den nächsten Fehlversuch produzieren — die Fehlerzeile bietet
+    /// deshalb „Zugangsdaten aktualisieren" statt „Erneut versuchen".
+    @Published var errorNeedsCredentialUpdate: Bool = false
     @Published var transactions: [TransactionsResponse.Transaction] = [] {
         didSet {
             // Indizes off-main rebuilden (Search-Index, Fixed-Costs, Subscriptions)

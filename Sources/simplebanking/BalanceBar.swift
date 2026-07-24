@@ -348,6 +348,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var masterPassword: String? = nil
     private var locked: Bool = false
 
+    /// Slots, deren gespeicherte Zugangsdaten die Bank zuletzt abgelehnt hat.
+    ///
+    /// Solange ein Slot hier steht, läuft für ihn KEIN automatischer Abruf mehr.
+    /// Ohne diese Bremse probiert der Refresh-Timer nach einem Passwortwechsel bei
+    /// der Bank alle paar Minuten dieselbe falsche PIN — nach drei Fehlversuchen
+    /// sperrt die Bank den Online-Zugang. Genau so ist ein Kunde in die Sperre
+    /// gelaufen. Aufgehoben wird der Stopp nur durch neue Zugangsdaten
+    /// (`changeBankCredentials`) oder einen bewussten manuellen Abruf.
+    private var credentialsRejectedSlotIds: Set<String> = []
+
     /// Incremented on every slot switch. Async tasks capture this at start and bail if it changed.
     private var slotEpoch: Int = 0
     /// Cancellable task for the current slot switch — ensures only the last click wins.
@@ -1234,6 +1244,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Menüleisten-Button neu rendern, damit der Money-Mood-Emoji-Toggle
             // (Settings → Verhalten) sofort wirkt, statt erst beim nächsten Refresh.
             self?.updateMenuBarButton()
+        }
+        NotificationCenter.default.addObserver(forName: .changeBankCredentials, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.changeBankCredentials() }
         }
         NotificationCenter.default.addObserver(forName: .creditLimitToggleChanged, object: nil, queue: .main) { [weak self] _ in
             // Automatischer UI-Refresh (kein User-Sync) → kein eBon-Login-Fenster.
@@ -5159,6 +5172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 txVM.resetPaging()
                 confettiTransactions = txVM.transactions
             } else {
+                noteCredentialRejectionIfNeeded(resp.error ?? resp.userMessage)
                 if cachedTransactions.isEmpty {
                     txVM.transactions = []
                     txVM.error = resp.userMessage ?? resp.error ?? t("Keine Umsatzdaten verfügbar.", "No transaction data available.")
@@ -5173,6 +5187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 txVM.isLoading = false
                 return
             }
+            noteCredentialRejectionIfNeeded(Self.yaxiUserMessage(error) ?? error.localizedDescription)
             if cachedTransactions.isEmpty {
                 txVM.transactions = []
                 let msg = Self.yaxiUserMessage(error) ?? "Fetch failed: \(error.localizedDescription)"
@@ -5183,6 +5198,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 txVM.error = t("Offline, zeige gespeicherte Umsätze", "Offline, showing cached transactions")
                 confettiTransactions = txVM.transactions
             }
+        }
+
+        // Zugangsdaten-Ablehnung gewinnt über jede andere Meldung — auch über
+        // „Offline, zeige gespeicherte Umsätze". Sonst sieht der Nutzer nur einen
+        // harmlosen Offline-Hinweis, während im Hintergrund die Sperre droht.
+        if txVM.errorNeedsCredentialUpdate {
+            txVM.error = t(
+                "Die Bank lehnt die gespeicherten Zugangsdaten ab. Automatischer Abruf gestoppt, damit die Bank den Zugang nicht sperrt.",
+                "The bank rejected the stored credentials. Automatic refresh stopped so the bank does not lock your access."
+            )
         }
 
         txVM.isLoading = false
@@ -6323,17 +6348,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         return formatter.string(from: d)
     }
 
-    nonisolated private static func isLikelyCredentialError(_ message: String) -> Bool {
+    /// Notbremse gegen die Konto-Sperre: lehnt die Bank die gespeicherten
+    /// Zugangsdaten ab, wird der automatische Abruf für diesen Slot gestoppt.
+    /// Ein Timer, der im Minutentakt dieselbe falsche PIN schickt, führt sonst
+    /// binnen weniger Versuche zur Sperrung des Online-Bankings.
+    private func noteCredentialRejectionIfNeeded(_ message: String?) {
+        guard let message, Self.isLikelyCredentialError(message) else { return }
+        let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        txVM.errorNeedsCredentialUpdate = true
+        guard !credentialsRejectedSlotIds.contains(slotId) else { return }
+        credentialsRejectedSlotIds.insert(slotId)
+        timer?.invalidate()
+        timer = nil
+        AppLogger.log(
+            "Zugangsdaten abgelehnt für Slot \(slotId.prefix(8)) — Auto-Refresh gestoppt (Sperrschutz)",
+            category: "Auth", level: "WARN"
+        )
+    }
+
+    /// Hebt den Sperrschutz auf, sobald neue Zugangsdaten hinterlegt wurden.
+    private func clearCredentialRejection(slotId: String) {
+        guard credentialsRejectedSlotIds.remove(slotId) != nil else { return }
+        txVM.errorNeedsCredentialUpdate = false
+        setupRefreshTimer()
+    }
+
+    /// Deutet die Fehlermeldung der Bank auf falsche Zugangsdaten hin?
+    ///
+    /// Kurze bzw. mehrdeutige Tokens werden nur als ganzes Wort geprüft: „pin"
+    /// steckt sonst in „mapping"/„shipping", „wrong" in Sätzen ohne Auth-Bezug.
+    /// Seit dem Sperrschutz hat ein Fehlalarm Folgen — er stoppt den Auto-Sync.
+    /// Die langen, eindeutigen Begriffe dürfen weiterhin auch in Komposita
+    /// treffen („Passwort" in „Passwortfehler", „Legitimations…").
+    nonisolated static func isLikelyCredentialError(_ message: String) -> Bool {
         let text = message.lowercased()
-        return text.contains("pin") ||
-            text.contains("passwort") ||
+        if WordMatch.containsAnyWord(text, ["pin", "wrong", "unauthorized", "credentials"]) {
+            return true
+        }
+        return text.contains("passwort") ||
             text.contains("password") ||
             text.contains("anmeldename") ||
             text.contains("legitimations") ||
-            text.contains("zugangsdaten") ||
-            text.contains("credentials") ||
-            text.contains("wrong") ||
-            text.contains("unauthorized")
+            text.contains("zugangsdaten")
     }
 
     nonisolated private static func runSetupStepWithTimeout<T: Sendable>(
@@ -6676,18 +6732,112 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let alert = NSAlert()
         alert.messageText = t("Bank neu verbinden?", "Reconnect bank?")
         alert.informativeText = t(
-            "Die Verbindung zur Bank wird zurückgesetzt. Beim nächsten Abruf musst Du Dich erneut mit TAN/PIN identifizieren. Kontodaten, IBAN und Einstellungen bleiben erhalten.",
-            "The connection to the bank will be reset. You'll need to re-authenticate with TAN/PIN on the next refresh. Account data, IBAN, and settings will be preserved."
+            "Die Verbindung zur Bank wird zurückgesetzt. Beim nächsten Abruf musst Du Dich erneut mit TAN/PIN identifizieren. Kontodaten, IBAN und Einstellungen bleiben erhalten.\n\nHat sich Dein Online-Banking-Passwort geändert, wähle „Zugangsdaten ändern“ — sonst meldet sich die App weiter mit dem alten Passwort an und die Bank sperrt den Zugang.",
+            "The connection to the bank will be reset. You'll need to re-authenticate with TAN/PIN on the next refresh. Account data, IBAN, and settings will be preserved.\n\nIf your online banking password changed, choose “Change credentials” — otherwise the app keeps signing in with the old password and the bank will lock your access."
         )
         alert.alertStyle = .warning
-        alert.addButton(withTitle: t("Neu verbinden", "Reconnect"))
+        alert.addButton(withTitle: t("Zugangsdaten ändern", "Change credentials"))
         alert.addButton(withTitle: t("Abbrechen", "Cancel"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        alert.addButton(withTitle: t("Nur Verbindung zurücksetzen", "Only reset connection"))
 
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            changeBankCredentials()
+        case .alertThirdButtonReturn:
+            resetBankConnection()
+        default:
+            return
+        }
+    }
+
+    /// Setzt nur die Session/Freigabe zurück (unveränderte Zugangsdaten).
+    private func resetBankConnection() {
         let slotId = YaxiService.activeSlotId
         Task { @MainActor [weak self] in
             await YaxiService.sessionStore.clearAll(slotId: slotId)
             AppLogger.log("reconnectBank: cleared sessions + connectionData for slot \(slotId.prefix(8))", category: "Support")
+            self?.refresh()
+        }
+    }
+
+    /// Hinterlegt neue Online-Banking-Zugangsdaten für den aktiven Slot.
+    ///
+    /// Vorher gab es dafür **keinen** Weg außer Konto löschen und neu anlegen
+    /// (mit Verlust der lokalen Historie). „Bank neu verbinden" hat nur die
+    /// Session verworfen und sofort wieder mit dem alten Passwort angemeldet —
+    /// nach einem Passwortwechsel bei der Bank führte genau das zur Sperre.
+    @objc func changeBankCredentials() {
+        if locked { promptUnlockIfNeeded() }
+        guard let pw = masterPassword else { return }
+
+        let slot = MultibankingStore.shared.activeSlot
+        guard slot?.isReceiptSlot != true, slot?.source != .paypal else {
+            let a = NSAlert()
+            a.messageText = t("Nicht für dieses Konto", "Not available for this account")
+            a.informativeText = t(
+                "Zugangsdaten lassen sich nur für Bankkonten ändern. Händler- und PayPal-Konten werden über ihren eigenen Einrichtungsdialog verbunden.",
+                "Credentials can only be changed for bank accounts. Merchant and PayPal accounts use their own setup dialog."
+            )
+            a.runModal()
+            return
+        }
+
+        let existing = try? CredentialsStore.load(masterPassword: pw)
+
+        let alert = NSAlert()
+        alert.messageText = t("Zugangsdaten ändern", "Change credentials")
+        alert.informativeText = t(
+            "Anmeldename und PIN/Passwort Deines Online-Bankings. Sie werden verschlüsselt auf diesem Mac gespeichert. Umsätze, Auswertungen und Einstellungen bleiben vollständig erhalten.",
+            "Login name and PIN/password of your online banking. They are stored encrypted on this Mac. Transactions, reports and settings are fully preserved."
+        )
+        alert.addButton(withTitle: t("Speichern & verbinden", "Save & connect"))
+        alert.addButton(withTitle: t("Abbrechen", "Cancel"))
+
+        func mkLabel(_ s: String, y: CGFloat) -> NSTextField {
+            let l = NSTextField(labelWithString: s)
+            l.font = .systemFont(ofSize: 10); l.textColor = .secondaryLabelColor
+            l.frame = NSRect(x: 0, y: y, width: 340, height: 13)
+            return l
+        }
+        let userField = NSTextField(frame: NSRect(x: 0, y: 44, width: 340, height: 22))
+        userField.stringValue = existing?.userId ?? ""
+        let pwdField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 22))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 82))
+        container.addSubview(mkLabel(t("Anmeldename / Kontonummer", "Login name / account number"), y: 66))
+        container.addSubview(userField)
+        container.addSubview(mkLabel(t("PIN / Passwort", "PIN / password"), y: 22))
+        container.addSubview(pwdField)
+        alert.accessoryView = container
+        // Der Anmeldename ist vorbefüllt — der Fokus gehört ins leere PIN-Feld.
+        alert.window.initialFirstResponder = pwdField
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let userId = userField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = pwdField.stringValue
+        guard !userId.isEmpty, !password.isEmpty else { return }
+
+        var creds = existing ?? StoredCredentials(iban: "", userId: "", password: "")
+        creds.userId = userId
+        creds.password = password
+        do {
+            try CredentialsStore.save(creds, masterPassword: pw)
+        } catch {
+            let a = NSAlert()
+            a.messageText = t("Speichern fehlgeschlagen", "Saving failed")
+            a.informativeText = error.localizedDescription
+            a.runModal()
+            return
+        }
+
+        let slotId = YaxiService.activeSlotId
+        clearCredentialRejection(slotId: slotId)
+        AppLogger.log("changeBankCredentials: neue Zugangsdaten für Slot \(slotId.prefix(8))", category: "Auth")
+
+        // Session verwerfen, damit die Bank die neuen Daten auch wirklich prüft
+        // (eine noch gültige Session würde die geänderte PIN gar nicht sehen).
+        Task { @MainActor [weak self] in
+            await YaxiService.sessionStore.clearAll(slotId: slotId)
             self?.refresh()
         }
     }
@@ -6814,6 +6964,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Automatischer Refresh (Timer): nur Anzeige aktualisieren. eBon-Slots
     /// öffnen hier KEIN Login-Fenster — das tut nur der manuelle `refresh()`.
     @objc private func autoRefresh() {
+        // Sperrschutz: nach abgelehnten Zugangsdaten kein automatischer Versuch mehr.
+        // Der manuelle Abruf bleibt erlaubt — das ist eine bewusste Nutzerentscheidung,
+        // der Timer dagegen läuft unbeaufsichtigt in die Sperre.
+        let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
+        guard !credentialsRejectedSlotIds.contains(slotId) else {
+            AppLogger.log("Auto-Refresh übersprungen (Zugangsdaten abgelehnt)", category: "Auth")
+            return
+        }
         Task { await refreshAsync() }
     }
 

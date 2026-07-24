@@ -6,6 +6,9 @@ import UserNotifications
 extension Notification.Name {
     /// Flyout-„+" → Settings öffnen und zum Quick-Send-Vorlagen-Editor (Konten-Tab) scrollen.
     static let openQuickSendTemplates = Notification.Name("simplebanking.openQuickSendTemplates")
+    /// „Zugangsdaten ändern…" (Einstellungen bzw. Fehlerzeile der Umsatzliste)
+    /// → Dialog in `BalanceBar.changeBankCredentials`.
+    static let changeBankCredentials = Notification.Name("simplebanking.changeBankCredentials")
 }
 
 // Breite des Gehaltseingang-Pickers ("31. des Monats") — via Font-Metriken + Button-Chrome
@@ -1482,6 +1485,24 @@ struct SettingsView: View {
                                 title: t("Stammdaten", "Basics"),
                                 icon: "slider.horizontal.3"
                             )
+
+                            // Zugangsdaten ändern war bislang nur über Rechtsklick →
+                            // Support → „Bank neu verbinden" erreichbar und wurde von
+                            // Kunden nicht gefunden. Händler-/PayPal-Slots haben eigene
+                            // Einrichtungsdialoge und bleiben außen vor.
+                            if !slot.isReceiptSlot && slot.source != .paypal {
+                                SettingsRow(
+                                    title: t("Zugangsdaten", "Credentials"),
+                                    subtitle: t(
+                                        "Anmeldename und PIN/Passwort des Online-Bankings — z.B. nachdem Du das Passwort bei der Bank geändert hast. Umsätze und Auswertungen bleiben erhalten.",
+                                        "Login name and PIN/password of your online banking — e.g. after you changed the password at your bank. Transactions and reports are preserved."
+                                    )
+                                ) {
+                                    Button(t("Ändern…", "Change…")) {
+                                        NotificationCenter.default.post(name: .changeBankCredentials, object: nil)
+                                    }
+                                }
+                            }
 
                             SettingsRow(
                                 title: t("Auto-Sync-Zeitraum", "Auto-sync range"),
