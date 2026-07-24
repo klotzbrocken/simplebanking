@@ -4333,6 +4333,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // NSPopover-ähnliche Optik: gerundete Ecken + dezenter Rahmen am
         // Host-Layer. `masksToBounds=true` clipped die SwiftUI-Inhalte sauber.
+        // `wantsLayer` muss VORHER stehen — ohne Layer liefen die Zuweisungen
+        // unten still ins Leere (der Widget-Pfad macht es korrekt).
+        result.host.view.wantsLayer = true
         result.host.view.layer?.cornerRadius = 10
         result.host.view.layer?.masksToBounds = true
         result.host.view.layer?.borderWidth = 0.5
@@ -4344,7 +4347,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let visible = primaryScreen?.visibleFrame ?? primaryFrame
         let cx = visible.midX - contentWidth / 2
         let cy = visible.midY - contentHeight / 2
-        content.setFrameOrigin(NSPoint(x: cx, y: cy))
+        // Größe MIT setzen, nicht nur den Ursprung: `contentViewController` lässt das
+        // Fenster seine Größe vom Hosting-Controller übernehmen, und der liefert wegen
+        // `sizingOptions = []` und der `Color.clear`-Wurzel (kein Ideal-Maß) 0×0 — das
+        // im `contentRect` gesetzte Maß wird dabei verworfen. Ergebnis war ein
+        // sichtbares, deckendes, aber nulldimensionales Fenster: man sah nur das Dim.
+        content.setFrame(
+            NSRect(x: cx, y: cy, width: contentWidth, height: contentHeight),
+            display: false
+        )
 
         centeredFlyoutContentWindow = content
         for dim in centeredFlyoutDimWindows { dim.orderFront(nil) }
