@@ -1403,6 +1403,14 @@ private struct TransactionsPanelView: View {
 
     /// Konto-Umschalter als Logo-Pillen (wie im Flyout): aktive gefüllte Pille + kleinere
     /// Logo-Pillen; „Alle Konten" als kleine Icon-Pille (nur bei ≥2 echten Konten).
+    /// Kann vom aktiven Slot überwiesen werden? eBon-Slots (REWE/dm/Amazon) haben kein
+    /// Konto, PayPal ist ein reiner Lese-Zugang — beide zeigen keinen Senden-Button
+    /// (gleiche Regel wie im Flyout).
+    private var slotSupportsTransfer: Bool {
+        guard let slot = multibankingStore.activeSlot else { return true }
+        return !slot.isReceiptSlot && !slot.isPayPal
+    }
+
     private var accountDotsBar: some View {
         // Bei aktivem Theme folgen Pillen + Text der Theme-Fläche (statt Weiß, das auf
         // der flachen Theme-Farbe fremd wirkt) — analog zum Flyout.
@@ -2029,8 +2037,9 @@ private struct TransactionsPanelView: View {
                     .foregroundColor(.primary)
                 }
 
-                // simplesend — Geld senden, ganz rechts (wie im Flyout-Footer)
-                if simplesendVisible {
+                // simplesend — Geld senden, ganz rechts (wie im Flyout-Footer).
+                // Nur für Slots, von denen überhaupt überwiesen werden kann.
+                if simplesendVisible, slotSupportsTransfer {
                     Button(action: {
                         NotificationCenter.default.post(
                             name: Notification.Name("simplebanking.openTransferSheet"),

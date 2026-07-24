@@ -160,13 +160,28 @@ struct BalanceSubMetricsLabel: View {
                     : "\(amount) until \(month) \(day). available"
     }
 
+    /// „1. August" (DE) / „August 1." (EN). Der Monat wird hier IMMER genannt: bei einem
+    /// überzogenen Konto liegt der Gehaltstag praktisch immer im Folgemonat — „bis 1."
+    /// wäre mehrdeutig (dieser oder nächster Monat?).
+    private func dayWithMonth(_ date: Date) -> String {
+        let day = Calendar.current.component(.day, from: date)
+        let isDE = AppLanguage.resolved() == .de
+        let month = (isDE ? Self.monthNameDE : Self.monthNameEN).string(from: date)
+        return isDE ? "\(day). \(month)" : "\(month) \(day)."
+    }
+
+    private func overdrawnText() -> String {
+        let amount = euro(-metrics.availableAmount)
+        let until = dayWithMonth(metrics.cycleEnd)
+        return AppLanguage.resolved() == .de
+            ? "\(amount) überzogen bis \(until)"
+            : "\(amount) overdrawn until \(until)"
+    }
+
     var body: some View {
         switch metrics.state {
         case .overdrawn:
-            Text(L10n.t(
-                "\(euro(-metrics.availableAmount)) überzogen bis \(metrics.salaryDayOfMonth).",
-                "\(euro(-metrics.availableAmount)) overdrawn until \(metrics.salaryDayOfMonth)."
-            ))
+            Text(overdrawnText())
             .font(.system(size: 13, weight: .regular))
             .foregroundColor(.sbRedStrong)
             .lineLimit(1)

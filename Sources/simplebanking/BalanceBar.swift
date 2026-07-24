@@ -823,6 +823,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Call this at startup and on every slot switch — NOT during data refresh.
     private func applySlotToViewModel(_ slot: BankSlot) {
         let store = MultibankingStore.shared
+        // Menü wird nicht neu gebaut → „Geld senden" beim Slot-Wechsel nachziehen
+        // (PayPal/Händler haben kein Konto zum Überweisen).
+        refreshSendMoneyMenuItem()
         var resolvedName = slot.displayName
         var resolvedLogo = slot.logoId ?? ""
 
@@ -1299,7 +1302,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                                            keyEquivalent: "n")
             sendMoneyItem.tag = 350
             sendMoneyItem.target = self
-            sendMoneyItem.isHidden = !simplesendVisible
+            sendMoneyItem.isHidden = !simplesendVisible || !activeSlotSupportsTransfer
             if let img = NSImage(systemSymbolName: "arrow.up.right.square",
                                  accessibilityDescription: nil) {
                 img.isTemplate = true
@@ -1672,9 +1675,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             forName: Notification.Name("simplebanking.simplesendVisibilityChanged"),
             object: nil, queue: .main
         ) { [weak self] _ in
-            guard let self,
-                  let item = self.statusMenu?.item(withTag: 350) else { return }
-            item.isHidden = !self.simplesendVisible
+            guard let self else { return }
+            self.refreshSendMoneyMenuItem()
         }
 
         updateChecker = UpdateChecker()
@@ -3766,8 +3768,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Prüfung erfolgt wie in der Umsatzliste erst beim KLICK (Upsell), nicht über
     /// die Sichtbarkeit — siehe `quickSendFlyoutNeedsUnlock`.
     private var quickSendFlyoutAvailable: Bool {
-        // eBon-Slots (REWE/dm) haben kein Konto zum Senden → kein Papierflieger.
-        if MultibankingStore.shared.activeSlot?.isReceiptSlot == true { return false }
+        guard activeSlotSupportsTransfer else { return false }
         guard FeatureFlags.transferMoneyEnabled || demoMode else { return false }
         // Demo zeigt alle Features — Quick-Send ohne Labs-Toggle.
         if demoMode { return true }
@@ -4601,6 +4602,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             widgetView.balanceTextOverride = widgetBalanceHidden ? hiddenBalanceMaskTitle() : nil
             widgetHost.rootView = widgetView
         }
+    }
+
+    /// Kann vom aktiven Slot überwiesen werden? eBon-Slots (REWE/dm/Amazon) haben gar
+    /// kein Konto, PayPal ist bei uns ein reiner Lese-Zugang (NVP: Saldo + Umsätze).
+    /// Gilt für ALLE Sende-Einstiege: Flyout-Papierflieger, Umsatzlisten-Button und
+    /// Menüeintrag — sonst öffnet man ein Überweisungsfenster für ein Konto, von dem
+    /// gar nicht überwiesen werden kann.
+    var activeSlotSupportsTransfer: Bool {
+        guard let slot = MultibankingStore.shared.activeSlot else { return true }
+        return !slot.isReceiptSlot && !slot.isPayPal
+    }
+
+    /// Blendet den Menüeintrag „Geld senden" passend zum aktiven Slot ein/aus. Das Menü
+    /// wird nicht neu gebaut, daher muss der Eintrag bei jedem Slot-Wechsel nachgezogen
+    /// werden (Tag 350).
+    private func refreshSendMoneyMenuItem() {
+        statusMenu?.item(withTag: 350)?.isHidden = !simplesendVisible || !activeSlotSupportsTransfer
     }
 
     /// EINZIGE Quelle für „das Flyout hat eine Footer-Zeile" (Konto-Pillen +
