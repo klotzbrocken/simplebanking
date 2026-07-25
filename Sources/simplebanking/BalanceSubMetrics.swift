@@ -134,17 +134,10 @@ struct BalanceSubMetricsLabel: View {
         return (isDE ? Self.shortDateDE : Self.shortDateEN).string(from: metrics.cycleEnd)
     }
 
-    private static let monthNameDE: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "de_DE"); f.dateFormat = "LLLL"; return f
-    }()
-    private static let monthNameEN: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "LLLL"; return f
-    }()
-
     /// „X € bis zum 15. verfügbar". Liegt das Zyklusende NICHT im aktuellen Monat
-    /// (Gehalt kam → neuer Zyklus → Folgemonat greift), wird der Monat ergänzt:
-    /// „X € bis zum 15. Juli verfügbar" — sonst wäre unklar, ob der 15. dieses oder
-    /// des nächsten Monats gemeint ist.
+    /// (Gehalt kam → neuer Zyklus → Folgemonat greift), wird der Monat numerisch
+    /// ergänzt: „X € bis 15.08. verfügbar". Der ausgeschriebene Monatsname wurde
+    /// im Panel abgeschnitten („…verfü…") — das Kurzdatum passt immer.
     private func untilText() -> String {
         let cal = Calendar.current
         let amount = euro(metrics.availableAmount)
@@ -155,24 +148,16 @@ struct BalanceSubMetricsLabel: View {
             return isDE ? "\(amount) bis zum \(day). verfügbar"
                         : "\(amount) until \(day). available"
         }
-        let month = (isDE ? Self.monthNameDE : Self.monthNameEN).string(from: metrics.cycleEnd)
-        return isDE ? "\(amount) bis zum \(day). \(month) verfügbar"
-                    : "\(amount) until \(month) \(day). available"
-    }
-
-    /// „1. August" (DE) / „August 1." (EN). Der Monat wird hier IMMER genannt: bei einem
-    /// überzogenen Konto liegt der Gehaltstag praktisch immer im Folgemonat — „bis 1."
-    /// wäre mehrdeutig (dieser oder nächster Monat?).
-    private func dayWithMonth(_ date: Date) -> String {
-        let day = Calendar.current.component(.day, from: date)
-        let isDE = AppLanguage.resolved() == .de
-        let month = (isDE ? Self.monthNameDE : Self.monthNameEN).string(from: date)
-        return isDE ? "\(day). \(month)" : "\(month) \(day)."
+        let short = shortCycleEnd()
+        return isDE ? "\(amount) bis \(short) verfügbar"
+                    : "\(amount) until \(short) available"
     }
 
     private func overdrawnText() -> String {
+        // Kurzdatum mit Monat: beim überzogenen Konto liegt der Gehaltstag praktisch
+        // immer im Folgemonat — „bis 1." wäre mehrdeutig, „01.08." ist eindeutig UND kurz.
         let amount = euro(-metrics.availableAmount)
-        let until = dayWithMonth(metrics.cycleEnd)
+        let until = shortCycleEnd()
         return AppLanguage.resolved() == .de
             ? "\(amount) überzogen bis \(until)"
             : "\(amount) overdrawn until \(until)"
