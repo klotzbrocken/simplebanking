@@ -59,18 +59,66 @@ enum CredentialsStore {
         return appDir
     }
 
+    /// Dateiname der globalen Credentials aus der Zeit vor Multibanking.
+    private static let legacyGlobalFileName = "credentials.json"
+
     static func defaultURL() throws -> URL {
         let appDir = try appSupportURL()
         let slotFile = appDir.appendingPathComponent("credentials-\(activeSlotId).json")
-        // Legacy fallback: if the slot-specific file doesn't exist but credentials.json does,
-        // return the legacy path so existing installs continue to work on first launch.
-        if !FileManager.default.fileExists(atPath: slotFile.path) {
-            let legacyFile = appDir.appendingPathComponent("credentials.json")
+        // Legacy-Fallback NUR für den Legacy-Slot selbst.
+        //
+        // Vorher galt er für JEDEN Slot ohne eigene Datei — ein frisch angelegtes
+        // Konto meldete dadurch `exists() == true`, und `load()` lieferte die
+        // Zugangsdaten des ALTEN Kontos (das Master-Passwort ist global, die
+        // Entschlüsselung gelang). In einer Multibanking-App heißt das: Anmeldung
+        // bei der falschen Bank — und mit drei Fehlversuchen ein gesperrter Zugang.
+        // `delete()` traf im selben Fall die globale statt der Slot-Datei.
+        //
+        // `migrateLegacyFileIfNeeded()` räumt die globale Datei beim Start weg;
+        // dieser Zweig ist nur noch die Brücke für den Moment davor.
+        if activeSlotId == "legacy", !FileManager.default.fileExists(atPath: slotFile.path) {
+            let legacyFile = appDir.appendingPathComponent(legacyGlobalFileName)
             if FileManager.default.fileExists(atPath: legacyFile.path) {
                 return legacyFile
             }
         }
         return slotFile
+    }
+
+    /// Einmalige Migration `credentials.json` → `credentials-legacy.json`.
+    ///
+    /// Beseitigt die Quelle des slot-übergreifenden Fallbacks (siehe `defaultURL`).
+    /// Idempotent: ohne globale Datei passiert nichts.
+    static func migrateLegacyFileIfNeeded() {
+        guard let appDir = try? appSupportURL() else { return }
+        let fm = FileManager.default
+        let globalFile = appDir.appendingPathComponent(legacyGlobalFileName)
+        guard fm.fileExists(atPath: globalFile.path) else { return }
+        let slotFile = appDir.appendingPathComponent("credentials-legacy.json")
+
+        guard fm.fileExists(atPath: slotFile.path) else {
+            // Normalfall: umbenennen, damit der Inhalt erhalten bleibt.
+            do {
+                try fm.moveItem(at: globalFile, to: slotFile)
+                AppLogger.log("Credentials: credentials.json → credentials-legacy.json migriert",
+                              category: "Credentials")
+            } catch {
+                AppLogger.log("Credentials-Migration fehlgeschlagen: \(error.localizedDescription)",
+                              category: "Credentials", level: "WARN")
+            }
+            return
+        }
+
+        // Beide vorhanden: `save()` schreibt seit jeher ausschließlich slot-spezifisch,
+        // die globale Datei ist also der ältere Stand — und nur noch eine Fehlerquelle.
+        // Nur entfernen, wenn die Slot-Datei tatsächlich Inhalt hat (kein Datenverlust
+        // durch eine leere Hülle).
+        let slotSize = (try? fm.attributesOfItem(atPath: slotFile.path)[.size] as? Int) ?? nil
+        if (slotSize ?? 0) > 0 {
+            try? fm.removeItem(at: globalFile)
+            AppLogger.log("Credentials: veraltete credentials.json entfernt (Slot-Datei vorhanden)",
+                          category: "Credentials")
+        }
     }
 
     static func exists() -> Bool {

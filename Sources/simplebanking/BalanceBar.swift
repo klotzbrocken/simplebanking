@@ -1086,6 +1086,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Ripple standardmäßig an (Aufruf + neue Bewegungen) — direkte
         // UserDefaults.bool-Reads ignorieren den @AppStorage-Default, daher registrieren.
         UserDefaults.standard.register(defaults: ["rippleAlwaysOn": true])
+        // Globale credentials.json in die Slot-Datei überführen — sonst dient sie
+        // weiter als slot-übergreifender Fallback (siehe CredentialsStore.defaultURL).
+        CredentialsStore.migrateLegacyFileIfNeeded()
         YaxiService.migrateCredentialsModelIfNeeded()
 
         // TAN/SCA state callback → update menu bar and transactions panel
@@ -3087,12 +3090,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         BiometricStore.clearAutoUnlock()
         biometricOfferDismissed = false
         let allSlotIds = MultibankingStore.shared.slots.map { $0.id } + ["legacy"]
-        Task {
-            for slotId in allSlotIds {
-                await YaxiService.clearSessionData(forSlotId: slotId)
-            }
-            CredentialsStore.activeSlotId = "legacy"
-        }
 
         // Reset UserDefaults
         if let bundleID = Bundle.main.bundleIdentifier {
@@ -3119,13 +3116,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         statusItem.button?.title = t("Verbinden…", "Connect…")
         statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
         
-        // Show notification
-        let alert = NSAlert()
-        alert.messageText = t("simplebanking wurde zurückgesetzt", "simplebanking has been reset")
-        alert.informativeText = t("Alle Zugangsdaten und Einstellungen wurden gelöscht.", "All credentials and settings have been deleted.")
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        // Asynchrone Aufräumarbeiten — die Erfolgsmeldung kommt ERST danach, sonst
+        // verspricht der Dialog etwas, das noch läuft.
+        Task { @MainActor in
+            for slotId in allSlotIds {
+                await YaxiService.clearSessionData(forSlotId: slotId)
+            }
+            CredentialsStore.activeSlotId = "legacy"
+            // Händler-Logins (REWE/dm/Amazon) liegen im geteilten WebKit-Store und
+            // werden weder von deleteAllData() noch von removePersistentDomain erfasst.
+            await MerchantSession.clearAll()
+
+            let alert = NSAlert()
+            alert.messageText = t("simplebanking wurde zurückgesetzt", "simplebanking has been reset")
+            alert.informativeText = t("Alle Zugangsdaten und Einstellungen wurden gelöscht.",
+                                      "All credentials and settings have been deleted.")
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
 
     private func rebuildMenuTitleForDemoMode() {

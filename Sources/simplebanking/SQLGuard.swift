@@ -69,13 +69,24 @@ enum SQLGuard {
         return candidate
     }
 
-    // MARK: - LLM-Query-Härtung
+    // MARK: - LLM-Query-Härtung (ERSTE von drei Schichten)
     //
-    // Für LLM-**generiertes** SQL, dessen Ergebnis an einen externen KI-Anbieter
-    // geht: zusätzlich zur Read-Only-Prüfung eine harte Tabellen-/Spalten-Grenze.
-    // Der System-Prompt ist KEINE Sicherheitsgrenze — hier wird erzwungen, dass nur
-    // die minimierte, slot-gefilterte Sicht `llm_tx` abgefragt werden kann und
-    // sensible Bezeichner (IBAN, Rohdaten, Absender, Basistabelle) nie vorkommen.
+    // Für LLM-**generiertes** SQL, dessen Ergebnis an einen externen KI-Anbieter geht.
+    // Der System-Prompt ist keine Sicherheitsgrenze — diese Funktion aber auch nicht
+    // allein: sie arbeitet auf Textmustern und kann nur prüfen, dass `llm_tx`
+    // *vorkommt*, nicht dass es die *einzige* Quelle ist. Ein `JOIN`, eine CTE oder
+    // eine Unterabfrage auf eine Fremdtabelle passiert hier.
+    //
+    // Die eigentliche Grenze ist deshalb die Ausführungsumgebung:
+    //   1. HIER — Read-only-Form (kein `;`, Prefix `select`/`with`, keine
+    //      schreibenden Keywords), LIMIT-Cap, verbotene Bezeichner.
+    //   2. `TransactionsDatabase.executeLLMQuery` führt das SQL in einer isolierten
+    //      In-Memory-DB aus, die AUSSCHLIESSLICH `llm_tx` enthält — Fremdtabellen
+    //      existieren dort nicht, jeder Zugriff scheitert an „no such table".
+    //   3. Redaktion der Ergebniszeilen (`llmRedactColumns`) vor dem Versand.
+    //
+    // Wer diese Prüfung erweitert, darf sich also nicht auf sie allein verlassen —
+    // und wer die Sandbox anfasst, muss wissen, dass sie die tragende Schicht ist.
     static let llmAllowedTable = "llm_tx"
     static let llmForbiddenIdentifiers = ["transactions", "raw_json", "iban", "absender"]
 

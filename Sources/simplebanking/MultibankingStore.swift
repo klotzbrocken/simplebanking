@@ -6,7 +6,10 @@ import Foundation
 /// Herkunft eines Slots. `nil`/`.yaxi` = klassischer Bank-Slot über YAXI.
 /// `.rewe` / `.dm` = eBon-Slots (kein YAXI/IBAN, eigener Datenpfad, kein Refresh
 /// über die Bank-Call-Pfade — nur manueller Sync über ein Login-Fenster).
-enum SlotSource: String, Codable {
+/// `CaseIterable`, damit Aufräum-Pfade (z.B. `MerchantSession.clearAll` beim
+/// vollständigen Zurücksetzen) alle Quellen erfassen und ein künftig ergänzter
+/// Händler nicht still übersehen wird.
+enum SlotSource: String, Codable, CaseIterable {
     case yaxi
     case rewe
     case dm
@@ -170,20 +173,40 @@ final class MultibankingStore: ObservableObject {
         }
     }
 
-    /// Räumt alle slot-suffixed Persistenz-Spuren weg. Wird aus removeSlot
-    /// gerufen — extracted als static, damit Tests sie isoliert prüfen können
-    /// und wir bei zukünftigen per-slot-Storage-Locations zentral ergänzen.
+    /// Räumt alle slot-suffixed Persistenz-Spuren weg. **Die einzige Stelle dafür** —
+    /// eine neue per-Slot-Persistenz gehört hierher und sonst nirgendwohin.
+    ///
+    /// Bis 2.0 löschte `SettingsPanel.deleteSlot` zusätzlich selbst: die
+    /// Credentials-Datei (was die Legacy-Schutzklausel in
+    /// `CredentialsStore.deleteSlotFile` umging — der Legacy-Slot verlor beim
+    /// „Entfernen" seine Datei) und acht hartkodierte UserDefaults-Keys, deren
+    /// Namensschema vom echten abwich: `YaxiService` lässt für `legacy` das Suffix
+    /// WEG, die Liste hängte immer `.legacy` an und traf damit ins Leere.
+    /// Deshalb werden die Keys jetzt über die Builder von `YaxiService` gebildet.
+    ///
     /// YAXI-Session-Cleanup läuft in einem detached Task (actor-isolated),
     /// die anderen Cleanups sync.
     static func purgePerSlotData(slotId: String) {
         // YAXI session + connectionData (sensitive!) — actor-isolated, fire-and-forget.
         Task { await YaxiService.sessionStore.clearAll(slotId: slotId) }
-        // Encrypted credentials file
+        // Encrypted credentials file (schützt "legacy" bewusst).
         CredentialsStore.deleteSlotFile(slotId: slotId)
-        // UserDefaults pro-slot-suffixed keys
+        // Slot-Einstellungen (Gehaltstag, Schwellen, Budget …).
+        BankSlotSettingsStore.delete(slotId: slotId)
+        // UserDefaults pro-slot-suffixed keys — Schreibweise über dieselben Builder,
+        // die beim Schreiben verwendet werden.
         let defaults = UserDefaults.standard
-        defaults.removeObject(forKey: "simplebanking.cachedBalance.\(slotId)")
-        defaults.removeObject(forKey: "simplebanking.lastSeenTxSig.\(slotId)")
+        for key in [
+            YaxiService.ibanKey(for: slotId),
+            YaxiService.connectionIdKey(for: slotId),
+            YaxiService.credModelFullKey(for: slotId),
+            YaxiService.credModelUserIdKey(for: slotId),
+            YaxiService.credModelNoneKey(for: slotId),
+            "simplebanking.cachedBalance.\(slotId)",
+            "simplebanking.lastSeenTxSig.\(slotId)",
+        ] {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     func setActive(index: Int) {

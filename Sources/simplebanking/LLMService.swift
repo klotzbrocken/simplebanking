@@ -23,6 +23,22 @@ enum LLMServiceError: LocalizedError {
 private struct DateScope {
     let sqlClause: String
     let description: String
+
+    /// Bindet den Plan an EIN Konto.
+    ///
+    /// Jeder regelbasierte Plan hängt `sqlClause` an eine Boolean-Position seiner
+    /// WHERE-Klausel an — der Slot-Filter gilt damit für alle zehn Pläne, ohne dass
+    /// zehn SQL-Strings einzeln gepflegt werden müssen. Vorher fehlte er komplett:
+    /// bei mehreren Konten summierte der lokale KI-Pfad über ALLE Slots, obwohl ein
+    /// bestimmtes Konto aktiv war (z.B. `summaryPlan`: „WHERE 1 = 1").
+    ///
+    /// Der Wert wird als `?` gebunden, nicht interpoliert. Nebeneffekt mit
+    /// Sicherheitsnutzen: vergisst ein künftiger Plan den Scope, fehlt der
+    /// Platzhalter und GRDB wirft wegen Argument-Anzahl — der Fehler fällt sofort
+    /// auf, statt still falsche Zahlen zu liefern.
+    func boundToSlot() -> DateScope {
+        DateScope(sqlClause: " AND slot_id = ?" + sqlClause, description: description)
+    }
 }
 
 private struct QueryPlan {
@@ -99,9 +115,11 @@ enum LLMService {
         // Rule-based Intents laufen KOMPLETT LOKAL: eigenes SQL, Rendering im Client,
         // KEIN externer Aufruf. Sie dürfen daher auf die volle `transactions`-Tabelle
         // (inkl. Merchant-/Suchtext-Ausdrücke) zugreifen — es verlässt nichts den Mac.
+        // Der Slot-Scope gilt aber auch hier: eine Antwort muss sich auf das AKTIVE
+        // Konto beziehen, sonst summiert sie über alle Konten (falsche Zahlen).
         if let plan = ruleBasedPlan(for: normalizedQuestion) {
             let safeSQL = try SQLGuard.validatedReadOnlySQL(plan.sql, defaultLimit: 200)
-            let rows = try TransactionsDatabase.executeReadOnlyQuery(sql: safeSQL)
+            let rows = try TransactionsDatabase.executeReadOnlyQuery(sql: safeSQL, arguments: [slotId])
             return LLMAnswer(sql: safeSQL, resultRows: rows, answerText: plan.renderAnswer(rows))
         }
 
@@ -125,7 +143,8 @@ enum LLMService {
 
     private static func ruleBasedPlan(for question: String) -> QueryPlan? {
         let normalized = normalize(question)
-        let scope = dateScope(for: normalized)
+        // `.boundToSlot()` ergänzt den Konto-Filter für ALLE Pläne an einer Stelle.
+        let scope = dateScope(for: normalized).boundToSlot()
 
         let asksCount = containsAny(normalized, needles: ["wie viele", "wieviele", "anzahl", "wie oft"])
         let asksIncome = containsAny(normalized, needles: ["einnahm", "gehalt", "lohn", "eingang", "eingange", "einkommen", "verdien"])

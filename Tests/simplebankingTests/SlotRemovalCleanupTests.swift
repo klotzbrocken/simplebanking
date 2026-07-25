@@ -57,19 +57,85 @@ final class SlotRemovalCleanupTests: XCTestCase {
 
     // MARK: - CredentialsStore.deleteSlotFile
 
-    func test_deleteSlotFile_legacySlotIsProtected() {
-        // legacy ist die default-Datei (credentials.json), darf NIE gelöscht werden.
-        // deleteSlotFile soll dafür ein no-op sein.
-        // Wir erzeugen keine echte Datei — Funktion soll früh returnen.
-        // Wenn Funktion buggy wäre und legacy-Path probiert zu löschen, wäre das
-        // im normal-Run problemlos (Datei existiert evtl. schon nicht), aber hier
-        // testen wir nur dass kein Crash erfolgt.
-        XCTAssertNoThrow(CredentialsStore.deleteSlotFile(slotId: "legacy"))
+    /// Der Schutz muss an der DATEI nachweisbar sein, nicht nur „kein Absturz".
+    /// Die alte Fassung dieses Tests war grün, während `SettingsPanel.deleteSlot`
+    /// die Datei per `removeItem` an der Schutzklausel vorbei löschte.
+    func test_deleteSlotFile_legacyFileActuallySurvives() throws {
+        let appDir = try CredentialsStore.appSupportURL()
+        let file = appDir.appendingPathComponent("credentials-legacy.json")
+        let backup = try? Data(contentsOf: file)
+        defer {
+            try? FileManager.default.removeItem(at: file)
+            if let backup { try? backup.write(to: file) }
+        }
+        try Data("SCHUETZENSWERT".utf8).write(to: file)
+
+        CredentialsStore.deleteSlotFile(slotId: "legacy")
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path),
+                      "Die Legacy-Credentials-Datei darf nicht gelöscht werden")
     }
 
-    func test_deleteSlotFile_nonLegacySlotDoesNotCrash() {
-        // Datei existiert vermutlich nicht — try? FileManager.removeItem schluckt das.
-        XCTAssertNoThrow(CredentialsStore.deleteSlotFile(
-            slotId: "test-no-such-slot-\(UUID().uuidString.prefix(6))"))
+    func test_deleteSlotFile_removesNonLegacyFile() throws {
+        let slotId = "test-del-\(UUID().uuidString.prefix(6))"
+        let appDir = try CredentialsStore.appSupportURL()
+        let file = appDir.appendingPathComponent("credentials-\(slotId).json")
+        try Data("WEG-DAMIT".utf8).write(to: file)
+
+        CredentialsStore.deleteSlotFile(slotId: slotId)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    // MARK: - Zentrales Aufräumen (nach Zusammenführung der Löschpfade)
+
+    /// `SettingsPanel.deleteSlot` löschte diese Keys früher selbst — mit einer
+    /// hartkodierten Liste, die für `legacy` fälschlich `.legacy` anhängte, während
+    /// `YaxiService` dort gar kein Suffix nutzt. Jetzt bilden beide Seiten die Keys
+    /// über dieselben Builder.
+    func test_purgePerSlotData_removesYaxiKeys_normalSlot() {
+        let slotId = "test-keys-\(UUID().uuidString.prefix(6))"
+        let keys = [
+            YaxiService.ibanKey(for: slotId),
+            YaxiService.connectionIdKey(for: slotId),
+            YaxiService.credModelFullKey(for: slotId),
+            YaxiService.credModelUserIdKey(for: slotId),
+            YaxiService.credModelNoneKey(for: slotId),
+        ]
+        for key in keys { UserDefaults.standard.set("x", forKey: key) }
+
+        MultibankingStore.purgePerSlotData(slotId: slotId)
+
+        for key in keys {
+            XCTAssertNil(UserDefaults.standard.object(forKey: key), "übrig geblieben: \(key)")
+        }
+    }
+
+    /// Der Legacy-Slot nutzt suffixlose Keys — genau der Fall, den die alte
+    /// hartkodierte Liste verfehlte.
+    func test_purgePerSlotData_removesYaxiKeys_legacySlotUsesUnsuffixedNames() {
+        let key = YaxiService.connectionIdKey(for: "legacy")
+        XCTAssertEqual(key, "simplebanking.yaxi.connectionId",
+                       "Legacy-Keys tragen kein Suffix — daran scheiterte die alte Liste")
+        let backup = UserDefaults.standard.string(forKey: key)
+        defer { if let backup { UserDefaults.standard.set(backup, forKey: key) } }
+        UserDefaults.standard.set("conn-123", forKey: key)
+
+        MultibankingStore.purgePerSlotData(slotId: "legacy")
+
+        XCTAssertNil(UserDefaults.standard.object(forKey: key))
+    }
+
+    func test_purgePerSlotData_removesSlotSettings() {
+        let slotId = "test-settings-\(UUID().uuidString.prefix(6))"
+        var settings = BankSlotSettingsStore.load(slotId: slotId)
+        settings.fetchDays = 42
+        BankSlotSettingsStore.save(settings, slotId: slotId)
+        XCTAssertEqual(BankSlotSettingsStore.load(slotId: slotId).fetchDays, 42, "Sanity")
+
+        MultibankingStore.purgePerSlotData(slotId: slotId)
+
+        XCTAssertNotEqual(BankSlotSettingsStore.load(slotId: slotId).fetchDays, 42,
+                          "Slot-Einstellungen müssen mit weg — sie hingen vorher nur am Settings-Pfad")
     }
 }

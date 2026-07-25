@@ -409,43 +409,22 @@ struct SettingsView: View {
     
     // MARK: - Slot Deletion
 
+    /// Entfernt ein Konto. Das eigentliche Aufräumen liegt **vollständig** in
+    /// `MultibankingStore.removeSlot` → `purgePerSlotData`.
+    ///
+    /// Vorher räumte diese Methode zusätzlich selbst auf und rief `removeSlot`
+    /// erst danach. Zwei Folgen: die Credentials-Datei wurde direkt per
+    /// `removeItem` gelöscht und umging damit die Legacy-Schutzklausel in
+    /// `CredentialsStore.deleteSlotFile` (der zugehörige Test blieb grün, weil er
+    /// nur die Store-Funktion prüft, nicht diesen Pfad) — und die hier
+    /// hartkodierten UserDefaults-Keys hängten für den Legacy-Slot fälschlich
+    /// `.legacy` an, während `YaxiService` dort gar kein Suffix verwendet. Beides
+    /// löst sich auf, wenn es nur noch einen Löschweg gibt.
     private func deleteSlot(id slotId: String) {
         let wasActive = MultibankingStore.shared.activeSlot?.id == slotId
 
-        // 1. Delete credentials file
-        let fm = FileManager.default
-        if let appDir = try? CredentialsStore.appSupportURL() {
-            let credFile = appDir.appendingPathComponent("credentials-\(slotId).json")
-            try? fm.removeItem(at: credFile)
-        }
-
-        // 2. Delete transactions from DB for this slot
-        try? TransactionsDatabase.deleteTransactions(forSlotId: slotId)
-
-        // 2b. Clear Keychain session data for this slot
-        Task { await YaxiService.clearSessionData(forSlotId: slotId) }
-
-        // 3. Clear UserDefaults keys for this slot
-        let defaults = UserDefaults.standard
-        let keysToRemove = [
-            "simplebanking.iban.\(slotId)",
-            "simplebanking.yaxi.connectionId.\(slotId)",
-            "simplebanking.yaxi.credModel.full.\(slotId)",
-            "simplebanking.yaxi.credModel.userId.\(slotId)",
-            "simplebanking.yaxi.credModel.none.\(slotId)",
-            "simplebanking.yaxi.session.balances.\(slotId)",
-            "simplebanking.yaxi.session.transactions.\(slotId)",
-            "simplebanking.yaxi.connectionData.\(slotId)",
-        ]
-        for key in keysToRemove { defaults.removeObject(forKey: key) }
-
-        // 4. Remove slot settings
-        BankSlotSettingsStore.delete(slotId: slotId)
-
-        // 5. Remove from store
         MultibankingStore.shared.removeSlot(id: slotId)
 
-        // 5. Notify BalanceBar so it can react
         NotificationCenter.default.post(
             name: Notification.Name("simplebanking.slotDeleted"),
             object: nil,

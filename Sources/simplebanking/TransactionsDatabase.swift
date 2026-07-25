@@ -828,12 +828,17 @@ enum TransactionsDatabase {
         }
     }
 
-    static func executeReadOnlyQuery(sql: String, bankId: String = "primary") throws -> [[String: String]] {
+    /// - Parameter arguments: gebundene Werte für die `?`-Platzhalter im SQL.
+    ///   Der lokale KI-Pfad bindet hier den Slot; stimmt die Anzahl nicht mit den
+    ///   Platzhaltern überein, wirft GRDB — genau erwünscht, denn ein Plan ohne
+    ///   Slot-Filter würde sonst still über alle Konten summieren.
+    static func executeReadOnlyQuery(sql: String, arguments: [String] = [],
+                                     bankId: String = "primary") throws -> [[String: String]] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
 
         return try queue.read { db in
-            let rows = try Row.fetchAll(db, sql: sql)
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(arguments))
             return rows.map { row in
                 var map: [String: String] = [:]
                 for columnName in row.columnNames {
@@ -858,26 +863,63 @@ enum TransactionsDatabase {
     /// Rechner Richtung KI-Anbieter verlassen — auch falls sie je auftauchen sollten.
     static let llmRedactColumns: Set<String> = ["iban", "raw_json", "absender"]
 
-    /// Führt LLM-generiertes SQL gegen eine **temporäre, slot-gefilterte und
-    /// spalten-reduzierte** Sicht `llm_tx` aus. Die Basistabelle `transactions`
-    /// bleibt zwar erreichbar, wird aber von `SQLGuard.validatedLLMQuery` blockiert;
-    /// `llm_tx` gibt es nur mit den erlaubten Spalten und nur für `slotId`. Zusätzlich
-    /// werden sensible Keys aus den Zeilen redigiert (Defense-in-Depth).
+    /// Führt LLM-generiertes SQL in einer **isolierten In-Memory-Datenbank** aus, die
+    /// ausschließlich die Tabelle `llm_tx` enthält — slot-gefiltert und auf
+    /// `llmAllowlistColumns` reduziert.
+    ///
+    /// **Warum eine Sandbox und keine TEMP VIEW auf der echten DB:** vorher lief das
+    /// SQL gegen die Produktions-Connection, auf der neben `llm_tx` alle übrigen
+    /// Tabellen erreichbar blieben (`rewe_receipts`, `roundup_*`, `sqlite_master` …).
+    /// `SQLGuard` prüft per Textmuster nur, dass `llm_tx` *vorkommt* — nicht, dass es
+    /// die einzige Quelle ist. Ein `JOIN`, eine CTE oder eine Unterabfrage auf eine
+    /// Fremdtabelle passierte die Prüfung und hätte Daten an den KI-Anbieter geschickt,
+    /// die dort nichts zu suchen haben (z.B. Einkaufsbons).
+    ///
+    /// In der Sandbox gibt es diese Tabellen nicht: jeder solche Versuch scheitert mit
+    /// „no such table". Die Grenze ergibt sich aus der **Konstruktion**, nicht aus einer
+    /// Mustererkennung, die man umschreiben kann. `SQLGuard` bleibt als erste Schicht
+    /// (Read-only-Form, LIMIT, verbotene Bezeichner), die Redaktion der Ergebniszeilen
+    /// als dritte.
     static func executeLLMQuery(sql: String, slotId: String, bankId: String = "primary") throws -> [[String: String]] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
-        let cols = llmAllowlistColumns.joined(separator: ", ")
-        // slotId ist app-generiert (UUID/"legacy"); Hochkommas dennoch escapen.
-        let escapedSlot = slotId.replacingOccurrences(of: "'", with: "''")
+        let cols = llmAllowlistColumns
 
-        return try queue.write { db in
-            try db.execute(sql: "DROP VIEW IF EXISTS llm_tx")
-            try db.execute(sql: """
-                CREATE TEMP VIEW llm_tx AS
-                SELECT \(cols) FROM transactions WHERE slot_id = '\(escapedSlot)'
-                """)
-            defer { try? db.execute(sql: "DROP VIEW IF EXISTS llm_tx") }
+        // 1) Datenbeschaffung READ-ONLY aus der echten DB — gebundener Slot-Parameter,
+        //    nur erlaubte Spalten. Das LLM-SQL läuft hier nirgends.
+        let sourceRows: [Row] = try queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT \(cols.map { "\"\($0)\"" }.joined(separator: ", "))
+                FROM transactions WHERE slot_id = ?
+                """, arguments: [slotId])
+        }
 
+        // 2) Sandbox aufbauen: frische In-Memory-DB, die NUR llm_tx kennt.
+        //    Spalten ohne Typangabe — SQLite ist dynamisch typisiert, und die
+        //    DatabaseValues werden 1:1 übernommen, damit Zahlenvergleiche
+        //    (`betrag < 0`) und Datums-Strings weiter funktionieren.
+        let sandbox = try DatabaseQueue()
+        try sandbox.write { db in
+            let quoted = cols.map { "\"\($0)\"" }.joined(separator: ", ")
+            let placeholders = Array(repeating: "?", count: cols.count).joined(separator: ", ")
+            try db.execute(sql: "CREATE TABLE llm_tx (\(quoted))")
+            for row in sourceRows {
+                let values: [(any DatabaseValueConvertible)?] = cols.map { name in
+                    let v: DatabaseValue = row[name]
+                    return v
+                }
+                try db.execute(sql: "INSERT INTO llm_tx VALUES (\(placeholders))",
+                               arguments: StatementArguments(values))
+            }
+        }
+        // Zweite Grenze: selbst wenn SQLGuard je ein schreibendes Statement durchließe,
+        // lehnt SQLite es hier ab (die Sandbox ist ohnehin ein Wegwerf-Objekt).
+        try sandbox.writeWithoutTransaction { db in
+            try db.execute(sql: "PRAGMA query_only = ON")
+        }
+
+        // 3) LLM-SQL ausführen — gegen die Sandbox, nicht gegen die echte DB.
+        return try sandbox.read { db in
             let rows = try Row.fetchAll(db, sql: sql)
             return rows.map { row in
                 var map: [String: String] = [:]
