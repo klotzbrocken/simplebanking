@@ -126,30 +126,33 @@ private struct BTXCRTModifier: ViewModifier {
     @AppStorage(BTXCRT.defaultsKey) private var crtEnabled: Bool = false
 
     func body(content: Content) -> some View {
-        if #available(macOS 14.0, *), gate, crtEnabled, BTXCRT.isEligible {
-            // 24 fps genügen für das dezente Flackern; ausgeschaltet läuft NICHTS
-            // (dieser Zweig wird gar nicht erst gebaut).
-            //
-            // colorEffect statt layerEffect: reine Pixel-Farbtransformation ohne
-            // Sampling — die Tonnen-Verzerrung der ersten Fassung riss das
-            // maxSampleOffset-Limit und schwärzte das Fenster.
-            TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { tl in
-                let t = Float(tl.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: 3600))
-                content
-                    .compositingGroup()
-                    .visualEffect { inner, proxy in
-                        inner.colorEffect(
-                            ShaderLibrary.btxCrtColor(
-                                .float2(Float(proxy.size.width), Float(proxy.size.height)),
-                                .float(t),
-                                .float(1.0)
+        // OVERLAY-Prinzip: die CRT-Textur liegt als halbtransparente Schicht ÜBER
+        // dem Inhalt. Den Inhalt selbst zu shadern scheitert an AppKit-gestützten
+        // Views (NSScrollView der Liste, NSTextField der Felder) — die lassen sich
+        // nicht rastern: Liste verschwand, Felder zeigten das Verboten-Symbol.
+        content.overlay {
+            if #available(macOS 14.0, *), gate, crtEnabled, BTXCRT.isEligible {
+                // 24 fps genügen für das dezente Flackern; ausgeschaltet existiert
+                // das Overlay gar nicht.
+                TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { tl in
+                    let t = Float(tl.date.timeIntervalSinceReferenceDate
+                        .truncatingRemainder(dividingBy: 3600))
+                    Rectangle()
+                        .fill(Color.white)
+                        .visualEffect { inner, proxy in
+                            inner.colorEffect(
+                                ShaderLibrary.btxCrtOverlay(
+                                    .float2(Float(proxy.size.width), Float(proxy.size.height)),
+                                    .float(t),
+                                    .float(1.0)
+                                )
                             )
-                        )
-                    }
+                        }
+                        .ignoresSafeArea(.all, edges: .top)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
-        } else {
-            content
         }
     }
 }

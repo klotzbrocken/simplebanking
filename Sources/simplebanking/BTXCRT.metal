@@ -3,24 +3,27 @@
 using namespace metal;
 
 /*
- CRT-Shader für das BTX-Theme (Easter-Egg) — im Geist von cool-retro-term,
- als SwiftUI-colorEffect über die bestehende Metal-Pipeline (wie Ripple.metal).
+ CRT-Shader für das BTX-Theme (Easter-Egg) — im Geist von cool-retro-term.
 
- Bewusst ein reiner FARB-Shader ohne Layer-Sampling: die erste Fassung nutzte
- layerEffect mit Tonnen-Verzerrung, deren Sample-Verschiebung an den Ecken das
- maxSampleOffset-Limit riss — Ergebnis war ein schwarzes Fenster. colorEffect
- transformiert nur den Farbwert des jeweiligen Pixels und kann prinzipbedingt
- nichts schwärzen; die Röhren-Wölbung übernimmt optisch die BTXScreenBezel.
+ Dritter Anlauf, bewusst als OVERLAY: der Shader läuft per colorEffect auf einem
+ eigenen transparenten Rechteck ÜBER dem Inhalt und zeichnet die CRT-Textur als
+ halbtransparente Schicht (RetroMac-„CRT lite"-Prinzip).
 
- Bausteine:
-   • Scanlines      — abwechselnd helle/dunkle Zeilen (Periode 2 pt)
-   • Aperture-Maske — RGB-Subpixel-Streifen wie eine Lochmaske
-   • Vignette       — Abdunklung zu den Rändern
-   • Flicker        — kaum wahrnehmbares 50-Hz-Zittern der Helligkeit
-   • Phosphor-Glow  — leichtes Überstrahlen heller Flächen
+ Warum nicht direkt auf dem Inhalt?
+   • layerEffect + Tonnen-Verzerrung riss das maxSampleOffset-Limit → Schwarzbild.
+   • colorEffect auf dem Inhalt muss ihn rastern — AppKit-gestützte Views
+     (NSScrollView der Umsatzliste, NSTextField der Suchfelder) können nicht
+     gerastert werden: die Liste verschwand, Felder zeigten das Verboten-Symbol.
+ Das Overlay berührt den Inhalt nicht — darunter darf beliebiges AppKit liegen.
+
+ Bausteine (alle nur abdunkelnd/tönend, nie deckend):
+   • Scanlines       — dunkle Zeilen im 2-pt-Raster
+   • Aperture-Maske  — R/G/B-Streifen im 3-pt-Raster (leichte Phosphor-Tönung)
+   • Vignette        — Abdunklung zu den Rändern
+   • Flicker         — kaum wahrnehmbares 50-Hz-Zittern
 */
 [[ stitchable ]]
-half4 btxCrtColor(
+half4 btxCrtOverlay(
     float2 position,
     half4 color,
     float2 size,
@@ -31,26 +34,23 @@ half4 btxCrtColor(
     float2 cc = (position / size) * 2.0 - 1.0;
     float dist2 = dot(cc, cc);
 
-    // Scanlines: Periode 2 pt (Retina: 4 px) — deutlich, aber nicht dominant.
-    float scan = 1.0 - 0.14 * strength * (0.5 + 0.5 * sin(position.y * 3.14159265));
+    // Abdunkelnde Anteile (Alpha der schwarzen Schicht).
+    float flicker = 1.0 + 0.10 * sin(time * 100.0 * 3.14159265);
+    float scanA   = 0.13 * strength * (0.5 + 0.5 * sin(position.y * 3.14159265)) * flicker;
+    float vigA    = 0.16 * strength * dist2;
+    float blackA  = clamp(scanA + vigA * (1.0 - scanA), 0.0, 0.85);
 
-    // Aperture-Maske: RGB-Streifen im 3-pt-Raster.
+    // Phosphor-Streifen: pro 3-pt-Spalte ein R/G/B-Hauch (additiv wirkende Tönung).
     int px = int(fmod(position.x, 3.0));
-    half3 mask = half3(1.0);
-    float m = 0.06 * strength;
-    if (px == 0)      { mask = half3(1.0 + m, 1.0 - m, 1.0 - m); }
-    else if (px == 1) { mask = half3(1.0 - m, 1.0 + m, 1.0 - m); }
-    else              { mask = half3(1.0 - m, 1.0 - m, 1.0 + m); }
+    half3 stripe = (px == 0) ? half3(1.0, 0.1, 0.1)
+                 : (px == 1) ? half3(0.1, 1.0, 0.1)
+                             : half3(0.1, 0.1, 1.0);
+    float stripeA = 0.05 * strength;
 
-    // Vignette + Flicker (50 Hz, sehr dezent).
-    float vignette = 1.0 - 0.18 * strength * dist2;
-    float flicker  = 1.0 + 0.012 * strength * sin(time * 100.0 * 3.14159265);
+    // Streifen zuerst, Schwarz darüber (source-over, dann entpremultipliziert).
+    float aTotal = stripeA + blackA * (1.0 - stripeA);
+    half3 rgbPremul = stripe * stripeA * (1.0 - blackA);
+    half3 rgb = aTotal > 0.001 ? rgbPremul / aTotal : half3(0.0);
 
-    color.rgb *= mask * half3(scan * vignette * flicker);
-
-    // Leichtes Überstrahlen heller Flächen (Phosphor-Glow, billig genähert).
-    half luma = dot(color.rgb, half3(0.299, 0.587, 0.114));
-    color.rgb += color.rgb * (luma * luma) * 0.08 * strength;
-
-    return color;
+    return half4(rgb, aTotal);
 }
