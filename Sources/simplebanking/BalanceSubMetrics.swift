@@ -181,21 +181,26 @@ struct BalanceSubMetricsLabel: View {
     // Bei aktivem Theme trägt der Untertitel Theme-Schrift und -Farbe. BTX setzt die
     // Verfügbarkeits-Zeile grün (Leitfarbe „verfügbar" der Originalseiten), die
     // Dispo-Warnung bleibt rot — beides über die Theme-Betragsfarben.
+    // Lo-Fi (BTX): Raster-Typografie + Signalfarben. Farb-Themes behalten die
+    // Default-Metriken (13 pt, Sekundärgrau) — nur die Schriftfamilie folgt dem Theme.
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+    private var lofi: Bool { themed && ThemeChrome.lofi }
 
     private var normalFont: Font {
-        themed ? ThemeFonts.flyoutBody(size: 16) : .system(size: 13, weight: .regular)
+        lofi ? ThemeFonts.flyoutBody(size: 16)
+             : themed ? ThemeFonts.flyoutBody(size: 13)
+                      : .system(size: 13, weight: .regular)
     }
     private var normalColor: Color {
-        themed ? .themedIncome : Color(NSColor.secondaryLabelColor)
+        lofi ? .themedIncome : Color(NSColor.secondaryLabelColor)
     }
-    private var textCase: Text.Case? { themed ? .uppercase : nil }
+    private var textCase: Text.Case? { ThemeChrome.textCase }
 
     var body: some View {
         switch metrics.state {
         case .overdrawn:
             Text(overdrawnText())
-            .font(themed ? ThemeFonts.flyoutBody(size: 16) : .system(size: 13, weight: .regular))
+            .font(normalFont)
             .textCase(textCase)
             .foregroundColor(themed ? .themedExpense : .sbRedStrong)
             .lineLimit(1)

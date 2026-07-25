@@ -43,15 +43,16 @@ struct RoundupSavingsCard: View {
         return L10n.t("Tag \(state.streakDays) in Folge", "Day \(state.streakDays) streak")
     }
 
-    // Bei aktivem Theme trägt die Karte die Theme-Fläche/-Schrift; BTX bekommt statt
-    // Mint + rundem Euro-Symbol die grüne Leitfarbe und einen Mosaik-Block.
+    // Nur im Lo-Fi-Modus (BTX) trägt die Karte Theme-Fläche/-Signalfarben statt Mint —
+    // Farb-Themes (Game Boy/Sunrise) behalten den Mint-Look wie vor 2.0.
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
-    private var heroColor: Color { themed ? .themedIncome : Color.roundupAccent }
-    private var eyebrowColor: Color { themed ? Color.themedInk.opacity(0.75) : .secondary }
+    private var lofi: Bool { themed && ThemeChrome.lofi }
+    private var heroColor: Color { lofi ? .themedIncome : Color.roundupAccent }
+    private var eyebrowColor: Color { lofi ? Color.themedInk.opacity(0.75) : .secondary }
 
     var body: some View {
         VStack(spacing: 6) {
-            if themed && !ThemeChrome.glyphControls {
+            if lofi {
                 BTXMosaicIcon(category: .sparen, side: iconSize)
                     .padding(.bottom, 2)
             } else {
@@ -62,8 +63,8 @@ struct RoundupSavingsCard: View {
             }
 
             Text("+ \(formatEuros(state.monthToDateCents))")
-                .font(themed ? ThemeFonts.flyoutHeading(size: heroFontSize, weight: .bold)
-                             : .system(size: heroFontSize, weight: .bold, design: .rounded))
+                .font(lofi ? ThemeFonts.flyoutHeading(size: heroFontSize, weight: .bold)
+                           : .system(size: heroFontSize, weight: .bold, design: .rounded))
                 .foregroundColor(heroColor)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -71,8 +72,8 @@ struct RoundupSavingsCard: View {
 
             Text(L10n.t("hättest Du diesen Monat durch Aufrunden zur Seite legen können",
                         "you could have set this aside through round-up this month"))
-                .font(themed ? ThemeFonts.flyoutBody(size: eyebrowFontSize + 3) : .system(size: eyebrowFontSize))
-                .textCase(themed ? .uppercase : nil)
+                .font(lofi ? ThemeFonts.flyoutBody(size: eyebrowFontSize + 3) : .system(size: eyebrowFontSize))
+                .textCase(ThemeChrome.textCase)
                 .foregroundColor(eyebrowColor)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -86,8 +87,8 @@ struct RoundupSavingsCard: View {
                     Text(streakLabel)
                 }
             }
-            .font(themed ? ThemeFonts.flyoutBody(size: subFontSize + 3) : .system(size: subFontSize))
-            .textCase(themed ? .uppercase : nil)
+            .font(lofi ? ThemeFonts.flyoutBody(size: subFontSize + 3) : .system(size: subFontSize))
+            .textCase(ThemeChrome.textCase)
             .foregroundColor(eyebrowColor)
             .monospacedDigit()
             .lineLimit(1)
@@ -97,8 +98,8 @@ struct RoundupSavingsCard: View {
         .padding(.vertical, verticalPadding)
         .padding(.horizontal, 14)
         .background(
-            RoundedRectangle(cornerRadius: themed ? 0 : 12, style: .continuous)
-                .fill(themed ? Color.themedSurface : Color.roundupPanelBackground)
+            RoundedRectangle(cornerRadius: lofi ? 0 : 12, style: .continuous)
+                .fill(lofi ? Color.themedSurface : Color.roundupPanelBackground)
         )
     }
 }

@@ -7480,7 +7480,8 @@ private struct StatusBalanceFlyoutCardView: View {
                     Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
                 }
                 Text(text)
-                    .font(isDefaultTheme ? .system(size: 12) : ThemeFonts.flyoutBody(size: 14))
+                    .font(isDefaultTheme ? .system(size: 12)
+                          : ThemeFonts.flyoutBody(size: ThemeChrome.lofi ? 14 : 12))
                     .textCase(ThemeChrome.textCase)
                     .lineLimit(1)
             }
@@ -7567,9 +7568,9 @@ private struct StatusBalanceFlyoutCardView: View {
                 }
                 // Mit CRT-Blende mehr Randabstand — sonst kleben Piles und „Senden"
                 // an der Schmucklinie.
-                .padding(.horizontal, isDefaultTheme ? 12 : 16)
+                .padding(.horizontal, ThemeChrome.lofi ? 16 : 12)
                 .padding(.top, 8)
-                .padding(.bottom, isDefaultTheme ? 9 : 12)
+                .padding(.bottom, ThemeChrome.lofi ? 12 : 9)
             }
             }
             .frame(height: cardRegionHeight, alignment: .top)
@@ -7618,7 +7619,7 @@ private struct StatusBalanceFlyoutCardView: View {
             .clipped()
             // Bei aktivem Theme füllt die flache Theme-Farbe auch Footer/Kanten (sonst
             // blitzt am unteren Rand die Default-Panelfarbe durch → „Rahmen").
-            .background((roundupView.isActive && isDefaultTheme) ? Color.roundupPanelBackground
+            .background((roundupView.isActive && !ThemeChrome.lofi) ? Color.roundupPanelBackground
                         : (isDefaultTheme ? Color.panelBackground : Color.themedSurface))
             // Das GANZE Flyout ist Drop-Zone: Rechnung (PDF/Bild) darauf ziehen →
             // Textebene/OCR → Quick-Send-Drawer öffnet sich vorbefüllt.
@@ -7688,10 +7689,11 @@ private struct StatusBalanceFlyoutCardView: View {
         }()
 
         let themed = !isDefaultTheme
+        let lofi = themed && ThemeChrome.lofi
         return VStack(alignment: .leading, spacing: 8) {
             // Header row — mirrors defaultThemeCard: icon + text + Spacer
             HStack(spacing: 8) {
-                if themed && !ThemeChrome.glyphControls {
+                if lofi {
                     BTXMosaicIcon(category: .sonstiges)
                 } else {
                     Image(systemName: "square.stack.3d.up.fill")
@@ -7699,7 +7701,7 @@ private struct StatusBalanceFlyoutCardView: View {
                         .foregroundColor(Color(NSColor.secondaryLabelColor))
                 }
                 Text(headerText)
-                    .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 14))
+                    .font(themed ? ThemeFonts.flyoutBody(size: lofi ? 15 : 14) : .system(size: 14))
                     .textCase(ThemeChrome.textCase)
                     .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 Spacer()
@@ -7707,9 +7709,10 @@ private struct StatusBalanceFlyoutCardView: View {
 
             // Nur der Gesamt-Saldo (keine Konten-Aufschlüsselung rechts).
             Text(effectiveBalanceText)
-                .font(themed ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
-                             : .system(size: 38, weight: .bold, design: .default))
-                .tracking(themed ? 1.0 : -0.6)
+                .font(lofi ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
+                     : themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
+                              : .system(size: 38, weight: .bold, design: .default))
+                .tracking(lofi ? 1.0 : -0.6)
                 .monospacedDigit()
                 // Negatives Aggregat auch im Theme in Warnfarbe (BTX-Rot).
                 .foregroundColor(themed
@@ -7717,7 +7720,8 @@ private struct StatusBalanceFlyoutCardView: View {
                                  : wash.balance)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
+                .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
+                .frame(height: lofi ? 48 : nil, alignment: .leading)
             leftToPaySubtitle
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -7728,7 +7732,7 @@ private struct StatusBalanceFlyoutCardView: View {
         // aktives Theme = flache Theme-Fläche.
         .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            themed
+            lofi
             ? AnyView(Color.themedSurface)
             : AnyView(LinearGradient(colors: [wash.top, wash.bottom],
                                      startPoint: .topTrailing, endPoint: .bottomLeading))
@@ -7771,6 +7775,7 @@ private struct StatusBalanceFlyoutCardView: View {
         // springen. Der Kategorien-Ring liegt als Overlay rechts und treibt die
         // Kartenhöhe NICHT (sonst wäre die Händler-Karte höher → Pillen versetzt).
         let themed = !isDefaultTheme
+        let lofi = themed && ThemeChrome.lofi
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 // BTX: Warenkorb-Mosaik statt Marken-Logo.
@@ -7786,51 +7791,53 @@ private struct StatusBalanceFlyoutCardView: View {
                 }
                 if reweNeedsLogin {
                     Text("⚠︎ " + L10n.t("Login erneuern", "Sign in again"))
-                        .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 14))
+                        .font(themed ? ThemeFonts.flyoutBody(size: lofi ? 15 : 14) : .system(size: 14))
                         .textCase(ThemeChrome.textCase)
                         .foregroundColor(themed ? .themedExpense : .orange)
                 } else {
                     Text(formatBankHeader(date: balanceFetchedAt))
-                        .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 14))
+                        .font(themed ? ThemeFonts.flyoutBody(size: lofi ? 15 : 14) : .system(size: 14))
                         .textCase(ThemeChrome.textCase)
                         .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 }
                 Spacer()
             }
             Text(effectiveBalanceText)
-                .font(themed ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
-                             : .system(size: 38, weight: .bold, design: .default))
-                .tracking(themed ? 1.0 : -0.6)
+                .font(lofi ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
+                     : themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
+                              : .system(size: 38, weight: .bold, design: .default))
+                .tracking(lofi ? 1.0 : -0.6)
                 .foregroundColor(themed ? .themedInk : wash.accent)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
+                .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
+                .frame(height: lofi ? 48 : nil, alignment: .leading)
             Button { cycleReweRange() } label: {
                 HStack(spacing: 6) {
                     if ThemeChrome.glyphControls {
                         Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
                     }
                     Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
-                        .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
+                        .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
                         .textCase(ThemeChrome.textCase)
                     if let badge = budgetBadge {
                         Text(badge)
-                            .font(themed ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
+                            .font(lofi ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
                             .padding(.horizontal, 6).padding(.vertical, 1)
                             .background(
                                 RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
-                                    .fill(themed ? Color.clear : heat.opacity(0.15))
+                                    .fill(lofi ? Color.clear : heat.opacity(0.15))
                                     .overlay(
-                                        themed
+                                        lofi
                                         ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
                                             .stroke(Color.themedInk.opacity(0.5), lineWidth: 1)
                                         : nil
                                     )
                             )
-                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : heat)
+                            .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : heat)
                     }
                 }
-                .foregroundColor(themed ? Color.themedInk.opacity(0.85) : toggleColor)
+                .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : toggleColor)
             }
             .buttonStyle(.plain)
             .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
@@ -7847,7 +7854,7 @@ private struct StatusBalanceFlyoutCardView: View {
         // aktives Theme = flache Theme-Fläche.
         .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            themed
+            lofi
             ? AnyView(Color.themedSurface)
             : AnyView(LinearGradient(colors: [wash.top, wash.bottom],
                                      startPoint: .topTrailing, endPoint: .bottomLeading))
@@ -7895,10 +7902,12 @@ private struct StatusBalanceFlyoutCardView: View {
         let detailColor:  Color = themed ? Color.themedInk.opacity(0.72) : wash.detail
         let nameColor: Color = themed ? .themedInk
             : (dark ? Color(NSColor.labelColor) : (Color(hex: "1d1d1f") ?? .primary))
-        // Demo 2b (Flyout, 420 px): Kontostand 50 px + scaleY(1.15). Auf die 348-pt-Breite
-        // skaliert ≈ 42 pt; die Streckung übernimmt der scaleEffect am Text.
-        let balanceFont: Font = themed ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
-                                        : .system(size: 38, weight: .bold, design: .default)
+        // Demo 2b (Flyout, 420 px): Kontostand 50 px + scaleY(1.15) — NUR Lo-Fi (BTX).
+        // Farb-Themes behalten die 38-pt-Metrik; Streckung via scaleEffect am Text.
+        let lofi = themed && ThemeChrome.lofi
+        let balanceFont: Font = lofi ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
+                              : themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
+                                       : .system(size: 38, weight: .bold, design: .default)
         let nameFont: Font = themed ? ThemeFonts.flyoutHeading(size: 14, weight: .semibold)
                                      : .system(size: 14, weight: .semibold)
         let timeFont: Font = themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 13)
@@ -7939,12 +7948,15 @@ private struct StatusBalanceFlyoutCardView: View {
 
             Text(displayBalance)
                 .font(balanceFont)
-                .tracking(themed ? 1.0 : -0.6)
+                .tracking(lofi ? 1.0 : -0.6)
                 .foregroundColor(balanceColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
-                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
+                .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
+                // Feste Zeilenhöhe im Lo-Fi-Modus — die Länge des Kontostands darf
+                // die Kartenhöhe nie verändern.
+                .frame(height: lofi ? 48 : nil, alignment: .leading)
 
             if isPayPalCard { paypalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }

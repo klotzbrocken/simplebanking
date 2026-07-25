@@ -436,6 +436,14 @@ enum ThemeChrome {
 
     /// `nil` beim Default-Theme — Aufrufer behalten dann ihr Bestandsverhalten.
     static var textCase: Text.Case? { theme.uppercaseText ? .uppercase : nil }
+
+    /// Lo-Fi-Modus: die tiefgreifende Text-Terminal-Gestaltung (größere Rasterschrift-
+    /// Typografie, „double height"-Kontostand, Block-Felder, Flächen-Swaps im Sparmodus,
+    /// bündige Zeilen ohne Gutter). Hängt an `glyphControls=off` — dem Schalter, der ein
+    /// Theme zur textgetriebenen Oberfläche erklärt (derzeit nur BTX). Themes wie
+    /// Game Boy oder Sunrise, die nur Farben und Schriftfamilie setzen, behalten
+    /// exakt die Default-Metriken.
+    static var lofi: Bool { !theme.isDefault && !theme.glyphControls }
 }
 
 enum ThemeFonts {

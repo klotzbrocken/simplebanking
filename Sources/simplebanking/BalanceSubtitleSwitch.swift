@@ -76,13 +76,14 @@ struct BalanceSubtitleSwitch: View {
     }
 
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+    private var lofi: Bool { themed && ThemeChrome.lofi }
 
     var body: some View {
         HStack(spacing: 6) {
             if !forceClassic {
                 // Als kleine Pille darstellen, damit klar ist: das ist ein Umschalter.
                 Button(action: toggle) {
-                    if themed && !ThemeChrome.glyphControls {
+                    if lofi {
                         // BTX: kleiner Block statt SF-Symbol (README: „grüner Mosaik-Punkt").
                         Rectangle()
                             .fill(Color.themedIncome)
@@ -153,9 +154,11 @@ struct BalanceSubtitleSwitch: View {
                 ? classicLabel(amount)
                 : L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
             Text(text)
-                .font(themed ? ThemeFonts.flyoutBody(size: 16) : .system(size: 13, weight: .regular))
-                .textCase(themed ? .uppercase : nil)
-                .foregroundColor(themed ? .themedIncome : (detailColor ?? Color(NSColor.secondaryLabelColor)))
+                .font(lofi ? ThemeFonts.flyoutBody(size: 16)
+                     : themed ? ThemeFonts.flyoutBody(size: 13)
+                              : .system(size: 13, weight: .regular))
+                .textCase(ThemeChrome.textCase)
+                .foregroundColor(lofi ? .themedIncome : (detailColor ?? Color(NSColor.secondaryLabelColor)))
                 .lineLimit(1)
         } else {
             // Placeholder reserves vertical space while value is computing

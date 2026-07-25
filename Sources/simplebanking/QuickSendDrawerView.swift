@@ -243,7 +243,7 @@ struct QuickSendDrawerView: View {
                         }
                     Text("€")
                         .font(fieldFont())
-                        .foregroundColor(themed ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
+                        .foregroundColor(lofi ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
                 }
                 .padding(.horizontal, 9)
                 .frame(width: 122, height: 30)
@@ -271,7 +271,7 @@ struct QuickSendDrawerView: View {
                     }
                 if ibanValid {
                     // BTX: Text-Haken statt SF-Symbol.
-                    if themed && !ThemeChrome.glyphControls {
+                    if lofi {
                         Text("OK")
                             .font(ThemeFonts.flyoutBody(size: 13))
                             .foregroundColor(.themedIncome)
@@ -334,7 +334,7 @@ struct QuickSendDrawerView: View {
     private var inactiveTemplate: some View {
         let radius = ThemeChrome.cornerRadius(7)
         return Group {
-            if themed && !ThemeChrome.glyphControls {
+            if lofi {
                 // BTX: kein Smiley — leeres Feld als Platzhalter.
                 Color.clear.frame(width: 30, height: 30)
                     .background(
@@ -361,13 +361,13 @@ struct QuickSendDrawerView: View {
         let radius = ThemeChrome.cornerRadius(7)
         return Button { onAddTemplate?() } label: {
             Text("+")
-                .font(themed ? ThemeFonts.flyoutHeading(size: 16) : .system(size: 12, weight: .semibold))
-                .foregroundColor(themed ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
+                .font(lofi ? ThemeFonts.flyoutHeading(size: 16) : .system(size: 12, weight: .semibold))
+                .foregroundColor(lofi ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
                 .frame(width: 30, height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: radius)
                         .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
-                        .foregroundColor(themed ? Color.themedInk.opacity(0.4) : .sbBorder)
+                        .foregroundColor(lofi ? Color.themedInk.opacity(0.4) : .sbBorder)
                 )
         }
         .buttonStyle(.plain)
@@ -379,9 +379,9 @@ struct QuickSendDrawerView: View {
         Button { review() } label: {
             HStack(spacing: 5) {
                 Text(L10n.t("Weiter", "Next"))
-                    .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
-                    .textCase(themed ? .uppercase : nil)
-                if themed && !ThemeChrome.glyphControls {
+                    .font(lofi ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
+                    .textCase(ThemeChrome.textCase)
+                if lofi {
                     Text(">").font(ThemeFonts.flyoutBody(size: 15))
                 } else {
                     Image(systemName: "arrow.right")
@@ -394,17 +394,17 @@ struct QuickSendDrawerView: View {
                 // BTX: aktiv = gefüllter Block in Leitfarbe; inaktiv = heller Block mit
                 // Tintenrahmen (klar lesbar, aber sichtbar „noch nicht bereit").
                 RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(7))
-                    .fill(themed
+                    .fill(lofi
                           ? (canSubmit ? Color.themedAccent : Color.white.opacity(0.4))
                           : (canSubmit ? Color.sbRedStrong : Color.sbSurfaceSoft))
                     .overlay(
-                        (themed && !canSubmit)
+                        (lofi && !canSubmit)
                         ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(7))
                             .stroke(Color.themedInk.opacity(0.6), lineWidth: 2)
                         : nil
                     )
             )
-            .foregroundColor(themed
+            .foregroundColor(lofi
                              ? (canSubmit ? Color.themedSurface : Color.themedInk.opacity(0.7))
                              : (canSubmit ? .white : .sbTextSecondary))
         }
@@ -517,28 +517,30 @@ struct QuickSendDrawerView: View {
 
     // MARK: Helpers
 
-    /// Aktives Theme (nicht Default) → Drawer in Theme-Optik (BTX: eckig, VT323).
+    /// Nur Lo-Fi (BTX) → Drawer in Block-Optik (eckig, VT323, helle Felder).
+    /// Farb-Themes behalten die Default-Felder.
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+    private var lofi: Bool { themed && ThemeChrome.lofi }
 
     /// Schrift der Eingabefelder — VT323 bei aktivem Theme, sonst System.
     private func fieldFont(mono: Bool = false) -> Font {
-        if themed { return ThemeFonts.flyoutBody(size: 15) }
+        if lofi { return ThemeFonts.flyoutBody(size: 15) }
         return mono ? .system(size: 12.5, design: .monospaced) : .system(size: 12.5)
     }
-    private var fieldTextColor: Color { themed ? .themedInk : .primary }
+    private var fieldTextColor: Color { lofi ? .themedInk : .primary }
 
     /// Platzhalter-Behandlung: der System-Prompt folgt dem (ggf. dunklen) Appearance-
     /// Modus und wäre auf dem hellen BTX-Feld weiß = unlesbar. Eine Prompt-Farbe wird
     /// vom Plain-TextField auf macOS ignoriert — deshalb wird der System-Platzhalter
     /// bei aktivem Theme mit `Text("")` unterdrückt und ein eigener Text übergelegt.
     private func prompt(_ de: String, _ en: String) -> Text? {
-        themed ? Text("") : nil
+        lofi ? Text("") : nil
     }
 
     /// Eigener, lesbarer Platzhalter für die Theme-Felder (nur solange leer).
     @ViewBuilder
     private func themedPlaceholder(_ de: String, _ en: String, visible: Bool, trailing: Bool = false) -> some View {
-        if themed && visible {
+        if lofi && visible {
             Text(L10n.t(de, en))
                 .font(ThemeFonts.flyoutBody(size: 15))
                 .foregroundColor(Color.themedInk.opacity(0.45))
@@ -556,11 +558,11 @@ struct QuickSendDrawerView: View {
         // Der helle Grund liefert zugleich den Kontrast für Text und Platzhalter.
         let radius = ThemeChrome.cornerRadius(7)
         let isNeutral = border == Color.sbBorder
-        let fill = themed ? Color.white.opacity(0.65) : Color.sbSurfaceSoft
-        let stroke = (themed && isNeutral) ? Color.themedInk : border
+        let fill = lofi ? Color.white.opacity(0.65) : Color.sbSurfaceSoft
+        let stroke = (lofi && isNeutral) ? Color.themedInk : border
         return RoundedRectangle(cornerRadius: radius)
             .fill(fill)
-            .overlay(RoundedRectangle(cornerRadius: radius).stroke(stroke, lineWidth: themed ? 2 : 1))
+            .overlay(RoundedRectangle(cornerRadius: radius).stroke(stroke, lineWidth: lofi ? 2 : 1))
     }
 
     private func apply(_ fav: QuickSendFavorite) {

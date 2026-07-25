@@ -76,6 +76,26 @@ final class BTXThemeTests: XCTestCase {
         XCTAssertTrue(t.glyphControls, "Default behält grafische Icons")
     }
 
+    /// Regression: die Lo-Fi-Gestaltung (große Raster-Typografie, Block-Felder,
+    /// Flächen-Swaps) gehört NUR Themes mit `glyphControls=off`. Game Boy und
+    /// Sunrise sind reine Farb-Themes und müssen die Default-Metriken behalten —
+    /// genau das war nach der ersten BTX-Runde verletzt.
+    func test_colorThemes_areNotLofi() throws {
+        for file in ["gameboy.cfg", "sunrise.cfg", "default.cfg"] {
+            let cfg = try XCTUnwrap(ThemeManager.builtInThemes[file])
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("t-\(UUID().uuidString).cfg")
+            try cfg.write(to: url, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(at: url) }
+            let t = try XCTUnwrap(ThemeManager.shared.parseTheme(from: url))
+            XCTAssertTrue(t.glyphControls, "\(file) darf NICHT in den Lo-Fi-Modus rutschen")
+            XCTAssertFalse(t.uppercaseText, "\(file): keine Großschreibung")
+            XCTAssertFalse(t.squareControls, "\(file): keine eckigen Controls")
+        }
+        let btx = try parsedBTX()
+        XCTAssertFalse(btx.glyphControls, "BTX ist das (bisher einzige) Lo-Fi-Theme")
+    }
+
     /// Ein BTX-Schirm sah in Hell wie Dunkel gleich aus — die Palette darf nicht
     /// zwischen den Appearances springen.
     func test_btxTheme_isAppearanceIndependent() throws {

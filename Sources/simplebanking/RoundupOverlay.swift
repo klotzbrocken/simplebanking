@@ -24,8 +24,10 @@ struct RoundupOverlay: View {
         ("10 €",  1000)
     ]
 
-    /// Aktives Theme (BTX): Fläche/Schrift/Blöcke statt Mint-Pillen.
+    /// Nur Lo-Fi (BTX): Fläche/Schrift/Blöcke statt Mint-Pillen — Farb-Themes
+    /// behalten den Mint-Look.
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+    private var lofi: Bool { themed && ThemeChrome.lofi }
 
     var body: some View {
         VStack(spacing: 8) {
@@ -33,13 +35,13 @@ struct RoundupOverlay: View {
             // EIGENER voller Zeile — sonst wird im schmalen Fenster die 5€-Pille beschnitten.
             HStack(spacing: 10) {
                 Text(L10n.t("Aufrunden um:", "Round up to:"))
-                    .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
+                    .font(lofi ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
                     .textCase(ThemeChrome.textCase)
-                    .foregroundColor(themed ? .themedInk : .primary)
+                    .foregroundColor(lofi ? .themedInk : .primary)
                     .fixedSize()
                 Spacer(minLength: 4)
                 Button(action: onClose) {
-                    if themed && !ThemeChrome.glyphControls {
+                    if lofi {
                         BTXTextControl(text: L10n.t("Aus", "Off"), active: true)
                     } else {
                         Image(systemName: "centsign.circle.fill")
@@ -58,10 +60,10 @@ struct RoundupOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(themed ? Color.themedSurface : Color.roundupPanelBackground)
+        .background(lofi ? Color.themedSurface : Color.roundupPanelBackground)
         .overlay(
             Rectangle()
-                .fill(themed ? Color.themedInk.opacity(0.4) : Color.roundupAccent.opacity(0.25))
+                .fill(lofi ? Color.themedInk.opacity(0.4) : Color.roundupAccent.opacity(0.25))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -77,7 +79,7 @@ struct RoundupOverlay: View {
                 }
                 Text(L10n.t("Aufgerundeten Betrag zur Seite legen",
                             "Set aside round-up amount"))
-                    .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 13, weight: .semibold))
+                    .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 13, weight: .semibold))
                     .textCase(ThemeChrome.textCase)
                 Spacer(minLength: 0)
             }
@@ -86,9 +88,9 @@ struct RoundupOverlay: View {
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
-                    .fill(themed ? Color.themedAccent : Color.roundupAccent)
+                    .fill(lofi ? Color.themedAccent : Color.roundupAccent)
             )
-            .foregroundColor(themed ? Color.themedSurface : .white)
+            .foregroundColor(lofi ? Color.themedSurface : .white)
         }
         .buttonStyle(.plain)
         .help(L10n.t("Öffnet den Auswahl-Dialog (Heute / Gestern / Vorgestern / Monat).",
@@ -126,20 +128,20 @@ struct RoundupOverlay: View {
             // BTX: eckige Blöcke mit Tintenrahmen statt Mint-Kapseln; aktiv = gefüllt
             // in Leitfarbe (wie die Filter-Blöcke der Umsatzliste).
             Text(label)
-                .font(themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11, weight: selected ? .semibold : .regular))
+                .font(lofi ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11, weight: selected ? .semibold : .regular))
                 .textCase(ThemeChrome.textCase)
-                .foregroundColor(themed
+                .foregroundColor(lofi
                                  ? (selected ? Color.themedSurface : Color.themedInk.opacity(0.85))
                                  : (selected ? .white : Color.roundupAccent))
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
                 .background(
                     RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
-                        .fill(themed
+                        .fill(lofi
                               ? (selected ? Color.themedAccent : Color.clear)
                               : (selected ? Color.roundupAccent : Color.roundupAccent.opacity(0.10)))
                         .overlay(
-                            (themed && !selected)
+                            (lofi && !selected)
                             ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
                                 .stroke(Color.themedInk.opacity(0.5), lineWidth: 1)
                             : nil
