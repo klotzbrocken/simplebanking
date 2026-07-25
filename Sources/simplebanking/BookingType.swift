@@ -27,8 +27,38 @@ enum BookingType {
         return standingOrderMarkers.contains { WordMatch.atWordStart(upper, $0) }
     }
 
+    /// ISO-20022-SubFamily für Dauerauftrag — gilt für ausgehende (`ICDT`) wie
+    /// eingehende (`RCDT`) Zahlungen.
+    static let isoStandingOrderSubFamily = "STDO"
+    /// Deutsche Geschäftsvorfallcodes für Daueraufträge: 52 (Belastung),
+    /// 152 (Gutschrift).
+    static let germanStandingOrderGVCs: Set<String> = ["52", "052", "152"]
+
+    /// Wertet den **Buchungstyp-Code** der Bank aus (`bankTransactionCodes`).
+    ///
+    /// Das ist die belastbarste Auskunft überhaupt: sie kommt aus dem
+    /// Buchungssystem der Bank und ist im Gegensatz zum Buchungstext nicht
+    /// sprach- oder institutsabhängig formuliert.
+    static func isStandingOrder(code: String?) -> Bool {
+        guard let code, !code.isEmpty else { return false }
+        for part in code.uppercased().split(separator: ";") {
+            if part.hasPrefix("ISO:"),
+               part.split(separator: "/").last.map(String.init) == isoStandingOrderSubFamily {
+                return true
+            }
+            if part.hasPrefix("GVC:"),
+               germanStandingOrderGVCs.contains(String(part.dropFirst(4))) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Code zuerst (eindeutig), Buchungstext als Rückfall für Banken, die keine
+    /// Codes liefern.
     static func isStandingOrder(_ transaction: TransactionsResponse.Transaction) -> Bool {
-        isStandingOrder(text: transaction.additionalInformation)
+        isStandingOrder(code: transaction.bankTransactionCode)
+            || isStandingOrder(text: transaction.additionalInformation)
     }
 
     /// `true`, wenn IRGENDEINE Buchung der Gruppe als Dauerauftrag gebucht wurde.

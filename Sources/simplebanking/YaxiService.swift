@@ -1599,7 +1599,8 @@ enum YaxiService {
                 },
                 remittanceInformation: tx.remittanceInformation.isEmpty ? nil : tx.remittanceInformation,
                 additionalInformation: tx.additionalInformation,
-                purposeCode: tx.purposeCode
+                purposeCode: tx.purposeCode,
+                bankTransactionCode: compactBankTransactionCode(tx.bankTransactionCodes)
             )
         }
 
@@ -1631,6 +1632,38 @@ enum YaxiService {
 
     private static func dateString(_ date: Date) -> String {
         isoDateFormatter.string(from: date)
+    }
+
+    /// Verdichtet `bankTransactionCodes` zu EINEM Text, der in eine Spalte passt.
+    ///
+    /// Die API liefert je Buchung mehrere Codes in verschiedenen Systemen (ISO 20022,
+    /// deutscher GVC, SWIFT, BAI). Statt sie zu interpretieren und dabei Information
+    /// zu verlieren, werden sie normiert aneinandergereiht — `BookingType` liest
+    /// daraus, was es braucht, und spätere Auswertungen (Lastschrift, Kartenzahlung)
+    /// finden die Rohdaten noch vor. Bisher wurde das Feld komplett verworfen und war
+    /// nach dem Abruf unwiederbringlich weg — auch aus `raw_json`, denn das ist die
+    /// Serialisierung des App-eigenen Structs, nicht der Bankantwort.
+    ///
+    /// Format: `ISO:PMNT/ICDT/STDO`, `GVC:52`, `SWIFT:…`, `BAI:…`, `OTHER:…`,
+    /// mehrere getrennt durch `;`.
+    static func compactBankTransactionCode(_ codes: [BankTransactionCode]) -> String? {
+        let parts: [String] = codes.map { code in
+            switch code {
+            case let .iso(domain, family, subFamily):
+                return "ISO:\(domain)/\(family)/\(subFamily)"
+            case let .national(code, country):
+                // Deutschland: GVC (Geschäftsvorfallcode). Andere Länder mit
+                // Länderkennung, damit die Codes unterscheidbar bleiben.
+                return country.uppercased() == "DE" ? "GVC:\(code)" : "NAT-\(country.uppercased()):\(code)"
+            case let .swift(code):
+                return "SWIFT:\(code)"
+            case let .bai(code):
+                return "BAI:\(code)"
+            case let .other(code, issuer):
+                return issuer.map { "OTHER-\($0):\(code)" } ?? "OTHER:\(code)"
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: ";")
     }
 
     private static func statusString(_ status: TransactionStatus) -> String {

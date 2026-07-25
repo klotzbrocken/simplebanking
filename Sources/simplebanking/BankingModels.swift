@@ -58,6 +58,12 @@ struct TransactionsResponse: Codable, Sendable {
         let remittanceInformation: [String]?
         let additionalInformation: String?  // Buchungstext (z.B. "DAUERAUFTRAG")
         let purposeCode: String?            // Kategorie (z.B. "RINP")
+        /// Buchungstyp der Bank in kompakter Schreibweise, z.B. `ISO:PMNT/ICDT/STDO`
+        /// (Dauerauftrag) oder `GVC:52`. Kommt aus `bankTransactionCodes` der API und
+        /// ist die einzige *belastbare* Auskunft darüber, ob eine Zahlung wiederkehrend
+        /// ist — alles andere muss aus Beträgen und Abständen geraten werden.
+        /// `nil` bei Buchungen, die vor Einführung des Feldes gespeichert wurden.
+        var bankTransactionCode: String? = nil
         var category: String? = nil         // Local category label (e.g. "Essen & Alltag")
         var slotId: String? = nil           // Unified inbox: which bank slot this transaction belongs to
     }
