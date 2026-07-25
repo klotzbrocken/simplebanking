@@ -143,7 +143,11 @@ enum SubscriptionDetector {
     }
 
     private static func scoreGroup(merchantKey: String, transactions: [TransactionsResponse.Transaction]) -> SubscriptionCandidate? {
-        guard transactions.count >= 2 else { return nil }
+        // Dauerauftrag: die Bank bestätigt die Wiederkehr. Nur dann genügt EINE
+        // Buchung — die Zwei-Buchungen-Regel ist sonst das einzige, was einen
+        // beliebigen Einmalkauf davon abhält, als Abo zu gelten.
+        let isStandingOrder = BookingType.containsStandingOrder(transactions)
+        guard transactions.count >= 2 || isStandingOrder else { return nil }
 
         let merchantName = merchantKey.contains("|")
             ? String(merchantKey.split(separator: "|", maxSplits: 1).first ?? Substring(merchantKey))
@@ -167,8 +171,24 @@ enum SubscriptionDetector {
         let avgAmount = amounts.reduce(0, +) / Double(amounts.count)
         let category = FixedCostsAnalyzer.categoryForMerchant(merchantName)
 
-        // Amount ceiling — higher for obligations and savings
-        let amountLimit: Double = {
+        let maxDev = amounts.map { abs($0 - avgAmount) }.max() ?? 0
+        let relVar = avgAmount > 0 ? maxDev / avgAmount : 1.0
+
+        // Amount ceiling — higher for obligations and savings.
+        //
+        // Der Deckel soll teure EINMALKÄUFE fernhalten, nicht teure VERPFLICHTUNGEN.
+        // Die pauschalen 600 € für alles ohne bekannte Marke trafen aber genau
+        // letztere: Miete, Kreditrate oder Kita-Beitrag gehen an Privatpersonen und
+        // kleine Firmen, die in keiner Marken-Tabelle stehen — sie fielen damit
+        // grundsätzlich aus „Abos & Verträge" heraus, obwohl sie die verlässlichsten
+        // wiederkehrenden Posten überhaupt sind. (Die Standard-Ansicht kennt
+        // „Miete" und „Kreditrate" sogar als Kategorien.)
+        //
+        // Statt den Deckel pauschal anzuheben, wächst er mit der BELEGLAGE: nur wenn
+        // die Wiederkehr belastbar ist, darf der Betrag groß sein. Ein einzelner
+        // teurer Kauf hat weder Dauerauftrags-Kennung noch drei gleich hohe
+        // Buchungen im Monatsrhythmus und bleibt damit weiterhin draußen.
+        let baseLimit: Double = {
             switch category {
             case .finance:               return 5000.0
             case .insurance, .utilities: return 2000.0
@@ -177,10 +197,11 @@ enum SubscriptionDetector {
                 return isHousing ? 3000.0 : 600.0
             }
         }()
+        // Starke Belege: von der Bank als Dauerauftrag gebucht ODER mindestens drei
+        // Buchungen mit nahezu identischem Betrag (≤ 5 % Abweichung).
+        let strongEvidence = isStandingOrder || (transactions.count >= 3 && relVar <= 0.05)
+        let amountLimit = strongEvidence ? max(baseLimit, 5000.0) : baseLimit
         guard avgAmount <= amountLimit else { return nil }
-
-        let maxDev = amounts.map { abs($0 - avgAmount) }.max() ?? 0
-        let relVar = avgAmount > 0 ? maxDev / avgAmount : 1.0
 
         // Wider tolerance for categories with variable billing
         let varianceTol: Double = {
@@ -221,6 +242,10 @@ enum SubscriptionDetector {
         if daySpread <= 5         { s += 1 }
         if !amountOK              { s -= 3 }
         if !isMonthly && !intervals.isEmpty { s -= 2 }
+        // Von der Bank bestätigte Wiederkehr wiegt schwerer als jedes abgeleitete
+        // Signal — und gleicht aus, dass eine einzelne Buchung weder Intervall noch
+        // Betragskonstanz belegen kann.
+        if isStandingOrder        { s += 3 }
 
         guard s >= 7 else { return nil }
 

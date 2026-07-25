@@ -516,6 +516,34 @@ enum FixedCostsAnalyzer {
         // bekannten Marken fälschlich als Fixkosten in der Ansicht.
         let isKnownMerchant = categoryForMerchant(merchant) != .other
 
+        // Dauerauftrag: die Bank hat die Wiederkehr bereits bestätigt. Damit
+        // brauchen wir sie nicht mehr aus Beträgen und Abständen zu erraten —
+        // genau daran scheiterten bisher Miete, Sparrate und Vereinsbeitrag, die
+        // im 60-Tage-Fenster oft nur ein- oder zweimal auftauchen.
+        let isStandingOrder = BookingType.containsStandingOrder(transactions)
+
+        // Ein einzelner Dauerauftrag ist wiederkehrend, aber seine FREQUENZ lässt
+        // sich aus einem Datum nicht ableiten. Wir nehmen die in Deutschland
+        // übliche monatliche an — und drücken die Confidence bewusst auf 0.55:
+        // das liegt ÜBER der Schwelle dieser Analyse (0.5), sodass der Posten in
+        // Fixkosten und Abo-Liste erscheint, aber UNTER der Schwelle von
+        // `LeftToPayCalculator` (0.6). Eine aus einer einzigen Beobachtung
+        // geratene Frequenz verändert damit keine Geldsumme.
+        if isStandingOrder && transactions.count == 1 {
+            guard let only = transactions.first else { return nil }
+            return RecurringPayment(
+                merchant: merchant,
+                groupKey: groupKey,
+                averageAmount: abs(amt(only)),
+                occurrences: 1,
+                months: 1,
+                frequency: .monthly,
+                lastDate: only.bookingDate ?? only.valueDate ?? "",
+                category: categoryForMerchant(merchant),
+                confidence: 0.55
+            )
+        }
+
         // Require 2+ transactions
         guard transactions.count >= 2 else { return nil }
 
@@ -533,7 +561,10 @@ enum FixedCostsAnalyzer {
         // Check amount consistency. Bekannte Marken dürfen bis 0.50 schwanken
         // (Preiserhöhungen bei Streaming), unbekannte nur bis 0.35.
         let amountVariance = amounts.map { abs($0 - avgAmount) / avgAmount }.max() ?? 1.0
-        let varianceLimit = isKnownMerchant ? 0.50 : 0.35
+        // Beim Dauerauftrag dieselbe Toleranz wie bei bekannten Marken: eine
+        // Mieterhöhung oder Nebenkostenanpassung darf die Erkennung nicht kippen,
+        // wenn die Bank die Wiederkehr ohnehin bestätigt.
+        let varianceLimit = (isKnownMerchant || isStandingOrder) ? 0.50 : 0.35
         guard amountVariance < varianceLimit else { return nil }
 
         // Count distinct months and years
@@ -542,8 +573,10 @@ enum FixedCostsAnalyzer {
         let yearSet = Set(dates.map { cal.component(.year, from: $0) })
         let distinctYears = yearSet.count
 
-        // Require 2 distinct months — gilt für alle Händler
-        guard distinctMonths >= 2 else { return nil }
+        // Require 2 distinct months — gilt für alle Händler AUSSER Daueraufträgen:
+        // dort ist die Wiederkehr von der Bank bestätigt, und zwei Buchungen im
+        // selben Monat (wöchentlich/14-täglich) sind ein gültiger Fall.
+        guard distinctMonths >= 2 || isStandingOrder else { return nil }
 
         // Determine frequency
         var frequency = determineFrequency(dates: dates, cal: cal)
@@ -567,13 +600,15 @@ enum FixedCostsAnalyzer {
             .last ?? ""
         
         // Calculate confidence
-        let confidence = calculateConfidence(
+        var confidence = calculateConfidence(
             occurrences: transactions.count,
             months: distinctMonths,
             amountVariance: amountVariance,
             frequency: frequency
         )
-        
+        // Bestätigte Wiederkehr durch die Bank ist mehr wert als jede Heuristik.
+        if isStandingOrder { confidence = min(1.0, confidence + 0.2) }
+
         // Only include if confidence is decent
         guard confidence >= 0.5 else { return nil }
         
