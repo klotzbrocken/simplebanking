@@ -7699,7 +7699,10 @@ private struct StatusBalanceFlyoutCardView: View {
                              : .system(size: 38, weight: .bold, design: .default))
                 .tracking(themed ? 1.0 : -0.6)
                 .monospacedDigit()
-                .foregroundColor(themed ? .themedInk : wash.balance)
+                // Negatives Aggregat auch im Theme in Warnfarbe (BTX-Rot).
+                .foregroundColor(themed
+                                 ? ((unifiedTotalBalance ?? 0) < 0 ? .themedExpense : .themedInk)
+                                 : wash.balance)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
@@ -7873,7 +7876,10 @@ private struct StatusBalanceFlyoutCardView: View {
         let themed = !isDefaultTheme
         let fillTop:    Color = themed ? .themedSurface : wash.top
         let fillBottom: Color = themed ? .themedSurface : wash.bottom
-        let balanceColor: Color = themed ? .themedInk : wash.balance
+        // Negativer Saldo trägt auch im Theme die Warnfarbe (BTX-Rot).
+        let balanceColor: Color = themed
+            ? ((balanceValue ?? 0) < 0 ? .themedExpense : .themedInk)
+            : wash.balance
         let detailColor:  Color = themed ? Color.themedInk.opacity(0.72) : wash.detail
         let nameColor: Color = themed ? .themedInk
             : (dark ? Color(NSColor.labelColor) : (Color(hex: "1d1d1f") ?? .primary))

@@ -547,7 +547,10 @@ private struct TransactionsPanelView: View {
                     .font(themed ? ThemeFonts.flyoutHeading(size: 50, weight: .bold)
                                  : .system(size: 38, weight: .bold, design: .default))
                     .tracking(themed ? 1.0 : -0.6)
-                    .foregroundColor(themed ? .themedInk : totalSignalColor)
+                    // Negatives Aggregat auch im Theme in Warnfarbe (BTX-Rot).
+                    .foregroundColor(themed
+                                     ? (total < 0 ? .themedExpense : .themedInk)
+                                     : totalSignalColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
@@ -637,7 +640,11 @@ private struct TransactionsPanelView: View {
         let themed = !isDefaultTheme
         let fillTop:    Color = themed ? .themedSurface : wash.top
         let fillMid:    Color = themed ? .themedSurface : wash.bottom
-        let balanceColor: Color = themed ? .themedInk : wash.balance
+        // Negativer Saldo trägt auch im Theme die Warnfarbe (BTX-Rot) — Blau würde
+        // die wichtigste Information der Karte verschlucken.
+        let balanceColor: Color = themed
+            ? ((parsedBalance ?? 0) < 0 ? .themedExpense : .themedInk)
+            : wash.balance
         let detailColor:  Color = themed ? Color.themedInk.opacity(0.72) : wash.detail
         let headerColor:  Color = themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor)
         // Demo-Referenz (2a, 460 px breit): Kontostand 50–52 px VT323 + scaleY(1.15)
