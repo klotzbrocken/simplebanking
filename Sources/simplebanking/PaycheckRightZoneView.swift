@@ -39,9 +39,49 @@ struct GreenZoneRing: View {
         return df.string(from: date)
     }
 
+    /// BTX-Theme: Kreise gab es im Zeichenraster nicht — der Ring wird zur
+    /// Mosaik-Blockleiste (10 Zellen, links nach rechts gefüllt), gleiche 72×72-
+    /// Fläche, gleiche Ampel-Semantik. Datum als Text darüber.
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+
+    private func btxColor(for f: Double) -> Color {
+        guard !isDispoMode else { return .themedExpense }
+        if f < 0.34 { return .themedExpense }
+        if f < 0.67 { return Color(nsColor: AppTheme.color(from: "#c08a00", fallback: .systemOrange)) }
+        return .themedIncome
+    }
+
+    private var btxBlockGauge: some View {
+        // Direkt `effectiveFraction` statt des animierten `displayedFraction`: BTX
+        // kennt keine Zwischenstufen, und der onAppear/asyncAfter-Tanz des Rings
+        // zeigte nach einem Slot-Wechsel bis zum nächsten Update den alten Stand.
+        let color = btxColor(for: effectiveFraction)
+        let filled = Int((effectiveFraction * 10).rounded())
+        return VStack(spacing: 5) {
+            Text(String(format: "%02d", day))
+                .font(ThemeFonts.flyoutHeading(size: 22, weight: .bold))
+                .monospacedDigit()
+                .foregroundColor(color)
+            Text(monthAbbrev.uppercased())
+                .font(ThemeFonts.flyoutBody(size: 11))
+                .foregroundColor(color.opacity(0.8))
+            HStack(spacing: 1) {
+                ForEach(0..<10, id: \.self) { i in
+                    Rectangle()
+                        .fill(i < filled ? color : color.opacity(0.18))
+                        .frame(width: 5, height: 8)
+                }
+            }
+        }
+        .frame(width: 72, height: 72)
+    }
+
     var body: some View {
         let color = ringColor(for: displayedFraction)
         ZStack {
+            if themed && !ThemeChrome.glyphControls {
+                btxBlockGauge
+            } else {
             Circle()
                 .stroke(color.opacity(0.12), lineWidth: 7)
             Circle()
@@ -57,6 +97,7 @@ struct GreenZoneRing: View {
                 Text(monthAbbrev.uppercased())
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(color.opacity(0.70))
+            }
             }
         }
         .frame(width: 72, height: 72)

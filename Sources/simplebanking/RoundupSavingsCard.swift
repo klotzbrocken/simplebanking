@@ -43,24 +43,37 @@ struct RoundupSavingsCard: View {
         return L10n.t("Tag \(state.streakDays) in Folge", "Day \(state.streakDays) streak")
     }
 
+    // Bei aktivem Theme trägt die Karte die Theme-Fläche/-Schrift; BTX bekommt statt
+    // Mint + rundem Euro-Symbol die grüne Leitfarbe und einen Mosaik-Block.
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+    private var heroColor: Color { themed ? .themedIncome : Color.roundupAccent }
+    private var eyebrowColor: Color { themed ? Color.themedInk.opacity(0.75) : .secondary }
+
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: "eurosign.circle.fill")
-                .font(.system(size: iconSize, weight: .semibold))
-                .foregroundColor(Color.roundupAccent)
-                .padding(.bottom, 2)
+            if themed && !ThemeChrome.glyphControls {
+                BTXMosaicIcon(category: .sparen, side: iconSize)
+                    .padding(.bottom, 2)
+            } else {
+                Image(systemName: "eurosign.circle.fill")
+                    .font(.system(size: iconSize, weight: .semibold))
+                    .foregroundColor(Color.roundupAccent)
+                    .padding(.bottom, 2)
+            }
 
             Text("+ \(formatEuros(state.monthToDateCents))")
-                .font(.system(size: heroFontSize, weight: .bold, design: .rounded))
-                .foregroundColor(Color.roundupAccent)
+                .font(themed ? ThemeFonts.flyoutHeading(size: heroFontSize, weight: .bold)
+                             : .system(size: heroFontSize, weight: .bold, design: .rounded))
+                .foregroundColor(heroColor)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             Text(L10n.t("hättest Du diesen Monat durch Aufrunden zur Seite legen können",
                         "you could have set this aside through round-up this month"))
-                .font(.system(size: eyebrowFontSize))
-                .foregroundColor(.secondary)
+                .font(themed ? ThemeFonts.flyoutBody(size: eyebrowFontSize + 3) : .system(size: eyebrowFontSize))
+                .textCase(themed ? .uppercase : nil)
+                .foregroundColor(eyebrowColor)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 8)
@@ -69,12 +82,13 @@ struct RoundupSavingsCard: View {
                 Text(L10n.t("Heute +\(formatEuros(state.todayPotCents))",
                             "Today +\(formatEuros(state.todayPotCents))"))
                 if state.streakDays > 0 {
-                    Text("·").foregroundColor(.secondary.opacity(0.5))
+                    Text("·").foregroundColor(eyebrowColor.opacity(0.6))
                     Text(streakLabel)
                 }
             }
-            .font(.system(size: subFontSize))
-            .foregroundColor(.secondary)
+            .font(themed ? ThemeFonts.flyoutBody(size: subFontSize + 3) : .system(size: subFontSize))
+            .textCase(themed ? .uppercase : nil)
+            .foregroundColor(eyebrowColor)
             .monospacedDigit()
             .lineLimit(1)
             .padding(.top, 2)
@@ -83,8 +97,8 @@ struct RoundupSavingsCard: View {
         .padding(.vertical, verticalPadding)
         .padding(.horizontal, 14)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.roundupPanelBackground)
+            RoundedRectangle(cornerRadius: themed ? 0 : 12, style: .continuous)
+                .fill(themed ? Color.themedSurface : Color.roundupPanelBackground)
         )
     }
 }

@@ -246,6 +246,8 @@ private struct TransactionsPanelView: View {
     private var isDefaultTheme: Bool {
         themeId == ThemeManager.defaultThemeID
     }
+    /// Kurzform: ein Theme (nicht Default) ist aktiv → Flyout/Liste getönt.
+    private var themed: Bool { !isDefaultTheme }
 
     private var activeColorScheme: ColorScheme {
         colorScheme ?? environmentColorScheme
@@ -266,7 +268,12 @@ private struct TransactionsPanelView: View {
     }
 
     private var activePanelBg: Color {
-        if roundupView.isActive { return .roundupPanelBackground }
+        // Bei aktivem Theme bleibt die Theme-Fläche auch im Sparmodus erhalten — das
+        // Mint-Grün des Aufrunden-Views würde die BTX-Farbwelt sprengen.
+        if roundupView.isActive { return themed ? .themedSurface : .roundupPanelBackground }
+        // Aktives Theme schlägt auch den Händler-Marken-Ton — BTX kennt keine
+        // Markenfarben, die ganze Liste bleibt auf der Theme-Fläche.
+        if themed { return .themedSurface }
         // Händler-/eBon-Slots: Liste im Marken-Ton (untere Wash-Farbe), damit der
         // Marken-Header nahtlos in die Liste übergeht. WICHTIG: vor dem Money-Heat-
         // Zweig — sonst würde der (als cachedBalance gespeicherte) Letzt-Bon-Betrag
@@ -519,35 +526,47 @@ private struct TransactionsPanelView: View {
             // Row 1: „Alle Konten"-Header (harmonisiert mit der Einzelkarte —
             // keine Konten-Aufschlüsselung/Pillen mehr, nur der Gesamt-Saldo).
             HStack(spacing: 8) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                // Aggregat-Kopf folgt dem Theme (BTX: Mosaik-Block statt Stapel-Symbol).
+                if themed && !ThemeChrome.glyphControls {
+                    BTXMosaicIcon(category: .sonstiges, side: 18)
+                } else {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
                 Text(L10n.t("Alle Konten", "All accounts"))
-                    .font(.system(size: 13))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 13))
+                    .textCase(ThemeChrome.textCase)
+                    .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
 
-            // Row 2: aggregated balance — same 38pt bold as single-account card
+            // Row 2: aggregated balance — same size as single-account card
             if let total = totalBalance {
                 Text(formatBalance(total, currency: displayCurrency))
-                    .font(.system(size: 38, weight: .bold, design: .default))
-                    .tracking(-0.6)
-                    .foregroundColor(totalSignalColor)
+                    .font(themed ? ThemeFonts.flyoutHeading(size: 50, weight: .bold)
+                                 : .system(size: 38, weight: .bold, design: .default))
+                    .tracking(themed ? 1.0 : -0.6)
+                    .foregroundColor(themed ? .themedInk : totalSignalColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                    .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
             } else if slotBalances.isEmpty || slotBalances.allSatisfy({ $0.balance == nil }) {
                 Text("--,-- €")
-                    .font(.system(size: 32, weight: .bold, design: .default))
-                    .foregroundColor(.secondary)
+                    .font(themed ? ThemeFonts.flyoutHeading(size: 32, weight: .bold)
+                                 : .system(size: 32, weight: .bold, design: .default))
+                    .foregroundColor(themed ? Color.themedInk.opacity(0.7) : .secondary)
                     .padding(.trailing, 0)
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(slotBalances.prefix(2), id: \.slot.id) { item in
                         if let b = item.balance {
                             Text(formatBalance(b, currency: item.slot.currency ?? "EUR"))
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundColor(b < 0 ? Color.expenseRed : (b > 0 ? Color.incomeGreen : .primary))
+                                .font(themed ? ThemeFonts.flyoutHeading(size: 22, weight: .bold)
+                                             : .system(size: 22, weight: .bold))
+                                .foregroundColor(themed
+                                                 ? (b < 0 ? .themedExpense : (b > 0 ? .themedIncome : .themedInk))
+                                                 : (b < 0 ? Color.expenseRed : (b > 0 ? Color.incomeGreen : .primary)))
                                 .lineLimit(1)
                         }
                     }
@@ -621,9 +640,11 @@ private struct TransactionsPanelView: View {
         let balanceColor: Color = themed ? .themedInk : wash.balance
         let detailColor:  Color = themed ? Color.themedInk.opacity(0.72) : wash.detail
         let headerColor:  Color = themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor)
-        let balanceFont: Font = themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
+        // Demo-Referenz (2a, 460 px breit): Kontostand 50–52 px VT323 + scaleY(1.15)
+        // („double height"-Steuerzeichen). Die Streckung passiert am Text selbst.
+        let balanceFont: Font = themed ? ThemeFonts.flyoutHeading(size: 50, weight: .bold)
                                         : .system(size: 38, weight: .bold, design: .default)
-        let headerFont:  Font = themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 13)
+        let headerFont:  Font = themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 13)
 
         let balanceBrand = BankLogoAssets.resolve(displayName: vm.connectedBankDisplayName,
                                                    logoID: vm.connectedBankLogoID,
@@ -632,7 +653,10 @@ private struct TransactionsPanelView: View {
         let headerName = isPayPal ? "PayPal" : vm.connectedBankDisplayName
         let leftContent = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let img = (isPayPal ? PayPalLogoAsset.image : nil) ?? vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
+                if !ThemeChrome.bankLogosEnabled {
+                    // BTX: keine Bildmarke über dem Kontostand — neutraler Mosaik-Block.
+                    BTXMosaicIcon(category: .sonstiges, side: 18)
+                } else if let img = (isPayPal ? PayPalLogoAsset.image : nil) ?? vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
                     let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: balanceBrand?.id ?? "")
                     if invertActive {
                         Image(nsImage: img)
@@ -659,16 +683,23 @@ private struct TransactionsPanelView: View {
                     date: vm.currentBalanceFetchedAt
                 ))
                     .font(headerFont)
+                    .textCase(ThemeChrome.textCase)
                     .foregroundColor(headerColor)
+                // BTX: blinkendes Telefon-Steuerzeichen neben der Bank (wie Demo-Kopf).
+                if themed && !ThemeChrome.glyphControls {
+                    BTXBlinkingPhone(size: 14)
+                }
                 Spacer()
             }
 
             Text(displayBalance)
                 .font(balanceFont)
-                .tracking(-0.6)
+                .tracking(themed ? 1.0 : -0.6)
                 .foregroundColor(balanceColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
+                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
 
             if isPayPal { panelPayPalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }
@@ -806,7 +837,10 @@ private struct TransactionsPanelView: View {
             : nil
         let leftContent = VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let logo = receiptLogo {
+                // BTX: Warenkorb-Mosaik statt Marken-Logo (Bildmarken gab es nicht).
+                if themed && !ThemeChrome.merchantLogosEnabled {
+                    BTXMosaicIcon(category: .essenAlltag, side: 18)
+                } else if let logo = receiptLogo {
                     Image(nsImage: logo).resizable().scaledToFit().frame(width: 18, height: 18)
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 } else {
@@ -814,33 +848,51 @@ private struct TransactionsPanelView: View {
                 }
                 if receiptNeedsLogin {
                     Text("⚠︎ " + L10n.t("Login erneuern", "Sign in again"))
-                        .font(.system(size: 13)).foregroundColor(.orange)
+                        .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 13))
+                        .textCase(ThemeChrome.textCase)
+                        .foregroundColor(themed ? .themedExpense : .orange)
                 } else {
                     Text(formatBankHeader(nickname: nil, bankName: receiptBrandName, date: receiptFetchedDate))
-                        .font(.system(size: 13)).foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 13))
+                        .textCase(ThemeChrome.textCase)
+                        .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 }
                 Spacer()
             }
             Text(vm.currentBalance ?? "--,-- €")
-                .font(.system(size: 38, weight: .bold, design: .default))
-                .tracking(-0.6)
-                .foregroundColor(wash.accent)
+                .font(themed ? ThemeFonts.flyoutHeading(size: 50, weight: .bold)
+                             : .system(size: 38, weight: .bold, design: .default))
+                .tracking(themed ? 1.0 : -0.6)
+                .foregroundColor(themed ? .themedInk : wash.accent)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
             Button { cycleReweRange() } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                    }
                     Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
-                        .font(.system(size: 12))
+                        .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
+                        .textCase(ThemeChrome.textCase)
                     if let badge = budgetBadge {
                         Text(badge)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(themed ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
                             .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(Capsule().fill(heat.opacity(0.15)))
-                            .foregroundColor(heat)
+                            .background(
+                                RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                                    .fill(themed ? Color.clear : heat.opacity(0.15))
+                                    .overlay(
+                                        themed
+                                        ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                                            .stroke(Color.themedInk.opacity(0.5), lineWidth: 1)
+                                        : nil
+                                    )
+                            )
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : heat)
                     }
                 }
-                .foregroundColor(toggleColor)
+                .foregroundColor(themed ? Color.themedInk.opacity(0.85) : toggleColor)
             }
             .buttonStyle(.plain)
             .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
@@ -855,14 +907,21 @@ private struct TransactionsPanelView: View {
         .padding(.top, 16)
         .padding(.bottom, 8)
         .background(
-            LinearGradient(
-                stops: [
-                    .init(color: wash.top, location: 0.0),
-                    .init(color: wash.bottom, location: 0.52),
-                    .init(color: activePanelBg, location: 1.0)
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
+            Group {
+                if themed {
+                    // BTX: flache Theme-Fläche statt Marken-Verlauf.
+                    Color.themedSurface
+                } else {
+                    LinearGradient(
+                        stops: [
+                            .init(color: wash.top, location: 0.0),
+                            .init(color: wash.bottom, location: 0.52),
+                            .init(color: activePanelBg, location: 1.0)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                }
+            }
             .ignoresSafeArea(.container, edges: .top)
         )
     }
@@ -886,7 +945,9 @@ private struct TransactionsPanelView: View {
                 } else {
                     ForEach(reweReceiptDayGroups, id: \.day) { group in
                         Text(formatDateDE(group.day))
-                            .font(.system(size: 13)).foregroundColor(.secondary)
+                            .font(themed ? ThemeFonts.flyoutHeading(size: 17) : .system(size: 13))
+                            .textCase(ThemeChrome.textCase)
+                            .foregroundColor(themed ? .themedExpense : .secondary)
                             .padding(.top, 8).padding(.bottom, 4).padding(.horizontal, 12)
                         ForEach(group.items) { r in
                             reweRow(r)
@@ -941,21 +1002,43 @@ private struct TransactionsPanelView: View {
                         let ringColor = ringColorByLabel[entry.label]
                         VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 10) {
-                                Image(systemName: entry.symbol)
-                                    .font(.system(size: 13)).foregroundColor(ringColor ?? .secondary).frame(width: 20)
-                                Text(entry.label).font(.system(size: 14, weight: .medium))
-                                Text("· \(entry.count)").font(.system(size: 11)).foregroundColor(Color(NSColor.tertiaryLabelColor))
+                                // BTX: Farbblock statt SF-Symbol — die Farbe verknüpft
+                                // Balken und Segmentleiste, das Symbol wäre eine Bildmarke.
+                                if themed && !ThemeChrome.categoryIconsEnabled {
+                                    Rectangle()
+                                        .fill(ringColor ?? Color.themedInk.opacity(0.35))
+                                        .frame(width: 10, height: 10)
+                                        .frame(width: 20)
+                                } else {
+                                    Image(systemName: entry.symbol)
+                                        .font(.system(size: 13)).foregroundColor(ringColor ?? .secondary).frame(width: 20)
+                                }
+                                Text(entry.label)
+                                    .font(themed ? ThemeFonts.flyoutHeading(size: 14, weight: .medium) : .system(size: 14, weight: .medium))
+                                    .textCase(ThemeChrome.textCase)
+                                    .foregroundColor(themed ? .themedInk : .primary)
+                                Text("· \(entry.count)")
+                                    .font(themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11))
+                                    .foregroundColor(themed ? Color.themedInk.opacity(0.7) : Color(NSColor.tertiaryLabelColor))
                                 Spacer()
-                                Text(reweEuro(entry.totalCents)).font(.system(size: 14, weight: .medium)).monospacedDigit()
+                                Text(reweEuro(entry.totalCents))
+                                    .font(themed ? ThemeFonts.flyoutHeading(size: 16, weight: .medium) : .system(size: 14, weight: .medium))
+                                    .foregroundColor(themed ? .themedInk : .primary)
+                                    .monospacedDigit()
                             }
                             GeometryReader { geo in
+                                // BTX: eckige Balken statt Kapseln.
                                 ZStack(alignment: .leading) {
-                                    Capsule().fill(Color.secondary.opacity(0.12)).frame(height: 5)
-                                    Capsule().fill((ringColor ?? Color.accentColor).opacity(ringColor == nil ? 0.45 : 0.85))
-                                        .frame(width: max(4, geo.size.width * frac), height: 5)
+                                    RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                                        .fill(themed ? Color.themedInk.opacity(0.15) : Color.secondary.opacity(0.12))
+                                        .frame(height: themed ? 7 : 5)
+                                    RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                                        .fill((ringColor ?? (themed ? Color.themedAccent : Color.accentColor))
+                                            .opacity(ringColor == nil && !themed ? 0.45 : 0.85))
+                                        .frame(width: max(4, geo.size.width * frac), height: themed ? 7 : 5)
                                 }
                             }
-                            .frame(height: 5)
+                            .frame(height: themed ? 7 : 5)
                         }
                         .padding(.horizontal, 14).padding(.vertical, 9)
                         Divider()
@@ -974,7 +1057,10 @@ private struct TransactionsPanelView: View {
                 if isOpen { reweExpanded.remove(r.receiptId) } else { reweExpanded.insert(r.receiptId) }
             } label: {
                 HStack(spacing: 10) {
-                    if let logo = receiptLogo {
+                    // BTX: Warenkorb-Mosaik statt Händler-Logo, Texte in VT323/Ink.
+                    if themed && !ThemeChrome.merchantLogosEnabled {
+                        BTXMosaicIcon(category: .essenAlltag)
+                    } else if let logo = receiptLogo {
                         Image(nsImage: logo).resizable().scaledToFill().frame(width: 20, height: 20)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                             .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
@@ -984,15 +1070,27 @@ private struct TransactionsPanelView: View {
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(r.marketName ?? receiptBrandName)
-                            .font(.system(size: 14, weight: .medium)).foregroundColor(.primary).lineLimit(1)
+                            .font(themed ? ThemeFonts.flyoutHeading(size: 14, weight: .medium) : .system(size: 14, weight: .medium))
+                            .textCase(ThemeChrome.textCase)
+                            .foregroundColor(themed ? .themedInk : .primary).lineLimit(1)
                         Text("\(r.items.count) Artikel")
-                            .font(.system(size: 11)).foregroundColor(.secondary).lineLimit(1)
+                            .font(themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11))
+                            .textCase(ThemeChrome.textCase)
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary).lineLimit(1)
                     }
                     Spacer()
                     Text(reweEuro(r.totalCents))
-                        .font(.system(size: 14, weight: .medium)).monospacedDigit().foregroundColor(.primary)
-                    Image(systemName: isOpen ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold)).foregroundColor(Color(NSColor.tertiaryLabelColor))
+                        .font(themed ? ThemeFonts.flyoutHeading(size: 17, weight: .medium) : .system(size: 14, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundColor(themed ? .themedInk : .primary)
+                    if themed && !ThemeChrome.glyphControls {
+                        Text(isOpen ? "v" : ">")
+                            .font(ThemeFonts.flyoutBody(size: 13))
+                            .foregroundColor(Color.themedInk.opacity(0.7))
+                    } else {
+                        Image(systemName: isOpen ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 10, weight: .semibold)).foregroundColor(Color(NSColor.tertiaryLabelColor))
+                    }
                 }
                 .contentShape(Rectangle())
             }
@@ -1110,9 +1208,11 @@ private struct TransactionsPanelView: View {
 
     private func amountColor(_ t: TransactionsResponse.Transaction) -> Color {
         let v = amountDouble(t)
-        if v < 0 { return .expenseRed }
-        if v > 0 { return .incomeGreen }
-        return Color(NSColor.tertiaryLabelColor)
+        // Bei aktivem Theme tragen die Theme-Farben auch die Zeilenbeträge — vorher
+        // blieben sie auf den Default-Tokens hängen und stachen aus der Fläche heraus.
+        if v < 0 { return isDefaultTheme ? .expenseRed : .themedExpense }
+        if v > 0 { return isDefaultTheme ? .incomeGreen : .themedIncome }
+        return isDefaultTheme ? Color(NSColor.tertiaryLabelColor) : Color.themedInk.opacity(0.5)
     }
 
     /// Im Sparmode: Original → Aufgerundet (z.B. „32,00 €" → „35,00 €") für Zeilen,
@@ -1422,7 +1522,38 @@ private struct TransactionsPanelView: View {
         let inactiveFill = themed
             ? Color.themedInk.opacity(0.08)
             : (activeColorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
-        return HStack(spacing: 6) {
+        // BTX-Variante: reine Text-Umschalter ohne Pillen-Chrome und ohne Bank-Icon.
+        // Aktiv = Leitfarbe + Unterstreichung, inaktiv gedämpft — „Blättern" per Klick.
+        if !ThemeChrome.glyphControls {
+            return AnyView(HStack(spacing: 14) {
+                ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
+                    let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
+                    Text(slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName)
+                        .font(ThemeFonts.flyoutBody(size: 15))
+                        .textCase(.uppercase)
+                        .foregroundColor(isActive ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                        .underline(isActive)
+                        .lineLimit(1)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
+                            accountNav.onSwitchToIndex?(idx)
+                        }
+                }
+                if multibankingStore.realSlotCount > 1 {
+                    let unifiedActive = vm.unifiedModeEnabled
+                    Text(L10n.t("Alle", "All"))
+                        .font(ThemeFonts.flyoutBody(size: 15))
+                        .textCase(.uppercase)
+                        .foregroundColor(unifiedActive ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                        .underline(unifiedActive)
+                        .contentShape(Rectangle())
+                        .onTapGesture { if !unifiedActive { vm.unifiedModeEnabled = true } }
+                }
+                Spacer(minLength: 0)
+            })
+        }
+        return AnyView(HStack(spacing: 6) {
             ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
                 let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
                 if isActive {
@@ -1462,7 +1593,7 @@ private struct TransactionsPanelView: View {
             Spacer(minLength: 0)
         }
         .animation(.easeInOut(duration: 0.2), value: multibankingStore.activeIndex)
-        .animation(.easeInOut(duration: 0.2), value: vm.unifiedModeEnabled)
+        .animation(.easeInOut(duration: 0.2), value: vm.unifiedModeEnabled))
     }
 
     var body: some View {
@@ -1482,7 +1613,8 @@ private struct TransactionsPanelView: View {
                 }
             }
             .rippleEffect(trigger: vm.rippleTrigger,
-                          defaultOrigin: CGPoint(x: 190, y: 65))
+                          defaultOrigin: CGPoint(x: 190, y: 65),
+                          enabled: ThemeChrome.rippleEnabled)
             // Randlos (0 Außen-Padding) für alle Saldo-/Marken-Karten; nur Roundup
             // behält das 16/-9-Inset-Layout.
             .padding(.horizontal, !roundupView.isActive ? 0 : 16)
@@ -1503,25 +1635,59 @@ private struct TransactionsPanelView: View {
             // (bank-spezifische Suche/Filter/Kategorien dort nicht sinnvoll).
             if !roundupView.isActive && !receiptActive {
             HStack(spacing: 8) {
-                // Search field — flexible
+                // Search field — flexible. Bei BTX eckig (keine Rundung) und ohne
+                // Lupen-/Löschen-Icon; das Feld selbst trägt VT323 und einen
+                // Großbuchstaben-Platzhalter.
                 HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13))
-                        .foregroundColor(Color(NSColor.placeholderTextColor))
-                    TextField(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"), text: $vm.query)
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13))
+                            .foregroundColor(Color(NSColor.placeholderTextColor))
+                    }
+                    // System-Platzhalter folgt dem (ggf. dunklen) Appearance-Modus und
+                    // wäre auf dem hellen BTX-Feld weiß = unlesbar. Prompt-Farben
+                    // ignoriert das Plain-TextField auf macOS — daher bei Theme den
+                    // Prompt leeren und einen eigenen Platzhalter überlegen.
+                    TextField(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"),
+                              text: $vm.query,
+                              prompt: themed ? Text("") : nil)
                         .textFieldStyle(PlainTextFieldStyle())
-                        .font(.system(size: 13))
+                        .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 13))
+                        .foregroundColor(themed ? .themedInk : .primary)
+                        .overlay(alignment: .leading) {
+                            if themed && vm.query.isEmpty {
+                                Text(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"))
+                                    .font(ThemeFonts.flyoutBody(size: 14))
+                                    .foregroundColor(Color.themedInk.opacity(0.45))
+                                    .allowsHitTesting(false)
+                            }
+                        }
                     if !vm.query.isEmpty {
                         Button(action: { vm.query = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(Color(NSColor.placeholderTextColor))
+                            if ThemeChrome.glyphControls {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(Color(NSColor.placeholderTextColor))
+                            } else {
+                                BTXTextControl(text: "X")
+                            }
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.cardBackground))
+                .background(
+                    // BTX-Lo-Fi: heller Block + harter 2-px-Tintenrahmen (wie der
+                    // Eingabebereich einer BTX-Seite) statt Soft-Grau mit dünner Linie.
+                    RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
+                        .fill(themed ? Color.white.opacity(0.65) : Color.cardBackground)
+                        .overlay(
+                            themed
+                            ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
+                                .stroke(Color.themedInk, lineWidth: 2)
+                            : nil
+                        )
+                )
 
                 // Icons
                 if vm.isLoading {
@@ -1530,21 +1696,30 @@ private struct TransactionsPanelView: View {
                         .scaleEffect(0.8)
                 }
                 Button(action: { showFilterPills.toggle() }) {
-                    Image(systemName: showFilterPills
-                          ? "line.3.horizontal.decrease.circle.fill"
-                          : "line.3.horizontal.decrease")
-                        .font(.system(size: 15))
-                        .foregroundColor(showFilterPills || vm.activeFilter != .all
-                                         ? .accentColor : .secondary)
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: showFilterPills
+                              ? "line.3.horizontal.decrease.circle.fill"
+                              : "line.3.horizontal.decrease")
+                            .font(.system(size: 15))
+                            .foregroundColor(showFilterPills || vm.activeFilter != .all
+                                             ? .accentColor : .secondary)
+                    } else {
+                        BTXTextControl(text: L10n.t("Filter", "Filter"),
+                                       active: showFilterPills || vm.activeFilter != .all)
+                    }
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help(showFilterPills
                       ? L10n.t("Filter ausblenden", "Hide filters")
                       : L10n.t("Filter einblenden", "Show filters"))
                 Button(action: { showCategories.toggle() }) {
-                    Image(systemName: showCategories ? "tag.fill" : "tag")
-                        .font(.system(size: 14))
-                        .foregroundColor(showCategories ? .accentColor : .secondary)
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: showCategories ? "tag.fill" : "tag")
+                            .font(.system(size: 14))
+                            .foregroundColor(showCategories ? .accentColor : .secondary)
+                    } else {
+                        BTXTextControl(text: L10n.t("Kat.", "Cat."), active: showCategories)
+                    }
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help(showCategories
@@ -1552,9 +1727,13 @@ private struct TransactionsPanelView: View {
                       : L10n.t("Kategorien anzeigen", "Show categories"))
                 if !vm.isUnifiedMode && !receiptActive && multibankingStore.activeSlot?.isPayPal != true {
                     Button(action: { toggleRoundupView() }) {
-                        Image(systemName: roundupView.isActive ? "centsign.circle.fill" : "centsign.circle")
-                            .font(.system(size: 15))
-                            .foregroundColor(roundupView.isActive ? Color.roundupAccent : .secondary)
+                        if ThemeChrome.glyphControls {
+                            Image(systemName: roundupView.isActive ? "centsign.circle.fill" : "centsign.circle")
+                                .font(.system(size: 15))
+                                .foregroundColor(roundupView.isActive ? Color.roundupAccent : .secondary)
+                        } else {
+                            BTXTextControl(text: L10n.t("Sparen", "Save"), active: roundupView.isActive)
+                        }
                     }
                     .buttonStyle(PlainButtonStyle())
                     .help(L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
@@ -1665,19 +1844,25 @@ private struct TransactionsPanelView: View {
                 .padding(.bottom, 8)
             }
 
-            if vm.isSearchActive || vm.activeFilter != .all {
+            if !receiptActive && (vm.isSearchActive || vm.activeFilter != .all) {
                 HStack(spacing: 6) {
                     Text("\(vm.filteredTransactions.count) Ergebnisse")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12, weight: .semibold))
+                        .textCase(ThemeChrome.textCase)
+                        .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary)
                     if vm.activeFilter != .all {
                         Text("· \(vm.activeFilter.label)")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
+                            .textCase(ThemeChrome.textCase)
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary)
                         Button(action: { vm.activeFilter = .all }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
+                            if ThemeChrome.glyphControls {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            } else {
+                                BTXTextControl(text: "X", size: 13)
+                            }
                         }
                         .buttonStyle(PlainButtonStyle())
                     }
@@ -1698,14 +1883,32 @@ private struct TransactionsPanelView: View {
             // eBon: Umschalter Einkäufe ⇄ Kategorien (Aktualisieren liegt jetzt
             // global im Header-Toolbar neben dem Pin-Button).
             if receiptActive {
-                Picker("", selection: $reweTab) {
-                    Text(L10n.t("Einkäufe", "Purchases")).tag(0)
-                    Text(L10n.t("Kategorien", "Categories")).tag(1)
+                // BTX: Text-Umschalter (unterstrichen = aktiv) statt Segmented Control.
+                if themed && !ThemeChrome.glyphControls {
+                    HStack(spacing: 16) {
+                        ForEach([(0, "Einkäufe", "Purchases"), (1, "Kategorien", "Categories")], id: \.0) { tag, de, en in
+                            Text(L10n.t(de, en))
+                                .font(ThemeFonts.flyoutBody(size: 15))
+                                .textCase(.uppercase)
+                                .foregroundColor(reweTab == tag ? Color.themedAccent : Color.themedInk.opacity(0.6))
+                                .underline(reweTab == tag)
+                                .contentShape(Rectangle())
+                                .onTapGesture { reweTab = tag }
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                } else {
+                    Picker("", selection: $reweTab) {
+                        Text(L10n.t("Einkäufe", "Purchases")).tag(0)
+                        Text(L10n.t("Kategorien", "Categories")).tag(1)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
             }
 
             // Transactions List (grouped by date) with pull-to-refresh indicator
@@ -1753,17 +1956,30 @@ private struct TransactionsPanelView: View {
                                 }
                             }
 
-                            // Date Section Header — Datum + Trennlinie am Tageswechsel
+                            // Date Section Header — Datum + Trennlinie am Tageswechsel.
+                            // Bei aktivem Theme in Theme-Schrift und -Farbe; BTX setzt
+                            // seine Datumsköpfe rot und unterstrichen, was exakt dieser
+                            // vorhandenen Kombination aus Text und Linie entspricht.
                             HStack(spacing: 10) {
                                 Text(formatDateDE(group.date))
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
+                                    .font(isDefaultTheme ? .system(size: 13)
+                                                         : ThemeFonts.flyoutHeading(size: 17))
+                                    .textCase(ThemeChrome.textCase)
+                                    .foregroundColor(isDefaultTheme ? .secondary : .themedExpense)
                                     .fixedSize()
-                                Rectangle()
-                                    .fill(Color.secondary.opacity(0.18))
-                                    .frame(height: 1)
+                                // BTX/Demo: KEINE Trennlinie nach dem Datum — nur der Text.
+                                if isDefaultTheme {
+                                    Rectangle()
+                                        .fill(Color.secondary.opacity(0.18))
+                                        .frame(height: 1)
+                                } else {
+                                    Spacer(minLength: 0)
+                                }
                             }
-                            .padding(.horizontal, 16)
+                            // Linksbündig mit den Zeilen (deren Gutter bei Themes 0 ist):
+                            // Datumskopf und Transaktion beginnen auf gleicher Höhe.
+                            .padding(.leading, themed ? 14 : 16)
+                            .padding(.trailing, 16)
                             .padding(.top, 10)
                             .padding(.bottom, 6)
 
@@ -1779,15 +1995,20 @@ private struct TransactionsPanelView: View {
                                 let txHasReminder = enrichment?.reminderId != nil
                                 let txReminderId = enrichment?.reminderId
                                 HStack(spacing: 0) {
-                                    // Left gutter — unread dot
+                                    // Left gutter — unread dot. Bei Themes (BTX) auf 0,
+                                    // damit die Zeile linksbündig mit dem Datumskopf sitzt
+                                    // (Demo: alle Einträge auf einer Höhe, kein Einzug).
+                                    // Der Ungelesen-Marker wandert dann als eckiger Block
+                                    // in ein Overlay AUF der Zeile — sonst läge der Kreis
+                                    // mit Gutter-Breite 0 auf dem gelben Zierrahmen.
                                     ZStack {
-                                        if txIsUnread {
+                                        if txIsUnread && !themed {
                                             Circle()
                                                 .fill(Color.accentColor)
                                                 .frame(width: 8, height: 8)
                                         }
                                     }
-                                    .frame(width: 16)
+                                    .frame(width: themed ? 0 : 16)
 
                                     // Transaction card
                                     SwipeableTransactionRow(
@@ -1845,7 +2066,8 @@ private struct TransactionsPanelView: View {
                                         )
                                     }
 
-                                    // Right gutter — reminder bell
+                                    // Right gutter — reminder bell. Bei Themes 0, damit
+                                    // die Beträge weiter nach rechts rücken (wie Demo).
                                     ZStack {
                                         if txHasReminder {
                                             Image(systemName: "bell.fill")
@@ -1853,9 +2075,21 @@ private struct TransactionsPanelView: View {
                                                 .foregroundColor(.orange)
                                         }
                                     }
-                                    .frame(width: 16)
+                                    .frame(width: themed ? 0 : 16)
                                 }
                                 .opacity(t.status == "pending" ? 0.65 : 1.0)
+                                // BTX-Ungelesen-Marker: eckiger Block in Leitfarbe am
+                                // linken Zeilenrand — innerhalb der Zeile, nicht auf dem
+                                // Zierrahmen (Overlay verbraucht keinen Layout-Platz).
+                                .overlay(alignment: .leading) {
+                                    if themed && txIsUnread {
+                                        Rectangle()
+                                            .fill(Color.themedAccent)
+                                            .frame(width: 6, height: 6)
+                                            .offset(x: 4)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
                                         .stroke(highlightedTxStableId == t.stableIdentifier
@@ -1887,8 +2121,9 @@ private struct TransactionsPanelView: View {
                             HStack {
                                 Spacer(minLength: 0)
                                 Text("Alle Umsätze geladen")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(.secondary)
+                                    .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 11, weight: .medium))
+                                    .textCase(ThemeChrome.textCase)
+                                    .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary)
                                 Spacer(minLength: 0)
                             }
                             .padding(.top, 10)
@@ -1956,9 +2191,13 @@ private struct TransactionsPanelView: View {
 
                 // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
                 Button(action: { onOpenDashboard?(.overview) }) {
-                    Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 15))
-                        .foregroundColor(.secondary)
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 15))
+                            .foregroundColor(.secondary)
+                    } else {
+                        BTXTextControl(text: L10n.t("Auswertung", "Reports"))
+                    }
                 }
                 .buttonStyle(PlainButtonStyle())
                 .help(L10n.t("Dashboard", "Dashboard"))
@@ -1969,6 +2208,15 @@ private struct TransactionsPanelView: View {
                         recomputeAttentionInbox()
                         showAttentionInbox = true
                     }) {
+                        if !ThemeChrome.glyphControls {
+                            // Badge als Text-Klammer: „INBOX (2)" statt Glocke mit Punkt.
+                            BTXTextControl(
+                                text: attentionCards.isEmpty
+                                    ? L10n.t("Inbox", "Inbox")
+                                    : L10n.t("Inbox (\(min(attentionCards.count, 9)))",
+                                             "Inbox (\(min(attentionCards.count, 9)))"),
+                                active: !attentionCards.isEmpty)
+                        } else {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: attentionCards.isEmpty ? "bell" : "bell.fill")
                                 .font(.system(size: 15))
@@ -1984,6 +2232,7 @@ private struct TransactionsPanelView: View {
                                 }
                                 .offset(x: 6, y: -6)
                             }
+                        }
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
@@ -2027,13 +2276,17 @@ private struct TransactionsPanelView: View {
                         }
                     } label: {
                         Text(L10n.t("Mehr ▾", "More ▾"))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .font(themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 13, weight: .medium))
+                            .textCase(themed ? .uppercase : nil)
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.75) : .secondary)
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .tint(.primary) // Menu-Item-Icons monochrom statt Accent-Blau
+                    // Menu-Item-Icons monochrom statt Accent-Blau. Der Tint überstimmt
+                    // auch die Label-Farbe — im Dark-Mode wäre `.primary` Weiß und
+                    // damit auf der hellen BTX-Fläche unlesbar; Themes tinten in Ink.
+                    .tint(themed ? Color.themedInk : .primary)
 
                 Spacer()
 
@@ -2058,21 +2311,36 @@ private struct TransactionsPanelView: View {
                             name: Notification.Name("simplebanking.openTransferSheet"),
                             object: nil)
                     }) {
-                        Image(systemName: "paperplane")
-                            .font(.system(size: 15))
-                            .foregroundColor(.secondary)
+                        if ThemeChrome.glyphControls {
+                            Image(systemName: "paperplane")
+                                .font(.system(size: 15))
+                                .foregroundColor(.secondary)
+                        } else {
+                            BTXTextControl(text: L10n.t("Senden", "Send"))
+                        }
                     }
                     .buttonStyle(PlainButtonStyle())
                     .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
                 }
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, themed ? 26 : 20)
             .padding(.top, 10)
-            .padding(.bottom, 6)
+            // Bei aktiver CRT-Blende mehr Abstand, sonst kleben die Footer-Kommandos
+            // an der dicken Schmucklinie.
+            .padding(.bottom, themed ? 14 : 6)
             .background(activePanelBg)
         }
         .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
         .background { activePanelBg.ignoresSafeArea(.all, edges: .top) } // extends panel-bg into titlebar/toolbar area (theme-aware)
+        // „Bildschirmrand" des BTX-Themes: liegt als Overlay INNEN auf der Fläche,
+        // verbraucht also keinen Platz und verschiebt nichts. Themes ohne
+        // `screenBorder` bekommen hier nichts.
+        .overlay {
+            if let border = Color.themedScreenBorder {
+                BTXScreenBezel(color: border, thickness: 6, innerRadius: 12)
+                    .ignoresSafeArea(.all, edges: .top)
+            }
+        }
         // Fenster-Chrome oben rechts im Titelleisten-Streifen (auf der Money-Heat),
         // ersetzt die entfernte NSToolbar. ignoresSafeArea → sitzt im Titel-Bereich.
         .overlay(alignment: .topTrailing) {
@@ -2082,6 +2350,15 @@ private struct TransactionsPanelView: View {
                 .ignoresSafeArea(.container, edges: .top)
         }
         .onAppear { isPinnedLocal = isPinnedProvider?() ?? false }
+        // Wechsel auf einen Händler-/eBon-Slot: Bank-Filter und Suche zurücksetzen —
+        // Bons kennen weder Einnahmen/Abos-Filter noch die Umsatzsuche; ein aktiver
+        // Filter würde sonst beim Rückwechsel unerwartet weiterwirken.
+        .onChange(of: receiptActive) { active in
+            if active {
+                vm.activeFilter = .all
+                vm.query = ""
+            }
+        }
         .tint(Color.themeAccent)
         .preferredColorScheme(colorScheme)
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { newWidth in
@@ -2861,36 +3138,65 @@ private struct FilterPill: View {
     let active: Bool
     let onTap: () -> Void
 
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+
+    @ViewBuilder
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 4) {
-                Image(systemName: filter.icon)
-                    .font(.system(size: 11, weight: .medium))
+        if themed {
+            // BTX/Theme: kein Icon, VT323 in Großbuchstaben, ausreichender Kontrast —
+            // aktiv als gefüllte Fläche in Leitfarbe mit Schirmfarbe als Text, inaktiv
+            // Ink-Text mit Rahmen. Eckig bei `squareControls`.
+            let radius = ThemeChrome.cornerRadius(999)
+            Button(action: onTap) {
                 Text(filter.label)
-                    .font(.system(size: 11, weight: .medium))
-                if active {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                }
+                    .font(ThemeFonts.flyoutBody(size: 14))
+                    .textCase(.uppercase)
+                    .foregroundColor(active ? Color.themedSurface : Color.themedInk.opacity(0.85))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: radius)
+                            .fill(active ? Color.themedAccent : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: radius)
+                            .stroke(Color.themedInk.opacity(active ? 0 : 0.5), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
             }
-            .foregroundColor(active ? .white : .secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(active ? Color.accentColor : Color.clear)
-            )
-            .overlay(
-                Capsule()
-                    .stroke(active ? Color.clear : Color.secondary.opacity(0.3), lineWidth: 1)
-            )
-            .contentShape(Capsule())
+            .buttonStyle(.plain)
+            .help(active ? L10n.t("Filter aufheben", "Clear filter") : filter.label)
+        } else {
+            Button(action: onTap) {
+                HStack(spacing: 4) {
+                    Image(systemName: filter.icon)
+                        .font(.system(size: 11, weight: .medium))
+                    Text(filter.label)
+                        .font(.system(size: 11, weight: .medium))
+                    if active {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+                .foregroundColor(active ? .white : .secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(active ? Color.accentColor : Color.clear)
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(active ? Color.clear : Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(active
+                  ? L10n.t("Filter aufheben", "Clear filter")
+                  : filter.label)
         }
-        .buttonStyle(.plain)
-        .help(active
-              ? L10n.t("Filter aufheben", "Clear filter")
-              : filter.label)
     }
 }
 
@@ -2924,6 +3230,12 @@ private struct TransactionRowNew: View {
 
     @ObservedObject private var logoService = MerchantLogoService.shared
     @State private var showDetail: Bool = false
+
+    /// Eigene Beobachtung des Themes: die Zeile ist ein eigener View-Wert, dessen Body
+    /// SwiftUI ohne geänderte Eingaben nicht neu auswertet. Ohne `@AppStorage` bliebe
+    /// sie nach einem Theme-Wechsel im alten Look stehen, bis sich die Liste ändert.
+    @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
+    private var themed: Bool { themeId != ThemeManager.defaultThemeID }
 
     private var empfaengerText: String {
         [transaction.creditor?.name, transaction.debtor?.name]
@@ -2974,28 +3286,35 @@ private struct TransactionRowNew: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 HStack(spacing: 10) {
-                    if let logo = merchantLogo {
+                    // Reihenfolge und Platz sind fix (20×20) — nur der Inhalt wechselt.
+                    // Ein Theme ohne Bildmarken (BTX) setzt hier Mosaik-Semigrafik.
+                    if let logo = merchantLogo, ThemeChrome.merchantLogosEnabled {
                         Image(nsImage: logo)
                             .resizable()
                             .scaledToFill()
                             .frame(width: 20, height: 20)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                             .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
-                    } else {
+                    } else if ThemeChrome.categoryIconsEnabled {
                         Image(systemName: category.icon)
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.secondary)
                             .frame(width: 20, height: 20)
+                    } else {
+                        BTXMosaicIcon(category: category)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(name)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(themed ? ThemeFonts.flyoutHeading(size: 14, weight: .medium)
+                                         : .system(size: 14, weight: .medium))
+                            .textCase(ThemeChrome.textCase)
                             .lineLimit(1)
-                            .foregroundColor(.primary)
+                            .foregroundColor(themed ? .themedInk : .primary)
                         if showCategories {
                             Text(category.rawValue)
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                                .font(themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 10))
+                                .textCase(ThemeChrome.textCase)
+                                .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
                                 .background(Capsule().fill(Color.secondary.opacity(0.12)))
@@ -3006,11 +3325,19 @@ private struct TransactionRowNew: View {
                 if isWide {
                     let remittance = transaction.remittanceInformation?.first ?? ""
                     Text(remittance)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .font(themed ? ThemeFonts.flyoutBody(size: 11) : .system(size: 11))
+                        .textCase(ThemeChrome.textCase)
+                        .foregroundStyle(themed ? Color.themedInk.opacity(0.72) : Color.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .lineLimit(1)
                         .padding(.leading, 8)
+                } else if ThemeChrome.dottedLeaders {
+                    // Punkt-Führungslinie aus der BTX-Originalseite — sie sitzt exakt
+                    // dort, wo sonst der leere Zwischenraum steht, und verbindet Name
+                    // und Betrag. Gleiche Position, gleiche Reihenfolge.
+                    BTXDottedRule()
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 6)
                 } else {
                     Spacer()
                 }
@@ -3029,30 +3356,44 @@ private struct TransactionRowNew: View {
                 }
                 VStack(alignment: .trailing, spacing: 2) {
                     if let rd = roundupDisplay {
-                        // Sparmode: Original → aufgerundetes Ziel (Ziel in Mint betont).
+                        // Sparmode: Original → aufgerundetes Ziel. Bei Themes (BTX) in
+                        // Theme-Schrift/-Farben und mit Text-Pfeil „>" statt SF-Symbol;
+                        // das Mint des Default-Looks passt nicht in die BTX-Farbwelt.
                         HStack(spacing: 4) {
                             Text(rd.original)
-                                .font(.system(size: 12, weight: .regular))
-                                .foregroundColor(.sbTextSecondary)
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.sbTextSecondary)
+                                .font(themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 12, weight: .regular))
+                                .foregroundColor(themed ? Color.themedInk.opacity(0.6) : .sbTextSecondary)
+                            if themed {
+                                Text(">")
+                                    .font(ThemeFonts.flyoutBody(size: 13))
+                                    .foregroundColor(Color.themedInk.opacity(0.6))
+                            } else {
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(.sbTextSecondary)
+                            }
                             Text(rd.rounded)
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(Color.roundupAccent)
+                                .font(themed ? ThemeFonts.flyoutHeading(size: 14, weight: .medium) : .system(size: 14, weight: .semibold))
+                                .foregroundColor(themed ? Color.themedIncome : Color.roundupAccent)
                         }
                     } else {
                         Text(amount)
-                            .font(.system(size: 14, weight: .medium))
+                            .font(themed ? ThemeFonts.flyoutHeading(size: 17, weight: .medium)
+                                         : .system(size: 14, weight: .medium))
                             .foregroundColor(amountColor)
                     }
                     if isPending {
+                        // BTX: reiner Text ohne Kapsel/Rahmen — die Zeile ist ohnehin
+                        // schon auf 65 % gedimmt, das Wort genügt.
                         Text(L10n.t("Vorgemerkt", "Pending"))
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.sbOrangeStrong)
-                            .padding(.horizontal, 6)
+                            .font(themed ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
+                            .textCase(ThemeChrome.textCase)
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .sbOrangeStrong)
+                            .padding(.horizontal, themed ? 0 : 6)
                             .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.sbOrangeSoft))
+                            .background(
+                                themed ? nil : Capsule().fill(Color.sbOrangeSoft)
+                            )
                     }
                 }
             }

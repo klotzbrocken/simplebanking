@@ -51,17 +51,52 @@ struct ReceiptCategoryRing: View {
         }
     }
 
-    var body: some View {
-        ZStack {
-            Circle().stroke(Color.secondary.opacity(0.12), lineWidth: 7)
-            ForEach(Array(arcs.enumerated()), id: \.offset) { _, arc in
-                Circle()
-                    .trim(from: arc.start, to: arc.end)
-                    .stroke(Color(hex: arc.hex) ?? .gray,
-                            style: StrokeStyle(lineWidth: 7, lineCap: .butt))
-                    .rotationEffect(.degrees(-90))
+    /// BTX-Theme: statt des Kreisrings eine Mosaik-Segmentleiste — die Warengruppen
+    /// als proportionale, farbige Blöcke in einer Zeile (gleiche 72×72-Fläche).
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+
+    private var btxSegmentBar: some View {
+        VStack(spacing: 5) {
+            if let date {
+                Text(String(format: "%02d", Calendar.current.component(.day, from: date)))
+                    .font(ThemeFonts.flyoutHeading(size: 22, weight: .bold)).monospacedDigit()
+                    .foregroundColor(.themedInk)
+                Text(monthAbbrev(date).uppercased())
+                    .font(ThemeFonts.flyoutBody(size: 11))
+                    .foregroundColor(Color.themedInk.opacity(0.8))
             }
-            center
+            HStack(spacing: 1) {
+                if segments.isEmpty {
+                    Rectangle().fill(Color.themedInk.opacity(0.18)).frame(width: 60, height: 8)
+                } else {
+                    ForEach(Array(segments.enumerated()), id: \.offset) { _, seg in
+                        Rectangle()
+                            .fill(Color(hex: seg.colorHex) ?? .gray)
+                            .frame(width: max(3, 60 * seg.fraction), height: 8)
+                    }
+                }
+            }
+        }
+        .frame(width: 72, height: 72)
+    }
+
+    var body: some View {
+        Group {
+            if themed && !ThemeChrome.glyphControls {
+                btxSegmentBar
+            } else {
+                ZStack {
+                    Circle().stroke(Color.secondary.opacity(0.12), lineWidth: 7)
+                    ForEach(Array(arcs.enumerated()), id: \.offset) { _, arc in
+                        Circle()
+                            .trim(from: arc.start, to: arc.end)
+                            .stroke(Color(hex: arc.hex) ?? .gray,
+                                    style: StrokeStyle(lineWidth: 7, lineCap: .butt))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    center
+                }
+            }
         }
         .frame(width: 72, height: 72)
         .help(helpText)

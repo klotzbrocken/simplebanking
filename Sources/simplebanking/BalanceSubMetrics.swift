@@ -178,12 +178,26 @@ struct BalanceSubMetricsLabel: View {
             : "\(amount) overdrawn until \(until)"
     }
 
+    // Bei aktivem Theme trägt der Untertitel Theme-Schrift und -Farbe. BTX setzt die
+    // Verfügbarkeits-Zeile grün (Leitfarbe „verfügbar" der Originalseiten), die
+    // Dispo-Warnung bleibt rot — beides über die Theme-Betragsfarben.
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+
+    private var normalFont: Font {
+        themed ? ThemeFonts.flyoutBody(size: 16) : .system(size: 13, weight: .regular)
+    }
+    private var normalColor: Color {
+        themed ? .themedIncome : Color(NSColor.secondaryLabelColor)
+    }
+    private var textCase: Text.Case? { themed ? .uppercase : nil }
+
     var body: some View {
         switch metrics.state {
         case .overdrawn:
             Text(overdrawnText())
-            .font(.system(size: 13, weight: .regular))
-            .foregroundColor(.sbRedStrong)
+            .font(themed ? ThemeFonts.flyoutBody(size: 16) : .system(size: 13, weight: .regular))
+            .textCase(textCase)
+            .foregroundColor(themed ? .themedExpense : .sbRedStrong)
             .lineLimit(1)
 
         case .normal:
@@ -192,22 +206,25 @@ struct BalanceSubMetricsLabel: View {
                     "\(euro(metrics.dailyBudget))/Tag verfügbar",
                     "\(euro(metrics.dailyBudget))/day available"
                 ))
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .font(normalFont)
+                .textCase(textCase)
+                .foregroundColor(normalColor)
                 .lineLimit(1)
             } else if compact {
                 Text(L10n.t(
                     "\(euro(metrics.availableAmount)) bis \(shortCycleEnd())",
                     "\(euro(metrics.availableAmount)) until \(shortCycleEnd())"
                 ))
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(Color(NSColor.secondaryLabelColor))
+                .font(normalFont)
+                .textCase(textCase)
+                .foregroundColor(normalColor)
                 .lineLimit(1)
                 .truncationMode(.tail)
             } else {
                 Text(untilText())
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .font(normalFont)
+                    .textCase(textCase)
+                    .foregroundColor(normalColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }

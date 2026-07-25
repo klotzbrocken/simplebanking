@@ -75,17 +75,28 @@ struct BalanceSubtitleSwitch: View {
         }
     }
 
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+
     var body: some View {
         HStack(spacing: 6) {
             if !forceClassic {
                 // Als kleine Pille darstellen, damit klar ist: das ist ein Umschalter.
                 Button(action: toggle) {
-                    // Prototyp: transparenter Umschalter (nur Icon, kein Kasten/Rahmen).
-                    Image(systemName: currentModeIcon)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(detailColor ?? .secondary)
-                        .frame(width: 18, height: 16)
-                        .contentShape(Rectangle())
+                    if themed && !ThemeChrome.glyphControls {
+                        // BTX: kleiner Block statt SF-Symbol (README: „grüner Mosaik-Punkt").
+                        Rectangle()
+                            .fill(Color.themedIncome)
+                            .frame(width: 8, height: 8)
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    } else {
+                        // Prototyp: transparenter Umschalter (nur Icon, kein Kasten/Rahmen).
+                        Image(systemName: currentModeIcon)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(detailColor ?? .secondary)
+                            .frame(width: 18, height: 16)
+                            .contentShape(Rectangle())
+                    }
                 }
                 .buttonStyle(.plain)
                 .help(L10n.t(
@@ -142,8 +153,9 @@ struct BalanceSubtitleSwitch: View {
                 ? classicLabel(amount)
                 : L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
             Text(text)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(detailColor ?? Color(NSColor.secondaryLabelColor))
+                .font(themed ? ThemeFonts.flyoutBody(size: 16) : .system(size: 13, weight: .regular))
+                .textCase(themed ? .uppercase : nil)
+                .foregroundColor(themed ? .themedIncome : (detailColor ?? Color(NSColor.secondaryLabelColor)))
                 .lineLimit(1)
         } else {
             // Placeholder reserves vertical space while value is computing

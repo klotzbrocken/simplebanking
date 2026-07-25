@@ -29,3 +29,8 @@ Sources/simplebanking/Secrets.swift
 
 # Lokale Research-Notizen (nicht als Doku committen — bei Bedarf hier austragen)
 /routex-lua-api-findings.md
+
+# Vorlage für das BTX-Theme (Demo, Referenz-Screens, Quelldatei) — Arbeitsmaterial,
+# kein Repo-Inhalt. In die Sourcen wandern nur btx.cfg, VT323 samt Lizenz und der
+# Mosaik-Code.
+/.btx-paket/

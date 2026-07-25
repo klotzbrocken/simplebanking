@@ -1080,6 +1080,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // damit eine bereits geschriebene Claude-Config gültig bleibt (No-op, wenn nicht
         // installiert oder Ziel bereits korrekt).
         MCPInstaller.refreshIfInstalled()
+        // Theme-Schriften registrieren, bevor die erste Oberfläche rendert —
+        // sonst greift die Schrift des aktiven Themes erst nach einem Neustart.
+        ThemeFonts.registerBundledFonts()
         // Ripple standardmäßig an (Aufruf + neue Bewegungen) — direkte
         // UserDefaults.bool-Reads ignorieren den @AppStorage-Default, daher registrieren.
         UserDefaults.standard.register(defaults: ["rippleAlwaysOn": true])
@@ -7042,7 +7045,35 @@ private struct FlyoutSlotSegmentedControl: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
+        // BTX: reine Text-Umschalter statt Pillen mit Bank-Icon (siehe accountDotsBar).
+        if !ThemeChrome.glyphControls {
+            return AnyView(HStack(spacing: 14) {
+                ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
+                    let active = !isUnifiedMode && idx == activeIndex
+                    if active || !soloActiveOnly {
+                        Text(item.nickname?.isEmpty == false ? item.nickname! : item.name)
+                            .font(ThemeFonts.flyoutBody(size: 15))
+                            .textCase(.uppercase)
+                            .foregroundColor(active ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                            .underline(active)
+                            .lineLimit(1)
+                            .contentShape(Rectangle())
+                            .onTapGesture { if !active { onSwitch(idx) } }
+                    }
+                }
+                if showUnified && !soloActiveOnly {
+                    Text(L10n.t("Alle", "All"))
+                        .font(ThemeFonts.flyoutBody(size: 15))
+                        .textCase(.uppercase)
+                        .foregroundColor(isUnifiedMode ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                        .underline(isUnifiedMode)
+                        .contentShape(Rectangle())
+                        .onTapGesture { if !isUnifiedMode { onActivateUnified?() } }
+                }
+                Spacer(minLength: 0)
+            })
+        }
+        return AnyView(HStack(spacing: 6) {
             ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
                 let active = !isUnifiedMode && idx == activeIndex
                 if active {
@@ -7066,7 +7097,7 @@ private struct FlyoutSlotSegmentedControl: View {
             Spacer(minLength: 0)
         }
         .animation(.easeInOut(duration: 0.2), value: activeIndex)
-        .animation(.easeInOut(duration: 0.2), value: isUnifiedMode)
+        .animation(.easeInOut(duration: 0.2), value: isUnifiedMode))
     }
 
     /// Aktive Pille: Logo + Name, gefüllt, Text in Temperaturfarbe.
@@ -7395,6 +7426,14 @@ private struct StatusBalanceFlyoutCardView: View {
                 showSend.toggle()
                 onQuickSendToggle?(showSend)
             } label: {
+                if !ThemeChrome.glyphControls {
+                    // BTX: Textkommando statt Papierflieger, aktiv unterstrichen.
+                    Text(L10n.t("Senden", "Send"))
+                        .font(ThemeFonts.flyoutBody(size: 15))
+                        .textCase(.uppercase)
+                        .underline(showSend)
+                        .foregroundColor(showSend ? Color.themedAccent : Color.themedInk.opacity(0.75))
+                } else {
                 // Immer Papierflieger; offen invertiert (heller Flieger auf dunklem
                 // Grund). Rahmen in beiden Zuständen, damit der „Geld senden"-Button
                 // klar als Button lesbar ist.
@@ -7408,6 +7447,7 @@ private struct StatusBalanceFlyoutCardView: View {
                         RoundedRectangle(cornerRadius: 7)
                             .fill(showSend ? Color.sbTextPrimary : Color.clear)
                     )
+                }
             }
             .buttonStyle(.plain)
             .help(L10n.t("Schnellüberweisung", "Quick transfer"))
@@ -7426,8 +7466,13 @@ private struct StatusBalanceFlyoutCardView: View {
             paypalSubtitleRange = paypalSubtitleRange == 0 ? 1 : 0
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
-                Text(text).font(.system(size: 12)).lineLimit(1)
+                if ThemeChrome.glyphControls {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                }
+                Text(text)
+                    .font(isDefaultTheme ? .system(size: 12) : ThemeFonts.flyoutBody(size: 14))
+                    .textCase(ThemeChrome.textCase)
+                    .lineLimit(1)
             }
             .foregroundColor(detail)
         }
@@ -7486,7 +7531,8 @@ private struct StatusBalanceFlyoutCardView: View {
             .padding(.bottom, bleedDefaultCard ? 0 : (hasDots ? 2 : 14))
             .onTapGesture(count: 2) { onDoubleTap?() }
             // Ripple only on the balance card, not the dot row
-            .rippleEffect(trigger: rippleTrigger, defaultOrigin: CGPoint(x: 310, y: 130))
+            .rippleEffect(trigger: rippleTrigger, defaultOrigin: CGPoint(x: 310, y: 130),
+                          enabled: ThemeChrome.rippleEnabled)
 
             // Footer-Zeile: Konto-Pillen (links) + Geld-senden (rechtsbündig, kleiner
             // Randabstand). Der adaptive Segmented Control (Design „4b") ersetzt die Dots.
@@ -7509,9 +7555,11 @@ private struct StatusBalanceFlyoutCardView: View {
                     )
                     quickSendToggleButton
                 }
-                .padding(.horizontal, 12)
+                // Mit CRT-Blende mehr Randabstand — sonst kleben Piles und „Senden"
+                // an der Schmucklinie.
+                .padding(.horizontal, isDefaultTheme ? 12 : 16)
                 .padding(.top, 8)
-                .padding(.bottom, 9)
+                .padding(.bottom, isDefaultTheme ? 9 : 12)
             }
             }
             .frame(height: cardRegionHeight, alignment: .top)
@@ -7560,7 +7608,7 @@ private struct StatusBalanceFlyoutCardView: View {
             .clipped()
             // Bei aktivem Theme füllt die flache Theme-Farbe auch Footer/Kanten (sonst
             // blitzt am unteren Rand die Default-Panelfarbe durch → „Rahmen").
-            .background(roundupView.isActive ? Color.roundupPanelBackground
+            .background((roundupView.isActive && isDefaultTheme) ? Color.roundupPanelBackground
                         : (isDefaultTheme ? Color.panelBackground : Color.themedSurface))
             // Das GANZE Flyout ist Drop-Zone: Rechnung (PDF/Bild) darauf ziehen →
             // Textebene/OCR → Quick-Send-Drawer öffnet sich vorbefüllt.
@@ -7568,6 +7616,15 @@ private struct StatusBalanceFlyoutCardView: View {
                 handleFlyoutDocumentDrop(providers)
             }
             .overlay { documentDropOverlay }
+            // „Bildschirmrand" (BTX): Overlay innen auf der Fläche — kein Platzverbrauch,
+            // keine Verschiebung. Ohne `screenBorder` im Theme passiert hier nichts.
+            .overlay {
+                if let border = Color.themedScreenBorder {
+                    // CRT-Blende wie in der Umsatzliste (die Host-Layer-Rundung
+                    // schneidet die Außenkante sauber ab).
+                    BTXScreenBezel(color: border, thickness: 5, innerRadius: 11)
+                }
+            }
             .preferredColorScheme(forcedColorScheme)
             .onHover { hovering in onHoverChanged?(hovering) }
     }
@@ -7618,37 +7675,48 @@ private struct StatusBalanceFlyoutCardView: View {
             return L10n.t("Alle Konten", "All Accounts")
         }()
 
+        let themed = !isDefaultTheme
         return VStack(alignment: .leading, spacing: 8) {
             // Header row — mirrors defaultThemeCard: icon + text + Spacer
             HStack(spacing: 8) {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                if themed && !ThemeChrome.glyphControls {
+                    BTXMosaicIcon(category: .sonstiges)
+                } else {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                }
                 Text(headerText)
-                    .font(.system(size: 14))
-                    .foregroundColor(Color(NSColor.secondaryLabelColor))
+                    .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 14))
+                    .textCase(ThemeChrome.textCase)
+                    .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 Spacer()
             }
 
             // Nur der Gesamt-Saldo (keine Konten-Aufschlüsselung rechts).
             Text(effectiveBalanceText)
-                .font(.system(size: 38, weight: .bold, design: .default))
-                .tracking(-0.6)
+                .font(themed ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
+                             : .system(size: 38, weight: .bold, design: .default))
+                .tracking(themed ? 1.0 : -0.6)
                 .monospacedDigit()
-                .foregroundColor(wash.balance)
+                .foregroundColor(themed ? .themedInk : wash.balance)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
             leftToPaySubtitle
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 16)
-        // Randlose Money-Heat wie die Einzelkonto-Karte (Aggregat-Temperatur).
+        // Randlose Money-Heat wie die Einzelkonto-Karte (Aggregat-Temperatur);
+        // aktives Theme = flache Theme-Fläche.
         .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            LinearGradient(colors: [wash.top, wash.bottom],
-                           startPoint: .topTrailing, endPoint: .bottomLeading)
+            themed
+            ? AnyView(Color.themedSurface)
+            : AnyView(LinearGradient(colors: [wash.top, wash.bottom],
+                                     startPoint: .topTrailing, endPoint: .bottomLeading))
         )
     }
 
@@ -7687,9 +7755,13 @@ private struct StatusBalanceFlyoutCardView: View {
         // Betrag direkt darunter — damit Name/Betrag beim Wechsel Bank↔Händler NICHT
         // springen. Der Kategorien-Ring liegt als Overlay rechts und treibt die
         // Kartenhöhe NICHT (sonst wäre die Händler-Karte höher → Pillen versetzt).
+        let themed = !isDefaultTheme
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let img = bankLogoImage {
+                // BTX: Warenkorb-Mosaik statt Marken-Logo.
+                if themed && !ThemeChrome.merchantLogosEnabled {
+                    BTXMosaicIcon(category: .essenAlltag)
+                } else if let img = bankLogoImage {
                     Image(nsImage: img).resizable().scaledToFit()
                         .frame(width: 20, height: 20)
                         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -7699,33 +7771,51 @@ private struct StatusBalanceFlyoutCardView: View {
                 }
                 if reweNeedsLogin {
                     Text("⚠︎ " + L10n.t("Login erneuern", "Sign in again"))
-                        .font(.system(size: 14)).foregroundColor(.orange)
+                        .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 14))
+                        .textCase(ThemeChrome.textCase)
+                        .foregroundColor(themed ? .themedExpense : .orange)
                 } else {
                     Text(formatBankHeader(date: balanceFetchedAt))
-                        .font(.system(size: 14)).foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 14))
+                        .textCase(ThemeChrome.textCase)
+                        .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 }
                 Spacer()
             }
             Text(effectiveBalanceText)
-                .font(.system(size: 38, weight: .bold, design: .default))
-                .tracking(-0.6)
-                .foregroundColor(wash.accent)
+                .font(themed ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
+                             : .system(size: 38, weight: .bold, design: .default))
+                .tracking(themed ? 1.0 : -0.6)
+                .foregroundColor(themed ? .themedInk : wash.accent)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
             Button { cycleReweRange() } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
+                    }
                     Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
-                        .font(.system(size: 12))
+                        .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
+                        .textCase(ThemeChrome.textCase)
                     if let badge = budgetBadge {
                         Text(badge)
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(themed ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
                             .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(Capsule().fill(heat.opacity(0.15)))
-                            .foregroundColor(heat)
+                            .background(
+                                RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                                    .fill(themed ? Color.clear : heat.opacity(0.15))
+                                    .overlay(
+                                        themed
+                                        ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                                            .stroke(Color.themedInk.opacity(0.5), lineWidth: 1)
+                                        : nil
+                                    )
+                            )
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : heat)
                     }
                 }
-                .foregroundColor(toggleColor)
+                .foregroundColor(themed ? Color.themedInk.opacity(0.85) : toggleColor)
             }
             .buttonStyle(.plain)
             .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
@@ -7738,11 +7828,14 @@ private struct StatusBalanceFlyoutCardView: View {
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 16)
-        // Randlos: Marken-Wash bis an die Flyout-Kanten (Popover rundet die Ecken).
+        // Randlos: Marken-Wash bis an die Flyout-Kanten (Popover rundet die Ecken);
+        // aktives Theme = flache Theme-Fläche.
         .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
-            LinearGradient(colors: [wash.top, wash.bottom],
-                           startPoint: .topTrailing, endPoint: .bottomLeading)
+            themed
+            ? AnyView(Color.themedSurface)
+            : AnyView(LinearGradient(colors: [wash.top, wash.bottom],
+                                     startPoint: .topTrailing, endPoint: .bottomLeading))
         )
     }
 
@@ -7784,7 +7877,9 @@ private struct StatusBalanceFlyoutCardView: View {
         let detailColor:  Color = themed ? Color.themedInk.opacity(0.72) : wash.detail
         let nameColor: Color = themed ? .themedInk
             : (dark ? Color(NSColor.labelColor) : (Color(hex: "1d1d1f") ?? .primary))
-        let balanceFont: Font = themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
+        // Demo 2b (Flyout, 420 px): Kontostand 50 px + scaleY(1.15). Auf die 348-pt-Breite
+        // skaliert ≈ 42 pt; die Streckung übernimmt der scaleEffect am Text.
+        let balanceFont: Font = themed ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
                                         : .system(size: 38, weight: .bold, design: .default)
         let nameFont: Font = themed ? ThemeFonts.flyoutHeading(size: 14, weight: .semibold)
                                      : .system(size: 14, weight: .semibold)
@@ -7792,7 +7887,11 @@ private struct StatusBalanceFlyoutCardView: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                if let img = bankLogoImage {
+                // Gleicher 20×20-Platz in jedem Fall — ein Theme ohne Bildmarken (BTX)
+                // setzt hier den Mosaik-Block der Kategorie „neutral/Bank".
+                if !ThemeChrome.bankLogosEnabled {
+                    BTXMosaicIcon(category: .sonstiges)
+                } else if let img = bankLogoImage {
                     let invertActive = dark && BankLogoAssets.isDark(brandId: bankLogoBrandId ?? "")
                     if invertActive {
                         Image(nsImage: img).resizable().scaledToFit()
@@ -7811,16 +7910,23 @@ private struct StatusBalanceFlyoutCardView: View {
                 }
                 (Text(headerNameOnly).font(nameFont).foregroundColor(nameColor)
                  + Text(headerTimeSuffix(balanceFetchedAt)).font(timeFont).foregroundColor(detailColor))
+                    .textCase(ThemeChrome.textCase)
                     .lineLimit(1)
+                // BTX: blinkendes Telefon-Steuerzeichen neben der Bank (wie Demo-Kopf).
+                if themed && !ThemeChrome.glyphControls {
+                    BTXBlinkingPhone(size: 13)
+                }
                 Spacer()
             }
 
             Text(displayBalance)
                 .font(balanceFont)
-                .tracking(-0.6)
+                .tracking(themed ? 1.0 : -0.6)
                 .foregroundColor(balanceColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
+                // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
+                .scaleEffect(x: 1, y: themed ? 1.15 : 1.0, anchor: .leading)
 
             if isPayPalCard { paypalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }

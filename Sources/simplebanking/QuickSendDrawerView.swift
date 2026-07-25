@@ -218,9 +218,11 @@ struct QuickSendDrawerView: View {
         VStack(spacing: 7) {
             // Reihe 1: Name + Betrag
             HStack(spacing: 7) {
-                TextField(L10n.t("Name", "Name"), text: $name)
+                TextField(L10n.t("Name", "Name"), text: $name, prompt: prompt("Name", "Name"))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
+                    .font(fieldFont())
+                    .foregroundColor(fieldTextColor)
+                    .overlay(themedPlaceholder("Name", "Name", visible: name.isEmpty))
                     .padding(.horizontal, 10)
                     .frame(height: 30)
                     .frame(maxWidth: .infinity)
@@ -229,17 +231,19 @@ struct QuickSendDrawerView: View {
                     .overlay(alignment: .topLeading) { autocompleteOverlay }
 
                 HStack(spacing: 4) {
-                    TextField(L10n.t("Betrag", "Amount"), text: $amountInput)
+                    TextField(L10n.t("Betrag", "Amount"), text: $amountInput, prompt: prompt("Betrag", "Amount"))
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12.5).monospacedDigit())
+                        .font(fieldFont(mono: true))
+                        .foregroundColor(fieldTextColor)
+                        .overlay(themedPlaceholder("Betrag", "Amount", visible: amountInput.isEmpty, trailing: true))
                         .multilineTextAlignment(.trailing)
                         .onChange(of: amountInput) { newValue in
                             let s = QuickSendFormatting.sanitizeAmountInput(newValue)
                             if s != newValue { amountInput = s }
                         }
                     Text("€")
-                        .font(.system(size: 12.5))
-                        .foregroundColor(.sbTextSecondary)
+                        .font(fieldFont())
+                        .foregroundColor(themed ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
                 }
                 .padding(.horizontal, 9)
                 .frame(width: 122, height: 30)
@@ -256,17 +260,26 @@ struct QuickSendDrawerView: View {
 
             // Reihe 2: IBAN + grüner Haken
             HStack(spacing: 8) {
-                TextField(L10n.t("IBAN", "IBAN"), text: $ibanText)
+                TextField(L10n.t("IBAN", "IBAN"), text: $ibanText, prompt: prompt("IBAN", "IBAN"))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12.5, design: .monospaced))
+                    .font(fieldFont(mono: true))
+                    .foregroundColor(fieldTextColor)
+                    .overlay(themedPlaceholder("IBAN", "IBAN", visible: ibanText.isEmpty))
                     .onChange(of: ibanText) { newValue in
                         let grouped = QuickSendFormatting.groupIban(newValue)
                         if grouped != newValue { ibanText = grouped }
                     }
                 if ibanValid {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.sbGreenStrong)
+                    // BTX: Text-Haken statt SF-Symbol.
+                    if themed && !ThemeChrome.glyphControls {
+                        Text("OK")
+                            .font(ThemeFonts.flyoutBody(size: 13))
+                            .foregroundColor(.themedIncome)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.sbGreenStrong)
+                    }
                 }
             }
             .padding(.horizontal, 10)
@@ -274,9 +287,11 @@ struct QuickSendDrawerView: View {
             .background(fieldBackground(border: ibanValid ? .sbGreenStrong : .sbBorder))
 
             // Reihe 3: Betreff
-            TextField(L10n.t("Betreff", "Reference"), text: $purpose)
+            TextField(L10n.t("Betreff", "Reference"), text: $purpose, prompt: prompt("Betreff", "Reference"))
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(fieldFont())
+                .foregroundColor(fieldTextColor)
+                .overlay(themedPlaceholder("Betreff", "Reference", visible: purpose.isEmpty))
                 .padding(.horizontal, 10)
                 .frame(height: 30)
                 .frame(maxWidth: .infinity)
@@ -317,28 +332,42 @@ struct QuickSendDrawerView: View {
 
     /// Inaktiver Emoji-Platzhalter (Leerzustand „noch keine Vorlage").
     private var inactiveTemplate: some View {
-        Image(systemName: "face.smiling")
-            .font(.system(size: 14))
-            .foregroundColor(Color.sbTextSecondary.opacity(0.35))
-            .frame(width: 30, height: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.sbSurfaceSoft)
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.sbBorder, lineWidth: 1))
-            )
+        let radius = ThemeChrome.cornerRadius(7)
+        return Group {
+            if themed && !ThemeChrome.glyphControls {
+                // BTX: kein Smiley — leeres Feld als Platzhalter.
+                Color.clear.frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: radius)
+                            .fill(Color.themedInk.opacity(0.06))
+                            .overlay(RoundedRectangle(cornerRadius: radius).stroke(Color.themedInk.opacity(0.35), lineWidth: 1))
+                    )
+            } else {
+                Image(systemName: "face.smiling")
+                    .font(.system(size: 14))
+                    .foregroundColor(Color.sbTextSecondary.opacity(0.35))
+                    .frame(width: 30, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.sbSurfaceSoft)
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.sbBorder, lineWidth: 1))
+                    )
+            }
+        }
     }
 
     /// „+“ → öffnet die Einstellungen am Vorlagen-Editor.
     private var addTemplateButton: some View {
-        Button { onAddTemplate?() } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.sbTextSecondary)
+        let radius = ThemeChrome.cornerRadius(7)
+        return Button { onAddTemplate?() } label: {
+            Text("+")
+                .font(themed ? ThemeFonts.flyoutHeading(size: 16) : .system(size: 12, weight: .semibold))
+                .foregroundColor(themed ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
                 .frame(width: 30, height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: 7)
+                    RoundedRectangle(cornerRadius: radius)
                         .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
-                        .foregroundColor(.sbBorder)
+                        .foregroundColor(themed ? Color.themedInk.opacity(0.4) : .sbBorder)
                 )
         }
         .buttonStyle(.plain)
@@ -350,17 +379,34 @@ struct QuickSendDrawerView: View {
         Button { review() } label: {
             HStack(spacing: 5) {
                 Text(L10n.t("Weiter", "Next"))
-                    .font(.system(size: 12, weight: .semibold))
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
+                    .textCase(themed ? .uppercase : nil)
+                if themed && !ThemeChrome.glyphControls {
+                    Text(">").font(ThemeFonts.flyoutBody(size: 15))
+                } else {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
             }
             .padding(.horizontal, 14)
             .frame(height: 30)
             .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(canSubmit ? Color.sbRedStrong : Color.sbSurfaceSoft)
+                // BTX: aktiv = gefüllter Block in Leitfarbe; inaktiv = heller Block mit
+                // Tintenrahmen (klar lesbar, aber sichtbar „noch nicht bereit").
+                RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(7))
+                    .fill(themed
+                          ? (canSubmit ? Color.themedAccent : Color.white.opacity(0.4))
+                          : (canSubmit ? Color.sbRedStrong : Color.sbSurfaceSoft))
+                    .overlay(
+                        (themed && !canSubmit)
+                        ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(7))
+                            .stroke(Color.themedInk.opacity(0.6), lineWidth: 2)
+                        : nil
+                    )
             )
-            .foregroundColor(canSubmit ? .white : .sbTextSecondary)
+            .foregroundColor(themed
+                             ? (canSubmit ? Color.themedSurface : Color.themedInk.opacity(0.7))
+                             : (canSubmit ? .white : .sbTextSecondary))
         }
         .buttonStyle(.plain)
         .disabled(!canSubmit)
@@ -471,10 +517,50 @@ struct QuickSendDrawerView: View {
 
     // MARK: Helpers
 
+    /// Aktives Theme (nicht Default) → Drawer in Theme-Optik (BTX: eckig, VT323).
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+
+    /// Schrift der Eingabefelder — VT323 bei aktivem Theme, sonst System.
+    private func fieldFont(mono: Bool = false) -> Font {
+        if themed { return ThemeFonts.flyoutBody(size: 15) }
+        return mono ? .system(size: 12.5, design: .monospaced) : .system(size: 12.5)
+    }
+    private var fieldTextColor: Color { themed ? .themedInk : .primary }
+
+    /// Platzhalter-Behandlung: der System-Prompt folgt dem (ggf. dunklen) Appearance-
+    /// Modus und wäre auf dem hellen BTX-Feld weiß = unlesbar. Eine Prompt-Farbe wird
+    /// vom Plain-TextField auf macOS ignoriert — deshalb wird der System-Platzhalter
+    /// bei aktivem Theme mit `Text("")` unterdrückt und ein eigener Text übergelegt.
+    private func prompt(_ de: String, _ en: String) -> Text? {
+        themed ? Text("") : nil
+    }
+
+    /// Eigener, lesbarer Platzhalter für die Theme-Felder (nur solange leer).
+    @ViewBuilder
+    private func themedPlaceholder(_ de: String, _ en: String, visible: Bool, trailing: Bool = false) -> some View {
+        if themed && visible {
+            Text(L10n.t(de, en))
+                .font(ThemeFonts.flyoutBody(size: 15))
+                .foregroundColor(Color.themedInk.opacity(0.45))
+                .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
+                .allowsHitTesting(false)
+        }
+    }
+
     private func fieldBackground(border: Color = .sbBorder) -> some View {
-        RoundedRectangle(cornerRadius: 7)
-            .fill(Color.sbSurfaceSoft)
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(border, lineWidth: 1))
+        // Validierungsränder (rot/grün) bleiben auch im Theme erhalten; nur der
+        // neutrale Standardrand und die Fläche folgen dem Theme.
+        //
+        // BTX-Lo-Fi: heller Block auf dem grauen Schirm mit hartem 2-px-Tintenrahmen —
+        // wie ein Eingabebereich einer BTX-Seite, nicht wie ein modernes Soft-Feld.
+        // Der helle Grund liefert zugleich den Kontrast für Text und Platzhalter.
+        let radius = ThemeChrome.cornerRadius(7)
+        let isNeutral = border == Color.sbBorder
+        let fill = themed ? Color.white.opacity(0.65) : Color.sbSurfaceSoft
+        let stroke = (themed && isNeutral) ? Color.themedInk : border
+        return RoundedRectangle(cornerRadius: radius)
+            .fill(fill)
+            .overlay(RoundedRectangle(cornerRadius: radius).stroke(stroke, lineWidth: themed ? 2 : 1))
     }
 
     private func apply(_ fav: QuickSendFavorite) {

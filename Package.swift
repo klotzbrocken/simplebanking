@@ -48,6 +48,10 @@ let package = Package(
                 .copy("Resources/merchant-logos"),
                 .copy("Resources/Fonts/SpaceMono-Regular.ttf"),
                 .copy("Resources/Fonts/SpaceMono-Bold.ttf"),
+                // BTX-Theme: VT323 (OFL-1.1, Lizenztext liegt daneben und muss
+                // mit ausgeliefert werden). Latin-Subset aus dem Theme-Paket.
+                .copy("Resources/Fonts/VT323-Regular.ttf"),
+                .copy("Resources/Fonts/VT323-OFL.txt"),
             ],
             linkerSettings: [
                 .linkedFramework("AppKit"),

@@ -25,6 +25,36 @@ struct AppTheme: Identifiable, Equatable {
     let inkLightHex: String?
     let inkDarkHex: String?
 
+    // MARK: - Chrome-Schalter
+    //
+    // Rein deklarativ: sie bestimmen, OB ein vorhandenes Element gezeichnet wird bzw.
+    // WOMIT ein vorhandener Platz gefüllt ist — nie die Anordnung. Alle Defaults
+    // entsprechen dem Bestandsverhalten, damit Default- und Game-Boy-Theme unverändert
+    // aussehen. Gebraucht werden sie für das BTX-Theme: Bildschirmtext kannte weder
+    // Bildmarken noch Wasser-Animationen.
+    var rippleEnabled: Bool = true
+    var merchantLogosEnabled: Bool = true
+    var categoryIconsEnabled: Bool = true
+    /// Bankmarke im Flyout-Kopf. Getrennt von `merchantLogosEnabled`, weil ein Theme
+    /// durchaus Händler-Logos zeigen und die Bankmarke weglassen könnte (oder umgekehrt).
+    var bankLogosEnabled: Bool = true
+    /// Beschriftungen in Großbuchstaben (BTX-Zeichensatz wurde in der Praxis so gesetzt).
+    var uppercaseText: Bool = false
+    /// Gepunktete Führungslinie zwischen Name und Betrag statt leerem Zwischenraum.
+    var dottedLeaders: Bool = false
+    /// Eckige Bedienelemente statt runder (Suchfeld, Pillen). BTX kannte keine Rundungen.
+    var squareControls: Bool = false
+    /// Bedien-Icons als SF-Symbol (`true`) oder als Textkürzel (`false`). BTX kannte
+    /// keine grafischen Icons — Kommandos standen als Text in der Fußleiste.
+    var glyphControls: Bool = true
+    /// Farbe eines Rahmens um Flyout/Liste („Bildschirmrand"). nil → kein Rahmen.
+    var screenBorderHex: String? = nil
+
+    var screenBorderColor: NSColor? {
+        guard let screenBorderHex else { return nil }
+        return Self.color(from: screenBorderHex, fallback: .clear)
+    }
+
     /// True für das eingebaute Default-Theme (nutzt Money-Heat statt flacher Theme-Farbe).
     var isDefault: Bool { id == ThemeManager.defaultThemeID }
 
@@ -212,7 +242,9 @@ final class ThemeManager: @unchecked Sendable {
             .appendingPathComponent("themes", isDirectory: true)
     }
 
-    private func parseTheme(from url: URL) -> AppTheme? {
+    /// Intern statt privat, damit Tests eine `.cfg` direkt gegen den echten Parser
+    /// prüfen können (keine Attrappe — die Built-in-Themes gehen denselben Weg).
+    func parseTheme(from url: URL) -> AppTheme? {
         guard let data = try? String(contentsOf: url, encoding: .utf8) else { return nil }
 
         var values: [String: String] = [:]
@@ -247,11 +279,35 @@ final class ThemeManager: @unchecked Sendable {
             negativeLightHex: values["negativelight"],
             negativeDarkHex: values["negativedark"],
             inkLightHex: values["inklight"],
-            inkDarkHex: values["inkdark"]
+            inkDarkHex: values["inkdark"],
+            rippleEnabled: Self.parseBool(values["ripple"], default: true),
+            merchantLogosEnabled: Self.parseBool(values["merchantlogos"], default: true),
+            categoryIconsEnabled: Self.parseBool(values["categoryicons"], default: true),
+            bankLogosEnabled: Self.parseBool(values["banklogos"], default: true),
+            uppercaseText: Self.parseBool(values["uppercase"], default: false),
+            dottedLeaders: Self.parseBool(values["dottedleaders"], default: false),
+            squareControls: Self.parseBool(values["squarecontrols"], default: false),
+            glyphControls: Self.parseBool(values["glyphcontrols"], default: true),
+            screenBorderHex: values["screenborder"].flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 
-    private static let builtInThemes: [String: String] = [
+    /// `on/off`, `true/false`, `yes/no`, `1/0` — alles andere (inkl. fehlendem Wert)
+    /// fällt auf den Default zurück, damit ein Tippfehler im `.cfg` nicht still ein
+    /// Feature abschaltet.
+    static func parseBool(_ raw: String?, default fallback: Bool) -> Bool {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty else {
+            return fallback
+        }
+        switch raw {
+        case "on", "true", "yes", "1":  return true
+        case "off", "false", "no", "0": return false
+        default:                        return fallback
+        }
+    }
+
+    /// Intern statt privat: Tests prüfen die ausgelieferten `.cfg`-Inhalte direkt.
+    static let builtInThemes: [String: String] = [
         "default.cfg": """
         # simplebanking Theme — Color Harmony Palette
         id=default
@@ -310,6 +366,48 @@ final class ThemeManager: @unchecked Sendable {
         # Ink = große Zahl + Text auf der Fläche (dunkelstes DMG-Grün).
         inkLight=#0F380F
         inkDark=#0F380F
+        """,
+        "btx.cfg": """
+        # simplebanking Theme — BTX revisited (Bildschirmtext, 1983–2001)
+        #
+        # Hommage an den Dienst, über den in Deutschland das erste Online-Banking lief.
+        # BTX kannte pro Zeichenzelle je eine Vorder- und Hintergrundfarbe aus acht
+        # Grundfarben, eine Rasterschrift und KEINE Bildmarken — Händler wurden über
+        # Mosaik-Blöcke aus der 2x3-Unterteilung einer Zeichenzelle dargestellt.
+        # Deshalb sind Logos, Symbole und der Wasser-Effekt hier abgeschaltet.
+        #
+        # Palette (heller Modus, Entwurf 2a/2b):
+        #   Schwarz #111111 · Rot #b0061f · Grün #0a7a24 · Gelb #e8b200
+        #   Blau #0018a8 · Magenta #a00050 · Cyan #0033b0 · Schirm #cfcfcf
+        # Appearance-unabhängig: ein BTX-Schirm sah in Hell wie Dunkel gleich aus.
+        id=btx
+        name=BTX revisited
+        bodyFont=VT323
+        headingFont=VT323
+        accent=#0018a8
+        positive=#0a7a24
+        negative=#b0061f
+        positiveLight=#0a7a24
+        positiveDark=#0a7a24
+        negativeLight=#b0061f
+        negativeDark=#b0061f
+        cardLight=#cfcfcf
+        cardDark=#cfcfcf
+        panelLight=#cfcfcf
+        panelDark=#cfcfcf
+        # Kontostand in BTX-Blau, der Leitfarbe der Originalseiten.
+        inkLight=#0018a8
+        inkDark=#0018a8
+        # Chrome: keine Bildmarken, kein Ripple, Großbuchstaben, Punktlinien, gelber Rand.
+        ripple=off
+        merchantLogos=off
+        categoryIcons=off
+        bankLogos=off
+        uppercase=on
+        dottedLeaders=on
+        squareControls=on
+        glyphControls=off
+        screenBorder=#e8b200
         """
     ]
 
@@ -319,7 +417,44 @@ final class ThemeManager: @unchecked Sendable {
     static let retiredThemeFiles = ["ocean.cfg", "norton-commander.cfg"]
 }
 
+/// Lese-Fassade für die Chrome-Schalter des aktiven Themes — gleiches Idiom wie die
+/// `Color.themed*`-Accessoren. Views fragen hier ab, statt `ThemeManager` zu kennen.
+enum ThemeChrome {
+    private static var theme: AppTheme { ThemeManager.shared.currentTheme }
+
+    static var rippleEnabled: Bool { theme.rippleEnabled }
+    static var merchantLogosEnabled: Bool { theme.merchantLogosEnabled }
+    static var categoryIconsEnabled: Bool { theme.categoryIconsEnabled }
+    static var bankLogosEnabled: Bool { theme.bankLogosEnabled }
+    static var uppercaseText: Bool { theme.uppercaseText }
+    static var dottedLeaders: Bool { theme.dottedLeaders }
+    static var squareControls: Bool { theme.squareControls }
+    static var glyphControls: Bool { theme.glyphControls }
+
+    /// Eckenradius für Bedienelemente: 0 bei `squareControls`, sonst der übergebene Wert.
+    static func cornerRadius(_ rounded: CGFloat) -> CGFloat { theme.squareControls ? 0 : rounded }
+
+    /// `nil` beim Default-Theme — Aufrufer behalten dann ihr Bestandsverhalten.
+    static var textCase: Text.Case? { theme.uppercaseText ? .uppercase : nil }
+}
+
 enum ThemeFonts {
+    /// Registriert die mitgelieferten Schriften im Prozess, damit `NSFont(name:)` sie
+    /// findet. Muss vor dem ersten Rendern laufen (App-Start) — ohne Registrierung
+    /// fällt `themedFont` still auf die Systemschrift zurück und das Theme sieht
+    /// unauffällig aus, statt zu brechen.
+    ///
+    /// `Bundle.main` zuerst (so liegt es im gebauten .app, siehe build-app.sh),
+    /// `Bundle.module` als Rückfall für `swift run` und Tests.
+    static func registerBundledFonts() {
+        for name in ["VT323-Regular", "SpaceMono-Regular", "SpaceMono-Bold"] {
+            let url = Bundle.main.url(forResource: name, withExtension: "ttf")
+                ?? Bundle.module.url(forResource: name, withExtension: "ttf")
+            guard let url else { continue }
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+    }
+
     // Themes wirken NUR in Flyout + Umsatzliste. Die globalen `body`/`heading` sind
     // daher bewusst NICHT mehr theme-abhängig (sonst leckte z.B. Game Boys Menlo in
     // Settings/TransferSheet). Für die theme-getönten Stellen: `flyoutHeading/flyoutBody`.
@@ -403,6 +538,11 @@ extension Color {
         })
     }
     static var themedAccent: Color { Color(nsColor: ThemeManager.shared.currentTheme.accentColor) }
+
+    /// Rahmenfarbe des „Bildschirms" (BTX: gelber Rand). nil → kein Rahmen.
+    static var themedScreenBorder: Color? {
+        ThemeManager.shared.currentTheme.screenBorderColor.map(Color.init(nsColor:))
+    }
 
     /// Mint-Hintergrund für die Aufrunden-Ansicht — überschreibt Bank-Tint
     /// wenn der View-Mode aktiv ist (Phase B-3).

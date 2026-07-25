@@ -1,9 +1,13 @@
 import SwiftUI
 
 extension View {
+    /// - Parameter enabled: `false` hängt den Modifier gar nicht erst an. Ein genullter
+    ///   `trigger` würde nicht genügen — der Modifier bringt zusätzlich eine eigene
+    ///   `onTapGesture` mit, die den Effekt auch ohne Trigger auslöst. Genutzt vom
+    ///   BTX-Theme: Bildschirmtext kannte keine Animationen.
     @ViewBuilder
-    func rippleEffect(trigger: Int, defaultOrigin: CGPoint) -> some View {
-        if #available(macOS 14.0, *) {
+    func rippleEffect(trigger: Int, defaultOrigin: CGPoint, enabled: Bool = true) -> some View {
+        if #available(macOS 14.0, *), enabled {
             self.modifier(RippleEffect(trigger: trigger, defaultOrigin: defaultOrigin))
         } else {
             self

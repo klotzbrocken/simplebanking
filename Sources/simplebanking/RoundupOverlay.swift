@@ -24,20 +24,28 @@ struct RoundupOverlay: View {
         ("10 €",  1000)
     ]
 
+    /// Aktives Theme (BTX): Fläche/Schrift/Blöcke statt Mint-Pillen.
+    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
+
     var body: some View {
         VStack(spacing: 8) {
             // Label + ¢-Toggle (Mode aus) in einer Zeile; die Step-Pills darunter in
             // EIGENER voller Zeile — sonst wird im schmalen Fenster die 5€-Pille beschnitten.
             HStack(spacing: 10) {
                 Text(L10n.t("Aufrunden um:", "Round up to:"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.primary)
+                    .font(themed ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
+                    .textCase(ThemeChrome.textCase)
+                    .foregroundColor(themed ? .themedInk : .primary)
                     .fixedSize()
                 Spacer(minLength: 4)
                 Button(action: onClose) {
-                    Image(systemName: "centsign.circle.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(Color.roundupAccent)
+                    if themed && !ThemeChrome.glyphControls {
+                        BTXTextControl(text: L10n.t("Aus", "Off"), active: true)
+                    } else {
+                        Image(systemName: "centsign.circle.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color.roundupAccent)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help(L10n.t("Sparmodus beenden", "Leave round-up mode"))
@@ -50,10 +58,10 @@ struct RoundupOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.roundupPanelBackground)
+        .background(themed ? Color.themedSurface : Color.roundupPanelBackground)
         .overlay(
             Rectangle()
-                .fill(Color.roundupAccent.opacity(0.25))
+                .fill(themed ? Color.themedInk.opacity(0.4) : Color.roundupAccent.opacity(0.25))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -63,21 +71,24 @@ struct RoundupOverlay: View {
         Button(action: openChoiceSheet) {
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
-                Image(systemName: "tray.and.arrow.down.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                if ThemeChrome.glyphControls {
+                    Image(systemName: "tray.and.arrow.down.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                }
                 Text(L10n.t("Aufgerundeten Betrag zur Seite legen",
                             "Set aside round-up amount"))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(themed ? ThemeFonts.flyoutBody(size: 14) : .system(size: 13, weight: .semibold))
+                    .textCase(ThemeChrome.textCase)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.roundupAccent)
+                RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
+                    .fill(themed ? Color.themedAccent : Color.roundupAccent)
             )
-            .foregroundColor(.white)
+            .foregroundColor(themed ? Color.themedSurface : .white)
         }
         .buttonStyle(.plain)
         .help(L10n.t("Öffnet den Auswahl-Dialog (Heute / Gestern / Vorgestern / Monat).",
@@ -112,14 +123,27 @@ struct RoundupOverlay: View {
                 state.applyStepChange(slotId: slotId, bankId: bankId, stepCents: cents)
             }
         }) {
+            // BTX: eckige Blöcke mit Tintenrahmen statt Mint-Kapseln; aktiv = gefüllt
+            // in Leitfarbe (wie die Filter-Blöcke der Umsatzliste).
             Text(label)
-                .font(.system(size: 11, weight: selected ? .semibold : .regular))
-                .foregroundColor(selected ? .white : Color.roundupAccent)
+                .font(themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11, weight: selected ? .semibold : .regular))
+                .textCase(ThemeChrome.textCase)
+                .foregroundColor(themed
+                                 ? (selected ? Color.themedSurface : Color.themedInk.opacity(0.85))
+                                 : (selected ? .white : Color.roundupAccent))
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
                 .background(
-                    Capsule()
-                        .fill(selected ? Color.roundupAccent : Color.roundupAccent.opacity(0.10))
+                    RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                        .fill(themed
+                              ? (selected ? Color.themedAccent : Color.clear)
+                              : (selected ? Color.roundupAccent : Color.roundupAccent.opacity(0.10)))
+                        .overlay(
+                            (themed && !selected)
+                            ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
+                                .stroke(Color.themedInk.opacity(0.5), lineWidth: 1)
+                            : nil
+                        )
                 )
         }
         .buttonStyle(.plain)

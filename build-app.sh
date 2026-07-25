@@ -123,6 +123,18 @@ if [[ -d "$MERCHANT_LOGOS_SRC" ]]; then
     cp -R "$MERCHANT_LOGOS_SRC" "$APP/Contents/Resources/merchant-logos"
 fi
 
+# Schriften flach nach Contents/Resources/ — sie werden über Bundle.main geladen
+# (ThemeFonts.registerBundledFonts, MonthlyReportPDFRenderer). Der SwiftPM-
+# Bundle.module-Accessor ist im handgebauten .app nicht verlässlich, siehe
+# Bank-Katalog weiter unten. VT323 trägt das BTX-Theme, SpaceMono den PDF-Report.
+FONTS_SRC="$ROOT/Sources/simplebanking/Resources/Fonts"
+if [[ -d "$FONTS_SRC" ]]; then
+    cp "$FONTS_SRC"/*.ttf "$APP/Contents/Resources/" 2>/dev/null || true
+    # OFL-1.1 verlangt, dass der Lizenztext mit der Schrift ausgeliefert wird.
+    cp "$FONTS_SRC"/*OFL.txt "$APP/Contents/Resources/" 2>/dev/null || true
+    echo "Fonts bundled: $(ls "$FONTS_SRC"/*.ttf | xargs -n1 basename | tr '\n' ' ')"
+fi
+
 # YAXI-Bank-Katalog. MUSS nach Contents/Resources/ — BankLogoCatalog/BankLogoCache
 # laden ihn über BankCatalogResource (Bundle.main). Liegt er nicht im .app, bleibt
 # der Bank-Logo-Katalog leer (Logos fehlen). Früher (1.6.0) wurde er über den
