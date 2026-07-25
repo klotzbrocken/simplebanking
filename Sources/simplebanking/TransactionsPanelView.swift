@@ -2356,6 +2356,9 @@ private struct TransactionsPanelView: View {
                 .padding(.trailing, 16)
                 .ignoresSafeArea(.container, edges: .top)
         }
+        // CRT-Easter-Egg (nur BTX): NACH Blende und Fenster-Chrome, damit der
+        // Shader das komplette Bild wölbt — wie eine echte Röhre.
+        .btxCRTEffect()
         .onAppear { isPinnedLocal = isPinnedProvider?() ?? false }
         // Wechsel auf einen Händler-/eBon-Slot: Bank-Filter und Suche zurücksetzen —
         // Bons kennen weder Einnahmen/Abos-Filter noch die Umsatzsuche; ein aktiver

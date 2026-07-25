@@ -3594,6 +3594,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             Task { await self?.openTransactionsPanel() }
         })
         result.host.sizingOptions = []
+        // Widget-Kennung setzen: nur die freigestellte Karte bekommt den CRT-Effekt.
+        var widgetRoot = result.host.rootView
+        widgetRoot.isDetachedWidget = true
+        result.host.rootView = widgetRoot
         let size = flyoutContentSize(hasDots: result.hasDots)
         let window = makeFlyoutWidgetWindow(size: size)
 
@@ -4627,6 +4631,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Popover/Centered oben nicht).
             var widgetView = rootView
             widgetView.balanceTextOverride = widgetBalanceHidden ? hiddenBalanceMaskTitle() : nil
+            // Flag beim Live-Refresh erhalten — sonst verliert das Widget den
+            // CRT-Effekt beim nächsten Daten-Update.
+            widgetView.isDetachedWidget = true
             widgetHost.rootView = widgetView
         }
     }
@@ -7178,6 +7185,9 @@ private struct StatusBalanceFlyoutCardView: View {
     var bankName: String? = nil
     var rippleTrigger: Int = 0
     var unifiedSlots: [FlyoutSlotItem]? = nil
+    /// `true`, wenn diese Karte im freigestellten Desktop-Widget lebt — nur dort
+    /// greift das CRT-Easter-Egg (im Popover am Status-Item nicht).
+    var isDetachedWidget: Bool = false
     var unifiedTotalBalance: Double? = nil
     var greenZoneFraction: Double = 0     // 0...1, balance / referenceIncome ("Bin ich im grünen Bereich?")
     var dispoLimit: Int = 0               // overdraft limit in € for dispo-mode ring
@@ -7625,6 +7635,8 @@ private struct StatusBalanceFlyoutCardView: View {
                     BTXScreenBezel(color: border, thickness: 5, innerRadius: 11)
                 }
             }
+            // CRT-Easter-Egg (nur BTX, nur im freigestellten Widget).
+            .btxCRTEffect(gate: isDetachedWidget)
             .preferredColorScheme(forcedColorScheme)
             .onHover { hovering in onHoverChanged?(hovering) }
     }

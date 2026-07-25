@@ -100,10 +100,72 @@ struct BTXScreenBezel: View {
     }
 }
 
+// MARK: - CRT-Easter-Egg (exklusiv für das BTX-Theme)
+
+/// Schalter für den CRT-Effekt. Getoggelt wird per Doppelklick auf das blinkende
+/// Telefon; der Zustand überlebt Neustarts. Wirkt NUR beim BTX-Theme und nur auf
+/// Umsatzliste + freigestelltem Flyout-Widget (nicht im Popover).
+enum BTXCRT {
+    static let defaultsKey = "btxCrtEnabled"
+
+    /// Exklusiv-Gate: das Easter-Egg gehört dem BTX-Theme — auch ein künftiges
+    /// Theme mit `glyphControls=off` (das das Telefon zeigt) bekommt es nicht.
+    static var isEligible: Bool { ThemeManager.shared.currentTheme.id == "btx" }
+
+    static func toggle() {
+        guard isEligible else { return }
+        let d = UserDefaults.standard
+        d.set(!d.bool(forKey: defaultsKey), forKey: defaultsKey)
+    }
+}
+
+private struct BTXCRTModifier: ViewModifier {
+    /// Zusatz-Gate des Aufrufers — das Flyout reicht hier `isDetachedWidget` durch,
+    /// damit das Popover am Status-Item unbehandelt bleibt.
+    var gate: Bool = true
+    @AppStorage(BTXCRT.defaultsKey) private var crtEnabled: Bool = false
+
+    func body(content: Content) -> some View {
+        if #available(macOS 14.0, *), gate, crtEnabled, BTXCRT.isEligible {
+            // 24 fps genügen für das dezente Flackern; ausgeschaltet läuft NICHTS
+            // (dieser Zweig wird gar nicht erst gebaut).
+            TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { tl in
+                let t = Float(tl.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 3600))
+                content
+                    .compositingGroup()
+                    .visualEffect { inner, proxy in
+                        inner.layerEffect(
+                            ShaderLibrary.btxCrt(
+                                .float2(Float(proxy.size.width), Float(proxy.size.height)),
+                                .float(t),
+                                .float(1.0)
+                            ),
+                            maxSampleOffset: CGSize(width: 24, height: 24)
+                        )
+                    }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// CRT-Effekt des BTX-Themes (Scanlines, Lochmaske, Tonnen-Verzerrung, Vignette,
+    /// Flicker — Shader in `BTXCRT.metal`). No-op, solange das Easter-Egg aus ist
+    /// oder ein anderes Theme aktiv ist.
+    func btxCRTEffect(gate: Bool = true) -> some View {
+        modifier(BTXCRTModifier(gate: gate))
+    }
+}
+
 /// Hart blinkendes Telefon-Glyph in der Kopfzeile — BTX-Steuerzeichen „Blinken", das
 /// im Sekundentakt ohne Zwischenstufen umschaltet (BTX kannte kein Fade). VT323 enthält
 /// kein ☎, deshalb wird das Zeichen in Systemschrift gesetzt, aber monochrom in der
 /// Ink-Farbe — es bleibt Text, keine Bildmarke.
+///
+/// Doppelklick = Easter-Egg: CRT-Effekt an/aus (nur BTX-Theme, siehe `BTXCRT`).
 struct BTXBlinkingPhone: View {
     var size: CGFloat = 14
 
@@ -117,6 +179,9 @@ struct BTXBlinkingPhone: View {
                 .opacity(on ? 1 : 0)
                 .accessibilityHidden(true)
         }
+        // Fester Hit-Bereich unabhängig von der Blink-Phase.
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { BTXCRT.toggle() }
     }
 }
 
