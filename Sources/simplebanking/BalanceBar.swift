@@ -3349,16 +3349,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         var best: Date? = nil
         for tx in txs {
             guard tx.parsedAmount > 0, let d = txDate(tx), d <= todayStart else { continue }
-            let purpose = tx.purposeCode?.uppercased() ?? ""
-            let rem = (tx.remittanceInformation ?? []).joined(separator: " ").uppercased()
-            let add = tx.additionalInformation?.uppercased() ?? ""
-            let isSalary = purpose == "SALA"
-                || rem.contains("GEHALT") || rem.contains("LOHN")
-                || add.contains("GEHALT") || add.contains("LOHN")
-            guard isSalary else { continue }
+            guard isSalaryCredit(purposeCode: tx.purposeCode,
+                                 remittance: (tx.remittanceInformation ?? []).joined(separator: " "),
+                                 additional: tx.additionalInformation) else { continue }
             if best == nil || d > best! { best = d }
         }
         return best
+    }
+
+    /// Ist diese Gutschrift ein Gehaltseingang?
+    ///
+    /// **Warum das genau sein muss:** der erkannte Eingang verschiebt den Zyklusstart
+    /// (`LeftToPayCalculator.cycleBounds`). Wird eine beliebige Gutschrift Mitte des
+    /// Monats fälschlich als Gehalt gewertet, gelten alle davor bereits gebuchten
+    /// Fixkosten wieder als „noch nicht in diesem Zyklus gebucht" — und „Noch offen"
+    /// zählt sie ein zweites Mal.
+    ///
+    /// Vorher stand hier `rem.contains("LOHN")`: eine **LOHN**STEUER-ERSTATTUNG (eine
+    /// Gutschrift, die viele einmal im Jahr bekommen) löste damit genau diesen Fehler
+    /// aus. Auch `WordMatch.atWordStart` hilft hier nicht — „LOHNSTEUER" beginnt mit
+    /// „LOHN". Deshalb:
+    ///
+    /// 1. `purposeCode == "SALA"` ist der ISO-Code für Gehalt und eindeutig — er
+    ///    genügt allein und wird nicht durch Textregeln entwertet.
+    /// 2. Textregeln greifen nur am Wortanfang (damit „GEHALTSZAHLUNG" zählt) und
+    ///    nur, wenn kein Ausschlussbegriff vorkommt.
+    ///
+    /// Die Fehlerkosten sind bewusst asymmetrisch behandelt: ein **falsch positiver**
+    /// Treffer verfälscht die angezeigte Zahl, ein **falsch negativer** fällt lediglich
+    /// auf den in den Einstellungen konfigurierten Gehaltstag zurück — also auf das,
+    /// was der Nutzer ohnehin angegeben hat. Im Zweifel lieber nicht erkennen.
+    nonisolated static func isSalaryCredit(purposeCode: String?, remittance: String,
+                                           additional: String?) -> Bool {
+        if (purposeCode?.uppercased() ?? "") == "SALA" { return true }
+
+        let text = (remittance + " " + (additional ?? "")).uppercased()
+        // Keine Gehaltszahlungen, obwohl sie mit einem Gehaltswort beginnen.
+        let exclusions = ["LOHNSTEUER", "LOHNERSATZ", "LOHNPFAEND", "LOHNPFÄND",
+                          "GEHALTSPFAEND", "GEHALTSPFÄND", "KURZARBEITERGELD"]
+        if exclusions.contains(where: { WordMatch.atWordStart(text, $0) }) { return false }
+
+        return ["GEHALT", "LOHN", "BEZUEGE", "BEZÜGE", "SALAER", "SALÄR"]
+            .contains { WordMatch.atWordStart(text, $0) }
     }
 
     private func recomputeLeftToPay() {
