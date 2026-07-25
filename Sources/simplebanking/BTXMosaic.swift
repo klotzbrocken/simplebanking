@@ -129,19 +129,22 @@ private struct BTXCRTModifier: ViewModifier {
         if #available(macOS 14.0, *), gate, crtEnabled, BTXCRT.isEligible {
             // 24 fps genügen für das dezente Flackern; ausgeschaltet läuft NICHTS
             // (dieser Zweig wird gar nicht erst gebaut).
+            //
+            // colorEffect statt layerEffect: reine Pixel-Farbtransformation ohne
+            // Sampling — die Tonnen-Verzerrung der ersten Fassung riss das
+            // maxSampleOffset-Limit und schwärzte das Fenster.
             TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { tl in
                 let t = Float(tl.date.timeIntervalSinceReferenceDate
                     .truncatingRemainder(dividingBy: 3600))
                 content
                     .compositingGroup()
                     .visualEffect { inner, proxy in
-                        inner.layerEffect(
-                            ShaderLibrary.btxCrt(
+                        inner.colorEffect(
+                            ShaderLibrary.btxCrtColor(
                                 .float2(Float(proxy.size.width), Float(proxy.size.height)),
                                 .float(t),
                                 .float(1.0)
-                            ),
-                            maxSampleOffset: CGSize(width: 24, height: 24)
+                            )
                         )
                     }
             }

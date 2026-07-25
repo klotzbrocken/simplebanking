@@ -4324,6 +4324,25 @@ final class AccountNavModel: ObservableObject {
         panel.orderOut(nil)
     }
 
+    // MARK: - Ampel nur bei aktivem Fenster
+    //
+    // Die Fensterknöpfe (Schließen/Minimieren/Zoom) sind nur sichtbar, solange das
+    // Panel das aktive Fenster ist — inaktiv wirkt die Karte aufgeräumter und die
+    // Knöpfe kleben nicht sichtbar auf der Theme-Fläche bzw. der CRT-Blende.
+    private func setTrafficLights(hidden: Bool) {
+        for button: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+            panel.standardWindowButton(button)?.isHidden = hidden
+        }
+    }
+
+    nonisolated func windowDidBecomeKey(_ notification: Notification) {
+        MainActor.assumeIsolated { setTrafficLights(hidden: false) }
+    }
+
+    nonisolated func windowDidResignKey(_ notification: Notification) {
+        MainActor.assumeIsolated { setTrafficLights(hidden: true) }
+    }
+
     // MARK: - NSWindowDelegate: Zoom-Toggle (grüner Button)
 
     nonisolated func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
