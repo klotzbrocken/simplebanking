@@ -17,13 +17,13 @@
             AUSGELIEFERTEN 2.0.0-DMG sein (build-app.sh stempelt sie als
             YYYYMMDD<seq>, die Nummer steigt also bei jedem Build). Ist der Wert zu
             niedrig, bekämen 2.0-Nutzer einen Eintrag ohne Datei angeboten.
-            Gültig für: simplebanking-20260726-071915.dmg (Build 20260726540).
+            Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
 
             Wen dieser Eintrag erreicht:
               • 1.6.x (ALTER Schlüssel) — sieht die Meldung, lädt einmalig manuell.
               • 2.0-Beta 20260725535 (neuer Schlüssel) — liegt darunter, sieht sie
                 ebenfalls. Redundant, aber harmlos und konsistent.
-              • 20260726540 selbst — der Eintrag ist nicht neuer als die installierte
+              • 20260726541 selbst — der Eintrag ist nicht neuer als die installierte
                 Version, Sparkle überspringt ihn. Keine Endlosmeldung.
 
             Der <link> zeigt auf die Download-SEITE, nicht direkt auf die DMG: Sparkle
@@ -39,11 +39,11 @@
         <item>
             <title>2.0.0</title>
             <pubDate>Sun, 26 Jul 2026 07:30:00 +0200</pubDate>
-            <sparkle:version>20260726540</sparkle:version>
+            <sparkle:version>20260726541</sparkle:version>
             <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:informationalUpdate>
-                <sparkle:belowVersion>20260726540</sparkle:belowVersion>
+                <sparkle:belowVersion>20260726541</sparkle:belowVersion>
             </sparkle:informationalUpdate>
             <link>https://simplebanking.de/download</link>
             <description><![CDATA[
