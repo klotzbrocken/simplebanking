@@ -2,6 +2,57 @@
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>simplebanking</title>
+        <!--
+            2.0.0 — INFORMATIVER Eintrag, bewusst OHNE <enclosure>.
+
+            Der EdDSA-Signaturschlüssel wurde gewechselt (der alte ist verloren).
+            Installationen bis 1.6.1 tragen den ALTEN öffentlichen Schlüssel und
+            könnten eine mit dem neuen Schlüssel signierte DMG nicht verifizieren.
+            Ein Eintrag ohne enclosure trägt keine Datei und braucht deshalb auch
+            keine Signatur — er wird also auch mit dem alten Schlüssel angezeigt
+            und schickt den Nutzer einmalig zum manuellen Download.
+
+            WICHTIG bei jedem neuen Build: <sparkle:version> und
+            <sparkle:belowVersion> müssen exakt die CFBundleVersion der
+            AUSGELIEFERTEN 2.0.0-DMG sein (build-app.sh stempelt sie als
+            YYYYMMDD<seq>, die Nummer steigt also bei jedem Build). Ist der Wert zu
+            niedrig, bekämen 2.0-Nutzer einen Eintrag ohne Datei angeboten.
+            Gültig für: simplebanking-20260726-071915.dmg (Build 20260726540).
+
+            Wen dieser Eintrag erreicht:
+              • 1.6.x (ALTER Schlüssel) — sieht die Meldung, lädt einmalig manuell.
+              • 2.0-Beta 20260725535 (neuer Schlüssel) — liegt darunter, sieht sie
+                ebenfalls. Redundant, aber harmlos und konsistent.
+              • 20260726540 selbst — der Eintrag ist nicht neuer als die installierte
+                Version, Sparkle überspringt ihn. Keine Endlosmeldung.
+
+            Der <link> zeigt auf die Download-SEITE, nicht direkt auf die DMG: Sparkle
+            öffnet ihn im Browser („Mehr erfahren"), und die Seite kann Hinweise
+            tragen, die eine Datei nicht kann.
+
+            Ab 2.0.1 wieder normale Einträge MIT enclosure und neuer Signatur — dann
+            aber mit einer VERSIONIERTEN Enclosure-URL. Die Webseite liefert unter
+            /assets/simplebanking.dmg immer die neueste Datei; als Enclosure-URL wäre
+            das falsch, weil ein 2.0.1-Eintrag später eine 2.0.2-DMG ausliefern würde
+            und die Signatur dann nicht mehr passt.
+        -->
+        <item>
+            <title>2.0.0</title>
+            <pubDate>Sun, 26 Jul 2026 07:30:00 +0200</pubDate>
+            <sparkle:version>20260726540</sparkle:version>
+            <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260726540</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <link>https://simplebanking.de/download</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.0 — bitte einmalig manuell laden</h2>
+                <p>Aus technischen Gründen muss simplebanking einmalig manuell neu geladen
+                   werden und neu installiert werden. Danach aktualisiert simplebanking
+                   wieder automatisch. Alle Daten bleiben erhalten.</p>
+            ]]></description>
+        </item>
         <item>
             <title>1.6.1</title>
             <pubDate>Mon, 15 Jun 2026 12:13:34 +0200</pubDate>
