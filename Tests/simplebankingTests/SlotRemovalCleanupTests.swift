@@ -63,11 +63,10 @@ final class SlotRemovalCleanupTests: XCTestCase {
     func test_deleteSlotFile_legacyFileActuallySurvives() throws {
         let appDir = try CredentialsStore.appSupportURL()
         let file = appDir.appendingPathComponent("credentials-legacy.json")
-        let backup = try? Data(contentsOf: file)
-        defer {
-            try? FileManager.default.removeItem(at: file)
-            if let backup { try? backup.write(to: file) }
-        }
+        // Aufräumen, damit die Datei nicht in andere Testklassen leckt — die Sandbox
+        // gilt pro Prozess. Ein Backup der echten Datei braucht es nicht mehr: der
+        // Redirect in `appSupportURL()` hält uns von den Nutzerdaten fern.
+        defer { try? FileManager.default.removeItem(at: file) }
         try Data("SCHUETZENSWERT".utf8).write(to: file)
 
         CredentialsStore.deleteSlotFile(slotId: "legacy")

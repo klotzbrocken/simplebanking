@@ -51,10 +51,94 @@ enum CredentialsStore {
     private static let currentVersion = 2
     private static let pbkdf2Iterations = 210_000
 
+    // MARK: - Basisverzeichnis (und warum es umlenkbar sein MUSS)
+    //
+    // `appSupportURL()` ist der einzige pfadbildende Einstieg für das
+    // Finanzdaten-Verzeichnis: daran hängen `defaultURL()`, die Migration, `save()`,
+    // sämtliche Löschpfade, `TransactionsDatabase.databaseURL(bankId:)` und
+    // `TransferDraftStore.directoryURL()`.
+    //
+    // Genau das war bis 2.0 ein Datenverlust-Risiko: `TransactionsDatabase`-Defaults
+    // lauten überall `bankId: "primary"`, und ein Test, der den Parameter vergisst
+    // (`LLMAllPlansSmokeTests`), löschte damit die ECHTE `transactions.db` des Nutzers —
+    // samt Notizen, Anhängen, Aufrund-Töpfen und eBons, die keine Bank je zurückliefert.
+    // Credential-Tests sicherten die echten `credentials*.json` weg und stellten sie im
+    // `tearDown` wieder her; ein Abbruch dazwischen ließ den Nutzer ohne Zugangsdaten
+    // zurück (und drei Fehlversuche bei der Bank bedeuten eine gesperrte Verbindung).
+    //
+    // Die Antwort darauf ist NICHT, in jedem Test an einen Parameter zu denken, sondern
+    // dem Testprozess den Produktivpfad gar nicht erst zu geben. Ein Redirect an dieser
+    // einen Stelle isoliert alle abgeleiteten Pfade auf einmal — jetzige wie künftige
+    // Tests, ohne dass jemand daran denken muss.
+    //
+    // NICHT abgedeckt: `~/Library/Application Support/com.maik.simplebanking/`
+    // (Logo-Cache, Themes, `state.json`), `.cachesDirectory` und `~/Library/Logs/`.
+    // Dort liegen keine Finanzdaten. Wer dort neue Persistenz aufhängt, hat sie nicht
+    // isoliert — der Wächter-Test `AppSupportSandboxGuardTests` deckt nur diese Wurzel.
+
+    private static let _baseDirLock = NSLock()
+    nonisolated(unsafe) private static var _baseDirectoryOverride: URL?
+
+    /// Setzt das Basisverzeichnis prozessweit um. Für Tests, die einen definierten
+    /// Startzustand brauchen; im Normalfall genügt der automatische Test-Redirect.
+    static var baseDirectoryOverride: URL? {
+        get { _baseDirLock.lock(); defer { _baseDirLock.unlock() }; return _baseDirectoryOverride }
+        set { _baseDirLock.lock(); defer { _baseDirLock.unlock() }; _baseDirectoryOverride = newValue }
+    }
+
+    /// Läuft dieser Prozess unter XCTest?
+    ///
+    /// `NSClassFromString("XCTestCase")` ist keine Heuristik, sondern eine
+    /// Linker-Garantie: das Test-Bundle linkt `libXCTestSwiftSupport.dylib` → `XCTestCore`
+    /// HART (nicht weak), dyld lädt die Klasse also vor `main`. Umgekehrt linkt keines der
+    /// ausgelieferten Executables XCTest — im Produktions-Binary kann das nie anschlagen.
+    /// Die Bundle-ID des SwiftPM-Runners ist das zweite unabhängige Signal (sie ist auch
+    /// der Grund, warum `UserDefaults.standard` im Test nicht in der App-Domain landet).
+    /// Die Env-Variable ist ein drittes Extra — dass SwiftPM sie setzt, ist NICHT belegt,
+    /// also darf sie nie allein tragen.
+    ///
+    /// Bewusst kein `#if DEBUG`: `swift test -c release` liefe sonst ohne Redirect und
+    /// würde die Produktiv-DB genauso zerlegen wie vorher.
+    private static var isRunningUnderTests: Bool {
+        if NSClassFromString("XCTestCase") != nil { return true }
+        if Bundle.main.bundleIdentifier == "com.apple.dt.xctest.tool" { return true }
+        return ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    /// Einmal pro Prozess ausgewertet (`static let` = lazy + thread-safe).
+    /// In Produktion `nil` — der Redirect existiert dort nicht.
+    ///
+    /// PID + UUID im Namen, kein fester Pfad: `swift test --parallel` startet mehrere
+    /// `xctest`-Prozesse, die sich sonst gegenseitig die Sandbox zerlegen würden.
+    private static let processSandboxURL: URL? = {
+        guard isRunningUnderTests else { return nil }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("simplebanking-tests", isDirectory: true)
+            .appendingPathComponent("\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(8))",
+                                    isDirectory: true)
+        // Wenn diese Zeile je in einem KUNDEN-Log auftaucht, ist der Redirect
+        // fälschlich aktiv und die App sieht leer aus — dann ist es wenigstens sichtbar
+        // statt still.
+        AppLogger.log("Test-Sandbox aktiv: App-Support umgeleitet nach \(url.path)",
+                      category: "Credentials", level: "WARN")
+        return url
+    }()
+
     static func appSupportURL() throws -> URL {
         let fm = FileManager.default
-        let dir = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let appDir = dir.appendingPathComponent("simplebanking", isDirectory: true)
+        let appDir: URL
+        if let override = baseDirectoryOverride {
+            appDir = override
+        } else if let envPath = ProcessInfo.processInfo.environment["SIMPLEBANKING_APP_SUPPORT_DIR"],
+                  !envPath.isEmpty {
+            appDir = URL(fileURLWithPath: envPath, isDirectory: true)
+        } else if let sandbox = processSandboxURL {
+            appDir = sandbox
+        } else {
+            let dir = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                 appropriateFor: nil, create: true)
+            appDir = dir.appendingPathComponent("simplebanking", isDirectory: true)
+        }
         try fm.createDirectory(at: appDir, withIntermediateDirectories: true)
         return appDir
     }

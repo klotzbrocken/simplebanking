@@ -8,9 +8,11 @@ import XCTest
 // `exists() == true` und `load()` lieferte die Zugangsdaten des ALTEN Kontos —
 // in einer Multibanking-App die Anmeldung bei der falschen Bank.
 //
-// Diese Tests arbeiten auf dem echten Application-Support-Verzeichnis und
-// sichern ihren Zustand vorher weg, damit eine reale Installation nicht
-// beschädigt wird.
+// Die Tests hantieren mit echten Credential-Dateien. Dass das gefahrlos ist, hängt
+// vollständig am Test-Redirect in `CredentialsStore.appSupportURL()` — vorher sicherten
+// sie die produktiven Dateien weg und stellten sie im `tearDown` wieder her, was bei
+// jedem Abbruch die Zugangsdaten des Nutzers verloren hätte. Fällt der Redirect aus,
+// schlägt `AppSupportSandboxGuardTests` fehl; darauf verlässt sich diese Datei.
 
 final class CredentialsLegacyFallbackTests: XCTestCase {
 
@@ -20,29 +22,23 @@ final class CredentialsLegacyFallbackTests: XCTestCase {
     private var otherSlotFile: URL!
     private let otherSlot = "slot-test-fallback"
 
-    /// Vorgefundene Dateien, die am Ende wiederhergestellt werden.
-    private var backup: [URL: Data] = [:]
-
     override func setUpWithError() throws {
         appDir = try CredentialsStore.appSupportURL()
         globalFile = appDir.appendingPathComponent("credentials.json")
         legacySlotFile = appDir.appendingPathComponent("credentials-legacy.json")
         otherSlotFile = appDir.appendingPathComponent("credentials-\(otherSlot).json")
 
-        for url in [globalFile!, legacySlotFile!, otherSlotFile!] {
-            if let data = try? Data(contentsOf: url) {
-                backup[url] = data
-                try FileManager.default.removeItem(at: url)
-            }
-        }
-    }
+        // Die Sandbox gilt pro PROZESS, nicht pro Testklasse: Rückstände anderer
+        // Klassen (die dieselben Dateinamen benutzen) würden sonst hereinlecken.
+        let files = [globalFile!, legacySlotFile!, otherSlotFile!]
+        for url in files { try? FileManager.default.removeItem(at: url) }
 
-    override func tearDownWithError() throws {
-        for url in [globalFile!, legacySlotFile!, otherSlotFile!] {
-            try? FileManager.default.removeItem(at: url)
-            if let data = backup[url] { try data.write(to: url) }
+        // `addTeardownBlock` statt `tearDownWithError`: läuft auch, wenn oberhalb
+        // etwas wirft.
+        addTeardownBlock {
+            for url in files { try? FileManager.default.removeItem(at: url) }
+            CredentialsStore.activeSlotId = "legacy"
         }
-        CredentialsStore.activeSlotId = "legacy"
     }
 
     private func write(_ url: URL, _ text: String) throws {

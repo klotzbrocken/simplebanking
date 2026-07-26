@@ -54,6 +54,10 @@
   - **Umsatzliste:** Fenster jetzt so schmal wie der Flyout (348 px, grüner Zoom-Button togglet weiterhin auf breit). Money-Heat reicht bis an alle Fensterkanten (oben hinter Ampel/Toolbar-Icons — die frühere NSToolbar ist durch SwiftUI-Buttons im Header ersetzt), unten weicher Fade in die Umsatzliste. **Ring bleibt** (Datum im Ring). Footer schmaler: Icons links, „Mehr ▾" rechts. Vertikale Scrollbar wieder on-demand (Overlay-Autohide erzwungen). Der Sidebar-Streifen fadet oben in die Money-Heat und läuft bis zur unteren Fensterkante durch.
   - **Aggregat-/„Alle Konten"-Ansicht** (Flyout + Umsatzliste) nutzt jetzt ebenfalls die vollflächige Money-Heat in der Temperatur der Gesamtsumme.
 
+### Intern
+
+- **Die Testsuite kann die echten Nutzerdaten nicht mehr anfassen** — `swift test` löschte bis hierher die produktive `transactions.db` (ein Test vergaß den `bankId`-Parameter, dessen Default auf genau die Datei der laufenden App zeigt) und hantierte mit den echten `credentials*.json`. Unwiederbringlich waren dabei Notizen, Anhänge, Aufrund-Töpfe und eBons; gelöschte Zugangsdaten bedeuten im schlimmsten Fall eine gesperrte Bankverbindung. Statt in jedem Test an einen Parameter zu denken, bekommt der Testprozess den Produktivpfad gar nicht mehr: `CredentialsStore.appSupportURL()` — der einzige pfadbildende Einstieg für Datenbank, Zugangsdaten und Überweisungsentwürfe — lenkt unter XCTest in ein prozesseigenes Temp-Verzeichnis um. Ein Wächter-Test schlägt fehl, sobald der Redirect ausfällt oder jemand eine neue Persistenz an einer eigenen Pfadwurzel aufhängt.
+
 ## [1.6.1]
 
 ### Geändert
