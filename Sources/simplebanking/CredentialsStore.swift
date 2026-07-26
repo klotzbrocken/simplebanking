@@ -242,14 +242,41 @@ enum CredentialsStore {
         try? fm.removeItem(at: appDir.appendingPathComponent("attachments"))
     }
 
-    /// Löscht die credentials-<slotId>.json Datei für einen entfernten Slot.
+    /// Wie mit dem Legacy-Slot zu verfahren ist.
+    ///
+    /// Bewusst **ohne Default-Wert**: der Unterschied zwischen den beiden Fällen ist
+    /// „Zugangsdaten bleiben" und „Zugangsdaten sind weg". Ein neuer Aufrufer soll das
+    /// hinschreiben müssen, statt die scharfe Variante versehentlich zu erben.
+    enum LegacySlotPolicy {
+        /// Legacy-Dateien nicht anfassen — für alles, was keine ausdrückliche
+        /// Nutzerentscheidung ist (Migrationen, Aufräumarbeiten, Demo-Wechsel).
+        case protect
+        /// Legacy-Dateien mitlöschen — nur, wenn der Nutzer das Entfernen des Kontos
+        /// im Dialog bestätigt hat.
+        case delete
+    }
+
+    /// Löscht die `credentials-<slotId>.json` für einen entfernten Slot.
     /// Best-effort: Fehler werden ignoriert (Datei könnte schon weg sein).
-    /// Der "legacy"-Slot ist geschützt (default-Slot, niemals gelöscht).
-    static func deleteSlotFile(slotId: String) {
-        guard slotId != "legacy" else { return }
+    static func deleteSlotFile(slotId: String, legacyPolicy: LegacySlotPolicy) {
         guard let appDir = try? appSupportURL() else { return }
-        let url = appDir.appendingPathComponent("credentials-\(slotId).json")
-        try? FileManager.default.removeItem(at: url)
+        let fm = FileManager.default
+
+        guard slotId == "legacy" else {
+            try? fm.removeItem(at: appDir.appendingPathComponent("credentials-\(slotId).json"))
+            return
+        }
+
+        guard case .delete = legacyPolicy else { return }
+
+        // BEIDE Dateien — sonst steht das Konto nach dem Entfernen wieder da:
+        // `defaultURL()` fällt für `legacy` auf die globale `credentials.json` zurück,
+        // sobald die Slot-Datei fehlt (:79-84). Liegt die globale noch herum, weil die
+        // Migration nie lief oder ihr `moveItem` fehlschlug, meldet `exists()` danach
+        // wieder `true` und `load()` entschlüsselt die alten Zugangsdaten — während der
+        // Dialog „unwiderruflich gelöscht" versprochen hat.
+        try? fm.removeItem(at: appDir.appendingPathComponent("credentials-legacy.json"))
+        try? fm.removeItem(at: appDir.appendingPathComponent(legacyGlobalFileName))
     }
 
     static func save(_ creds: StoredCredentials, masterPassword: String) throws {

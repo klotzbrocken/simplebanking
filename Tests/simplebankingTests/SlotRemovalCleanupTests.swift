@@ -57,22 +57,53 @@ final class SlotRemovalCleanupTests: XCTestCase {
 
     // MARK: - CredentialsStore.deleteSlotFile
 
+    /// Legt beide Legacy-Dateien an und räumt sie hinterher weg. Ein Backup der echten
+    /// Dateien braucht es nicht mehr — der Redirect in `appSupportURL()` hält uns von
+    /// den Nutzerdaten fern; aufgeräumt wird trotzdem, weil die Sandbox pro PROZESS
+    /// gilt und die Dateien sonst in andere Testklassen lecken.
+    private func makeLegacyFiles() throws -> (slot: URL, global: URL) {
+        let appDir = try CredentialsStore.appSupportURL()
+        // Fremde Credential-Dateien aus der Sandbox räumen, damit `anyExists()`
+        // (verzeichnisweit) nicht an Rückständen anderer Testklassen hängt.
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: appDir.path)) ?? []
+        where name.hasPrefix("credentials") && name.hasSuffix(".json") {
+            try? FileManager.default.removeItem(at: appDir.appendingPathComponent(name))
+        }
+        let slot = appDir.appendingPathComponent("credentials-legacy.json")
+        let global = appDir.appendingPathComponent("credentials.json")
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: slot)
+            try? FileManager.default.removeItem(at: global)
+            CredentialsStore.activeSlotId = "legacy"
+        }
+        try Data("SCHUETZENSWERT".utf8).write(to: slot)
+        try Data("AUCH-SCHUETZENSWERT".utf8).write(to: global)
+        return (slot, global)
+    }
+
     /// Der Schutz muss an der DATEI nachweisbar sein, nicht nur „kein Absturz".
     /// Die alte Fassung dieses Tests war grün, während `SettingsPanel.deleteSlot`
     /// die Datei per `removeItem` an der Schutzklausel vorbei löschte.
-    func test_deleteSlotFile_legacyFileActuallySurvives() throws {
-        let appDir = try CredentialsStore.appSupportURL()
-        let file = appDir.appendingPathComponent("credentials-legacy.json")
-        // Aufräumen, damit die Datei nicht in andere Testklassen leckt — die Sandbox
-        // gilt pro Prozess. Ein Backup der echten Datei braucht es nicht mehr: der
-        // Redirect in `appSupportURL()` hält uns von den Nutzerdaten fern.
-        defer { try? FileManager.default.removeItem(at: file) }
-        try Data("SCHUETZENSWERT".utf8).write(to: file)
+    func test_deleteSlotFile_protect_laesstLegacyDateienStehen() throws {
+        let (slot, global) = try makeLegacyFiles()
 
-        CredentialsStore.deleteSlotFile(slotId: "legacy")
+        CredentialsStore.deleteSlotFile(slotId: "legacy", legacyPolicy: .protect)
 
-        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path),
-                      "Die Legacy-Credentials-Datei darf nicht gelöscht werden")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: slot.path),
+                      "Ohne ausdrückliche Nutzerentscheidung bleibt die Legacy-Datei")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: global.path))
+    }
+
+    /// Die globale Altdatei muss mit — sonst holt der Legacy-Fallback in `defaultURL()`
+    /// das entfernte Konto zurück, sobald die Slot-Datei fehlt.
+    func test_deleteSlotFile_delete_loeschtBeideLegacyDateien() throws {
+        let (slot, global) = try makeLegacyFiles()
+
+        CredentialsStore.deleteSlotFile(slotId: "legacy", legacyPolicy: .delete)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: slot.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: global.path),
+                       "Bleibt credentials.json liegen, ist das Konto über den Fallback wieder da")
     }
 
     func test_deleteSlotFile_removesNonLegacyFile() throws {
@@ -81,9 +112,36 @@ final class SlotRemovalCleanupTests: XCTestCase {
         let file = appDir.appendingPathComponent("credentials-\(slotId).json")
         try Data("WEG-DAMIT".utf8).write(to: file)
 
-        CredentialsStore.deleteSlotFile(slotId: slotId)
+        CredentialsStore.deleteSlotFile(slotId: slotId, legacyPolicy: .protect)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    // MARK: - Die Aussage, die der Nutzer im Dialog liest
+
+    /// Der Bestätigungsdialog verspricht „und alle zugehörigen Daten werden
+    /// unwiderruflich gelöscht". Diese Assertion prüft genau das — und nicht bloß, ob
+    /// eine bestimmte Datei verschwunden ist: `exists()` geht durch `defaultURL()` und
+    /// fällt damit auch über die globale Altdatei wieder auf ein Konto zurück.
+    func test_purgePerSlotData_legacy_kontoIstDanachWirklichWeg() throws {
+        _ = try makeLegacyFiles()
+
+        MultibankingStore.purgePerSlotData(slotId: "legacy")
+
+        CredentialsStore.activeSlotId = "legacy"
+        XCTAssertFalse(CredentialsStore.exists(),
+                       "Nach dem Entfernen darf kein Weg mehr zu Zugangsdaten führen")
+        XCTAssertFalse(CredentialsStore.anyExists())
+    }
+
+    /// Gegenprobe: das Entfernen eines anderen Kontos lässt Legacy in Ruhe.
+    func test_purgePerSlotData_fremderSlot_laesstLegacyUnberuehrt() throws {
+        let (slot, global) = try makeLegacyFiles()
+
+        MultibankingStore.purgePerSlotData(slotId: "test-fremd-\(UUID().uuidString.prefix(6))")
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: slot.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: global.path))
     }
 
     // MARK: - Zentrales Aufräumen (nach Zusammenführung der Löschpfade)

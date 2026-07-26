@@ -178,19 +178,24 @@ final class MultibankingStore: ObservableObject {
     ///
     /// Bis 2.0 löschte `SettingsPanel.deleteSlot` zusätzlich selbst: die
     /// Credentials-Datei (was die Legacy-Schutzklausel in
-    /// `CredentialsStore.deleteSlotFile` umging — der Legacy-Slot verlor beim
-    /// „Entfernen" seine Datei) und acht hartkodierte UserDefaults-Keys, deren
-    /// Namensschema vom echten abwich: `YaxiService` lässt für `legacy` das Suffix
-    /// WEG, die Liste hängte immer `.legacy` an und traf damit ins Leere.
-    /// Deshalb werden die Keys jetzt über die Builder von `YaxiService` gebildet.
+    /// `CredentialsStore.deleteSlotFile` umging) und acht hartkodierte
+    /// UserDefaults-Keys, deren Namensschema vom echten abwich: `YaxiService` lässt für
+    /// `legacy` das Suffix WEG, die Liste hängte immer `.legacy` an und traf damit ins
+    /// Leere. Deshalb werden die Keys jetzt über die Builder von `YaxiService` gebildet.
+    ///
+    /// **Diese Funktion läuft nur auf ausdrückliche Nutzerentscheidung** — einziger
+    /// Aufrufer ist `removeSlot`, dessen einziger Aufrufer der destruktive Button des
+    /// Bestätigungsdialogs ist. Deshalb `.delete` für den Legacy-Slot: der Dialog
+    /// verspricht „und alle zugehörigen Daten werden unwiderruflich gelöscht", und das
+    /// muss auch für das Konto gelten, mit dem der Nutzer angefangen hat.
     ///
     /// YAXI-Session-Cleanup läuft in einem detached Task (actor-isolated),
     /// die anderen Cleanups sync.
     static func purgePerSlotData(slotId: String) {
         // YAXI session + connectionData (sensitive!) — actor-isolated, fire-and-forget.
         Task { await YaxiService.sessionStore.clearAll(slotId: slotId) }
-        // Encrypted credentials file (schützt "legacy" bewusst).
-        CredentialsStore.deleteSlotFile(slotId: slotId)
+        // Encrypted credentials file — inkl. Legacy, siehe oben.
+        CredentialsStore.deleteSlotFile(slotId: slotId, legacyPolicy: .delete)
         // Slot-Einstellungen (Gehaltstag, Schwellen, Budget …).
         BankSlotSettingsStore.delete(slotId: slotId)
         // UserDefaults pro-slot-suffixed keys — Schreibweise über dieselben Builder,
