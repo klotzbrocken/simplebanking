@@ -169,10 +169,58 @@ enum CredentialsStore {
         return slotFile
     }
 
+    /// Unterverzeichnis für beiseitegelegte Credential-Dateien. Verzeichnis statt
+    /// Namenssuffix, damit `anyExists()` (listet nur die oberste Ebene) den
+    /// Onboarding-Trigger nicht fälschlich unterdrückt — und damit `deleteAllData()`
+    /// es mit einem `removeItem` erwischt.
+    private static let quarantineDirName = "quarantine"
+
+    /// Strukturelle Prüfung OHNE Master-Passwort: spiegelt genau die Bedingungen, an
+    /// denen `load()` scheitern würde, bevor es überhaupt zur Entschlüsselung kommt.
+    /// Die festen Längen stammen aus `save()` (Salt 16, `AES.GCM.Nonce` 12, GCM-Tag 16).
+    private static func isUsableEnvelope(at url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              let env = try? JSONDecoder().decode(Envelope.self, from: data),
+              env.v == 1 || env.v == currentVersion,
+              let salt = Data(base64Encoded: env.saltB64),
+              let nonce = Data(base64Encoded: env.nonceB64),
+              let ciphertext = Data(base64Encoded: env.ciphertextB64),
+              let tag = Data(base64Encoded: env.tagB64)
+        else { return false }
+        return salt.count == 16 && nonce.count == 12 && tag.count == 16 && !ciphertext.isEmpty
+    }
+
+    /// Verschiebt eine Datei in die Quarantäne, statt sie zu löschen.
+    private static func quarantine(_ url: URL, reason: String) {
+        guard let appDir = try? appSupportURL() else { return }
+        let fm = FileManager.default
+        let dir = appDir.appendingPathComponent(quarantineDirName, isDirectory: true)
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let target = dir.appendingPathComponent(url.lastPathComponent)
+            if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+            try fm.moveItem(at: url, to: target)
+            AppLogger.log("Credentials: \(url.lastPathComponent) → quarantine/ (\(reason))",
+                          category: "Credentials")
+        } catch {
+            AppLogger.log("Credentials: Quarantäne für \(url.lastPathComponent) fehlgeschlagen: \(error.localizedDescription)",
+                          category: "Credentials", level: "WARN")
+        }
+    }
+
     /// Einmalige Migration `credentials.json` → `credentials-legacy.json`.
     ///
     /// Beseitigt die Quelle des slot-übergreifenden Fallbacks (siehe `defaultURL`).
     /// Idempotent: ohne globale Datei passiert nichts.
+    ///
+    /// **Entschieden wird nach Inhalt, nicht nach Alter.** Die frühere Fassung löschte
+    /// die globale Datei, sobald die Slot-Datei `size > 0` hatte — eine abgeschnittene
+    /// oder korrupte Datei erfüllt das. Und sie shadowt die gültige globale, weil
+    /// `defaultURL()` nur `fileExists` prüft: der Nutzer sah „Zugangsdaten beschädigt"
+    /// und hatte danach keine zweite Kopie mehr. Die frühere Begründung („die globale
+    /// ist der ältere Stand, weil `save()` seit jeher slot-spezifisch schreibt") stimmt
+    /// außerdem nicht: bis zum Multibanking-Umbau schrieb `save()` nach `defaultURL()`,
+    /// also nach `credentials.json`.
     static func migrateLegacyFileIfNeeded() {
         guard let appDir = try? appSupportURL() else { return }
         let fm = FileManager.default
@@ -181,7 +229,9 @@ enum CredentialsStore {
         let slotFile = appDir.appendingPathComponent("credentials-legacy.json")
 
         guard fm.fileExists(atPath: slotFile.path) else {
-            // Normalfall: umbenennen, damit der Inhalt erhalten bleibt.
+            // Normalfall: umbenennen, damit der Inhalt erhalten bleibt. Hier wird
+            // bewusst NICHT validiert — es gibt keine Alternative, und eine kaputte
+            // Datei zu behalten ist besser, als sie wegzuwerfen.
             do {
                 try fm.moveItem(at: globalFile, to: slotFile)
                 AppLogger.log("Credentials: credentials.json → credentials-legacy.json migriert",
@@ -193,15 +243,35 @@ enum CredentialsStore {
             return
         }
 
-        // Beide vorhanden: `save()` schreibt seit jeher ausschließlich slot-spezifisch,
-        // die globale Datei ist also der ältere Stand — und nur noch eine Fehlerquelle.
-        // Nur entfernen, wenn die Slot-Datei tatsächlich Inhalt hat (kein Datenverlust
-        // durch eine leere Hülle).
-        let slotSize = (try? fm.attributesOfItem(atPath: slotFile.path)[.size] as? Int) ?? nil
-        if (slotSize ?? 0) > 0 {
-            try? fm.removeItem(at: globalFile)
-            AppLogger.log("Credentials: veraltete credentials.json entfernt (Slot-Datei vorhanden)",
-                          category: "Credentials")
+        switch (isUsableEnvelope(at: slotFile), isUsableEnvelope(at: globalFile)) {
+        case (true, _):
+            // Slot-Datei trägt — die globale ist nur noch eine Fehlerquelle.
+            quarantine(globalFile, reason: "Slot-Datei ist gültig")
+
+        case (false, true):
+            // Rettung. Reihenfolge ist ZWINGEND: erst die kaputte Slot-Datei beiseite,
+            // dann die gültige globale an ihren Platz. Beide Schritte sind einzelne
+            // `rename(2)` auf demselben Volume, also je atomar — und das Fenster
+            // dazwischen ist von selbst korrekt, weil `defaultURL()` für `legacy` genau
+            // dann auf `credentials.json` zurückfällt. Ein Absturz dazwischen
+            // hinterlässt einen funktionierenden Zustand, der nächste Start wiederholt
+            // die Migration.
+            AppLogger.log("Credentials: credentials-legacy.json ist unbrauchbar, stelle aus credentials.json wieder her",
+                          category: "Credentials", level: "WARN")
+            quarantine(slotFile, reason: "unbrauchbarer Envelope")
+            guard !fm.fileExists(atPath: slotFile.path) else { return }
+            do {
+                try fm.moveItem(at: globalFile, to: slotFile)
+            } catch {
+                AppLogger.log("Credentials: Wiederherstellung fehlgeschlagen: \(error.localizedDescription)",
+                              category: "Credentials", level: "WARN")
+            }
+
+        case (false, false):
+            // Nichts anfassen. Beide behalten ist die einzige Chance, dass der Nutzer
+            // (oder ein Backup) daraus noch etwas rettet.
+            AppLogger.log("Credentials: weder credentials-legacy.json noch credentials.json sind lesbare Envelopes — beide bleiben unverändert",
+                          category: "Credentials", level: "WARN")
         }
     }
 
@@ -240,6 +310,10 @@ enum CredentialsStore {
             }
         }
         try? fm.removeItem(at: appDir.appendingPathComponent("attachments"))
+        // Quarantäne mitnehmen — dort liegen verschlüsselte Credential-Kopien, die die
+        // Migration beiseitegelegt hat. Ohne diese Zeile überlebte eine davon das
+        // vollständige Zurücksetzen.
+        try? fm.removeItem(at: appDir.appendingPathComponent(quarantineDirName))
     }
 
     /// Wie mit dem Legacy-Slot zu verfahren ist.
