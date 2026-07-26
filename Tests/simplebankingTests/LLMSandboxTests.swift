@@ -138,6 +138,59 @@ final class LLMSandboxTests: XCTestCase {
         XCTAssertEqual(counts.1, 1)
     }
 
+    // MARK: Ressourcenbremsen
+    //
+    // Die Isolation verhindert, dass Fremddaten den Rechner verlassen — sie verhindert
+    // nicht, dass modellerzeugtes SQL beliebig viel Rechenzeit verbrennt. `LIMIT`
+    // deckelt nur die Ergebniszeilen, nicht den Aufwand: ein kartesisches Produkt über
+    // drei Kopien einer kleinen Tabelle reicht.
+
+    func test_kartesischesProdukt_laeuftInsZeitbudget() throws {
+        // Genug Zeilen, dass n³ jedes realistische Budget sprengt.
+        let queue = try TransactionsDatabase.makeQueue(bankId: bank)
+        try queue.write { db in
+            for i in 0..<2000 {
+                try db.execute(sql: """
+                    INSERT INTO transactions
+                      (tx_id, datum, buchungsdatum, betrag, waehrung, empfaenger,
+                       raw_json, updated_at, slot_id)
+                    VALUES (?, '2026-07-01', '2026-07-01', -1.0, 'EUR', 'X', '{}',
+                       '2026-07-01T00:00:00Z', ?)
+                    """, arguments: ["bulk-\(i)", slotA])
+            }
+        }
+
+        XCTAssertThrowsError(
+            try TransactionsDatabase.executeLLMQuery(
+                sql: "SELECT COUNT(*) AS n FROM llm_tx a, llm_tx b, llm_tx c",
+                slotId: slotA, bankId: bank, budget: 0.3)
+        ) { error in
+            guard case TransactionsDatabase.LLMQueryError.budgetExceeded = error else {
+                return XCTFail("Erwartet wurde ein Budget-Abbruch, bekommen: \(error)")
+            }
+        }
+    }
+
+    /// Gegenprobe: eine harmlose Abfrage über dieselbe Zeilenzahl läuft durch. Ohne
+    /// diesen Test wäre das Budget nicht von „bricht immer ab" zu unterscheiden.
+    func test_vieleZeilen_werdenGestreamtUndBeantwortet() throws {
+        let queue = try TransactionsDatabase.makeQueue(bankId: bank)
+        try queue.write { db in
+            for i in 0..<5000 {
+                try db.execute(sql: """
+                    INSERT INTO transactions
+                      (tx_id, datum, buchungsdatum, betrag, waehrung, empfaenger,
+                       raw_json, updated_at, slot_id)
+                    VALUES (?, '2026-07-01', '2026-07-01', -2.0, 'EUR', 'X', '{}',
+                       '2026-07-01T00:00:00Z', ?)
+                    """, arguments: ["bulk-\(i)", slotA])
+            }
+        }
+
+        let rows = try run("SELECT COUNT(*) AS n FROM llm_tx")
+        XCTAssertEqual(Int(rows[0]["n"] ?? "0"), 5002, "5000 neue plus die zwei aus dem Seed")
+    }
+
     private static let bypassQueries = [
         "SELECT * FROM llm_tx JOIN rewe_receipts ON 1=1",
         "WITH x AS (SELECT total_cents FROM rewe_receipts) SELECT betrag FROM llm_tx, x",

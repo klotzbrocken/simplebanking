@@ -880,53 +880,93 @@ enum TransactionsDatabase {
     /// Mustererkennung, die man umschreiben kann. `SQLGuard` bleibt als erste Schicht
     /// (Read-only-Form, LIMIT, verbotene Bezeichner), die Redaktion der Ergebniszeilen
     /// als dritte.
-    static func executeLLMQuery(sql: String, slotId: String, bankId: String = "primary") throws -> [[String: String]] {
+    /// Zeitbudget für Aufbau **und** Ausführung der Sandbox. Das SQL stammt von einem
+    /// Sprachmodell; ein kartesisches Produkt oder eine rekursive CTE kostet auch in
+    /// einer kleinen Tabelle beliebig viel Rechenzeit, und `LIMIT` deckelt nur die
+    /// Ergebniszeilen, nicht den Aufwand.
+    static let llmQueryBudget: TimeInterval = 5.0
+
+    static func executeLLMQuery(sql: String, slotId: String, bankId: String = "primary",
+                                budget: TimeInterval = llmQueryBudget) throws -> [[String: String]] {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
         let cols = llmAllowlistColumns
 
-        // 1) Datenbeschaffung READ-ONLY aus der echten DB — gebundener Slot-Parameter,
-        //    nur erlaubte Spalten. Das LLM-SQL läuft hier nirgends.
-        let sourceRows: [Row] = try queue.read { db in
-            try Row.fetchAll(db, sql: """
-                SELECT \(cols.map { "\"\($0)\"" }.joined(separator: ", "))
-                FROM transactions WHERE slot_id = ?
-                """, arguments: [slotId])
-        }
-
-        // 2) Sandbox aufbauen: frische In-Memory-DB, die NUR llm_tx kennt.
-        //    Spalten ohne Typangabe — SQLite ist dynamisch typisiert, und die
-        //    DatabaseValues werden 1:1 übernommen, damit Zahlenvergleiche
-        //    (`betrag < 0`) und Datums-Strings weiter funktionieren.
+        // Sandbox: frische In-Memory-DB, die NUR llm_tx kennt. Spalten ohne Typangabe —
+        // SQLite ist dynamisch typisiert, und die DatabaseValues werden 1:1 übernommen,
+        // damit Zahlenvergleiche (`betrag < 0`) und Datums-Strings weiter funktionieren.
         let sandbox = try DatabaseQueue()
-        try sandbox.write { db in
-            let quoted = cols.map { "\"\($0)\"" }.joined(separator: ", ")
-            let placeholders = Array(repeating: "?", count: cols.count).joined(separator: ", ")
-            try db.execute(sql: "CREATE TABLE llm_tx (\(quoted))")
-            for row in sourceRows {
-                let values: [(any DatabaseValueConvertible)?] = cols.map { name in
-                    let v: DatabaseValue = row[name]
-                    return v
-                }
-                try db.execute(sql: "INSERT INTO llm_tx VALUES (\(placeholders))",
-                               arguments: StatementArguments(values))
-            }
-        }
-        // Zweite Grenze: selbst wenn SQLGuard je ein schreibendes Statement durchließe,
-        // lehnt SQLite es hier ab (die Sandbox ist ohnehin ein Wegwerf-Objekt).
-        try sandbox.writeWithoutTransaction { db in
-            try db.execute(sql: "PRAGMA query_only = ON")
-        }
 
-        // 3) LLM-SQL ausführen — gegen die Sandbox, nicht gegen die echte DB.
-        return try sandbox.read { db in
-            let rows = try Row.fetchAll(db, sql: sql)
-            return rows.map { row in
-                var map: [String: String] = [:]
-                for columnName in row.columnNames where !llmRedactColumns.contains(columnName.lowercased()) {
-                    map[columnName] = stringValue(for: row[columnName])
+        // Wachhund. `DatabaseQueue.interrupt()` ist von GRDB ausdrücklich für den Aufruf
+        // von einem fremden Thread gedacht. `cancel()` verhindert die Ausführung, solange
+        // sie nicht begonnen hat; das verbleibende Rennen ist folgenlos, weil der Work
+        // Item `sandbox` stark hält und ein `sqlite3_interrupt` ohne laufendes Statement
+        // ein No-op ist. Das Budget startet VOR dem Kopieren — ein Riesen-Import darf
+        // hier genausowenig ungebremst rennen wie die Abfrage.
+        let watchdog = DispatchWorkItem { sandbox.interrupt() }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + budget, execute: watchdog)
+        defer { watchdog.cancel() }
+
+        do {
+            // 1) Befüllen READ-ONLY aus der echten DB — gebundener Slot-Parameter, nur
+            //    erlaubte Spalten. Das LLM-SQL läuft hier nirgends.
+            //
+            //    Cursor statt `fetchAll` und ein vorbereitetes Statement statt eines
+            //    `execute` pro Zeile: vorher lag die komplette Kontohistorie zweimal im
+            //    Speicher (Array + Sandbox) und jede Zeile kostete ein eigenes
+            //    `sqlite3_prepare`. Die verschachtelte Nutzung zweier `DatabaseQueue`s
+            //    ist von GRDB unterstützt (`SchedulingWatchdog.inheritingAllowedDatabases`).
+            try queue.read { db in
+                let cursor = try Row.fetchCursor(db, sql: """
+                    SELECT \(cols.map { "\"\($0)\"" }.joined(separator: ", "))
+                    FROM transactions WHERE slot_id = ?
+                    """, arguments: [slotId])
+
+                try sandbox.write { sdb in
+                    let quoted = cols.map { "\"\($0)\"" }.joined(separator: ", ")
+                    let placeholders = Array(repeating: "?", count: cols.count).joined(separator: ", ")
+                    try sdb.execute(sql: "CREATE TABLE llm_tx (\(quoted))")
+                    let insert = try sdb.makeStatement(
+                        sql: "INSERT INTO llm_tx VALUES (\(placeholders))")
+                    while let row = try cursor.next() {
+                        let values: [(any DatabaseValueConvertible)?] = cols.map { name in
+                            let v: DatabaseValue = row[name]
+                            return v
+                        }
+                        try insert.execute(arguments: StatementArguments(values))
+                    }
                 }
-                return map
+            }
+
+            // Zweite Grenze: selbst wenn SQLGuard je ein schreibendes Statement durchließe,
+            // lehnt SQLite es hier ab (die Sandbox ist ohnehin ein Wegwerf-Objekt).
+            try sandbox.writeWithoutTransaction { db in
+                try db.execute(sql: "PRAGMA query_only = ON")
+            }
+
+            // 2) LLM-SQL ausführen — gegen die Sandbox, nicht gegen die echte DB.
+            return try sandbox.read { db in
+                let rows = try Row.fetchAll(db, sql: sql)
+                return rows.map { row in
+                    var map: [String: String] = [:]
+                    for columnName in row.columnNames where !llmRedactColumns.contains(columnName.lowercased()) {
+                        map[columnName] = stringValue(for: row[columnName])
+                    }
+                    return map
+                }
+            }
+        } catch let error as DatabaseError where error.isInterruptionError {
+            throw LLMQueryError.budgetExceeded(seconds: budget)
+        }
+    }
+
+    enum LLMQueryError: LocalizedError {
+        case budgetExceeded(seconds: TimeInterval)
+
+        var errorDescription: String? {
+            switch self {
+            case .budgetExceeded(let seconds):
+                return "Die Abfrage hat länger als \(Int(seconds)) Sekunden gebraucht und wurde abgebrochen. Bitte die Frage enger fassen."
             }
         }
     }

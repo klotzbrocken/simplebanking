@@ -71,4 +71,36 @@ final class SQLGuardTests: XCTestCase {
     func test_llm_stillRejectsWrites() {
         XCTAssertThrowsError(try SQLGuard.validatedLLMQuery("DELETE FROM llm_tx"))
     }
+
+    // MARK: LIMIT-Deckel und Längenlimit
+    //
+    // Ein LIMIT wurde bisher NUR angehängt, wenn keins vorhanden war — der Deckel galt
+    // damit ausgerechnet für die Abfragen nicht, die selbst eins mitbrachten.
+
+    func test_llm_kapptZuGrossesLimit() throws {
+        let out = try SQLGuard.validatedLLMQuery("SELECT betrag FROM llm_tx LIMIT 999999999")
+        XCTAssertTrue(out.lowercased().hasSuffix("limit \(SQLGuard.maxRowLimit)"), out)
+    }
+
+    func test_llm_behaeltKleinesLimit() throws {
+        let out = try SQLGuard.validatedLLMQuery("SELECT betrag FROM llm_tx LIMIT 25")
+        XCTAssertTrue(out.lowercased().hasSuffix("limit 25"), out)
+    }
+
+    /// `LIMIT offset, count` — gekappt wird die Zeilenzahl, nicht der Offset.
+    func test_llm_kapptZeilenzahlBeiOffsetForm() throws {
+        let out = try SQLGuard.validatedLLMQuery("SELECT betrag FROM llm_tx LIMIT 50, 900000")
+        XCTAssertTrue(out.lowercased().hasSuffix("limit 50, \(SQLGuard.maxRowLimit)"), out)
+    }
+
+    func test_llm_lehntUeberlangesSQLAb() {
+        let filler = String(repeating: "x", count: SQLGuard.maxSQLLength)
+        XCTAssertThrowsError(
+            try SQLGuard.validatedLLMQuery("SELECT betrag FROM llm_tx WHERE empfaenger = '\(filler)'")
+        ) { error in
+            guard case SQLGuardError.tooLong = error else {
+                return XCTFail("Erwartet wurde .tooLong, bekommen: \(error)")
+            }
+        }
+    }
 }
