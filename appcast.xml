@@ -3,38 +3,50 @@
     <channel>
         <title>simplebanking</title>
         <!--
-            2.0.0 — INFORMATIVER Eintrag, bewusst OHNE <enclosure>.
+            2.0.0 — EIN Eintrag, der zwei Gruppen unterschiedlich bedient.
 
             Der EdDSA-Signaturschlüssel wurde gewechselt (der alte ist verloren).
             Installationen bis 1.6.1 tragen den ALTEN öffentlichen Schlüssel und
-            könnten eine mit dem neuen Schlüssel signierte DMG nicht verifizieren.
-            Ein Eintrag ohne enclosure trägt keine Datei und braucht deshalb auch
-            keine Signatur — er wird also auch mit dem alten Schlüssel angezeigt
-            und schickt den Nutzer einmalig zum manuellen Download.
+            KÖNNEN eine mit dem neuen Schlüssel signierte DMG nicht verifizieren —
+            empirisch geprüft: die Signatur der 2.0-DMG verifiziert gegen uXP0XBQg…
+            und scheitert gegen BOcdIyAH…. Für sie gibt es kein Auto-Update, nur den
+            einmaligen manuellen Download. Das ist keine Einstellungssache, sondern
+            eine Folge des verlorenen Schlüssels.
 
-            WICHTIG bei jedem neuen Build: <sparkle:version> und
-            <sparkle:belowVersion> müssen exakt die CFBundleVersion der
-            AUSGELIEFERTEN 2.0.0-DMG sein (build-app.sh stempelt sie als
-            YYYYMMDD<seq>, die Nummer steigt also bei jedem Build). Ist der Wert zu
-            niedrig, bekämen 2.0-Nutzer einen Eintrag ohne Datei angeboten.
+            `sparkle:informationalUpdate` + `belowVersion` trennt beide Gruppen an
+            EINEM Eintrag (von Sparkle 2 ausdrücklich dafür vorgesehen):
+
+              • installiert < 20260725535  → ALTER Schlüssel (alle 1.6.x).
+                Sparkle zeigt nur die Meldung und öffnet den <link> im Browser.
+                Die DMG wird nicht geladen, die Signatur also nie geprüft.
+              • installiert >= 20260725535 → NEUER Schlüssel (2.0-Beta und neuer).
+                Normales Update über das <enclosure> unten, Signatur verifiziert.
+              • installiert == 20260726541 → nicht neuer als der Eintrag, Sparkle
+                überspringt ihn. Keine Endlosmeldung.
+
+            Die Schwelle 20260725535 ist die Build-Nummer der ersten mit dem NEUEN
+            Schlüssel ausgelieferten Fassung (die 2.0-Beta). Sie darf nicht auf die
+            aktuelle Build-Nummer gesetzt werden — dann bekämen auch die Beta-Tester
+            nur den Hinweis, obwohl sie automatisch aktualisieren könnten.
+
+            Die <enclosure>-URL zeigt bewusst auf das GitHub-Release und NICHT auf
+            https://simplebanking.de/assets/simplebanking.dmg. Zwei Gründe:
+              1. Dieser Pfad liefert immer die NEUESTE Datei — ein 2.0.1-Eintrag
+                 würde später eine 2.0.2-DMG ausliefern und die Signatur passte nicht
+                 mehr. Enclosure-URLs müssen versioniert sein.
+              2. Die Seite liegt hinter Cloudflare mit max-age 30 Tage. Am 26.07.2026
+                 lieferte sie nach dem Upload noch die Juni-Datei aus (cf-cache-status
+                 HIT). GitHub-Release-Assets haben dieses Problem nicht.
+            Aus Grund 2 zeigt auch der <link> auf die Release-Seite statt auf
+            simplebanking.de/download.
+
+            Bei jedem neuen Build zu prüfen: <sparkle:version>, die Enclosure-URL,
+            `length` und `sparkle:edSignature` müssen zur TATSÄCHLICH hochgeladenen
+            DMG gehören (build-app.sh stempelt YYYYMMDD<seq>, die Nummer steigt bei
+            jedem Build). Die Signatur erzeugt `sign_update` aus dem Sparkle-Artefakt
+            unter .build/artifacts/sparkle/Sparkle/bin/, mit dem privaten Schlüssel
+            aus ~/Documents/RetroMac-Sparkle-Key/ (Aufruf steht in CLAUDE.md).
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
-
-            Wen dieser Eintrag erreicht:
-              • 1.6.x (ALTER Schlüssel) — sieht die Meldung, lädt einmalig manuell.
-              • 2.0-Beta 20260725535 (neuer Schlüssel) — liegt darunter, sieht sie
-                ebenfalls. Redundant, aber harmlos und konsistent.
-              • 20260726541 selbst — der Eintrag ist nicht neuer als die installierte
-                Version, Sparkle überspringt ihn. Keine Endlosmeldung.
-
-            Der <link> zeigt auf die Download-SEITE, nicht direkt auf die DMG: Sparkle
-            öffnet ihn im Browser („Mehr erfahren"), und die Seite kann Hinweise
-            tragen, die eine Datei nicht kann.
-
-            Ab 2.0.1 wieder normale Einträge MIT enclosure und neuer Signatur — dann
-            aber mit einer VERSIONIERTEN Enclosure-URL. Die Webseite liefert unter
-            /assets/simplebanking.dmg immer die neueste Datei; als Enclosure-URL wäre
-            das falsch, weil ein 2.0.1-Eintrag später eine 2.0.2-DMG ausliefern würde
-            und die Signatur dann nicht mehr passt.
         -->
         <item>
             <title>2.0.0</title>
@@ -43,9 +55,10 @@
             <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:informationalUpdate>
-                <sparkle:belowVersion>20260726541</sparkle:belowVersion>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
             </sparkle:informationalUpdate>
-            <link>https://simplebanking.de/download</link>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.0.0/simplebanking-20260726-100455.dmg" length="32049493" type="application/octet-stream" sparkle:edSignature="Y4G2HeQb93SMA85gb4iBZK0a4Bs34i5FYfhy9dETLsF2RzfWmaJZFDR5ykWyaG7iXbi05qbNoznVxxPWgwo3BA=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
             <description><![CDATA[
                 <h2>simplebanking 2.0 — bitte einmalig manuell laden</h2>
                 <p>Aus technischen Gründen muss simplebanking einmalig manuell neu geladen
