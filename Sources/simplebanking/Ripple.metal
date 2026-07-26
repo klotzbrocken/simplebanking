@@ -11,6 +11,7 @@ using namespace metal;
 half4 ripple(
     float2 position,
     SwiftUI::Layer layer,
+    float2 size,
     float2 origin,
     float time,
     float amplitude,
@@ -31,22 +32,22 @@ half4 ripple(
     // Radial unit vector away from origin.
     float2 n = normalize(position - origin);
 
-    // Displace the sample position.
-    float2 newPosition = position + rippleAmount * n;
-
-    // Nur die FARBE wird verschoben (Brechungs-Look), die OPAZITÄT bleibt die des
-    // Original-Pixels. Sonst würden verschobene Samples ausserhalb des Inhalts (a≈0)
-    // transparente Löcher erzeugen → Fenster-/Panel-Hintergrund scheint durch.
+    // Displace the sample position — aber NIEMALS über den Rand der Ebene hinaus.
     //
-    // ABER: liegt das verschobene Sample selbst außerhalb des Inhalts, ist es
-    // premultipliziertes Transparent-Schwarz — mit der Original-Alpha versehen
-    // schmiert das als SCHWARZER Blitz über die Wellenfront. Dann gibt es nichts
-    // zu brechen → Original-Farbe behalten. (Fiel erst auf, seit die Shader wieder
-    // aus dem Quelltext kompiliert werden statt aus der alten Precompiled-Lib.)
-    half4 displaced = layer.sample(newPosition);
-    half4 original  = layer.sample(position);
-    half4 color = (displaced.a < original.a - 0.01h) ? original : displaced;
-    color.a = original.a;
+    // Zwei Fehler hatte diese Stelle nacheinander, beide mit derselben Wurzel:
+    // ein Sample ausserhalb des Inhalts ist premultipliziertes Transparent-Schwarz.
+    //   1. Mit der Alpha des Originalpixels versehen wurde daraus ein SCHWARZER
+    //      Blitz entlang der Wellenfront.
+    //   2. Der erste Fix (in dem Fall die Originalfarbe behalten) schaltete pro
+    //      Pixel hart um — an antialiasten Textkanten nahm ein Pixel das Original,
+    //      das Nachbarpixel das verschobene Sample. Das Original geisterte als
+    //      zweite Kontur mit, im Dark Mode als deutlicher Doppler sichtbar.
+    // Wird die Sample-Position geklemmt, gibt es kein Aussen-Sample mehr — und
+    // damit weder Schwarz noch Fallunterscheidung.
+    float2 maxPos = max(size - float2(1.0, 1.0), float2(0.0, 0.0));
+    float2 newPosition = clamp(position + rippleAmount * n, float2(0.0, 0.0), maxPos);
+
+    half4 color = layer.sample(newPosition);
 
     // Brighten/darken based on wave direction — this is the "liquid glass" look.
     color.rgb += 0.3 * (rippleAmount / amplitude) * color.a;

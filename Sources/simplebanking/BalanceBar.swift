@@ -1275,6 +1275,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 if let _ = try? CredentialsStore.load(masterPassword: autoPw) {
                     masterPassword = autoPw
                     locked = false
+                    // Sofort aus dem lokalen Cache rechnen, statt auf den Netz-Refresh
+                    // zu warten — sonst steht die Zeile unter dem Kontostand beim Start
+                    // leer, obwohl die Daten längst auf der Platte liegen.
+                    recomputeLeftToPay()
                     Task { await refreshAsync() }
                 } else {
                     // Auto-unlock password mismatch → fall back to prompt
@@ -3008,6 +3012,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
 
             statusItem.button?.title = t("Lädt…", "Loading…")
+            // Aus dem lokalen Cache rechnen, bevor der Netz-Refresh anläuft.
+            recomputeLeftToPay()
             Task {
                 try? await Task.sleep(for: .milliseconds(100))
                 await refreshAsync()
@@ -4979,6 +4985,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         let epochAtStart = slotEpoch
         txPanel?.show()
+        // „Noch offen"/„verfügbar bis" aus dem lokalen 90-Tage-Cache berechnen —
+        // wie beim Flyout. Ohne diesen Aufruf blieb die Zeile unter dem Kontostand
+        // leer, bis irgendwann ein Netz-Refresh durchlief oder das Flyout geöffnet
+        // wurde; wer direkt die Umsatzliste öffnete, sah gar nichts. Kein Bank-Call.
+        recomputeLeftToPay()
         let didTriggerInitialConfetti = triggerInitialConfettiIfNeeded()
         
         // Demo-Modus: Komplett synthetische Daten ohne API-Calls

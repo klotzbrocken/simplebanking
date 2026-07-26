@@ -30,18 +30,24 @@ struct RippleEffect: ViewModifier {
         TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: rippleStart == nil)) { tl in
             let elapsed = rippleStart.map { tl.date.timeIntervalSince($0) } ?? 0.0
             content
-                .layerEffect(
-                    ShaderLibrary.ripple(
-                        .float2(origin),
-                        .float(elapsed),
-                        .float(12),    // amplitude  — pixel displacement
-                        .float(10),    // frequency  — waves per second (fewer, wider waves)
-                        .float(6),     // decay      — wave fade rate (slower fade)
-                        .float(650)    // speed      — propagation (points/s, slow travel)
-                    ),
-                    maxSampleOffset: CGSize(width: 12, height: 12),
-                    isEnabled: elapsed > 0 && elapsed < 1.5
-                )
+                // `visualEffect` nur, um an die Layer-Größe zu kommen: der Shader klemmt
+                // seine Sample-Position darauf, damit nie ausserhalb des Inhalts gelesen
+                // wird (sonst schwarzer Blitz bzw. Doppelkontur, s. Ripple.metal).
+                .visualEffect { inner, proxy in
+                    inner.layerEffect(
+                        ShaderLibrary.ripple(
+                            .float2(Float(proxy.size.width), Float(proxy.size.height)),
+                            .float2(origin),
+                            .float(elapsed),
+                            .float(12),    // amplitude  — pixel displacement
+                            .float(10),    // frequency  — waves per second (fewer, wider waves)
+                            .float(6),     // decay      — wave fade rate (slower fade)
+                            .float(650)    // speed      — propagation (points/s, slow travel)
+                        ),
+                        maxSampleOffset: CGSize(width: 12, height: 12),
+                        isEnabled: elapsed > 0 && elapsed < 1.5
+                    )
+                }
                 .onTapGesture { location in
                     origin = location
                     rippleStart = Date()
