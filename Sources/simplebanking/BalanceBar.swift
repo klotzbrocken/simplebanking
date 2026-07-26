@@ -5244,6 +5244,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 }
                 txVM.resetPaging()
                 confettiTransactions = txVM.transactions
+                // ERST HIER liegen die Buchungen in der DB. Die anderen
+                // `recomputeLeftToPay()`-Aufrufe (Panel-Öffnen, Saldo-Refresh)
+                // laufen alle VOR diesem Punkt und rechnen deshalb bei einer frisch
+                // eingerichteten Bank noch gegen eine leere Historie → `nil` → die
+                // Zeile unter dem Kontostand bleibt leer. Sichtbar wurde sie bis
+                // hierher erst durch einen Bank-Wechsel, weil der als einziger
+                // Pfad nach dem Befüllen neu rechnete.
+                recomputeLeftToPay()
             } else {
                 noteCredentialRejectionIfNeeded(resp.error ?? resp.userMessage)
                 if cachedTransactions.isEmpty {

@@ -218,7 +218,7 @@ struct SettingsView: View {
     @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
-    @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
+    @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = BankTintProvider.globalDefault
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
     @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.sidebar.rawValue
     @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""

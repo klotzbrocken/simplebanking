@@ -19,6 +19,18 @@ half4 ripple(
     float decay,
     float speed
 ) {
+    // `maxSampleOffset` vergrößert die Zeichenfläche des Effekts über die Ansicht
+    // hinaus (hier um 12 pt) — der Shader wird also auch für Positionen AUSSERHALB
+    // der Ebene aufgerufen. Vorher fiel das nicht auf: dort lieferte `layer.sample`
+    // transparentes Schwarz, es wurde schlicht nichts gezeichnet. Seit die
+    // Sample-Position geklemmt wird (gegen Blitz und Doppelkontur, s.u.), landen
+    // diese Aufrufe auf der Randzeile und schmieren sie nach außen — im Flyout und
+    // in der Umsatzliste sichtbar als Streifen über den Konto-Pillen.
+    // Ausserhalb also weiterhin nichts zeichnen.
+    if (position.x < 0.0 || position.y < 0.0 || position.x >= size.x || position.y >= size.y) {
+        return half4(0.0h);
+    }
+
     float distance = length(position - origin);
     float delay    = distance / speed;
 

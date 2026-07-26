@@ -30,7 +30,7 @@ private struct TransactionsPanelView: View {
     @AppStorage("attentionInboxEnabled") private var attentionInboxEnabled: Bool = true
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
-    @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = true
+    @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = BankTintProvider.globalDefault
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
     @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.sidebar.rawValue
     @AppStorage("greenZoneIncludeOtherIncome") private var greenZoneIncludeOtherIncome: Bool = false

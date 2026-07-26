@@ -123,13 +123,11 @@ final class BankTintResolverTests: XCTestCase {
         XCTAssertEqual(BankTintProvider.hex(for: s), "112233")
     }
 
-    // MARK: Default-ON Convention
-
-    func test_globalEnabled_defaultsTrue_whenNoEntry() {
-        let key = BankTintProvider.globalKey
-        UserDefaults.standard.removeObject(forKey: key)
-        XCTAssertTrue(BankTintProvider.globalEnabled(), "Kein Eintrag = ON (Default).")
-    }
+    // MARK: Default-Konvention
+    //
+    // Der globale Streifen ist seit 2.0 werkseitig AUS (vorher AN). Die pro-Slot-
+    // Schalter bleiben auf AN: sie sind Ausnahmen VOM globalen Schalter und wären
+    // sinnlos, wenn sie ihn nicht erben würden.
 
     func test_globalEnabled_falseWhenExplicitlyDisabled() {
         let key = BankTintProvider.globalKey
@@ -182,5 +180,31 @@ final class BankTintResolverTests: XCTestCase {
         XCTAssertNotEqual(lightRGB.1, darkRGB.1)
         // Light-Variante sollte hellere R-Komponente haben (Mix gegen helles BG).
         XCTAssertGreaterThan(lightRGB.0, darkRGB.0)
+    }
+
+    // MARK: Werkseinstellung des Farbstreifens
+
+    /// Der Default steht an drei Stellen: `BankTintProvider.globalEnabled()` (was die
+    /// Liste rendert) und je einer `@AppStorage`-Deklaration in `SettingsPanel` und
+    /// `TransactionsPanelView` (was der Schalter anzeigt). Driften die auseinander,
+    /// zeigt der Schalter „aus", während der Streifen sichtbar ist — oder umgekehrt.
+    /// Deshalb hängen alle drei an `globalDefault`; dieser Test hält den Wert fest.
+    func test_farbstreifen_istWerkseitigAus() {
+        UserDefaults.standard.removeObject(forKey: BankTintProvider.globalKey)
+
+        XCTAssertFalse(BankTintProvider.globalDefault)
+        XCTAssertFalse(BankTintProvider.globalEnabled(),
+                       "Ohne gespeicherten Wert muss der Streifen aus sein")
+    }
+
+    /// Eine ausdrückliche Nutzerentscheidung gewinnt weiterhin über die Werkseinstellung.
+    func test_farbstreifen_gespeicherteEntscheidungGewinnt() {
+        defer { UserDefaults.standard.removeObject(forKey: BankTintProvider.globalKey) }
+
+        UserDefaults.standard.set(true, forKey: BankTintProvider.globalKey)
+        XCTAssertTrue(BankTintProvider.globalEnabled())
+
+        UserDefaults.standard.set(false, forKey: BankTintProvider.globalKey)
+        XCTAssertFalse(BankTintProvider.globalEnabled())
     }
 }

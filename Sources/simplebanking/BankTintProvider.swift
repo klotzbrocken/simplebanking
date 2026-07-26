@@ -118,10 +118,18 @@ enum BankTintProvider {
         return nil
     }
 
-    // MARK: Toggle-Status (UserDefaults — Default ON wenn kein Eintrag)
+    // MARK: Toggle-Status (UserDefaults)
+
+    /// Werkseinstellung des Farbstreifens: **aus**.
+    ///
+    /// Bewusst hier als einzige Quelle — der Wert steht sonst zusätzlich in den
+    /// `@AppStorage`-Deklarationen von `SettingsPanel` und `TransactionsPanelView`.
+    /// Weichen die auseinander, zeigt der Schalter in den Einstellungen etwas
+    /// anderes an, als die Liste tatsächlich rendert.
+    static let globalDefault = false
 
     static func globalEnabled() -> Bool {
-        guard UserDefaults.standard.object(forKey: globalKey) != nil else { return true }
+        guard UserDefaults.standard.object(forKey: globalKey) != nil else { return globalDefault }
         return UserDefaults.standard.bool(forKey: globalKey)
     }
 
