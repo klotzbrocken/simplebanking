@@ -483,6 +483,23 @@ enum ThemeFonts {
         themedFont(named: ThemeManager.shared.currentTheme.bodyFontName, size: size, weight: weight)
     }
 
+    /// Feste Zeilenhöhe für theme-getönte Textstellen — abgeleitet aus der
+    /// **Systemschrift** dieser Größe, nicht aus der Theme-Schrift.
+    ///
+    /// Der Punkt ist genau diese Trennung: Ohne feste Höhe bestimmt die gewählte
+    /// Schriftfamilie die Zeilenhöhe, und damit die Höhe der Saldo-Karte und des ganzen
+    /// Flyouts. Bei Game Boy ist das schon einmal passiert — Kontostand und Umsätze
+    /// wurden zu groß, und die Höhe wanderte zusätzlich mit der Länge des Betrags.
+    /// Weil der Wert aus der Systemschrift kommt, bleibt das heutige Bild identisch,
+    /// egal welche Familie ein Theme oder der Nutzer später wählt.
+    ///
+    /// `ascender - descender + leading` ist die Standard-Zeilenhöhe; `descender` ist
+    /// negativ, deshalb die Subtraktion.
+    static func lineHeight(forSize size: CGFloat, weight: NSFont.Weight = .regular) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: size, weight: weight)
+        return ceil(font.ascender - font.descender + font.leading)
+    }
+
     private static func themedFont(named name: String, size: CGFloat, weight: Font.Weight) -> Font {
         if name.caseInsensitiveCompare("System") == .orderedSame {
             return .system(size: size, weight: weight)

@@ -7781,7 +7781,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
-                .frame(height: lofi ? 48 : nil, alignment: .leading)
+                .frame(height: lofi ? 48 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
             leftToPaySubtitle
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -7871,7 +7871,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
-                .frame(height: lofi ? 48 : nil, alignment: .leading)
+                .frame(height: lofi ? 48 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
             Button { cycleReweRange() } label: {
                 HStack(spacing: 6) {
                     if ThemeChrome.glyphControls {
@@ -8016,7 +8016,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
                 // Feste Zeilenhöhe im Lo-Fi-Modus — die Länge des Kontostands darf
                 // die Kartenhöhe nie verändern.
-                .frame(height: lofi ? 48 : nil, alignment: .leading)
+                .frame(height: lofi ? 48 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
 
             if isPayPalCard { paypalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }

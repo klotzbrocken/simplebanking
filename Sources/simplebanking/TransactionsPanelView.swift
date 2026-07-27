@@ -558,7 +558,7 @@ private struct TransactionsPanelView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
-                    .frame(height: lofi ? 58 : nil, alignment: .leading)
+                    .frame(height: lofi ? 58 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
             } else if slotBalances.isEmpty || slotBalances.allSatisfy({ $0.balance == nil }) {
                 Text("--,-- €")
                     .font(themed ? ThemeFonts.flyoutHeading(size: 32, weight: .bold)
@@ -716,7 +716,7 @@ private struct TransactionsPanelView: View {
                 .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
                 // Feste Zeilenhöhe im Lo-Fi-Modus: minimumScaleFactor darf die
                 // Layout-Höhe NIE von der Länge des Kontostands abhängen lassen.
-                .frame(height: lofi ? 58 : nil, alignment: .leading)
+                .frame(height: lofi ? 58 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
 
             if isPayPal { panelPayPalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }
@@ -885,7 +885,7 @@ private struct TransactionsPanelView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
-                .frame(height: lofi ? 58 : nil, alignment: .leading)
+                .frame(height: lofi ? 58 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
             Button { cycleReweRange() } label: {
                 HStack(spacing: 6) {
                     if ThemeChrome.glyphControls {

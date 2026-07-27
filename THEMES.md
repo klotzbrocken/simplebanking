@@ -21,6 +21,17 @@ Elementen. Es bestimmt nur, *welche* Farbe/Schrift ein Element trägt, *ob* ein 
 gezeichnet wird und *womit* ein vorhandener Platz gefüllt ist (z. B. Mosaik-Block im
 20×20-Logo-Platz). Der Builder braucht deshalb keine Layout-Werkzeuge.
 
+**Die Schrift kann die Geometrie nicht verschieben.** Das war einmal anders: Die
+Kontostand-Zeile übernahm die Zeilenhöhe der Theme-Schrift, wodurch Game Boy höhere
+Karten bekam als das Default-Theme — und die Höhe zusätzlich mit der Länge des Betrags
+wanderte. Die theme-getönten Saldo-Zeilen in Flyout und Umsatzliste haben deshalb eine
+**feste Höhe, abgeleitet aus der Systemschrift** ihrer Größe
+(`ThemeFonts.lineHeight(forSize:weight:)`), nicht aus der gewählten Familie. Für den
+Builder heißt das: Die Schriftwahl ist gefahrlos — eine sehr schmale oder sehr breite
+Familie ändert Zeichnung und Laufweite, aber nie die Höhe einer Karte oder eines
+Fensters. Ausgenommen ist der Lo-Fi-Modus (siehe §4.3, `glyphControls=off`), der eigene,
+absichtlich größere Metriken setzt.
+
 ---
 
 ## 2. Ablage, Laden, Auswahl
