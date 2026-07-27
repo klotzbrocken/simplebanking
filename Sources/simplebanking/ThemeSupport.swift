@@ -520,6 +520,37 @@ enum ThemeChrome {
         return override
     }
 
+    /// Das globale Logo als fertiges Bild, oder `nil`.
+    ///
+    /// Gecacht, weil ein SwiftUI-Body sehr oft ausgewertet wird und
+    /// `NSImage(contentsOf:)` jedes Mal von der Platte läse. Schlüssel ist Pfad plus
+    /// Änderungsdatum — damit sieht man ein ausgetauschtes Bild ohne Neustart.
+    @MainActor
+    static var globalLogoImage: NSImage? {
+        guard let url = globalLogoURL else { return nil }
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attrs?[.size] as? Int) ?? 0
+        guard size > 0, size <= maxLogoBytes else {
+            if size > maxLogoBytes {
+                AppLogger.log("Theme-Logo übersprungen: \(url.lastPathComponent) ist \(size / 1024) KB, erlaubt sind \(maxLogoBytes / 1024) KB",
+                              category: "Theme", level: "WARN")
+            }
+            return nil
+        }
+        let stamp = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        let key = "\(url.path)|\(stamp)"
+        if let cached = logoCache[key] { return cached }
+        guard let image = NSImage(contentsOf: url) else { return nil }
+        logoCache = [key: image]   // immer nur ein Logo aktiv — kein Wachstum nötig
+        return image
+    }
+
+    /// Theme-Ordner sollen weitergebbar bleiben, und die Datei wird beim Themewechsel
+    /// synchron geladen.
+    static let maxLogoBytes = 512 * 1024
+
+    @MainActor private static var logoCache: [String: NSImage] = [:]
+
     /// Ein globales Logo ersetzt die Bankmarke — aber nur, wenn Bildmarken überhaupt
     /// gezeichnet werden. `bankLogos` entscheidet OB, `logo` nur WOMIT.
     static var globalLogoURL: URL? {

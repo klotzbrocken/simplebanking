@@ -670,6 +670,14 @@ private struct TransactionsPanelView: View {
                 if !ThemeChrome.bankLogosEnabled {
                     // BTX: keine Bildmarke über dem Kontostand — neutraler Mosaik-Block.
                     BTXMosaicIcon(category: .sonstiges, side: 18)
+                } else if let logo = ThemeChrome.globalLogoImage {
+                    // Globales Theme-Logo — für alle Konten gleich, deshalb ohne die
+                    // marken-abhängige Invertierung (siehe `logoDark`).
+                    Image(nsImage: logo)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
                 } else if let img = (isPayPal ? PayPalLogoAsset.image : nil) ?? vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
                     let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: balanceBrand?.id ?? "")
                     if invertActive {

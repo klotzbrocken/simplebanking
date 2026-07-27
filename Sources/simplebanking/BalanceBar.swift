@@ -7978,6 +7978,13 @@ private struct StatusBalanceFlyoutCardView: View {
                 // setzt hier den Mosaik-Block der Kategorie „neutral/Bank".
                 if !ThemeChrome.bankLogosEnabled {
                     BTXMosaicIcon(category: .sonstiges)
+                } else if let logo = ThemeChrome.globalLogoImage {
+                    // Globales Theme-Logo: gilt für ALLE Konten, deshalb ohne die
+                    // Marken-Invertierung — die weiß nur bei Banken, wie das Logo
+                    // gebaut ist. Für den Dunkelmodus gibt es `logoDark`.
+                    Image(nsImage: logo).resizable().scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 } else if let img = bankLogoImage {
                     let invertActive = dark && BankLogoAssets.isDark(brandId: bankLogoBrandId ?? "")
                     if invertActive {
