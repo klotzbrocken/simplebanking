@@ -653,14 +653,32 @@ struct SettingsView: View {
 
     // MARK: - Slot Settings
 
+    /// Der ausgewählte Slot — aber nur, wenn es ihn noch gibt.
+    ///
+    /// Reines Ableiten aus dem Store, keine Zustandsänderung: Das Aufräumen der
+    /// Auswahl gehört nicht in die Auswertung des View-Bodys, sondern in
+    /// `loadSlotSettings()`.
+    private var selectedSlotIfStillPresent: BankSlot? {
+        guard let id = selectedSettingsSlotId else { return nil }
+        return multibankingStore.slots.first(where: { $0.id == id })
+    }
+
     private func loadSlotSettings() {
         // Default: „Allgemein"-Sub-Tab (selectedSettingsSlotId == nil). Wenn
         // bereits ein Slot ausgewählt war (durch eine frühere Session), Settings
         // dafür laden.
-        if let id = selectedSettingsSlotId {
-            currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
-            autoDetectSalaryForDisplay(slotId: id)
+        //
+        // Zeigt die Auswahl ins Leere — entferntes oder ersetztes Konto —, wird sie
+        // hier zurückgesetzt. Ohne das bliebe die Sub-Tab-Leiste auf einer Pille
+        // stehen, die zu keinem Konto mehr gehört, während der Inhalt schon auf
+        // „Allgemein" zurückgefallen ist.
+        guard let id = selectedSettingsSlotId else { return }
+        guard multibankingStore.slots.contains(where: { $0.id == id }) else {
+            selectedSettingsSlotId = nil
+            return
         }
+        currentSlotSettings = BankSlotSettingsStore.load(slotId: id)
+        autoDetectSalaryForDisplay(slotId: id)
     }
 
     private func autoDetectSalaryForDisplay(slotId: String) {
@@ -849,10 +867,20 @@ struct SettingsView: View {
                         }
                     }
                     .padding(20)
+                    .id("settingsTop")
+                }
+                // Alle sieben Tabs teilen sich EINEN ScrollView; gewechselt wird nur der
+                // Inhalt. SwiftUI behält dabei den Scroll-Offset — wer im langen
+                // „Allgemein"-Tab nach unten gescrollt hatte und auf einen kürzeren Tab
+                // wechselte, sah eine leere Fläche und hielt den Klick für wirkungslos.
+                // Deshalb bei jedem Tab-Wechsel nach oben.
+                .onChange(of: selectedTab) { _ in
+                    proxy.scrollTo("settingsTop", anchor: .top)
                 }
                 .onChange(of: scrollToQuickSend) { shouldScroll in
                     guard shouldScroll else { return }
                     // Kurzer Delay, damit der Konten-Tab gerendert ist, bevor zum Anker gescrollt wird.
+                    // Läuft absichtlich NACH dem Reset oben — der Sprung zum Anker gewinnt.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
                         withAnimation { proxy.scrollTo("quickSendTemplates", anchor: .top) }
                         scrollToQuickSend = false
@@ -1147,10 +1175,17 @@ struct SettingsView: View {
 
             accountsSubTabBar
 
-            if selectedSettingsSlotId == nil {
-                accountsGeneralSection
-            } else if let slot = multibankingStore.slots.first(where: { $0.id == selectedSettingsSlotId }) {
+            // Bewusst `if let … else` statt `if nil … else if let …`: die frühere
+            // Fassung hatte keinen else-Zweig. Zeigte die Auswahl auf einen Slot, den
+            // es nicht mehr gibt — nach dem Entfernen eines Kontos, oder wenn der Slot
+            // unter der Hand ersetzt wurde —, waren BEIDE Bedingungen falsch und unter
+            // der Sub-Tab-Leiste erschien nichts. Der Tab wirkte tot, als hätte der
+            // Klick nicht funktioniert. Jetzt fällt jede ungültige Auswahl auf
+            // „Allgemein" zurück; `loadSlotSettings()` zieht die Pillen-Auswahl nach.
+            if let slot = selectedSlotIfStillPresent {
                 accountsPerSlotSection(slot: slot)
+            } else {
+                accountsGeneralSection
             }
         }
         .onAppear { loadSlotSettings() }

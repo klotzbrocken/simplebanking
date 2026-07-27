@@ -284,15 +284,38 @@ final class MultibankingStore: ObservableObject {
         save()
     }
 
-    /// Called after setup wizard completes for the first slot (replaces slot[0])
+    /// Setzt den Slot des Erstkontos nach dem Einrichtungs-Assistenten.
+    ///
+    /// Früher hieß das schlicht `slots[0] = slot`, mit der stillschweigenden Annahme,
+    /// an Index 0 stünde ein Platzhalter oder das Erstkonto. Die Annahme bricht,
+    /// sobald jemand VOR der Bankeinrichtung einen eBon-Slot anlegt: Wer erst REWE
+    /// und dann Amazon verbindet, hat `[REWE, Amazon]` — und die anschließende
+    /// Bankeinrichtung hat REWE spurlos überschrieben. Ohne Hinweis, ohne Log, und
+    /// mit verwaisten Bons in der Datenbank, weil dieser Pfad (anders als
+    /// `removeSlot`) nichts aufräumt.
+    ///
+    /// Deshalb wird jetzt gezielt der Legacy-Slot ersetzt — der Assistent legt sein
+    /// Erstkonto immer unter `id == "legacy"` an. Gibt es ihn noch nicht, wird der
+    /// neue Slot VORNE eingefügt statt irgendetwas zu überschreiben.
     func replaceFirstSlot(with slot: BankSlot) {
-        if slots.isEmpty {
-            slots.append(slot)
-        } else {
-            slots[0] = slot
-        }
-        activeIndex = 0
+        let result = Self.applyingFirstSlot(slot, to: slots)
+        slots = result.slots
+        activeIndex = result.activeIndex
         save()
+    }
+
+    /// Die reine Entscheidung hinter `replaceFirstSlot` — ohne Singleton und ohne
+    /// UserDefaults, damit sie prüfbar ist.
+    nonisolated static func applyingFirstSlot(
+        _ slot: BankSlot,
+        to existing: [BankSlot]
+    ) -> (slots: [BankSlot], activeIndex: Int) {
+        if let idx = existing.firstIndex(where: { $0.id == slot.id }) {
+            var updated = existing
+            updated[idx] = slot
+            return (updated, idx)
+        }
+        return ([slot] + existing, 0)
     }
 
     // MARK: - Persistence
