@@ -513,10 +513,14 @@ enum ThemeChrome {
     /// Ein unbekannter Symbolname fällt auf den Standard zurück, statt ein leeres
     /// Bild zu zeichnen — dieselbe Haltung wie bei `parseBool`: Ein Tippfehler im
     /// `.cfg` darf keine Bedienung unsichtbar machen.
-    static func symbol(for icon: ChromeIcon) -> String {
-        guard let override = theme.iconOverrides[icon.rawValue],
+    /// `active` wählt die gefüllte/hervorgehobene Variante — Themes können beide
+    /// getrennt setzen (`icon.filter` und `icon.filter.active`).
+    static func symbol(for icon: ChromeIcon, active: Bool = false) -> String {
+        let key = active ? "\(icon.rawValue).active" : icon.rawValue
+        let fallback = active ? icon.defaultActiveSymbol : icon.defaultSymbol
+        guard let override = theme.iconOverrides[key],
               NSImage(systemSymbolName: override, accessibilityDescription: nil) != nil
-        else { return icon.defaultSymbol }
+        else { return fallback }
         return override
     }
 
@@ -577,9 +581,10 @@ enum ThemeChrome {
 enum ChromeIcon: String, CaseIterable {
     case filter, categories, savings, send, dashboard, inbox, refresh, pin, settings, clear
 
+    /// Symbol im Ruhezustand — exakt das heutige.
     var defaultSymbol: String {
         switch self {
-        case .filter:     return "line.3.horizontal.decrease.circle"
+        case .filter:     return "line.3.horizontal.decrease"
         case .categories: return "tag"
         case .savings:    return "centsign.circle"
         case .send:       return "paperplane"
@@ -589,6 +594,22 @@ enum ChromeIcon: String, CaseIterable {
         case .pin:        return "pin"
         case .settings:   return "gearshape"
         case .clear:      return "xmark.circle.fill"
+        }
+    }
+
+    /// Symbol im aktiven Zustand. Nicht durchgehend „Basis + `.fill`" — der Filter
+    /// wechselt heute von `line.3.horizontal.decrease` auf
+    /// `line.3.horizontal.decrease.circle.fill`, bekommt also zusätzlich den Kreis.
+    /// Deshalb steht die Variante ausgeschrieben, statt sie abzuleiten.
+    var defaultActiveSymbol: String {
+        switch self {
+        case .filter:     return "line.3.horizontal.decrease.circle.fill"
+        case .categories: return "tag.fill"
+        case .savings:    return "centsign.circle.fill"
+        case .inbox:      return "bell.fill"
+        case .pin:        return "pin.fill"
+        // Ohne eigenen Aktiv-Zustand — hier bleibt es beim Ruhesymbol.
+        case .send, .dashboard, .refresh, .settings, .clear: return defaultSymbol
         }
     }
 
@@ -638,6 +659,10 @@ enum ThemeFonts {
     }
 
     /// Theme-Schrift für die große Saldo-Zahl / Kopfzeile im Flyout (theme-abhängig).
+    ///
+    /// Die Schrift kommt ausschließlich aus dem Theme (`headingFont` / `bodyFont` im
+    /// `.cfg`) — bewusst ohne Einstellung in der App. Sie ist Teil der Gestaltung, die
+    /// ein Theme mitbringt, nicht etwas, das der Nutzer darüberlegt.
     static func flyoutHeading(size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         themedFont(named: ThemeManager.shared.currentTheme.headingFontName, size: size, weight: weight)
     }

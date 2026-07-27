@@ -85,6 +85,30 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 | `name` | Dateiname kapitalisiert | Anzeigename in den Einstellungen. |
 | `bodyFont` | `System` | Fließtext in Flyout + Liste (`ThemeFonts.flyoutBody`). PostScript-/Familienname; `System` = Systemschrift. |
 | `headingFont` | `System` | Saldo-Zahl, Händlernamen, Beträge, Datumsköpfe (`ThemeFonts.flyoutHeading`). |
+| `logo` | *(leer)* | **Globale Bildmarke** statt der Bankmarke in Flyout- und Listenkopf — für **alle** Konten gleich, auch PayPal und Händler-Slots. Dateiname **relativ zum Theme-Ordner**. Format siehe unten. |
+| `logoDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel wird `logo` in beiden Modi unverändert gezeigt — es wird **nichts automatisch invertiert**. |
+
+**Die Schrift ist gefahrlos wählbar.** Zeilenhöhen hängen nicht an ihr (siehe §1), eine
+sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe einer Karte.
+
+#### Format des globalen Logos
+
+| | |
+|---|---|
+| **Akzeptiert** | PNG, PDF, SVG (geladen über `NSImage(contentsOf:)`) |
+| **Empfohlen** | Vektor — PDF oder SVG. Bleibt in jeder Größe scharf. |
+| **Raster (PNG)** | quadratisch, **mindestens 128 × 128 px**. Gezeichnet wird bei 20 pt (Flyout) bzw. 18 pt (Liste), auf Retina also 40 bzw. 36 px — 128 gibt Reserve. |
+| **Hintergrund** | transparent. Die Marke sitzt auf der Theme-Fläche; ein deckendes Rechteck sieht aus wie ein aufgeklebter Sticker. |
+| **Seitenverhältnis** | Nicht quadratisches wird eingepasst, nie beschnitten oder verzerrt. |
+| **Dateigröße** | höchstens **512 KB**. Größeres wird ignoriert und protokolliert — Theme-Ordner sollen weitergebbar bleiben. |
+
+**Vorrang:** `bankLogos` entscheidet, **ob** überhaupt eine Bildmarke erscheint, `logo`
+nur **womit**. Bei `bankLogos=off` bleibt es also beim Mosaik-Block, auch wenn ein Logo
+hinterlegt ist. Fehlt die Datei oder lässt sie sich nicht laden, erscheint still wieder
+die Bankmarke — ein vergessenes Bild hinterlässt keine leere Fläche.
+
+**Noch nicht erfasst:** Die Konto-Pillen der Umsatzliste und das Menüleisten-Symbol
+zeigen weiterhin die Bankmarke.
 
 Schriften müssen im System installiert oder im App-Bundle registriert sein
 (`ThemeFonts.registerBundledFonts()` lädt `.ttf` aus `Contents/Resources`, Rückfall
@@ -122,10 +146,43 @@ Alle Defaults = Bestandsverhalten; ein leeres Theme sieht aus wie bisher.
 | `dottedLeaders` | `off` | `on`: gepunktete Führungslinie zwischen Name und Betrag statt Leerraum. |
 | `squareControls` | `off` | `on`: Eckenradius aller getönten Bedienelemente = 0 (`ThemeChrome.cornerRadius(_:)`) — Suchfeld, Filter-Blöcke, Buttons, Eingabefelder. |
 | `glyphControls` | `on` | `off`: Bedien-**Icons werden Text** — „FILTER", „KAT.", „SPAREN", „SENDEN", „AUSWERTUNG", „INBOX (n)", „X" zum Leeren, `>`-Pfeile; Konto-Umschalter werden unterstrichene Textkommandos statt Pillen; Konto-/Kategorien-**Ringe werden Mosaik-Blockleisten**; blinkendes ☎ erscheint im Kopf; Segmented-Controls werden Text-Paare. |
+| `windowCorners` | `rounded` | `square`: eckige **Fensterkanten** statt runder. Wirkt auf zentriertes Overlay-Flyout, freigestelltes Desktop-Widget und Umsatzliste. **Nicht** auf das Menüleisten-Popover — dessen Rahmen und Pfeilspitze zeichnet AppKit selbst. Absichtlich getrennt von `squareControls`, damit ein bestehendes Theme nicht ungefragt eckige Fenster bekommt. |
 
 **Faustregel für Retro-Themes:** `uppercase`, `dottedLeaders`, `squareControls` an,
 `glyphControls`, Logos, Icons, `ripple` aus — dann trägt Text die Bedienung, wie es
 Terminals und BTX taten.
+
+### 4.4 Bedien-Icons einzeln austauschen
+
+Jede Funktion in Fußzeile, Steuerzeile und Titelleiste hat einen Namen und lässt sich
+einzeln auf ein anderes SF-Symbol legen:
+
+```
+icon.filter        = slider.horizontal.3
+icon.filter.active = slider.horizontal.3
+```
+
+| Name | Ruhezustand | Aktiv | Textkürzel bei `glyphControls=off` |
+|---|---|---|---|
+| `filter` | `line.3.horizontal.decrease` | `line.3.horizontal.decrease.circle.fill` | Filter |
+| `categories` | `tag` | `tag.fill` | Kat. |
+| `savings` | `centsign.circle` | `centsign.circle.fill` | Sparen |
+| `send` | `paperplane` | — | Senden |
+| `dashboard` | `square.grid.2x2` | — | Auswertung |
+| `inbox` | `bell` | `bell.fill` | Inbox |
+| `refresh` | `arrow.clockwise` | — | Neu |
+| `pin` | `pin` | `pin.fill` | Pin |
+| `settings` | `gearshape` | — | Optionen |
+| `clear` | `xmark.circle.fill` | — | X |
+
+- `icon.<name>` setzt den Ruhezustand, `icon.<name>.active` die hervorgehobene Variante.
+  Beide sind unabhängig — es wird **kein** `.fill` angehängt, weil die Paare im Bestand
+  nicht durchgängig so gebaut sind (der Filter bekommt im aktiven Zustand zusätzlich
+  einen Kreis).
+- Funktionen ohne eigenen Aktiv-Zustand ignorieren `…​.active`.
+- **Ein unbekanntes Symbol fällt auf den Standard zurück**, statt eine leere Fläche zu
+  hinterlassen. Ein Tippfehler macht also keine Bedienung unsichtbar.
+- Bei `glyphControls=off` gelten weiter die Textkürzel; `icon.*` bleibt dann wirkungslos.
 
 ---
 
@@ -147,6 +204,9 @@ Bereiche zeigen (Flyout-Karte 348 pt breit + ein Listen-Ausschnitt, Light und Da
 | Aktiver Konto-Umschalter / Filter | `accent` (Text auf Füllung: Surface-Farbe) |
 | Suchfeld/Eingabefelder | Weiß 65 % + 2-pt-Ink-Rahmen, Radius via `squareControls` |
 | Blende um alles | `screenBorder` |
+| Bildmarke über dem Kontostand | `logo` / `logoDark` — sonst die Bankmarke, bei `bankLogos=off` ein Mosaik-Block |
+| Fensterkanten | `windowCorners` (Overlay, Widget, Umsatzliste — nicht das Popover) |
+| Icons in Fuß-, Steuer- und Titelzeile | `icon.<name>` / `icon.<name>.active` (§4.4) |
 | Mosaik-Blöcke | Muster fix, Farben fix je Kategorie (nicht konfigurierbar) |
 
 Bei aktivem Theme skaliert die Saldo-Zahl auf 50 pt (Liste) / 42 pt (Flyout) mit
@@ -227,7 +287,16 @@ bestehende bearbeitet — ohne die App zu verändern.
 1. **Formular für alle Schlüssel aus Abschnitt 4** — Farb-Picker paarweise
    (Light/Dark, mit „identisch"-Kopplung für appearance-unabhängige Themes),
    Font-Auswahl aus den installierten Schriften (Familienname), Schalter als Toggles
-   mit den Erklärtexten aus 4.3.
+   mit den Erklärtexten aus 4.3. Dazu:
+   - **Logo-Ablage** (4.1): Bild per Auswahl oder Drag & Drop, Prüfung auf Format,
+     Quadratmaß und die 512-KB-Grenze, Kopieren in den Theme-Ordner, optional eine
+     zweite Datei für den Dunkelmodus. Die Schriftwahl gehört **hier** hin und nicht
+     in die App — sie ist Teil der Gestaltung, die ein Theme mitbringt.
+   - **Icon-Tabelle** (4.4): je Zeile Funktion, Ruhe- und Aktiv-Symbol, mit
+     SF-Symbol-Suche und Vorschau. Ein unbekannter Name muss im Builder auffallen —
+     die App fällt still auf den Standard zurück, was beim Bauen niemand merkt.
+   - **Fensterform** (`windowCorners`) als Zweifach-Wahl mit dem Hinweis, dass das
+     Menüleisten-Popover davon unberührt bleibt.
 2. **Live-Preview** nach der Wirkungs-Landkarte (Abschnitt 5): Flyout-Karte +
    Listen-Ausschnitt mit Beispieldaten, umschaltbar Hell/Dunkel. Die Preview muss die
    Schalter-Effekte zeigen (Mosaik statt Logo, Textkommandos, Punktlinien, Blende,

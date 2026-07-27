@@ -1488,19 +1488,19 @@ private struct TransactionsPanelView: View {
     private var headerControls: some View {
         HStack(spacing: 15) {
             Button { Task { await onRefresh() } } label: {
-                Image(systemName: "arrow.clockwise")
+                Image(systemName: ThemeChrome.symbol(for: .refresh))
             }
             .help(L10n.t("Aktuelles Konto aktualisieren", "Refresh current account"))
             Button {
                 onTogglePin?()
                 isPinnedLocal.toggle()
             } label: {
-                Image(systemName: isPinnedLocal ? "pin.fill" : "pin")
+                Image(systemName: ThemeChrome.symbol(for: .pin, active: isPinnedLocal))
                     .foregroundColor(isPinnedLocal ? Color.themeAccent : .secondary)
             }
             .help(L10n.t("Oben halten", "Keep on top"))
             Button { onSettings?() } label: {
-                Image(systemName: "gearshape")
+                Image(systemName: ThemeChrome.symbol(for: .settings))
             }
             .help(L10n.t("Einstellungen", "Settings"))
         }
@@ -1692,7 +1692,7 @@ private struct TransactionsPanelView: View {
                     if !vm.query.isEmpty {
                         Button(action: { vm.query = "" }) {
                             if ThemeChrome.glyphControls {
-                                Image(systemName: "xmark.circle.fill")
+                                Image(systemName: ThemeChrome.symbol(for: .clear))
                                     .foregroundColor(Color(NSColor.placeholderTextColor))
                             } else {
                                 BTXTextControl(text: "X")
@@ -1724,9 +1724,7 @@ private struct TransactionsPanelView: View {
                 }
                 Button(action: { showFilterPills.toggle() }) {
                     if ThemeChrome.glyphControls {
-                        Image(systemName: showFilterPills
-                              ? "line.3.horizontal.decrease.circle.fill"
-                              : "line.3.horizontal.decrease")
+                        Image(systemName: ThemeChrome.symbol(for: .filter, active: showFilterPills))
                             .font(.system(size: 15))
                             .foregroundColor(showFilterPills || vm.activeFilter != .all
                                              ? .accentColor : .secondary)
@@ -1741,7 +1739,7 @@ private struct TransactionsPanelView: View {
                       : L10n.t("Filter einblenden", "Show filters"))
                 Button(action: { showCategories.toggle() }) {
                     if ThemeChrome.glyphControls {
-                        Image(systemName: showCategories ? "tag.fill" : "tag")
+                        Image(systemName: ThemeChrome.symbol(for: .categories, active: showCategories))
                             .font(.system(size: 14))
                             .foregroundColor(showCategories ? .accentColor : .secondary)
                     } else {
@@ -1755,7 +1753,7 @@ private struct TransactionsPanelView: View {
                 if !vm.isUnifiedMode && !receiptActive && multibankingStore.activeSlot?.isPayPal != true {
                     Button(action: { toggleRoundupView() }) {
                         if ThemeChrome.glyphControls {
-                            Image(systemName: roundupView.isActive ? "centsign.circle.fill" : "centsign.circle")
+                            Image(systemName: ThemeChrome.symbol(for: .savings, active: roundupView.isActive))
                                 .font(.system(size: 15))
                                 .foregroundColor(roundupView.isActive ? Color.roundupAccent : .secondary)
                         } else {
@@ -2097,7 +2095,7 @@ private struct TransactionsPanelView: View {
                                     // die Beträge weiter nach rechts rücken (wie Demo).
                                     ZStack {
                                         if txHasReminder {
-                                            Image(systemName: "bell.fill")
+                                            Image(systemName: ThemeChrome.symbol(for: .inbox, active: true))
                                                 .font(.system(size: 10))
                                                 .foregroundColor(.orange)
                                         }
@@ -2219,7 +2217,7 @@ private struct TransactionsPanelView: View {
                 // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
                 Button(action: { onOpenDashboard?(.overview) }) {
                     if ThemeChrome.glyphControls {
-                        Image(systemName: "square.grid.2x2")
+                        Image(systemName: ThemeChrome.symbol(for: .dashboard))
                             .font(.system(size: 15))
                             .foregroundColor(.secondary)
                     } else {
@@ -2339,7 +2337,7 @@ private struct TransactionsPanelView: View {
                             object: nil)
                     }) {
                         if ThemeChrome.glyphControls {
-                            Image(systemName: "paperplane")
+                            Image(systemName: ThemeChrome.symbol(for: .send))
                                 .font(.system(size: 15))
                                 .foregroundColor(.secondary)
                         } else {
@@ -4228,6 +4226,30 @@ final class AccountNavModel: ObservableObject {
         }
     }
 
+    // MARK: - Fensterform (Theme-Schalter `windowCorners`)
+    //
+    // Ein `.titled`-Fenster bekommt seine runden Ecken vom Fenster-Server; der
+    // Rahmen-View maskiert den Inhalt. Eckig geht deshalb nur, indem man dem Fenster
+    // seinen eigenen Hintergrund nimmt und die Fläche selbst zeichnet — nicht über
+    // einen Radius am `contentView`, der würde weiterhin rund beschnitten.
+    //
+    // Bei `rounded` (Default) passiert hier nichts: dann bleibt alles beim
+    // Systemverhalten, und der Bestand ist unberührt.
+
+    private static func applyWindowCorners(to panel: NSPanel) {
+        guard ThemeChrome.windowCornerRadius(10) == 0 else { return }
+        panel.isOpaque = false
+    }
+
+    /// Zweiter Teil, nach `super.init()`: Der `contentView` existiert erst dann.
+    private static func applyWindowCornerMask(to panel: NSPanel) {
+        guard let content = panel.contentView else { return }
+        let radius = ThemeChrome.windowCornerRadius(10)
+        content.wantsLayer = true
+        content.layer?.cornerRadius = radius
+        content.layer?.masksToBounds = radius > 0
+    }
+
     private func applyWindowLevel() {
         panel.level = isPinned ? .floating : .normal
     }
@@ -4269,6 +4291,7 @@ final class AccountNavModel: ObservableObject {
         }
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
+        Self.applyWindowCorners(to: panel)
         // Transparente Titelleiste ohne Trennlinie — die SwiftUI-Money-Heat füllt den
         // oberen Streifen (keine NSToolbar mehr, s. configureTitlebar()).
         panel.titlebarSeparatorStyle = .none
@@ -4288,6 +4311,7 @@ final class AccountNavModel: ObservableObject {
 
         panel.delegate = self
         applyWindowLevel()   // restore persisted stay-on-top state
+        Self.applyWindowCornerMask(to: panel)
         configureTitlebar()
         let host = NSHostingView(rootView: TransactionsPanelView(
             vm: vm, onRefresh: onRefresh, accountNav: accountNav, onOpenDashboard: onOpenDashboard,

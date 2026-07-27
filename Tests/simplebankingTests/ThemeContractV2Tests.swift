@@ -99,8 +99,42 @@ final class ThemeContractV2Tests: XCTestCase {
             XCTAssertNotNil(
                 NSImage(systemSymbolName: icon.defaultSymbol, accessibilityDescription: nil),
                 "\(icon.rawValue): '\(icon.defaultSymbol)' ist kein bekanntes SF-Symbol")
+            XCTAssertNotNil(
+                NSImage(systemSymbolName: icon.defaultActiveSymbol, accessibilityDescription: nil),
+                "\(icon.rawValue).active: '\(icon.defaultActiveSymbol)' ist kein bekanntes SF-Symbol")
             XCTAssertFalse(icon.textFallback.isEmpty, "\(icon.rawValue) ohne Textkürzel")
         }
+    }
+
+    /// Die Registry muss exakt die Symbole tragen, die vorher als Literale in den Views
+    /// standen — sonst hätte allein das Einführen der Registry das Bild verändert.
+    /// Die Werte sind bewusst hier ausgeschrieben und nicht aus dem Enum abgeleitet:
+    /// ein Test, der `defaultSymbol` gegen `defaultSymbol` prüft, prüft nichts.
+    func test_registryEntsprichtDemBisherigenBestand() {
+        let erwartet: [ChromeIcon: (ruhe: String, aktiv: String)] = [
+            .filter:     ("line.3.horizontal.decrease", "line.3.horizontal.decrease.circle.fill"),
+            .categories: ("tag", "tag.fill"),
+            .savings:    ("centsign.circle", "centsign.circle.fill"),
+            .send:       ("paperplane", "paperplane"),
+            .dashboard:  ("square.grid.2x2", "square.grid.2x2"),
+            .inbox:      ("bell", "bell.fill"),
+            .refresh:    ("arrow.clockwise", "arrow.clockwise"),
+            .pin:        ("pin", "pin.fill"),
+            .settings:   ("gearshape", "gearshape"),
+            .clear:      ("xmark.circle.fill", "xmark.circle.fill"),
+        ]
+        XCTAssertEqual(Set(erwartet.keys), Set(ChromeIcon.allCases),
+                       "Neues Icon in der Registry? Dann hier den Bestandswert ergänzen.")
+        for (icon, werte) in erwartet {
+            XCTAssertEqual(icon.defaultSymbol, werte.ruhe, "\(icon.rawValue) Ruhezustand")
+            XCTAssertEqual(icon.defaultActiveSymbol, werte.aktiv, "\(icon.rawValue) aktiv")
+        }
+    }
+
+    func test_iconOverride_kennt_aktiveVariante() throws {
+        let t = try parse("id=t\nicon.filter=star\nicon.filter.active=star.fill")
+        XCTAssertEqual(t.iconOverrides["filter"], "star")
+        XCTAssertEqual(t.iconOverrides["filter.active"], "star.fill")
     }
 
     // MARK: Zeilenhöhe
