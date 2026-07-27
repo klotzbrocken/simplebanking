@@ -50,6 +50,29 @@ struct AppTheme: Identifiable, Equatable {
     /// Farbe eines Rahmens um Flyout/Liste („Bildschirmrand"). nil → kein Rahmen.
     var screenBorderHex: String? = nil
 
+    /// Dateiname eines eigenen Logos, **relativ zum Theme-Ordner**. Ersetzt die
+    /// Bankmarke in Flyout und Umsatzliste — für ALLE Konten, unabhängig von der Bank.
+    ///
+    /// Verhältnis zu `bankLogosEnabled`: der entscheidet weiterhin, **ob** überhaupt
+    /// eine Bildmarke erscheint, `logoFileName` nur **welche**. Bei `bankLogos=off`
+    /// (BTX) bleibt es also beim Mosaik-Block. Ein Schalter, der einen anderen
+    /// aushebelt, wäre schwer erklärbar.
+    var logoFileName: String? = nil
+    /// Optionale Variante für den Dunkelmodus. Bei Banken weiß
+    /// `BankLogoAssets.isDark(brandId:)`, wie die Marke gebaut ist — bei einem fremden
+    /// Bild weiß das niemand, deshalb wird nichts automatisch invertiert.
+    var logoDarkFileName: String? = nil
+
+    /// Eckige Fensterkanten statt runder. Bewusst NICHT an `squareControls` gehängt:
+    /// BTX setzt den bereits auf `on` und hätte über Nacht eckige Fenster — eine
+    /// Verhaltensänderung an einem ausgelieferten Theme.
+    var squareWindowCorners: Bool = false
+
+    /// Pro Funktion austauschbares SF-Symbol, z. B. `icon.filter=slider.horizontal.3`.
+    /// Leer → überall die Standardsymbole. Greift nur, solange `glyphControls` an ist;
+    /// bei textgetriebenen Themes stehen weiterhin die Kürzel.
+    var iconOverrides: [String: String] = [:]
+
     var screenBorderColor: NSColor? {
         guard let screenBorderHex else { return nil }
         return Self.color(from: screenBorderHex, fallback: .clear)
@@ -288,8 +311,36 @@ final class ThemeManager: @unchecked Sendable {
             dottedLeaders: Self.parseBool(values["dottedleaders"], default: false),
             squareControls: Self.parseBool(values["squarecontrols"], default: false),
             glyphControls: Self.parseBool(values["glyphcontrols"], default: true),
-            screenBorderHex: values["screenborder"].flatMap { $0.isEmpty ? nil : $0 }
+            screenBorderHex: values["screenborder"].flatMap { $0.isEmpty ? nil : $0 },
+            logoFileName: values["logo"].flatMap { $0.isEmpty ? nil : $0 },
+            logoDarkFileName: values["logodark"].flatMap { $0.isEmpty ? nil : $0 },
+            squareWindowCorners: Self.parseWindowCorners(values["windowcorners"]),
+            iconOverrides: Self.parseIconOverrides(from: values)
         )
+    }
+
+    /// `rounded` (Default) oder `square`. Alles andere — inklusive Tippfehler — bleibt
+    /// rund; dieselbe Haltung wie bei `parseBool`.
+    static func parseWindowCorners(_ raw: String?) -> Bool {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty else {
+            return false
+        }
+        return raw == "square" || raw == "eckig"
+    }
+
+    /// Sammelt alle `icon.<name>=<sf-symbol>`-Zeilen ein. Der Schlüssel wird auf den
+    /// Teil hinter dem Punkt reduziert; die Gültigkeit des Symbolnamens prüft erst
+    /// `ThemeChrome.symbol(for:)` — ein Tippfehler soll kein Icon verschwinden lassen,
+    /// sondern auf den Standard zurückfallen.
+    static func parseIconOverrides(from values: [String: String]) -> [String: String] {
+        var result: [String: String] = [:]
+        for (key, value) in values where key.hasPrefix("icon.") {
+            let name = String(key.dropFirst("icon.".count))
+            let symbol = value.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty, !symbol.isEmpty else { continue }
+            result[name] = symbol
+        }
+        return result
     }
 
     /// `on/off`, `true/false`, `yes/no`, `1/0` — alles andere (inkl. fehlendem Wert)
@@ -444,6 +495,87 @@ enum ThemeChrome {
     /// Game Boy oder Sunrise, die nur Farben und Schriftfamilie setzen, behalten
     /// exakt die Default-Metriken.
     static var lofi: Bool { !theme.isDefault && !theme.glyphControls }
+
+    // MARK: - Fensterform
+
+    /// Eckenradius für FENSTER (Overlay-Flyout, Desktop-Widget, Umsatzliste) — im
+    /// Gegensatz zu `cornerRadius(_:)`, das für Bedienelemente gilt. Das
+    /// Menüleisten-Popover ist bewusst nicht dabei: `NSPopover` zeichnet Rahmen und
+    /// Pfeilspitze selbst.
+    static func windowCornerRadius(_ rounded: CGFloat) -> CGFloat {
+        theme.squareWindowCorners ? 0 : rounded
+    }
+
+    // MARK: - Austauschbare Bedien-Icons
+
+    /// Symbol für eine Funktion: Theme-Override, sonst der Standard.
+    ///
+    /// Ein unbekannter Symbolname fällt auf den Standard zurück, statt ein leeres
+    /// Bild zu zeichnen — dieselbe Haltung wie bei `parseBool`: Ein Tippfehler im
+    /// `.cfg` darf keine Bedienung unsichtbar machen.
+    static func symbol(for icon: ChromeIcon) -> String {
+        guard let override = theme.iconOverrides[icon.rawValue],
+              NSImage(systemSymbolName: override, accessibilityDescription: nil) != nil
+        else { return icon.defaultSymbol }
+        return override
+    }
+
+    /// Ein globales Logo ersetzt die Bankmarke — aber nur, wenn Bildmarken überhaupt
+    /// gezeichnet werden. `bankLogos` entscheidet OB, `logo` nur WOMIT.
+    static var globalLogoURL: URL? {
+        guard theme.bankLogosEnabled else { return nil }
+        let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let name = (dark ? theme.logoDarkFileName : nil) ?? theme.logoFileName
+        guard let name else { return nil }
+        let url = URL(fileURLWithPath: ThemeManager.shared.themesDirectoryPath)
+            .appendingPathComponent(name)
+        // Fehlende Datei → still zurück auf die Bankmarke. Ein Theme darf keine
+        // leere Fläche hinterlassen, nur weil ein Bild vergessen wurde.
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+}
+
+/// Die Bedien-Icons, die ein Theme einzeln austauschen darf.
+///
+/// Vorher stand jedes Symbol als Literal in seiner View, rund vierzehnmal dasselbe
+/// `if glyphControls { Image(systemName:) } else { BTXTextControl(…) }`. Ohne eine
+/// solche Aufzählung gäbe es keinen Namen, den ein Theme adressieren könnte.
+///
+/// `defaultSymbol` ist jeweils exakt das heutige Symbol, `textFallback` exakt das
+/// heutige BTX-Kürzel — die Registry ändert für sich genommen nichts.
+enum ChromeIcon: String, CaseIterable {
+    case filter, categories, savings, send, dashboard, inbox, refresh, pin, settings, clear
+
+    var defaultSymbol: String {
+        switch self {
+        case .filter:     return "line.3.horizontal.decrease.circle"
+        case .categories: return "tag"
+        case .savings:    return "centsign.circle"
+        case .send:       return "paperplane"
+        case .dashboard:  return "square.grid.2x2"
+        case .inbox:      return "bell"
+        case .refresh:    return "arrow.clockwise"
+        case .pin:        return "pin"
+        case .settings:   return "gearshape"
+        case .clear:      return "xmark.circle.fill"
+        }
+    }
+
+    /// Kürzel für textgetriebene Themes (`glyphControls=off`).
+    var textFallback: String {
+        switch self {
+        case .filter:     return "Filter"
+        case .categories: return "Kat."
+        case .savings:    return "Sparen"
+        case .send:       return "Senden"
+        case .dashboard:  return "Auswertung"
+        case .inbox:      return "Inbox"
+        case .refresh:    return "Neu"
+        case .pin:        return "Pin"
+        case .settings:   return "Optionen"
+        case .clear:      return "X"
+        }
+    }
 }
 
 enum ThemeFonts {
