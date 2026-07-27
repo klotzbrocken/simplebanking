@@ -63,11 +63,6 @@ struct AppTheme: Identifiable, Equatable {
     /// Bild weiß das niemand, deshalb wird nichts automatisch invertiert.
     var logoDarkFileName: String? = nil
 
-    /// Eckige Fensterkanten statt runder. Bewusst NICHT an `squareControls` gehängt:
-    /// BTX setzt den bereits auf `on` und hätte über Nacht eckige Fenster — eine
-    /// Verhaltensänderung an einem ausgelieferten Theme.
-    var squareWindowCorners: Bool = false
-
     /// Pro Funktion austauschbares SF-Symbol, z. B. `icon.filter=slider.horizontal.3`.
     /// Leer → überall die Standardsymbole. Greift nur, solange `glyphControls` an ist;
     /// bei textgetriebenen Themes stehen weiterhin die Kürzel.
@@ -314,19 +309,10 @@ final class ThemeManager: @unchecked Sendable {
             screenBorderHex: values["screenborder"].flatMap { $0.isEmpty ? nil : $0 },
             logoFileName: values["logo"].flatMap { $0.isEmpty ? nil : $0 },
             logoDarkFileName: values["logodark"].flatMap { $0.isEmpty ? nil : $0 },
-            squareWindowCorners: Self.parseWindowCorners(values["windowcorners"]),
             iconOverrides: Self.parseIconOverrides(from: values)
         )
     }
 
-    /// `rounded` (Default) oder `square`. Alles andere — inklusive Tippfehler — bleibt
-    /// rund; dieselbe Haltung wie bei `parseBool`.
-    static func parseWindowCorners(_ raw: String?) -> Bool {
-        guard let raw = raw?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty else {
-            return false
-        }
-        return raw == "square" || raw == "eckig"
-    }
 
     /// Sammelt alle `icon.<name>=<sf-symbol>`-Zeilen ein. Der Schlüssel wird auf den
     /// Teil hinter dem Punkt reduziert; die Gültigkeit des Symbolnamens prüft erst
@@ -496,15 +482,6 @@ enum ThemeChrome {
     /// exakt die Default-Metriken.
     static var lofi: Bool { !theme.isDefault && !theme.glyphControls }
 
-    // MARK: - Fensterform
-
-    /// Eckenradius für FENSTER (Overlay-Flyout, Desktop-Widget, Umsatzliste) — im
-    /// Gegensatz zu `cornerRadius(_:)`, das für Bedienelemente gilt. Das
-    /// Menüleisten-Popover ist bewusst nicht dabei: `NSPopover` zeichnet Rahmen und
-    /// Pfeilspitze selbst.
-    static func windowCornerRadius(_ rounded: CGFloat) -> CGFloat {
-        theme.squareWindowCorners ? 0 : rounded
-    }
 
     // MARK: - Austauschbare Bedien-Icons
 

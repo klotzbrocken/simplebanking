@@ -146,7 +146,6 @@ Alle Defaults = Bestandsverhalten; ein leeres Theme sieht aus wie bisher.
 | `dottedLeaders` | `off` | `on`: gepunktete Führungslinie zwischen Name und Betrag statt Leerraum. |
 | `squareControls` | `off` | `on`: Eckenradius aller getönten Bedienelemente = 0 (`ThemeChrome.cornerRadius(_:)`) — Suchfeld, Filter-Blöcke, Buttons, Eingabefelder. |
 | `glyphControls` | `on` | `off`: Bedien-**Icons werden Text** — „FILTER", „KAT.", „SPAREN", „SENDEN", „AUSWERTUNG", „INBOX (n)", „X" zum Leeren, `>`-Pfeile; Konto-Umschalter werden unterstrichene Textkommandos statt Pillen; Konto-/Kategorien-**Ringe werden Mosaik-Blockleisten**; blinkendes ☎ erscheint im Kopf; Segmented-Controls werden Text-Paare. |
-| `windowCorners` | `rounded` | `square`: eckige **Fensterkanten** statt runder. Wirkt auf zentriertes Overlay-Flyout, freigestelltes Desktop-Widget und Umsatzliste. **Nicht** auf das Menüleisten-Popover — dessen Rahmen und Pfeilspitze zeichnet AppKit selbst. Absichtlich getrennt von `squareControls`, damit ein bestehendes Theme nicht ungefragt eckige Fenster bekommt. |
 
 **Faustregel für Retro-Themes:** `uppercase`, `dottedLeaders`, `squareControls` an,
 `glyphControls`, Logos, Icons, `ripple` aus — dann trägt Text die Bedienung, wie es
@@ -205,7 +204,6 @@ Bereiche zeigen (Flyout-Karte 348 pt breit + ein Listen-Ausschnitt, Light und Da
 | Suchfeld/Eingabefelder | Weiß 65 % + 2-pt-Ink-Rahmen, Radius via `squareControls` |
 | Blende um alles | `screenBorder` |
 | Bildmarke über dem Kontostand | `logo` / `logoDark` — sonst die Bankmarke, bei `bankLogos=off` ein Mosaik-Block |
-| Fensterkanten | `windowCorners` (Overlay, Widget, Umsatzliste — nicht das Popover) |
 | Icons in Fuß-, Steuer- und Titelzeile | `icon.<name>` / `icon.<name>.active` (§4.4) |
 | Mosaik-Blöcke | Muster fix, Farben fix je Kategorie (nicht konfigurierbar) |
 
@@ -295,8 +293,6 @@ bestehende bearbeitet — ohne die App zu verändern.
    - **Icon-Tabelle** (4.4): je Zeile Funktion, Ruhe- und Aktiv-Symbol, mit
      SF-Symbol-Suche und Vorschau. Ein unbekannter Name muss im Builder auffallen —
      die App fällt still auf den Standard zurück, was beim Bauen niemand merkt.
-   - **Fensterform** (`windowCorners`) als Zweifach-Wahl mit dem Hinweis, dass das
-     Menüleisten-Popover davon unberührt bleibt.
 2. **Live-Preview** nach der Wirkungs-Landkarte (Abschnitt 5): Flyout-Karte +
    Listen-Ausschnitt mit Beispieldaten, umschaltbar Hell/Dunkel. Die Preview muss die
    Schalter-Effekte zeigen (Mosaik statt Logo, Textkommandos, Punktlinien, Blende,

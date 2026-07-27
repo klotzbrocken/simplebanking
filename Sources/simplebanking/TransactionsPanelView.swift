@@ -4226,30 +4226,6 @@ final class AccountNavModel: ObservableObject {
         }
     }
 
-    // MARK: - Fensterform (Theme-Schalter `windowCorners`)
-    //
-    // Ein `.titled`-Fenster bekommt seine runden Ecken vom Fenster-Server; der
-    // Rahmen-View maskiert den Inhalt. Eckig geht deshalb nur, indem man dem Fenster
-    // seinen eigenen Hintergrund nimmt und die Fläche selbst zeichnet — nicht über
-    // einen Radius am `contentView`, der würde weiterhin rund beschnitten.
-    //
-    // Bei `rounded` (Default) passiert hier nichts: dann bleibt alles beim
-    // Systemverhalten, und der Bestand ist unberührt.
-
-    private static func applyWindowCorners(to panel: NSPanel) {
-        guard ThemeChrome.windowCornerRadius(10) == 0 else { return }
-        panel.isOpaque = false
-    }
-
-    /// Zweiter Teil, nach `super.init()`: Der `contentView` existiert erst dann.
-    private static func applyWindowCornerMask(to panel: NSPanel) {
-        guard let content = panel.contentView else { return }
-        let radius = ThemeChrome.windowCornerRadius(10)
-        content.wantsLayer = true
-        content.layer?.cornerRadius = radius
-        content.layer?.masksToBounds = radius > 0
-    }
-
     private func applyWindowLevel() {
         panel.level = isPinned ? .floating : .normal
     }
@@ -4291,7 +4267,6 @@ final class AccountNavModel: ObservableObject {
         }
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
-        Self.applyWindowCorners(to: panel)
         // Transparente Titelleiste ohne Trennlinie — die SwiftUI-Money-Heat füllt den
         // oberen Streifen (keine NSToolbar mehr, s. configureTitlebar()).
         panel.titlebarSeparatorStyle = .none
@@ -4311,7 +4286,6 @@ final class AccountNavModel: ObservableObject {
 
         panel.delegate = self
         applyWindowLevel()   // restore persisted stay-on-top state
-        Self.applyWindowCornerMask(to: panel)
         configureTitlebar()
         let host = NSHostingView(rootView: TransactionsPanelView(
             vm: vm, onRefresh: onRefresh, accountNav: accountNav, onOpenDashboard: onOpenDashboard,

@@ -3656,9 +3656,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         hostView.frame = container.bounds
         hostView.autoresizingMask = [.width, .height]
         // Gerundete Ecken + dezenter Rahmen am Host-Layer (wie Centered-Flyout).
-        // Radius über das Theme: `windowCorners=square` macht daraus 0.
         hostView.wantsLayer = true
-        hostView.layer?.cornerRadius = ThemeChrome.windowCornerRadius(10)
+        hostView.layer?.cornerRadius = 10
         hostView.layer?.masksToBounds = true
         hostView.layer?.borderWidth = 0.5
         hostView.layer?.borderColor = NSColor.separatorColor.cgColor
@@ -4391,7 +4390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // `wantsLayer` muss VORHER stehen — ohne Layer liefen die Zuweisungen
         // unten still ins Leere (der Widget-Pfad macht es korrekt).
         result.host.view.wantsLayer = true
-        result.host.view.layer?.cornerRadius = ThemeChrome.windowCornerRadius(10)
+        result.host.view.layer?.cornerRadius = 10
         result.host.view.layer?.masksToBounds = true
         result.host.view.layer?.borderWidth = 0.5
         result.host.view.layer?.borderColor = NSColor.separatorColor.cgColor

@@ -3,8 +3,8 @@ import XCTest
 
 // MARK: - Die vier neuen Vertragsschlüssel
 //
-// `logo` / `logoDark` (globale Bildmarke statt Bankmarke), `windowCorners`
-// (Fensterform) und `icon.<name>` (einzeln austauschbare Bedien-Icons).
+// `logo` / `logoDark` (globale Bildmarke statt Bankmarke) und `icon.<name>`
+// (einzeln austauschbare Bedien-Icons).
 //
 // Der Vertrag ist additiv: Ohne diese Schlüssel muss sich nichts ändern. Genau das
 // prüft die erste Gruppe — sie ist die Klammer gegen den Fehler, der bei den
@@ -29,7 +29,6 @@ final class ThemeContractV2Tests: XCTestCase {
         let t = AppTheme.fallback
         XCTAssertNil(t.logoFileName)
         XCTAssertNil(t.logoDarkFileName)
-        XCTAssertFalse(t.squareWindowCorners, "Fenster bleiben rund")
         XCTAssertTrue(t.iconOverrides.isEmpty)
     }
 
@@ -40,24 +39,10 @@ final class ThemeContractV2Tests: XCTestCase {
             let cfg = try XCTUnwrap(ThemeManager.builtInThemes[file], "\(file) fehlt")
             let t = try parse(cfg)
             XCTAssertNil(t.logoFileName, "\(file) darf kein globales Logo mitbringen")
-            XCTAssertFalse(t.squareWindowCorners, "\(file) darf keine eckigen Fenster bekommen")
             XCTAssertTrue(t.iconOverrides.isEmpty, "\(file) darf keine Icons überschreiben")
         }
     }
 
-    // MARK: windowCorners
-
-    func test_windowCorners_wirdGelesen() throws {
-        XCTAssertTrue(try parse("id=t\nwindowCorners=square").squareWindowCorners)
-        XCTAssertFalse(try parse("id=t\nwindowCorners=rounded").squareWindowCorners)
-    }
-
-    /// Ein Tippfehler darf die Fenster nicht heimlich umstellen — gleiche Haltung wie
-    /// bei `parseBool`.
-    func test_windowCorners_tippfehlerBleibtRund() throws {
-        XCTAssertFalse(try parse("id=t\nwindowCorners=sqare").squareWindowCorners)
-        XCTAssertFalse(try parse("id=t\nwindowCorners=").squareWindowCorners)
-    }
 
     // MARK: logo
 
