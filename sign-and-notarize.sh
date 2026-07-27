@@ -139,7 +139,7 @@ spctl --assess --type execute --verbose=4 "$APP" || true
 spctl --assess --type open --verbose=4 "$DMG_PATH" || true
 
 if [[ "$SKIP_APPCAST" == "1" ]]; then
-    echo "Appcast-Generierung übersprungen (SKIP_APPCAST=1)"
+    echo "Appcast-Werte übersprungen (SKIP_APPCAST=1)"
     echo
     echo "Done."
     echo "App: $APP"
@@ -147,18 +147,97 @@ if [[ "$SKIP_APPCAST" == "1" ]]; then
     exit 0
 fi
 
-echo "[9/9] Generate appcast.xml"
-SPARKLE_TOOLS="${SPARKLE_TOOLS:-$ROOT/.sparkle-tools}"
-GENERATE_APPCAST="$SPARKLE_TOOLS/bin/generate_appcast"
-if [[ -x "$GENERATE_APPCAST" ]]; then
-    APPCAST_OUT="$OUTDIR/appcast.xml"
-    DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://simplebanking.de/download/}"
-    "$GENERATE_APPCAST" "$OUTDIR" -o "$APPCAST_OUT" --download-url-prefix "$DOWNLOAD_URL_PREFIX"
-    echo "Appcast: $APPCAST_OUT"
-    echo "Upload $APPCAST_OUT and the .dmg to your server."
-else
-    echo "Sparkle tools not found at $SPARKLE_TOOLS/bin/generate_appcast"
-    echo "Run ./setup-sparkle.sh once to install tools and generate keys."
+# ---------------------------------------------------------------------------
+# [9/9] Appcast-Werte ausgeben — bewusst KEIN `generate_appcast` mehr.
+#
+# Hier stand früher `generate_appcast "$OUTDIR"`. Das hatte zwei Fehler, von
+# denen der erste Kunden aussperrt:
+#
+#   1. Es scannt den GANZEN Build-Ordner. Dort liegen alle Wegwerf-Builds (im
+#      Juli waren es neun DMGs) und werden zu je einem regulären Eintrag. Vor
+#      allem aber kann es den `sparkle:informationalUpdate`/`belowVersion`-Riegel
+#      nicht erzeugen — und genau der trennt die Installationen mit dem ALTEN,
+#      verlorenen Signaturschlüssel (bis 1.6.1) von denen mit dem neuen. Ohne
+#      ihn bekämen 1.6.x-Kunden ein Update angeboten, das sie nicht verifizieren
+#      können: Fehlermeldung statt Migrationshinweis, und kein Weg mehr zurück.
+#   2. `--download-url-prefix` stand auf https://simplebanking.de/download/ —
+#      falscher Pfad (die DMGs liegen unter /assets/) und falscher Host: die
+#      Seite liegt hinter einem Cache mit 30 Tagen TTL, der nach einem Upload
+#      noch wochenlang die alte Datei ausliefert. Enclosure-URLs zeigen deshalb
+#      auf das GitHub-Release.
+#
+# Der Appcast wird von Hand gepflegt. Dieser Schritt liefert nur die Werte, die
+# man dafür braucht, und rechnet sie aus der TATSÄCHLICH gebauten DMG aus —
+# damit Build-Nummer, Länge und Signatur nicht auseinanderlaufen können.
+# ---------------------------------------------------------------------------
+echo "[9/9] Appcast-Werte für den neuen Eintrag"
+
+# Build-Nummer der ersten Fassung mit dem NEUEN Signaturschlüssel (2.0-Beta).
+# Alles darunter trägt den alten Schlüssel und darf nur den Hinweis sehen.
+# Dieser Wert bleibt konstant — er ist NICHT die Nummer des aktuellen Builds.
+OLD_KEY_CUTOFF="${OLD_KEY_CUTOFF:-20260725535}"
+
+SPARKLE_KEY_FILE="${SPARKLE_KEY_FILE:-$HOME/Documents/RetroMac-Sparkle-Key/sparkle-private-key.txt}"
+SIGN_UPDATE=""
+for candidate in "$ROOT/.sparkle-tools/bin/sign_update" \
+                 "$ROOT/.build/artifacts/sparkle/Sparkle/bin/sign_update"; do
+    [[ -x "$candidate" ]] && { SIGN_UPDATE="$candidate"; break; }
+done
+
+BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist")"
+SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+DMG_NAME="$(basename "$DMG_PATH")"
+DMG_LENGTH="$(stat -f%z "$DMG_PATH")"
+ENCLOSURE_URL="https://github.com/klotzbrocken/simplebanking/releases/download/v${SHORT_VERSION}/${DMG_NAME}"
+
+if [[ -z "$SIGN_UPDATE" ]]; then
+    echo "  ! sign_update nicht gefunden — einmalig ./setup-sparkle.sh ausführen."
+    exit 1
+fi
+if [[ ! -f "$SPARKLE_KEY_FILE" ]]; then
+    echo "  ! Privater Sparkle-Schlüssel fehlt: $SPARKLE_KEY_FILE"
+    echo "    (überschreibbar per SPARKLE_KEY_FILE=…)"
+    exit 1
+fi
+
+ED_SIGNATURE="$("$SIGN_UPDATE" --ed-key-file "$SPARKLE_KEY_FILE" "$DMG_PATH" \
+    | sed 's/.*edSignature="\([^"]*\)".*/\1/')"
+
+cat <<EOF
+
+  Release anlegen:
+    gh release create v${SHORT_VERSION} "$DMG_PATH"
+
+  Dann diesen Eintrag in appcast.xml einfügen (NACH <title>simplebanking</title>,
+  vor dem bisher obersten <item>). Der belowVersion-Riegel MUSS bleiben, solange
+  noch Installationen mit dem alten Schlüssel möglich sind:
+
+        <item>
+            <title>${SHORT_VERSION}</title>
+            <pubDate>$(LC_ALL=C date '+%a, %d %b %Y %H:%M:%S %z')</pubDate>
+            <sparkle:version>${BUNDLE_VERSION}</sparkle:version>
+            <sparkle:shortVersionString>${SHORT_VERSION}</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>${OLD_KEY_CUTOFF}</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="${ENCLOSURE_URL}" length="${DMG_LENGTH}" type="application/octet-stream" sparkle:edSignature="${ED_SIGNATURE}"/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking ${SHORT_VERSION}</h2>
+                <p>TODO: Release-Notizen.</p>
+            ]]></description>
+        </item>
+
+  Danach: main per Fast-Forward auf den Arbeitsbranch ziehen, pushen, und
+  gegenprüfen, dass raw.githubusercontent.com den neuen Stand ausliefert
+  (der CDN hängt rund eine Minute nach). Siehe CLAUDE.md.
+EOF
+
+OLD_DMG_COUNT=$(( $(ls -1 "$OUTDIR"/*.dmg 2>/dev/null | wc -l) - 1 ))
+if (( OLD_DMG_COUNT > 2 )); then
+    echo
+    echo "  Hinweis: $OLD_DMG_COUNT ältere DMGs liegen noch in $OUTDIR."
 fi
 
 echo

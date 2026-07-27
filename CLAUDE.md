@@ -109,30 +109,35 @@ BalanceBar
 
 ## Sparkle release process
 
-**Two hosts, don't confuse them.** The DMG is distributed via the website
-(`https://simplebanking.de/assets/simplebanking.dmg`, landing page `/download`,
-`Download.tsx:14` in the Lovable site export). The **appcast is not** — every shipped
-build has `SUFeedURL = https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/appcast.xml`
-baked into its Info.plist (unchanged since the initial commit). So `appcast.xml`
-**must be committed and pushed to `main`** no matter where the DMG lives; a GitHub
-Release is optional.
+**The appcast lives on GitHub `main`, the DMG on two hosts.** Every shipped build has
+`SUFeedURL = https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/appcast.xml`
+baked into its Info.plist, unchanged since the initial commit. **Pushing `appcast.xml`
+to `main` is what triggers the update for customers** — not the DMG upload. The DMG
+goes to the GitHub Release (that URL is the `<enclosure>`) *and* to the website for
+manual downloads.
 
-**⚠️ Signing-key migration (one-time, with 2.0.0):** the old EdDSA key (public
-`BOcdIyAH…`) was **lost** — its private key is gone. `sparkle-public-key.txt` now
-holds the **new** key (`uXP0XBQg…`; private key at `~/Documents/RetroMac-Sparkle-Key/`,
-shared with RetroMac). Existing 1.6.x installs carry the OLD public key and **cannot
-verify** any new-key-signed update — verified empirically, not assumed: the 2.0 DMG's
-signature verifies against `uXP0XBQg…` and fails against `BOcdIyAH…`. So 2.0.0 ships as
-an **informational appcast item**: `<sparkle:informationalUpdate><sparkle:belowVersion>`
-gated to the shipped CFBundleVersion, a `<link>` to the download page, and **no
-`<enclosure>`** (hence no signature) — it reaches old-key installs and nudges them to
-download once by hand. Once on the new build, normal signed auto-update resumes.
+**⚠️ Signing-key migration (done with 2.0.0, but its consequence is permanent):** the
+old EdDSA key (public `BOcdIyAH…`) was **lost**. `sparkle-public-key.txt` holds the
+**new** key (`uXP0XBQg…`; private key at `~/Documents/RetroMac-Sparkle-Key/`, shared
+with RetroMac). Installs up to 1.6.1 carry the OLD public key and **cannot verify** any
+new-key-signed update — measured, not assumed: the 2.0 DMG verifies against `uXP0XBQg…`
+and fails against `BOcdIyAH…`. There is no auto-update path for them, ever; they must
+download once by hand.
 
-Sign a DMG with the new key:
-`.build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file ~/Documents/RetroMac-Sparkle-Key/sparkle-private-key.txt <DMG>`
+**Therefore every future appcast item keeps the gate:**
+```xml
+<sparkle:informationalUpdate>
+    <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+</sparkle:informationalUpdate>
+```
+`20260725535` is the build number of the first release carrying the NEW key (the 2.0
+beta) and is a **constant** — never the current build. Below it → old key → Sparkle only
+shows the notice and opens `<link>`, nothing is downloaded and no signature is checked.
+At or above → normal signed update. Drop the gate and a 1.6.x client picks the newest
+item, downloads, and fails verification: an error dialog instead of the migration hint.
 
-Verify a signature actually matches the key baked into a build (do this whenever the
-key changes — otherwise a broken auto-update path only shows up one release later):
+Verify a signature matches the key baked into a build (do this whenever the key
+changes — a broken auto-update path otherwise surfaces one release too late):
 ```bash
 { printf '302a300506032b6570032100' | xxd -r -p; base64 -d < sparkle-public-key.txt; } \
   | openssl pkey -pubin -inform DER -out /tmp/ed.pem
@@ -140,16 +145,37 @@ echo "<edSignature>" | base64 -d > /tmp/sig.bin
 openssl pkeyutl -verify -pubin -inkey /tmp/ed.pem -rawin -in <DMG> -sigfile /tmp/sig.bin
 ```
 
-Release steps:
+### Release steps
+
 1. Bump `VERSION_BASE` in `build-app.sh`.
-2. `BUILD_FIRST=1 SKIP_APPCAST=1 bash sign-and-notarize.sh` → notarized, stapled DMG in `SimpleBankingBuild/`.
-3. Upload the DMG to the website as `assets/simplebanking.dmg`; bump `APP_VERSION` in `Download.tsx` if the visible version changed.
-4. Edit `appcast.xml` — from 2.0.1 on a normal item **with** `<enclosure>` and the new
-   signature. Use a **versioned** enclosure URL, never `/assets/simplebanking.dmg`:
-   that path always serves the newest file, so a 2.0.1 item would later hand out a
-   2.0.2 DMG whose signature no longer matches the item.
-5. `git add appcast.xml && git commit && git push` — **this is what actually triggers
-   the update for customers.**
+2. `BUILD_FIRST=1 bash sign-and-notarize.sh` → notarized, stapled DMG, and step 9 prints
+   the ready-made `<item>` with version, length, signature and enclosure URL computed
+   from the DMG it just built. **Do not run `generate_appcast`** — it scans the whole
+   build folder (every throwaway build becomes an item) and cannot express the gate.
+   That is why it was removed from the script.
+3. `gh release create vX.Y.Z <DMG>` — **push first** (next step), otherwise `gh` tags the
+   remote's current HEAD, i.e. the wrong commit. Fixable afterwards with
+   `gh api -X PATCH repos/klotzbrocken/simplebanking/git/refs/tags/vX.Y.Z -f sha=<sha> -F force=true`.
+4. Paste the item into `appcast.xml`, fill in the release notes, `xmllint --noout appcast.xml`.
+5. **Check the branch.** Development runs on a feature branch (2.0 was on
+   `feat/flyout-refresh-4b`); local `main` lags far behind, so a bare `git push origin main`
+   ships the *old* state. Fast-forward first: `git branch -f main <branch>`.
+6. Push. The remote is `git@github.com:…` but SSH is not set up — use the HTTPS URL, `gh`
+   supplies the credentials: `git push https://github.com/klotzbrocken/simplebanking.git main`.
+7. Verify what clients actually get — `raw.githubusercontent.com` lags ~1 minute behind
+   the push:
+   ```bash
+   curl -s https://raw.githubusercontent.com/klotzbrocken/simplebanking/main/appcast.xml | grep -o '<title>[^<]*</title>' | head -3
+   ```
+8. Website: upload the DMG under its **versioned** filename and point `DOWNLOAD_URL` in
+   `Download.tsx` at it. Never reuse `assets/simplebanking.dmg` — the site sits behind a
+   cache with `max-age=2592000` (30 days) that kept serving the June file for weeks after
+   the 2.0 upload. A URL that did not exist before cannot be stale. Same trap in
+   `BetaDownload.tsx`.
+
+`CFBundleVersion` is stamped as `YYYYMMDD<seq>` and rises with **every** build, including
+throwaway ones — so the appcast version must always come from the DMG actually uploaded.
+Step 9 does that for you. Never reset `.build-number` after a public release.
 
 `<sparkle:version>` in the appcast must be the CFBundleVersion of the DMG you actually
 uploaded — it is stamped as `YYYYMMDD<seq>` at build time and rises with **every**
