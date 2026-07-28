@@ -4098,11 +4098,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Färbt die Popover-„Nase" (Pfeil) im Wash-Ton. AppKit bietet dafür keine
     /// offizielle API — best-effort über den Layer der privaten Rahmen-View
     /// (sicher: kein KVC, kein Crash-Risiko; wirkt nur, wenn die View einen Layer hat).
+    /// Kennung der eingehängten Hintergrundfläche, damit sie beim Nachtönen
+    /// wiedergefunden statt gestapelt wird.
+    private static let flyoutArrowTintIdentifier = NSUserInterfaceItemIdentifier("flyoutArrowTint")
+
+    /// Färbt die Sprechblase des Popovers — inklusive der Nase.
+    ///
+    /// Vorher stand hier `frameView.layer?.backgroundColor = …`, und genau das
+    /// funktioniert nicht: Der Rahmen-View des Popovers zeichnet seinen eigenen
+    /// Blasen-Hintergrund ÜBER sein Layer, weshalb nur die Nase weiß blieb — die
+    /// Fläche darunter deckte ohnehin der SwiftUI-Inhalt ab, deshalb fiel es dort
+    /// nicht auf.
+    ///
+    /// Stattdessen wird eine eigene Fläche als UNTERSTE Subview des Rahmen-Views
+    /// eingehängt. Der Rahmen-View beschneidet seine Subviews auf die Blasenform,
+    /// also bekommt die Nase die Farbe mit, ohne dass ein Rechteck entsteht.
     private func tintFlyoutPopoverArrow() {
         guard let window = balancePopover?.contentViewController?.view.window,
               let frameView = window.contentView?.superview else { return }
-        frameView.wantsLayer = true
-        frameView.layer?.backgroundColor = currentFlyoutWashTopNSColor().cgColor
+
+        let tint: NSView
+        if let existing = frameView.subviews.first(where: { $0.identifier == Self.flyoutArrowTintIdentifier }) {
+            tint = existing
+        } else {
+            let view = NSView(frame: frameView.bounds)
+            view.identifier = Self.flyoutArrowTintIdentifier
+            view.autoresizingMask = [.width, .height]
+            view.wantsLayer = true
+            frameView.addSubview(view, positioned: .below, relativeTo: nil)
+            tint = view
+        }
+        tint.layer?.backgroundColor = currentFlyoutSurfaceNSColor().cgColor
+    }
+
+    /// Die Farbe, mit der die Flyout-Karte oben abschließt — bei aktivem Theme die
+    /// flache Theme-Fläche, sonst der obere Money-Heat-Ton.
+    ///
+    /// Die frühere Fassung kannte nur den Money-Heat und hätte bei einem aktiven Theme
+    /// eine Nase in fremder Farbe erzeugt.
+    private func currentFlyoutSurfaceNSColor() -> NSColor {
+        if ThemeManager.shared.currentTheme.isDefault == false {
+            let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return ThemeManager.shared.currentTheme.surfaceColor(dark: dark)
+        }
+        return currentFlyoutWashTopNSColor()
     }
 
     private func showBalanceFlyout() {
