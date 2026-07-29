@@ -365,6 +365,8 @@ enum YaxiService {
 
     // Throttle re-opening the bank redirect URL (< 290 s cooldown).
     private static nonisolated(unsafe) var lastRedirectOpenedAt: Date? = nil
+    /// Zur zuletzt geöffneten Freigabe-URL — die Drossel greift nur bei identischer URL.
+    private static nonisolated(unsafe) var lastRedirectURL: String? = nil
 
 
     // MARK: - Public API
@@ -585,6 +587,7 @@ enum YaxiService {
                           userInfo: [NSLocalizedDescriptionKey: "no connectionId for accounts()"])
         }
         let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
+        AppLogger.log("fetchAccounts: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
         var storedSession = await sessionStore.session(for: .balances, slotId: slotSnapshot)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
@@ -728,6 +731,7 @@ enum YaxiService {
             : [AccountReference(id: .iban(iban), currency: "EUR")]
 
         let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
+        AppLogger.log("fetchBalances: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
         let storedSession = await sessionStore.session(for: .balances, slotId: slotSnapshot)
         let creds = buildCredentials(
             connectionId: connectionId, model: model,
@@ -2213,13 +2217,40 @@ enum YaxiService {
 
     // MARK: - Redirect URL throttling and browser opening
 
+    /// Öffnet die Freigabe-URL der Bank im Browser.
+    ///
+    /// Die Drossel verhindert, dass parallel laufende Abrufe **dieselbe** Freigabe
+    /// mehrfach aufreißen. Sie verglich bisher nur die Zeit, nicht die URL — und war
+    /// damit prozessweit blind gegenüber einer NEUEN Freigabe-Anforderung.
+    ///
+    /// Das brach Banken mit mehreren Freigaben pro Einrichtung, allen voran bunq: Der
+    /// Konten-Abruf öffnet den QR-Code, der Nutzer scannt und gibt auf dem Telefon frei
+    /// (ein bis drei Minuten), danach verlangt der Umsatzabruf eine zweite Freigabe —
+    /// deren URL wurde verworfen, weil die erste keine 290 s zurücklag. Kein Browser,
+    /// kein neuer QR-Code, nichts erreichte das Telefon; `pollRedirect` lief zehn
+    /// Minuten ins Leere und die Einrichtung scheiterte.
+    ///
+    /// Jetzt greift die Drossel nur noch bei **identischer** URL. Eine neue Freigabe
+    /// hat einen neuen Zustandsparameter und damit eine neue URL, kommt also durch.
+    /// Ein Fenster-Sturm droht dadurch nicht: `pollRedirect` öffnet URLs nicht erneut
+    /// (`:2026-2029` aktualisiert nur den Kontext), diese Funktion läuft genau einmal
+    /// je Freigabe-Zyklus.
     private static func openRedirectURL(_ url: URL) {
         let now = Date()
-        if let last = lastRedirectOpenedAt, now.timeIntervalSince(last) < 290 {
-            AppLogger.log("SCA: redirect URL throttled (\(Int(now.timeIntervalSince(last)))s ago)", category: "YaxiService")
+        let key = url.absoluteString
+        if key == lastRedirectURL,
+           let last = lastRedirectOpenedAt,
+           now.timeIntervalSince(last) < 290 {
+            AppLogger.log("SCA: redirect URL throttled — identische URL vor \(Int(now.timeIntervalSince(last)))s geöffnet",
+                          category: "YaxiService")
             return
         }
+        if lastRedirectOpenedAt != nil, key != lastRedirectURL {
+            AppLogger.log("SCA: neue Freigabe-URL (host=\(url.host ?? "?"), \(key.count) Zeichen) — öffne Browser",
+                          category: "YaxiService")
+        }
         lastRedirectOpenedAt = now
+        lastRedirectURL = key
         NSWorkspace.shared.open(url)
         sendSCANotification()
     }

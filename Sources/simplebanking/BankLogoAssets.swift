@@ -271,6 +271,34 @@ enum BankLogoAssets {
         if let iban, let byIBAN = find(byIBAN: iban) {
             return withGeneratedColor(byIBAN)
         }
+        // Letzter Ausweg: der YAXI-Catalog. Er führt 192 Logos, die handgepflegte
+        // Liste `brands` nur 29 — für alle übrigen lag das Logo bisher ungenutzt im
+        // Bundle und der Slot bekam gar keins (aufgefallen an bunq). Bewusst zuletzt,
+        // damit die kuratierten Marken mit ihren Keywords und BLZ-Regeln Vorrang
+        // behalten; für sie ändert sich dadurch nichts.
+        if let fromCatalog = find(inCatalog: logoID, displayName: displayName) {
+            return fromCatalog
+        }
+        return nil
+    }
+
+    /// Baut eine Marke direkt aus dem Catalog. Sucht zuerst über die logoID, dann über
+    /// den Anzeigenamen — bei frisch eingerichteten Slots steht die logoID noch nicht
+    /// fest (`BalanceBar` heilt sie erst nachträglich).
+    static func find(inCatalog logoID: String?, displayName: String?) -> BankBrand? {
+        for candidate in [logoID, displayName] {
+            guard let candidate else { continue }
+            let key = normalize(candidate).replacingOccurrences(of: " ", with: "")
+            guard !key.isEmpty, BankLogoCatalog.availableLogoIds.contains(key) else { continue }
+            let name = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return BankBrand(
+                id: key,
+                displayName: name.isEmpty ? key : name,
+                logoURL: bundled(key),
+                accentColor: primaryColor(forLogoId: key) ?? "808080",
+                keywords: []
+            )
+        }
         return nil
     }
 
@@ -374,6 +402,11 @@ enum BankLogoAssets {
         return darkBrandIDs.contains(brandId)
     }
 
+    /// Bewusst nur über `brands`, nicht über den ganzen Catalog: `primaryColor` beschreibt
+    /// die Wortmarke, nicht das gerenderte SVG. bunq etwa führt `#000000`, zeigt aber eine
+    /// bunte Kachel mit weißer Schrift — ein `.colorInvert()` darauf färbt die Balken um.
+    /// Katalog-Marken (siehe `find(inCatalog:displayName:)`) bleiben deshalb uninvertiert;
+    /// wer das ändern will, muss die Tinte aus dem SVG lesen, nicht aus `primaryColor`.
     private static let darkBrandIDs: Set<String> = {
         var result: Set<String> = []
         for brand in brands {

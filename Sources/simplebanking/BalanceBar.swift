@@ -708,7 +708,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             : ""
         if isShort {
             // Flyout-Mode: kein Saldo-Text, nur Bank-Icon (+ optional Emoji).
-            setButtonTitle(button, moodEmoji)
+            // Ohne Logo braucht es dasselbe „€" wie im ausgeblendeten Zweig, sonst
+            // bleibt das Status-Item vollständig leer — sichtbar wurde das beim
+            // Mouse-Over, das aus dem ausgeblendeten Zweig hierher wechselt und den
+            // Platzhalter dabei verschwinden ließ.
+            setButtonTitle(button, logo != nil ? moodEmoji : "\(moodEmoji)€")
         } else if let unifiedTitle = computeUnifiedBalanceTitle() {
             let indicator = latestTxSigBySlot.contains { id, sig in !sig.isEmpty && sig != lastSeenTxSig(for: id) } ? "  ●" : ""
             setButtonTitle(button, "\(unifiedTitle)\(indicator)")
