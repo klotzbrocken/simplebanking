@@ -792,6 +792,13 @@ enum YaxiService {
                     accounts: accountRefs
                 )
             } catch {
+                // Rohfehler VOR der Einordnung: Die Zweige darunter legen ihn auf
+                // eine Deutung fest („consent expired") und loggen nur diese. Bei
+                // HypoVereinsbank stand das im Protokoll, obwohl die connectionData
+                // vierzig Sekunden alt war — ohne den Rohwert war nicht zu sehen, ob
+                // die Bank das wirklich sagte oder unsere Heuristik es hineinlas.
+                AppLogger.log("fetchBalances: Rohfehler vor Einordnung: \(String(reflecting: error))",
+                              category: "YaxiService", level: "WARN")
                 // YAXI-Doku: nach jedem non-RequestError ist der Service in
                 // "failed state" → "need to start it again, with a new ticket".
                 // Wir holen daher in jedem retry-Branch (außer Network) einen
@@ -1005,6 +1012,9 @@ enum YaxiService {
                     ticket: ticket
                 )
             } catch {
+                // Rohfehler vor der Einordnung — wie bei fetchBalances, aus demselben Grund.
+                AppLogger.log("fetchTransactions: Rohfehler vor Einordnung: \(String(reflecting: error))",
+                              category: "YaxiService", level: "WARN")
                 // YAXI-Doku: nach jedem non-RequestError ist der Service in
                 // "failed state" → frischer Ticket nötig. Network-Errors
                 // sind explizit ausgenommen.
@@ -1915,8 +1925,15 @@ enum YaxiService {
                     return await handleSCA(initial: next, client: client, ticket: ticket,
                                            confirm: confirm, respond: respond, depth: depth + 1)
                 } catch {
-                    AppLogger.log("SCA field respond error: \(error.localizedDescription)",
+                    // `localizedDescription` ist hier wertlos: `UnexpectedError(userMessage: nil)`
+                    // beschreibt sich damit als nichts. Deshalb der volle Typ — und ein Trace,
+                    // denn dieser Zweig kehrt mit nil zurück statt zu werfen, weshalb der
+                    // Trace-Schreiber in fetchBalances/fetchTransactions nie erreicht wird.
+                    // Genau der Fehler, auf den es ankommt, hinterließ bisher keine Spur.
+                    AppLogger.log("SCA field respond error: \(String(reflecting: error))",
                                   category: "YaxiService", level: "ERROR")
+                    await writeTrace(client: client, label: "sca-field-respond",
+                                     ticket: ticket, error: error)
                     return nil
                 }
             }

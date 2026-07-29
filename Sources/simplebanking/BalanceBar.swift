@@ -6537,10 +6537,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             text.contains("zugangsdaten")
     }
 
+    /// `succeeded` entscheidet, ob ein zurückgekehrter Wert auch ein Erfolg ist.
+    /// Ein Schritt kann ohne Fehler zurückkehren und trotzdem gescheitert sein —
+    /// `fetchBalances` liefert dafür `ok == false`, und die Prüfung darauf steht erst
+    /// hinter diesem Aufruf. Die Diagnosedatei meldete deshalb „success" für genau den
+    /// Schritt, an dem die Einrichtung starb (HypoVereinsbank, 29.07.). Ohne Angabe
+    /// bleibt es beim bisherigen Verhalten: zurückgekehrt heißt gelungen.
     nonisolated private static func runSetupStepWithTimeout<T: Sendable>(
         step: String,
         timeout: TimeInterval = 60,
         logger: SetupDiagnosticsLogger?,
+        succeeded: @escaping @Sendable (T) -> Bool = { _ in true },
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         let timeoutSeconds: TimeInterval = timeout
@@ -6577,7 +6584,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 }
             }
             let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
-            logger?.log(step: step, event: "success", details: ["duration_ms": String(durationMs)])
+            logger?.log(step: step,
+                        event: succeeded(value) ? "success" : "failure",
+                        details: ["duration_ms": String(durationMs)])
             return value
         } catch {
             let durationMs = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -6739,7 +6748,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Kein SCA mehr nötig (recurring consent ist gesetzt).
             options.onProgress?(.fetchingBalance)
             AppLogger.log("Setup step warmup_balances", category: "Setup")
-            let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 300, logger: diagnosticsLogger) {
+            let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 300, logger: diagnosticsLogger,
+                                                                      succeeded: { $0.ok }) {
                 try await YaxiService.fetchBalances(
                     userId: result.userId,
                     password: result.password,
@@ -6764,7 +6774,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
             options.onProgress?(.requestingTransactionApproval)
             AppLogger.log("Setup step warmup_transactions", category: "Setup")
-            var warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions", timeout: 720, logger: diagnosticsLogger) {
+            var warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions", timeout: 720, logger: diagnosticsLogger,
+                                                                          succeeded: { $0.ok == true }) {
                 try await YaxiService.fetchTransactions(
                     userId: result.userId,
                     password: result.password,
@@ -6780,13 +6791,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     // keinen Push-TAN – sie fällt auf interaktive TAN zurück.
                     await YaxiService.clearSessionsKeepingConnectionData()
                 }
-                _ = try await runSetupStepWithTimeout(step: "warmup_balances_retry", timeout: 720, logger: diagnosticsLogger) {
+                _ = try await runSetupStepWithTimeout(step: "warmup_balances_retry", timeout: 720, logger: diagnosticsLogger,
+                                                                 succeeded: { $0.ok }) {
                     try await YaxiService.fetchBalances(
                         userId: result.userId, password: result.password,
                         callSource: .setupWarmup
                     )
                 }
-                warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions_retry", timeout: 720, logger: diagnosticsLogger) {
+                warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions_retry", timeout: 720, logger: diagnosticsLogger,
+                                                                     succeeded: { $0.ok == true }) {
                     try await YaxiService.fetchTransactions(
                         userId: result.userId,
                         password: result.password,
