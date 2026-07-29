@@ -1117,8 +1117,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // SCA `.field`-Branch (TAN-Eingabe-Dialog) — Bank verlangt einen
         // Textcode statt Push-Bestätigung. UI lebt in SCAFieldInputSheet.
-        YaxiService.fieldInputProvider = { spec in
-            await SCAFieldInputPresenter.present(spec)
+        YaxiService.fieldInputProvider = { spec, done in
+            SCAFieldInputPresenter.present(spec, completion: done)
         }
 
         // Task 4: Set active slot IDs in all data layers at startup

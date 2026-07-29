@@ -24,12 +24,18 @@ enum YaxiService {
     nonisolated(unsafe) static var onTanStateChanged: (@MainActor (Bool) -> Void)?
 
     /// Wird vom SCA-`.field`-Branch in `handleSCA` aufgerufen, wenn die Bank
-    /// eine TAN/PIN-Eingabe verlangt. Liefert den eingegebenen String oder
-    /// nil bei User-Cancel. Wird einmalig in `BalanceBar` beim App-Start
-    /// auf `SCAFieldInputPresenter.present(_:)` verdrahtet. Bleibt nil in
-    /// Test-/CLI-Kontexten — dann bricht der Branch wie bisher mit WARN ab.
+    /// eine TAN/PIN-Eingabe verlangt. Meldet den eingegebenen String über die
+    /// Completion — oder nil bei User-Cancel. Wird einmalig in `BalanceBar` beim
+    /// App-Start auf `SCAFieldInputPresenter.present(_:completion:)` verdrahtet.
+    /// Bleibt nil in Test-/CLI-Kontexten — dann bricht der Branch wie bisher mit
+    /// WARN ab.
+    ///
+    /// Bewusst mit Completion statt `async`: Der Aufrufer muss das Panel synchron
+    /// aus einem Runloop-Callback heraus aufbauen können (siehe `onMainRunLoop`).
+    /// Eine `async`-Signatur zwänge ihn zurück auf die Main-Queue, die während einer
+    /// modalen Sitzung nicht bedient wird.
     nonisolated(unsafe) static var fieldInputProvider:
-        (@Sendable (SCAFieldInput.Spec) async -> String?)?
+        (@MainActor (SCAFieldInput.Spec, @escaping @MainActor (String?) -> Void) -> Void)?
 
     /// Meldet den SCA-Methodentyp, sobald `handleSCA` ihn kennt — damit die Setup-UI
     /// den Fortschrittstext passend setzt (Code-Eingabe vs. App-Freigabe). Vom
@@ -364,6 +370,24 @@ enum YaxiService {
     }
 
     // Throttle re-opening the bank redirect URL (< 290 s cooldown).
+    /// Führt `body` auf dem Main-Thread aus — auch während einer modalen Sitzung.
+    ///
+    /// `await MainActor.run` reiht den Block in die Main-Dispatch-Queue ein, und die
+    /// wird nur in den Common-Modes bedient. `NSApp.runModal()` fährt die Runloop aber
+    /// in `NSModalPanelRunLoopMode`, der nicht dazugehört: Solange der
+    /// Einrichtungsassistent modal läuft, bleibt so ein Hop schlicht liegen, bis die
+    /// Sitzung endet. Bei Banken mit Tipp-TAN (HypoVereinsbank) verzögerte das die
+    /// Anzeige des TAN-Felds bis zum Abbruch — gemessen 17 bis 60 Sekunden, die TAN war
+    /// dann abgelaufen. `RunLoop.perform(inModes:)` wird auch im Modal-Mode bedient;
+    /// `SetupFlowPanel.enqueueOnMainRunLoop` nimmt für seine Callbacks denselben Weg.
+    static func onMainRunLoop<T: Sendable>(_ body: @escaping @MainActor @Sendable () -> T) async -> T {
+        await withCheckedContinuation { (cont: CheckedContinuation<T, Never>) in
+            RunLoop.main.perform(inModes: [.default, .modalPanel]) {
+                MainActor.assumeIsolated { cont.resume(returning: body()) }
+            }
+        }
+    }
+
     private static nonisolated(unsafe) var lastRedirectOpenedAt: Date? = nil
     /// Zur zuletzt geöffneten Freigabe-URL — die Drossel greift nur bei identischer URL.
     private static nonisolated(unsafe) var lastRedirectURL: String? = nil
@@ -1820,10 +1844,13 @@ enum YaxiService {
                 }
                 // Tipp-TAN/PIN → Setup-UI auf „Code eingeben" stellen (nicht App-Freigabe).
                 scaMethodReporter?(.fieldInput)
-                let slotEpochSnapshot = await MainActor.run {
+                // Ab hier NUR noch `onMainRunLoop`, kein `MainActor.run`: Während der
+                // Einrichtungsassistent modal läuft, bliebe jeder gewöhnliche Hop bis
+                // zum Abbruch liegen — siehe die Begründung an `onMainRunLoop`.
+                let slotEpochSnapshot = await onMainRunLoop {
                     MultibankingStore.shared.activeSlotEpoch
                 }
-                let bankName = await MainActor.run {
+                let bankName = await onMainRunLoop {
                     MultibankingStore.shared.activeSlot?.displayName ?? "Bank"
                 }
                 let spec = SCAFieldInput.Spec(
@@ -1839,13 +1866,27 @@ enum YaxiService {
                     "min=\(minLen.map(String.init) ?? "—") max=\(maxLen.map(String.init) ?? "—")",
                     category: "YaxiService"
                 )
-                guard let userValue = await provider(spec) else {
+                // Das Panel wird aus dem Runloop-Callback heraus aufgebaut und gezeigt.
+                // Es MUSS synchron dort geschehen: Ein `Task { @MainActor }` landete
+                // wieder auf der Main-Queue und damit im selben Stau.
+                let userValue = await withCheckedContinuation {
+                    (cont: CheckedContinuation<String?, Never>) in
+                    RunLoop.main.perform(inModes: [.default, .modalPanel]) {
+                        MainActor.assumeIsolated {
+                            let guard_ = FieldInputResumeGuard(cont)
+                            provider(spec) { guard_.resume($0) }
+                        }
+                    }
+                }
+                guard let userValue else {
                     AppLogger.log("SCA field: user cancelled", category: "YaxiService")
                     return nil
                 }
                 // Slot-Race: User hat während Eingabe Bank gewechselt → der
                 // InputContext zeigt auf eine fremde Session, nicht abschicken.
-                let currentEpoch = await MainActor.run {
+                // Auch hier `onMainRunLoop`: Die verschachtelte TAN-Session ist zwar
+                // vorbei, die äußere Assistenten-Session läuft aber weiter.
+                let currentEpoch = await onMainRunLoop {
                     MultibankingStore.shared.activeSlotEpoch
                 }
                 guard currentEpoch == slotEpochSnapshot else {
@@ -2268,5 +2309,21 @@ enum YaxiService {
                 if let error { AppLogger.log("SCA notification error: \(error)", category: "YaxiService", level: "WARN") }
             }
         }
+    }
+}
+
+/// Genau-einmal-Wrapper für die Continuation der TAN-Eingabe.
+///
+/// Der Presenter garantiert einen einzigen Completion-Aufruf selbst (Coordinator bzw.
+/// ContinuationBox), aber diese Zusage steht in einer anderen Datei — und ein zweites
+/// `resume` auf derselben Continuation ist kein Fehlverhalten, sondern ein Absturz.
+@MainActor
+final class FieldInputResumeGuard {
+    private var cont: CheckedContinuation<String?, Never>?
+    init(_ cont: CheckedContinuation<String?, Never>) { self.cont = cont }
+    func resume(_ value: String?) {
+        guard let c = cont else { return }
+        cont = nil
+        c.resume(returning: value)
     }
 }

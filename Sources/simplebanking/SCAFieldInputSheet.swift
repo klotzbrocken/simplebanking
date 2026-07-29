@@ -3,15 +3,20 @@ import SwiftUI
 
 // MARK: - SCAFieldInputPresenter
 //
-// Bridge zwischen dem `async`-API von `YaxiService.handleSCA` und dem
-// modalen NSPanel-Sheet. Aufrufer macht:
+// Bridge zwischen `YaxiService.handleSCA` und dem modalen NSPanel-Sheet:
 //
-//     let tan = await SCAFieldInputPresenter.present(spec)
+//     SCAFieldInputPresenter.present(spec) { tan in … }
 //
-// und bekommt den eingegebenen String — oder nil bei Cancel/Close.
+// Die Completion liefert den eingegebenen String — oder nil bei Cancel/Close.
 //
 // Die `fieldInputProvider`-Closure auf `YaxiService` wird einmalig beim
 // App-Start in `BalanceBar` auf diesen Presenter verdrahtet.
+//
+// WICHTIG — Completion statt `async`: Der Aufruf kommt aus einem Runloop-Callback
+// (`RunLoop.perform(inModes:)`), weil die Main-Dispatch-Queue während der modalen
+// Sitzung des Einrichtungsassistenten nicht bedient wird. Alles hier muss deshalb
+// synchron in diesem Callback passieren; ein `await` gäbe die Ausführung an genau
+// die Queue zurück, die stillsteht. Ausführlich an `YaxiService.onMainRunLoop`.
 
 @MainActor
 enum SCAFieldInputPresenter {
@@ -27,9 +32,11 @@ enum SCAFieldInputPresenter {
     /// taucht erst auf, wenn man das Setup-Fenster schließt).
     nonisolated(unsafe) static weak var hostWindow: NSWindow?
 
-    /// Zeigt das TAN-Feld modal, returnt async den User-Wert oder nil bei Cancel.
-    static func present(_ spec: SCAFieldInput.Spec) async -> String? {
-        await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+    /// Zeigt das TAN-Feld und meldet den User-Wert — oder nil bei Cancel/Close.
+    /// Muss auf dem Main-Thread aufgerufen werden; `completion` läuft ebenfalls dort.
+    static func present(_ spec: SCAFieldInput.Spec,
+                        completion: @escaping @MainActor (String?) -> Void) {
+        do {
             let inModalSetup = hostWindow != nil
 
             let panel = NSPanel(
@@ -73,12 +80,12 @@ enum SCAFieldInputPresenter {
                 NSApp.runModal(for: panel)   // blockiert bis Submit/Cancel/Close
                 panel.delegate = nil
                 panel.close()
-                cont.resume(returning: coord.value)
+                completion(coord.value)
             } else {
                 // Fallback außerhalb des Setups (Refresh/Transfer, kein äußeres
                 // Modal): frei schwebendes, nicht-blockierendes Panel — die App
                 // bleibt bedienbar. ContinuationBox garantiert genau ein resume.
-                let box = ContinuationBox(cont: cont, host: nil)
+                let box = ContinuationBox(completion: completion, host: nil)
                 let delegate = SCAFieldInputWindowDelegate { box.resolve(nil, panel: panel) }
                 panel.delegate = delegate
                 objc_setAssociatedObject(panel, &SCAFieldInputDelegateKey,
@@ -106,21 +113,21 @@ private final class SCAModalCoordinator {
 
 private nonisolated(unsafe) var SCAFieldInputDelegateKey: UInt8 = 0
 
-/// Idempotenter Wrapper für die Continuation — verhindert doppeltes resume,
+/// Idempotenter Wrapper für die Completion — verhindert doppelte Meldung,
 /// wenn Submit + Window-Close kurz hintereinander feuern.
 @MainActor
 private final class ContinuationBox {
-    private var cont: CheckedContinuation<String?, Never>?
+    private var completion: (@MainActor (String?) -> Void)?
     private weak var host: NSWindow?
-    init(cont: CheckedContinuation<String?, Never>, host: NSWindow?) {
-        self.cont = cont
+    init(completion: @escaping @MainActor (String?) -> Void, host: NSWindow?) {
+        self.completion = completion
         self.host = host
     }
     func resolve(_ value: String?, panel: NSPanel) {
-        guard let c = cont else { return }
-        cont = nil
+        guard let done = completion else { return }
+        completion = nil
         if let host { host.endSheet(panel) } else { panel.close() }
-        c.resume(returning: value)
+        done(value)
     }
 }
 
