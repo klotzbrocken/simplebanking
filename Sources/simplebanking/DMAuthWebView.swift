@@ -35,6 +35,11 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
     private var didAutoSync = false
 
     var onSynced: ((DMSyncResult) -> Void)?
+
+    /// Meldet das Schließen des Fensters und ob je ein Sync gelang. Der Aufrufer legt
+    /// den Slot an, BEVOR dieses Fenster erscheint — bricht der Nutzer den Login ab,
+    /// bliebe sonst ein Konto zurück, das er nie wollte.
+    var onDismissed: ((_ didSync: Bool) -> Void)?
     /// Headless-Abschluss: true = synchronisiert, false = Timeout/Login nötig.
     var onFinished: ((Bool) -> Void)?
     private var headless = false
@@ -49,9 +54,12 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
     }
 
     @discardableResult
-    static func present(slotId: String, onSynced: ((DMSyncResult) -> Void)? = nil) -> DMAuthWebView {
+    static func present(slotId: String,
+                        onSynced: ((DMSyncResult) -> Void)? = nil,
+                        onDismissed: ((Bool) -> Void)? = nil) -> DMAuthWebView {
         let c = DMAuthWebView(slotId: slotId)
         c.onSynced = onSynced
+        c.onDismissed = onDismissed
         retained[slotId] = c
         c.show()
         return c
@@ -134,6 +142,7 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
     }
 
     func windowWillClose(_ notification: Notification) {
+        onDismissed?(finished)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "dmToken")
         Self.retained[slotId] = nil
     }

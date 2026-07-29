@@ -24,6 +24,11 @@ final class REWEAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate {
 
     /// Wird nach erfolgreichem Sync aufgerufen (z. B. zum Anlegen des Slots).
     var onSynced: ((REWESyncResult) -> Void)?
+
+    /// Meldet das Schließen des Fensters und ob je ein Sync gelang. Der Aufrufer legt
+    /// den Slot an, BEVOR dieses Fenster erscheint — bricht der Nutzer den Login ab,
+    /// bliebe sonst ein Konto zurück, das er nie wollte.
+    var onDismissed: ((_ didSync: Bool) -> Void)?
     /// Headless-Abschluss: true = synchronisiert, false = Timeout/Login nötig.
     var onFinished: ((Bool) -> Void)?
     private var headless = false
@@ -40,9 +45,12 @@ final class REWEAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate {
 
     /// Öffnet das Login-/Sync-Fenster.
     @discardableResult
-    static func present(slotId: String, onSynced: ((REWESyncResult) -> Void)? = nil) -> REWEAuthWebView {
+    static func present(slotId: String,
+                        onSynced: ((REWESyncResult) -> Void)? = nil,
+                        onDismissed: ((Bool) -> Void)? = nil) -> REWEAuthWebView {
         let c = REWEAuthWebView(slotId: slotId)
         c.onSynced = onSynced
+        c.onDismissed = onDismissed
         retained[slotId] = c
         c.show()
         return c
@@ -114,6 +122,7 @@ final class REWEAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        onDismissed?(finished)
         Self.retained[slotId] = nil
     }
 

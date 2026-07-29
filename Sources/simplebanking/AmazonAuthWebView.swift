@@ -21,6 +21,11 @@ final class AmazonAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate 
     private let bankId: String
 
     var onSynced: ((AmazonSyncResult) -> Void)?
+
+    /// Meldet das Schließen des Fensters und ob je ein Sync gelang. Der Aufrufer legt
+    /// den Slot an, BEVOR dieses Fenster erscheint — bricht der Nutzer den Login ab,
+    /// bliebe sonst ein Konto zurück, das er nie wollte.
+    var onDismissed: ((_ didSync: Bool) -> Void)?
     /// Headless-Abschluss: true = importiert, false = Timeout/Login nötig.
     var onFinished: ((Bool) -> Void)?
     private var headless = false
@@ -34,9 +39,12 @@ final class AmazonAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate 
     }
 
     @discardableResult
-    static func present(slotId: String, onSynced: ((AmazonSyncResult) -> Void)? = nil) -> AmazonAuthWebView {
+    static func present(slotId: String,
+                        onSynced: ((AmazonSyncResult) -> Void)? = nil,
+                        onDismissed: ((Bool) -> Void)? = nil) -> AmazonAuthWebView {
         let c = AmazonAuthWebView(slotId: slotId)
         c.onSynced = onSynced
+        c.onDismissed = onDismissed
         retained[slotId] = c
         c.show()
         return c
@@ -117,6 +125,7 @@ final class AmazonAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate 
     }
 
     func windowWillClose(_ notification: Notification) {
+        onDismissed?(finished)
         Self.retained[slotId] = nil
     }
 

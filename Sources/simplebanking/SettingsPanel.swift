@@ -1405,7 +1405,12 @@ struct SettingsView: View {
                                         .foregroundColor(.sbRedStrong).font(ThemeFonts.body(size: 12))
                                 }
                                 .buttonStyle(PlainButtonStyle())
-                                .disabled(multibankingStore.slots.count == 1)
+                                // Kein `.disabled` beim letzten Konto mehr: Wer nur ein
+                                // einziges hat, saß sonst darauf fest. Gemeldet für einen
+                                // REWE-Slot aus einer abgebrochenen Einrichtung — er war
+                                // das einzige Konto, ließ sich deshalb nicht entfernen und
+                                // überlebte auch das Zurücksetzen. Ohne Konten steht die
+                                // App im selben Zustand wie vor der ersten Einrichtung.
                             }
                         }
                         .padding(.vertical, 4)

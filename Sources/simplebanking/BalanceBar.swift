@@ -3118,6 +3118,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if let bundleID = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: bundleID)
         }
+        // NACH dem Domain-Wipe: Die Slot-Liste lebt zusätzlich im Speicher und schriebe
+        // sich beim nächsten `save()` ungefragt zurück — das Konto wäre trotz
+        // Zurücksetzen wieder da.
+        MultibankingStore.shared.removeAllSlots()
         
         // Reset state
         masterPassword = nil
@@ -5660,23 +5664,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         DispatchQueue.main.async { [weak self] in
             let store = MultibankingStore.shared
             let slotId: String
+            let createdNow: Bool
             if let existing = store.slots.first(where: { $0.isREWE }) {
                 slotId = existing.id
+                createdNow = false
             } else {
                 let slot = BankSlot.makeREWE()
                 // Nicht-aktiv + kein Aggregat-Zwang → kein destabilisierendes
                 // Re-Render der aktiven Bank-Ansicht mitten in der Session.
                 store.addSlot(slot, makeActive: false, autoUnified: false)
                 slotId = slot.id
+                createdNow = true
             }
-            self?.presentREWELogin(slotId: slotId)
+            self?.presentREWELogin(slotId: slotId, removeIfNeverSynced: createdNow)
         }
     }
 
     /// Öffnet das REWE-Login-/Sync-Fenster (manuell angestoßen — kein Auto-Sync).
     /// Nach erfolgreichem Sync: Anzeige + Panel-Liste aktualisieren.
-    private func presentREWELogin(slotId: String) {
-        REWEAuthWebView.present(slotId: slotId) { [weak self] result in
+    /// `removeIfNeverSynced` gilt nur für einen Slot, den dieser Aufruf gerade erst
+    /// angelegt hat: Bricht der Nutzer den Login ab, ohne dass je ein Sync gelang,
+    /// verschwindet er wieder. Sonst bliebe ein Konto zurück, das nie eingerichtet
+    /// wurde — gemeldet am 29.07., inklusive der Folge, dass es als einziges Konto
+    /// nicht mehr löschbar war.
+    private func presentREWELogin(slotId: String, removeIfNeverSynced: Bool = false) {
+        REWEAuthWebView.present(slotId: slotId, onSynced: { [weak self] result in
             AppLogger.log("REWE sync: listed=\(result.listed) matched=\(result.matched) stored=\(result.stored)",
                           category: "REWE")
             if MultibankingStore.shared.activeSlot?.id == slotId {
@@ -5684,7 +5696,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
             AppDelegate.setReceiptNeedsLogin(slotId, false)
             NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
-        }
+        }, onDismissed: { didSync in
+            // Fenster zu, nie ein Sync gelungen und der Slot stammt aus genau diesem
+            // Aufruf → wieder entfernen. `removeSlot` räumt Bons, Cookies und
+            // per-Slot-Daten gleich mit ab.
+            guard removeIfNeverSynced, !didSync else { return }
+            AppLogger.log("Händler-Login abgebrochen — angelegten Slot wieder entfernt",
+                          category: "Setup")
+            MultibankingStore.shared.removeSlot(id: slotId)
+        })
     }
 
     /// Phase-3a-Beta: öffnet das dm-Login-/Sync-Fenster (analog zu REWE). Legt
@@ -5693,20 +5713,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         DispatchQueue.main.async { [weak self] in
             let store = MultibankingStore.shared
             let slotId: String
+            let createdNow: Bool
             if let existing = store.slots.first(where: { $0.isDM }) {
                 slotId = existing.id
+                createdNow = false
             } else {
                 let slot = BankSlot.makeDM()
                 store.addSlot(slot, makeActive: false, autoUnified: false)
                 slotId = slot.id
+                createdNow = true
             }
-            self?.presentDMLogin(slotId: slotId)
+            self?.presentDMLogin(slotId: slotId, removeIfNeverSynced: createdNow)
         }
     }
 
     /// Öffnet das dm-Login-/Sync-Fenster (manuell angestoßen — kein Auto-Sync).
-    private func presentDMLogin(slotId: String) {
-        DMAuthWebView.present(slotId: slotId) { [weak self] result in
+    /// `removeIfNeverSynced` gilt nur für einen Slot, den dieser Aufruf gerade erst
+    /// angelegt hat: Bricht der Nutzer den Login ab, ohne dass je ein Sync gelang,
+    /// verschwindet er wieder. Sonst bliebe ein Konto zurück, das nie eingerichtet
+    /// wurde — gemeldet am 29.07., inklusive der Folge, dass es als einziges Konto
+    /// nicht mehr löschbar war.
+    private func presentDMLogin(slotId: String, removeIfNeverSynced: Bool = false) {
+        DMAuthWebView.present(slotId: slotId, onSynced: { [weak self] result in
             AppLogger.log("dm sync: listed=\(result.listed) detailed=\(result.detailed) stored=\(result.stored)",
                           category: "DM")
             if MultibankingStore.shared.activeSlot?.id == slotId {
@@ -5715,7 +5743,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             AppDelegate.setReceiptNeedsLogin(slotId, false)
             NotificationCenter.default.post(name: .dmReceiptsChanged, object: nil)
             NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
-        }
+        }, onDismissed: { didSync in
+            // Fenster zu, nie ein Sync gelungen und der Slot stammt aus genau diesem
+            // Aufruf → wieder entfernen. `removeSlot` räumt Bons, Cookies und
+            // per-Slot-Daten gleich mit ab.
+            guard removeIfNeverSynced, !didSync else { return }
+            AppLogger.log("Händler-Login abgebrochen — angelegten Slot wieder entfernt",
+                          category: "Setup")
+            MultibankingStore.shared.removeSlot(id: slotId)
+        })
     }
 
     /// Phase-3a-Beta: öffnet das Amazon-Login-/Import-Fenster. Legt einen
@@ -5724,27 +5760,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         DispatchQueue.main.async { [weak self] in
             let store = MultibankingStore.shared
             let slotId: String
+            let createdNow: Bool
             if let existing = store.slots.first(where: { $0.isAmazon }) {
                 slotId = existing.id
+                createdNow = false
             } else {
                 let slot = BankSlot.makeAmazon()
                 store.addSlot(slot, makeActive: false, autoUnified: false)
                 slotId = slot.id
+                createdNow = true
             }
-            self?.presentAmazonLogin(slotId: slotId)
+            self?.presentAmazonLogin(slotId: slotId, removeIfNeverSynced: createdNow)
         }
     }
 
     /// Öffnet das Amazon-Login-/Import-Fenster (manuell angestoßen — kein Auto-Sync).
-    private func presentAmazonLogin(slotId: String) {
-        AmazonAuthWebView.present(slotId: slotId) { [weak self] result in
+    /// `removeIfNeverSynced` gilt nur für einen Slot, den dieser Aufruf gerade erst
+    /// angelegt hat: Bricht der Nutzer den Login ab, ohne dass je ein Sync gelang,
+    /// verschwindet er wieder. Sonst bliebe ein Konto zurück, das nie eingerichtet
+    /// wurde — gemeldet am 29.07., inklusive der Folge, dass es als einziges Konto
+    /// nicht mehr löschbar war.
+    private func presentAmazonLogin(slotId: String, removeIfNeverSynced: Bool = false) {
+        AmazonAuthWebView.present(slotId: slotId, onSynced: { [weak self] result in
             AppLogger.log("amazon sync: scraped=\(result.scraped) stored=\(result.stored)", category: "Amazon")
             if MultibankingStore.shared.activeSlot?.id == slotId {
                 self?.applyREWEDisplay(slotId: slotId)
             }
             AppDelegate.setReceiptNeedsLogin(slotId, false)
             NotificationCenter.default.post(name: .reweReceiptsChanged, object: nil)
-        }
+        }, onDismissed: { didSync in
+            // Fenster zu, nie ein Sync gelungen und der Slot stammt aus genau diesem
+            // Aufruf → wieder entfernen. `removeSlot` räumt Bons, Cookies und
+            // per-Slot-Daten gleich mit ab.
+            guard removeIfNeverSynced, !didSync else { return }
+            AppLogger.log("Händler-Login abgebrochen — angelegten Slot wieder entfernt",
+                          category: "Setup")
+            MultibankingStore.shared.removeSlot(id: slotId)
+        })
     }
 
     // MARK: - eBon Hintergrund-Sync (unsichtbar, gespeicherte Sitzung)

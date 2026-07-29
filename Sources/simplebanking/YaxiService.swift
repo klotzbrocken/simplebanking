@@ -688,7 +688,7 @@ enum YaxiService {
         }
 
         guard let outcome = await handleSCA(
-            initial: toSCACommon(resp), client: client, ticket: finalTicket,
+            initial: toSCACommon(resp), client: client, ticket: finalTicket, slotId: slotSnapshot,
             confirm: confirm, respond: respond
         ) else {
             throw NSError(domain: "YaxiService", code: -2,
@@ -879,7 +879,7 @@ enum YaxiService {
             }
 
             guard let outcome = await handleSCA(
-                initial: toSCACommon(resp), client: client, ticket: scaTicket,
+                initial: toSCACommon(resp), client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
             ) else {
                 return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
@@ -1085,7 +1085,7 @@ enum YaxiService {
             }
 
             guard let outcome = await handleSCA(
-                initial: toSCACommon(resp), client: client, ticket: scaTicket,
+                initial: toSCACommon(resp), client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
             ) else {
                 return TransactionsResponse(ok: false, transactions: nil, session: nil,
@@ -1501,7 +1501,7 @@ enum YaxiService {
             }
 
             guard let outcome = await handleSCA(
-                initial: toSCACommon(resp), client: client, ticket: scaTicket,
+                initial: toSCACommon(resp), client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
             ) else {
                 return TransferOutcome(ok: false, scaRequired: true, error: nil,
@@ -1787,10 +1787,17 @@ enum YaxiService {
         }
     }
 
+    /// `slotId` ist das Konto, zu dem dieser Aufruf gehört — nicht das gerade aktive.
+    /// Beide fallen auseinander, sobald während einer Einrichtung ein anderes Konto
+    /// aktiv ist: Ein Kunde richtete die HypoVereinsbank ein und bekam im TAN-Dialog
+    /// „REWE" als Bank genannt, weil ein REWE-Slot aktiv war (gemeldet 29.07.). In
+    /// einem Dialog, in den jemand eine TAN tippt, ist die falsche Bank kein
+    /// Schönheitsfehler.
     private static func handleSCA(
         initial: SCACommon,
         client: RoutexClient,
         ticket: Ticket,
+        slotId: String,
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         depth: Int = 0
@@ -1821,7 +1828,7 @@ enum YaxiService {
                 AppLogger.log("SCA Selection: picking '\(preferred.key)'", category: "YaxiService")
                 do {
                     let next = try await respond(context, preferred.key)
-                    return await handleSCA(initial: next, client: client, ticket: ticket,
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond, depth: depth + 1)
                 } catch {
                     AppLogger.log("SCA respond error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
@@ -1837,7 +1844,7 @@ enum YaxiService {
                     return await pollConfirmation(
                         context: context,
                         delay: TimeInterval(delay),
-                        client: client, ticket: ticket,
+                        client: client, ticket: ticket, slotId: slotId,
                         confirm: confirm, respond: respond, depth: depth
                     )
                 } else {
@@ -1850,7 +1857,7 @@ enum YaxiService {
                     return await pollConfirmation(
                         context: context,
                         delay: 5.0,
-                        client: client, ticket: ticket,
+                        client: client, ticket: ticket, slotId: slotId,
                         confirm: confirm, respond: respond, depth: depth
                     )
                 }
@@ -1871,12 +1878,14 @@ enum YaxiService {
                 let slotEpochSnapshot = await onMainRunLoop {
                     MultibankingStore.shared.activeSlotEpoch
                 }
-                // Beim Ersteinrichten gibt es den Slot noch nicht — dann den Namen aus
-                // der Banksuche nehmen, statt das Panel mit „Bank" zu überschreiben.
+                // Ausdrücklich der Slot DIESES Aufrufs, nicht der aktive: sonst nennt der
+                // Dialog die Bank eines fremden Kontos. Beim Ersteinrichten trägt der
+                // Slot noch keinen Namen — dann greift der aus der Banksuche.
                 let slotName = await onMainRunLoop {
-                    MultibankingStore.shared.activeSlot?.displayName
+                    MultibankingStore.shared.slots.first(where: { $0.id == slotId })?.displayName
                 }
-                let bankName = [slotName, UserDefaults.standard.string(forKey: connectionNameKey)]
+                let bankName = [slotName,
+                                UserDefaults.standard.string(forKey: connectionNameKey(for: slotId))]
                     .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .first(where: { !$0.isEmpty }) ?? "Bank"
                 let spec = SCAFieldInput.Spec(
@@ -1922,7 +1931,7 @@ enum YaxiService {
                 }
                 do {
                     let next = try await respond(context, userValue)
-                    return await handleSCA(initial: next, client: client, ticket: ticket,
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond, depth: depth + 1)
                 } catch {
                     // `localizedDescription` ist hier wertlos: `UnexpectedError(userMessage: nil)`
@@ -1941,7 +1950,7 @@ enum YaxiService {
         case .redirect(let url, let context):
             AppLogger.log("SCA Redirect: opening browser", category: "YaxiService")
             openRedirectURL(url)
-            return await pollRedirect(context: context, client: client, ticket: ticket,
+            return await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                       confirm: confirm, respond: respond)
 
         case .redirectHandle(let handle, let context):
@@ -1969,7 +1978,7 @@ enum YaxiService {
             let callbackSignal = AsyncStream<Void> { continuation in
                 callbackServer.onCallbackReceived = { continuation.yield(); continuation.finish() }
             }
-            let result = await pollRedirect(context: context, client: client, ticket: ticket,
+            let result = await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                              confirm: confirm, respond: respond,
                                              callbackSignal: callbackSignal)
             callbackServer.stop()
@@ -2001,6 +2010,7 @@ enum YaxiService {
         delay: TimeInterval,
         client: RoutexClient,
         ticket: Ticket,
+        slotId: String,
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         depth: Int
@@ -2021,7 +2031,7 @@ enum YaxiService {
                 errorBackoff = 0  // reset nach erfolgreicher Antwort
                 switch next {
                 case .result:
-                    return await handleSCA(initial: next, client: client, ticket: ticket,
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond, depth: depth + 1)
                 case .dialog(let input, _):
                     if case .confirmation(let newCtx, let newDelay) = input {
@@ -2037,10 +2047,10 @@ enum YaxiService {
                     } else {
                         AppLogger.log("SCA poll[\(i)]: got non-confirmation dialog: \(input)", category: "YaxiService", level: "WARN")
                     }
-                    return await handleSCA(initial: next, client: client, ticket: ticket,
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond, depth: depth + 1)
                 default:
-                    return await handleSCA(initial: next, client: client, ticket: ticket,
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond, depth: depth + 1)
                 }
             } catch {
@@ -2059,6 +2069,7 @@ enum YaxiService {
         context: ConfirmationContext,
         client: RoutexClient,
         ticket: Ticket,
+        slotId: String,
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         callbackSignal: AsyncStream<Void>? = nil
@@ -2099,7 +2110,7 @@ enum YaxiService {
                 let next = try await confirm(ctx)
                 switch next {
                 case .result:
-                    return await handleSCA(initial: next, client: client, ticket: ticket,
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond)
                 case .redirect(_, let newCtx):
                     ctx = newCtx
@@ -2107,7 +2118,7 @@ enum YaxiService {
                     ctx = newCtx
                 case .dialog(let input, _):
                     if case .confirmation = input {
-                        return await handleSCA(initial: next, client: client, ticket: ticket,
+                        return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                                confirm: confirm, respond: respond)
                     }
                     AppLogger.log("SCA Redirect poll: unexpected dialog", category: "YaxiService", level: "WARN")

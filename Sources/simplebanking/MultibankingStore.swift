@@ -106,6 +106,24 @@ final class MultibankingStore: ObservableObject {
 
     static let shared = MultibankingStore()
 
+    /// Im Testlauf eine Wegwerf-Domain statt der echten.
+    ///
+    /// `UserDefaults.standard` ist unter Test dieselbe wie im Betrieb — ein Test, der die
+    /// Slot-Liste austauscht, hätte die echten Konten des Nutzers überschrieben. Nur das
+    /// App-Support-Verzeichnis war bisher abgeschirmt (`CredentialsStore.appSupportURL`),
+    /// die UserDefaults nicht. Dieselbe Begründung, dieselbe Erkennung: `XCTestCase`
+    /// existiert genau dann, wenn das Test-Bundle geladen ist — vom Linker garantiert,
+    /// keine Heuristik.
+    static let defaults: UserDefaults = {
+        let sandboxName = "simplebanking.tests.multibanking"
+        if NSClassFromString("XCTestCase") != nil,
+           let sandbox = UserDefaults(suiteName: sandboxName) {
+            sandbox.removePersistentDomain(forName: sandboxName)
+            return sandbox
+        }
+        return .standard
+    }()
+
     private let slotsKey        = "simplebanking.multibanking.slots"
     private let activeIndexKey  = "simplebanking.multibanking.activeIndex"
 
@@ -171,6 +189,25 @@ final class MultibankingStore: ObservableObject {
         if realSlotCount <= 1 {
             UserDefaults.standard.set(false, forKey: "unifiedModeEnabled")
         }
+    }
+
+    /// Leert die Slot-Liste — für das vollständige Zurücksetzen.
+    ///
+    /// `performSecurityReset` löscht die UserDefaults als Ganzes, die Liste lebt aber
+    /// zusätzlich im Speicher: Der nächste `save()` schrieb sie ungefragt zurück, und
+    /// das eben zurückgesetzte Konto war wieder da. Gemeldet am 29.07. für einen
+    /// REWE-Slot, den ein Kunde weder löschen noch zurücksetzen konnte.
+    ///
+    /// Die per-Slot-Daten räumt der Reset-Pfad selbst ab (Credentials, Sessions,
+    /// UserDefaults-Domain); hier gehen nur die Dinge weg, die er nicht kennt: die
+    /// Bons der Händler-Slots.
+    func removeAllSlots() {
+        for slot in slots where slot.isReceiptSlot {
+            try? ReweReceiptStore.deleteAll(slotId: slot.id)
+        }
+        slots = []
+        activeIndex = 0
+        save()
     }
 
     /// Räumt alle slot-suffixed Persistenz-Spuren weg. **Die einzige Stelle dafür** —
@@ -320,8 +357,25 @@ final class MultibankingStore: ObservableObject {
 
     // MARK: - Persistence
 
+    #if DEBUG
+    /// Nur für Tests: setzt die Liste direkt und schreibt sie durch. Der Store ist ein
+    /// Singleton, deshalb sichern die Tests den Ausgangszustand und stellen ihn wieder her.
+    func replaceAllSlotsForTesting(_ neue: [BankSlot]) {
+        slots = neue
+        activeIndex = 0
+        save()
+    }
+
+    /// Nur für Tests: lädt aus den UserDefaults nach — deckt auf, wenn etwas den Weg
+    /// zurück auf die Platte gefunden hat, das gelöscht sein sollte.
+    func reloadFromDiskForTesting() {
+        slots = []
+        load()
+    }
+    #endif
+
     private func load() {
-        let d = UserDefaults.standard
+        let d = Self.defaults
         if let data = d.data(forKey: slotsKey),
            let decoded = try? JSONDecoder().decode([BankSlot].self, from: data) {
             slots = decoded
@@ -331,7 +385,7 @@ final class MultibankingStore: ObservableObject {
     }
 
     private func save() {
-        let d = UserDefaults.standard
+        let d = Self.defaults
         if let data = try? JSONEncoder().encode(slots) {
             d.set(data, forKey: slotsKey)
         }
