@@ -2936,6 +2936,21 @@ struct SettingsView: View {
 
             Divider()
 
+            // Dauerhafte Adresse für die Update-Liste. Die „Neu in simplebanking"-Sheet
+            // fragt einmal pro Version; wer sie wegklickt, findet sie hier wieder — und
+            // hier steht auch, wie man wieder herauskommt.
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsSectionHeader(title: t("Neuigkeiten", "News"), icon: "envelope")
+                Text(t("Gelegentlich eine Mail zu neuen Versionen. Kein Tracking, keine Weitergabe.",
+                       "An occasional email about new versions. No tracking, no sharing."))
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                NewsletterSignupView(source: "settings", zeigeUeberschrift: false)
+            }
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 8) {
                 SettingsSectionHeader(title: t("Technologie", "Technology"), icon: "cpu")
                 

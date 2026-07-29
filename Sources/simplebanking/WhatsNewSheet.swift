@@ -218,6 +218,26 @@ struct WhatsNewSheet: View {
     }
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Nur wer noch nicht eingetragen ist — sonst fragt jedes Update erneut.
+            if !NewsletterSignup.hasSubscribed {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.t("Das war neu. Künftig per Mail erfahren?",
+                                "That's what's new. Want it by email next time?"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.sbTextPrimary)
+                    NewsletterSignupView(source: "whatsnew-\(version)", zeigeUeberschrift: false)
+                }
+                Divider().opacity(0.4)
+            }
+            footerButtons
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 14)
+        .background(Color.panelBackground)
+    }
+
+    private var footerButtons: some View {
         HStack(spacing: 10) {
             Spacer()
             Button(action: { onClose() }) {
@@ -233,9 +253,6 @@ struct WhatsNewSheet: View {
             .buttonStyle(.plain)
             .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
-        .background(Color.panelBackground)
     }
 }
 
@@ -248,12 +265,50 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.0.1":
+            return v201
         case "1.5.0":
             return v150
         default:
             return nil
         }
     }
+
+    /// 2.0.1 ist ein reines Fehlerbehebungs-Release. Aufgenommen wird nur, was jemand
+    /// auch gemerkt hat — die Reparaturen an Zustellwegen und Protokollen bleiben
+    /// draußen, die interessieren niemanden außerhalb des Codes.
+    private static let v201: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "keyboard",
+            tint: .sbBlueStrong,
+            title: L10n.t("TAN-Eingabe erscheint sofort",
+                          "TAN entry shows up right away"),
+            description: L10n.t(
+                "Bei Banken mit Tipp-TAN kam das Eingabefeld erst, wenn man die Einrichtung abbrach — die TAN war dann abgelaufen. Und im Titel steht jetzt die Bank, die wirklich fragt.",
+                "With typed-TAN banks the input field only appeared once you cancelled setup — by then the TAN had expired. And the title now names the bank actually asking."
+            )
+        ),
+        WhatsNewItem(
+            icon: "building.columns",
+            tint: .sbGreenStrong,
+            title: L10n.t("Konten lassen sich wieder entfernen",
+                          "Accounts can be removed again"),
+            description: L10n.t(
+                "Ein abgebrochener Händler-Login hinterließ ein Konto, das sich weder löschen noch zurücksetzen ließ. Beides behoben — und das letzte Konto ist jetzt ebenfalls entfernbar.",
+                "An aborted merchant login left behind an account that could neither be deleted nor reset. Both fixed — and the last remaining account can now be removed too."
+            )
+        ),
+        WhatsNewItem(
+            icon: "menubar.rectangle",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Bank-Logo in der Menüleiste",
+                          "Bank logo in the menu bar"),
+            description: L10n.t(
+                "Statt eines €-Platzhalters erscheint das Logo deiner Bank — jetzt für alle 192 Banken aus dem Katalog. Und das Flyout reagiert auf den ersten Klick.",
+                "Instead of a € placeholder you get your bank's logo — now for all 192 banks in the catalog. And the flyout responds to the first click."
+            )
+        ),
+    ]
 
     private static let v150: [WhatsNewItem] = [
         WhatsNewItem(

@@ -119,6 +119,10 @@ enum YaxiService {
             var transactionsSession: Data?
             var transferSession: Data?
             var connectionData: Data?
+            /// Wann die connectionData zuletzt geschrieben wurde. Bewusst nur im
+            /// Speicher: Nach einem Neustart gilt sie als „nicht frisch", und damit
+            /// greift wieder das alte Verhalten — die vorsichtigere Annahme.
+            var connectionDataAt: Date?
         }
         private var slotStates: [String: SlotState] = [:]
 
@@ -266,6 +270,12 @@ enum YaxiService {
             loadIfNeeded(slotId).connectionData
         }
 
+        /// Alter der connectionData in Sekunden, `nil` wenn sie aus einer früheren
+        /// Sitzung stammt (dann ist der Zeitpunkt unbekannt).
+        func connectionDataAge(slotId: String) -> TimeInterval? {
+            loadIfNeeded(slotId).connectionDataAt.map { Date().timeIntervalSince($0) }
+        }
+
         func update(scope: Scope, session: Data?, connectionData: Data?, slotId: String? = nil) {
             let sid = slotId ?? YaxiService.activeSlotId
             mutateState(sid) { state in
@@ -286,6 +296,7 @@ enum YaxiService {
                 }
                 if let cd = connectionData {
                     state.connectionData = cd
+                    state.connectionDataAt = Date()
                     persistWrite("connectionData", slotId: sid, data: cd)
                 }
             }
@@ -296,6 +307,7 @@ enum YaxiService {
             guard let connectionData else { return }
             mutateState(sid) { state in
                 state.connectionData = connectionData
+                state.connectionDataAt = Date()
                 persistWrite("connectionData", slotId: sid, data: connectionData)
             }
         }
@@ -817,7 +829,10 @@ enum YaxiService {
                         ticket: retryTicket,
                         accounts: accountRefs
                     )
-                } else if isConnectionResetError(error), storedCD != nil {
+                } else if darfOhneConnectionDataWiederholen(
+                              error: error,
+                              connectionDataAge: await sessionStore.connectionDataAge(slotId: slotSnapshot)),
+                          storedCD != nil {
                     // Consent abgelaufen (Unauthorized / ConsentExpired):
                     // YAXI-Empfehlung "Restart the service without passing
                     // connection data" — frischer Ticket (Doku) + connectionData
@@ -1031,7 +1046,10 @@ enum YaxiService {
                         recurringConsents: true,
                         ticket: retryTicket
                     )
-                } else if isConnectionResetError(error), storedCD != nil {
+                } else if darfOhneConnectionDataWiederholen(
+                              error: error,
+                              connectionDataAge: await sessionStore.connectionDataAge(slotId: slotSnapshot)),
+                          storedCD != nil {
                     // Consent abgelaufen — frischer Ticket + connectionData
                     // weg, Session behalten (siehe fetchBalances: Sparkasse-
                     // Regression bei Session-Drop, 2026-05-12).
@@ -1273,6 +1291,34 @@ enum YaxiService {
     /// Internal (statt private) für `@testable import`-Coverage —
     /// `RoutexClientErrorClassificationTests` prüft die Klassifizierung
     /// (Branch-Reorder-Schutz in fetchBalances/fetchTransactions/sendTransfer).
+    /// Wie lange eine gerade erst ausgestellte Zustimmung als „frisch" gilt.
+    /// Großzügig bemessen: Zwischen Kontenabruf und Saldenabruf liegt die Kontoauswahl
+    /// des Nutzers, und die darf dauern.
+    static let frischeZustimmungSekunden: TimeInterval = 300
+
+    /// Entscheidet, ob der „Zustimmung abgelaufen"-Zweig genommen werden darf.
+    ///
+    /// `isConnectionResetError` deutet `UnexpectedError(userMessage: nil)` als veraltete
+    /// connectionData — eine Faustregel, die für Sparkassen eingeführt wurde. Bei der
+    /// HypoVereinsbank liegt sie nachweislich falsch: Dort scheitert der Saldenabruf mit
+    /// genau diesem Fehler, obwohl die Zustimmung Sekunden zuvor aus der ersten TAN
+    /// entstanden ist. Wir warfen sie daraufhin weg und forderten eine zweite TAN an —
+    /// die mit demselben Fehler scheiterte. Gemessen am 29.07. bei zwei Kunden, je
+    /// zweimal.
+    ///
+    /// Eine Zustimmung, die eben erst ausgestellt wurde, kann nicht abgelaufen sein.
+    /// Der eindeutige `Unauthorized`/`ConsentExpired` bleibt unberührt — nur die
+    /// Faustregel wird ausgesetzt.
+    static func darfOhneConnectionDataWiederholen(error: Error,
+                                                  connectionDataAge: TimeInterval?) -> Bool {
+        guard isConnectionResetError(error) else { return false }
+        guard let re = error as? RoutexClientError, case .UnexpectedError = re else {
+            return true   // ausdrückliche Aussage der Bank — immer folgen
+        }
+        guard let alter = connectionDataAge else { return true }  // Alter unbekannt
+        return alter >= frischeZustimmungSekunden
+    }
+
     static func isConnectionResetError(_ error: Error) -> Bool {
         guard let re = error as? RoutexClientError else { return false }
         switch re {
@@ -1464,7 +1510,10 @@ enum YaxiService {
                         debtorName: nil,
                         requestedExecutionDate: requestedExecutionDate
                     )
-                } else if isConnectionResetError(error), storedCD != nil {
+                } else if darfOhneConnectionDataWiederholen(
+                              error: error,
+                              connectionDataAge: await sessionStore.connectionDataAge(slotId: slotSnapshot)),
+                          storedCD != nil {
                     // Yaxi-Empfehlung „Restart the service without passing
                     // connection data" — frischer Ticket + connectionData weg,
                     // Session behalten (Sparkasse-Regression bei Drop, 2026-05-12).
