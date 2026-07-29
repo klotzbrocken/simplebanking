@@ -453,9 +453,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img?.isTemplate = true
             return img
         }
-        let logoID = connectedBankLogoID.isEmpty ? nil : connectedBankLogoID
-        guard let logoID else { return nil }
-        let brand = BankLogoAssets.resolve(displayName: connectedBankDisplayName, logoID: logoID, iban: nil)
+        // Kein `guard` auf die logoID: `resolve` findet die Marke auch über den
+        // Anzeigenamen, und frisch eingerichtete Slots tragen noch keine logoId (sie
+        // wird erst nachträglich geheilt). Der frühere Abbruch ließ die Menüleiste
+        // deshalb auf den €-Platzhalter fallen, während der Flyout dieselbe Bank
+        // längst mit Logo zeigte — dieselben Argumente wie dort, damit auch dasselbe
+        // Logo herauskommt.
+        let brand = BankLogoAssets.resolve(
+            displayName: connectedBankDisplayName,
+            logoID: connectedBankLogoID.isEmpty ? nil : connectedBankLogoID,
+            iban: nil
+        )
 
         // Bevorzugt die einfarbige Mask-Variante für die Menüleiste. Logos mit
         // eigenem, deckendem Hintergrund (z. B. comdirect: dunkles Quadrat +
@@ -467,7 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
            BankLogoCache.hasMask(forLogoId: brandId),
            let maskURL = BankLogoCache.url(forLogoId: brandId, mask: true),
            let maskImg = NSImage(contentsOf: maskURL) {
-            let sized = maskImg.resized(to: NSSize(width: 16, height: 16))
+            let sized = maskImg.trimmedToInk(fittingHeight: 16, maxWidth: 32)
             sized.isTemplate = true
             return sized
         }
@@ -679,7 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // TAN / 2FA pending
         if isTanPending {
             setButtonTitle(button, "\(p)TAN")
-            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
+            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
             return
         }
 
@@ -696,7 +704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // Long: logo + (optional) emoji + Mask
                 setButtonTitle(button, "\(p)\(hiddenEmoji)•••.•• ")
             }
-            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
+            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
             return
         }
 
@@ -719,7 +727,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         } else {
             setButtonTitle(button, "\(p)\(moodEmoji)\(decoratedTitle(lastShownTitle))")
         }
-        statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth()
+        statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
     }
 
     /// Liefert das Money-Mood-Emoji für den aktuellen Saldo des aktiven Slots, gefolgt
@@ -744,7 +752,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         return "\(emoji) "
     }
 
-    private func menubarFixedWidth() -> CGFloat {
+    /// `logo` ist das Bild, das gleich im Status-Item landet. Seit dem Zuschnitt auf die
+    /// Tinte sind Logos nicht mehr alle 16 Punkt breit — breite Wortmarken wie bunq
+    /// brauchen mehr, sonst schneidet macOS den Saldo hinten ab. Ohne Argument bleibt
+    /// es beim bisherigen Vorhalt.
+    private func menubarFixedWidth(logo: NSImage? = nil) -> CGFloat {
         let refString = " \(lastShownTitle.isEmpty ? "1.234" : lastShownTitle) "
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -754,7 +766,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // sonst schneidet macOS den Saldo ab.
         let emojiEnabled = UserDefaults.standard.bool(forKey: "balanceMoodEmojiEnabled")
         let emojiReserve: CGFloat = emojiEnabled ? 22 : 0
-        return textWidth + emojiReserve + 22  // 22px für das Logo-Image + Gap
+        let logoReserve = max(22, (logo?.size.width ?? 16) + 6)  // Bildbreite + Gap
+        return textWidth + emojiReserve + logoReserve
     }
 
     private func setButtonTitle(_ button: NSStatusBarButton, _ text: String) {
@@ -4187,6 +4200,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         popover.contentViewController = host
         balancePopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Die App läuft als `.accessory` und ist beim Klick aufs Status-Item nicht
+        // aktiv. Das Popover erscheint dann zwar, sein Fenster wird aber nicht zum
+        // Key-Window — der erste Klick hinein aktiviert nur die App und erreicht das
+        // Steuerelement darunter nicht. Genau das war das doppelte Klicken beim
+        // Bankwechsel. Beide Aufrufer (Status-Item-Klick und Hotkey) sind ausdrückliche
+        // Nutzeraktionen, das Aktivieren nimmt also niemandem ungefragt den Fokus.
+        NSApp.activate(ignoringOtherApps: true)
+        popover.contentViewController?.view.window?.makeKey()
         installFlyoutDetachMonitor()   // ganzes Flyout per Drag greifbar (#4)
         // Pfeil/Nase im Wash-Ton (nächster Runloop: Popover-Fenster existiert dann).
         DispatchQueue.main.async { [weak self] in self?.tintFlyoutPopoverArrow() }

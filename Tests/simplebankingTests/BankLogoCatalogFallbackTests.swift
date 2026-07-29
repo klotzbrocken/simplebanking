@@ -89,6 +89,28 @@ final class BankLogoCatalogFallbackTests: XCTestCase {
         XCTAssertNil(BankLogoAssets.find(inCatalog: "_default", displayName: nil))
     }
 
+    // MARK: Menüleiste
+
+    /// Die Menüleiste brach früher ab, sobald die logoId leer war, und zeigte den
+    /// €-Platzhalter — obwohl der Flyout dieselbe Bank über den Anzeigenamen auflöste.
+    /// Beide Wege rufen jetzt `resolve` mit denselben Argumenten; dieser Test hält fest,
+    /// dass die Auflösung ohne logoId überhaupt etwas liefert.
+    func test_ohneLogoId_bleibtDieMarkeAufloesbar() {
+        for name in ["bunq", "Stadtsparkasse München", "ING"] {
+            XCTAssertNotNil(BankLogoAssets.resolve(displayName: name, logoID: nil, iban: nil),
+                            "\(name) ohne logoId nicht auflösbar")
+        }
+    }
+
+    /// Die Menüleiste bevorzugt die einfarbige Maske, weil ein deckendes Logo unter
+    /// `isTemplate` zum massiven Block wird. Für bunq muss diese Maske existieren und
+    /// als Datei ankommen — sonst landet die Menüleiste wieder beim Platzhalter.
+    func test_bunq_hatEineMaskeFuerDieMenueleiste() throws {
+        XCTAssertTrue(BankLogoCache.hasMask(forLogoId: "bunq"))
+        let url = try XCTUnwrap(BankLogoCache.url(forLogoId: "bunq", mask: true))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
     // MARK: Dunkelmodus
 
     /// bunq führt `primaryColor = #000000` und hat eine Maske — nach den alten Kriterien
