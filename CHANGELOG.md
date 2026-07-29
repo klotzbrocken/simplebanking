@@ -1,6 +1,18 @@
 # Changelog — simplebanking
 
-## [Unreleased] (2.0.0)
+## [2.0.1] — 2026-07-29
+
+### Behoben
+
+- **bunq ließ sich nicht einrichten** — nach der Freigabe per QR-Code meldete simplebanking Erfolg, verlangte für den Umsatzabruf eine zweite Freigabe, und die kam in der bunq-App nie an; nach dem Zeitablauf war kein Konto angelegt. Die Sperre, die ein Aufblitzen mehrerer Browserfenster verhindern soll, verglich nur die Uhrzeit und nie die Adresse — jede weitere Freigabe innerhalb von knapp fünf Minuten wurde deshalb stillschweigend verworfen. Banken wie bunq, die pro Einrichtung mehrere Freigaben verlangen, kamen so nie durch. Die Sperre greift jetzt nur noch bei identischer Adresse.
+- **HypoVereinsbank: das TAN-Feld erschien erst beim Abbruch** — die Einrichtung meldete „Code eingeben", das Eingabefeld kam aber nicht; es tauchte erst auf, wenn man den Vorgang abbrach, und die TAN war dann abgelaufen. Solange das Einrichtungsfenster modal läuft, bedient macOS die Warteschlange nicht, über die das Feld angefordert wurde — gemessen 17 bis 60 Sekunden Verzug. Die Anforderung nimmt jetzt denselben Weg wie der Fortschrittstext, der immer ankam. Betrifft alle Banken mit Tipp-TAN.
+- **TAN-Feld nennt die Bank beim Namen** — beim Einrichten des ersten Kontos stand im Titel nur „Bank", weil es den Kontoeintrag zu diesem Zeitpunkt noch nicht gibt. Der Name aus der Banksuche wird jetzt herangezogen.
+- **Menüleiste zeigte ein € statt des Bank-Logos** — das Logo wurde nur gefunden, wenn dem Konto bereits eine Kennung zugeordnet war; frisch eingerichtete Konten bekommen die erst nachträglich, und bis dahin blieb es beim Platzhalter, während das Flyout dieselbe Bank längst mit Logo zeigte. Beide Wege lösen die Marke jetzt gleich auf. Der Platzhalter verschwand außerdem beim Überfahren mit der Maus und ließ das Symbol leer zurück.
+- **Logos außerhalb der bekannten 29 Marken blieben ungenutzt** — der mitgelieferte Katalog führt 192 Bank-Logos, erreichbar waren nur die von Hand gepflegten. bunq etwa hatte sein Logo längst im Programm, ohne es je zu zeigen. Alle Katalog-Logos sind jetzt erreichbar; die gepflegten Marken behalten Vorrang, ihre Zuordnung ändert sich nicht.
+- **Logos in der Menüleiste waren zu klein** — Schriftzüge wie der von bunq liegen in einem quadratischen Feld mit viel Leerraum und schrumpften dadurch auf einen kaum lesbaren Streifen. Sie werden jetzt auf ihren sichtbaren Teil beschnitten und nutzen die Höhe aus.
+- **Flyout brauchte zwei Klicks** — beim Öffnen über das Menüleisten-Symbol wurde der erste Klick ins Fenster verbraucht, statt den Knopf darunter zu treffen; ein Kontowechsel gelang deshalb erst im zweiten Anlauf.
+
+## [2.0.0] — 2026-07-26
 
 ### Neu
 
