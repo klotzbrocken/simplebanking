@@ -53,11 +53,16 @@ enum YaxiService {
     static func credModelFullKey(for slotId: String) -> String { "simplebanking.yaxi.credModel.full\(slotSuffix(for: slotId))" }
     static func credModelUserIdKey(for slotId: String) -> String { "simplebanking.yaxi.credModel.userId\(slotSuffix(for: slotId))" }
     static func credModelNoneKey(for slotId: String) -> String { "simplebanking.yaxi.credModel.none\(slotSuffix(for: slotId))" }
+    /// Anzeigename der Bank aus der Banksuche. Wird nur für Beschriftungen gebraucht —
+    /// beim Ersteinrichten gibt es noch keinen Slot, dessen `displayName` man fragen
+    /// könnte, und das TAN-Panel hieß deshalb nur „Bank".
+    static func connectionNameKey(for slotId: String) -> String { "simplebanking.yaxi.connectionName\(slotSuffix(for: slotId))" }
     static var ibanKey: String { ibanKey(for: activeSlotId) }
     static var connectionIdKey: String { connectionIdKey(for: activeSlotId) }
     static var credModelFullKey: String { credModelFullKey(for: activeSlotId) }
     static var credModelUserIdKey: String { credModelUserIdKey(for: activeSlotId) }
     static var credModelNoneKey: String { credModelNoneKey(for: activeSlotId) }
+    static var connectionNameKey: String { connectionNameKey(for: activeSlotId) }
 
     // MARK: - Session Store
 
@@ -417,6 +422,9 @@ enum YaxiService {
         if let v = d.string(forKey: connectionIdKey(for: fromSlotId)), !v.isEmpty {
             d.set(v, forKey: connectionIdKey(for: toSlotId))
         }
+        if let v = d.string(forKey: connectionNameKey(for: fromSlotId)), !v.isEmpty {
+            d.set(v, forKey: connectionNameKey(for: toSlotId))
+        }
         for (srcKey, dstKey) in [
             (credModelFullKey(for: fromSlotId),   credModelFullKey(for: toSlotId)),
             (credModelUserIdKey(for: fromSlotId), credModelUserIdKey(for: toSlotId)),
@@ -445,6 +453,7 @@ enum YaxiService {
         d.removeObject(forKey: credModelFullKey)
         d.removeObject(forKey: credModelUserIdKey)
         d.removeObject(forKey: credModelNoneKey)
+        d.removeObject(forKey: connectionNameKey)
         await sessionStore.clearAll()
         return true
     }
@@ -479,6 +488,7 @@ enum YaxiService {
         d.set(info.credentials.full,   forKey: credModelFullKey)
         d.set(info.credentials.userId, forKey: credModelUserIdKey)
         d.set(info.credentials.none,   forKey: credModelNoneKey)
+        d.set(info.displayName,        forKey: connectionNameKey)
         AppLogger.log("storeConnectionInfo: connId=\(info.id.prefix(8)) name=\(info.displayName)", category: "YaxiService")
     }
 
@@ -490,6 +500,7 @@ enum YaxiService {
         d.removeObject(forKey: credModelFullKey)
         d.removeObject(forKey: credModelUserIdKey)
         d.removeObject(forKey: credModelNoneKey)
+        d.removeObject(forKey: connectionNameKey)
         await sessionStore.clearAll()
     }
 
@@ -1850,9 +1861,14 @@ enum YaxiService {
                 let slotEpochSnapshot = await onMainRunLoop {
                     MultibankingStore.shared.activeSlotEpoch
                 }
-                let bankName = await onMainRunLoop {
-                    MultibankingStore.shared.activeSlot?.displayName ?? "Bank"
+                // Beim Ersteinrichten gibt es den Slot noch nicht — dann den Namen aus
+                // der Banksuche nehmen, statt das Panel mit „Bank" zu überschreiben.
+                let slotName = await onMainRunLoop {
+                    MultibankingStore.shared.activeSlot?.displayName
                 }
+                let bankName = [slotName, UserDefaults.standard.string(forKey: connectionNameKey)]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first(where: { !$0.isEmpty }) ?? "Bank"
                 let spec = SCAFieldInput.Spec(
                     type: type, secrecyLevel: secrecy,
                     minLength: minLen, maxLength: maxLen,
