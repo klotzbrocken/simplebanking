@@ -166,6 +166,21 @@ kein Bild zeichnen.
 > setzen**, oder `cardLight`/`cardDark` so wählen, dass ihre Helligkeit zum Bild passt.
 > Letzteres ist ohnehin sinnvoll: Diese Farben sind der Rückfall, wenn das Bild fehlt.
 
+#### Format des Ringbilds
+
+| | |
+|---|---|
+| **Akzeptiert** | PNG, PDF, SVG — wie Logo und Wallpaper |
+| **Sollmaß** | **72 × 72** (als @2x: 144 × 144), quadratisch |
+| **Größe** | bis 512 KB (wie das Logo) |
+| **Dateiname** | einfacher Name im Theme-Ordner, dieselben Regeln wie beim Logo |
+
+Das Bild wird seitenverhältnistreu in die 72 × 72 des Kontorings eingepasst — ein nicht
+quadratisches Bild wird also nicht verzerrt, sondern bekommt Rand. Ist `ringImage`
+gesetzt, erscheint es **immer** auf dieser Fläche, unabhängig vom Schalter „Kontoring
+anzeigen"; der wird in den Einstellungen gesperrt. Das Theme gewinnt, weil es die Fläche
+gestaltet und der Nutzer sonst einen Schalter ohne Wirkung sähe.
+
 **Vorrang:** `bankLogos` entscheidet, **ob** überhaupt eine Bildmarke erscheint, `logo`
 nur **womit**. Bei `bankLogos=off` bleibt es also beim Mosaik-Block, auch wenn ein Logo
 hinterlegt ist. Fehlt die Datei oder lässt sie sich nicht laden, erscheint still wieder
@@ -398,6 +413,13 @@ Nutzer wählt ein Theme, die Bilder kommen mit. Wer eigene will, baut ein Theme.
 Builder ist damit der einzige Ort, an dem diese Dinge gesetzt werden; was er nicht
 anbietet, existiert für den Nutzer praktisch nicht.
 
+**Die Gegenprobe** gehört dazu, damit die Grenze nicht ausfranst: „Vorgemerkt als Pille
+anzeigen" ist **keine** Theme-Sache und steht in den Einstellungen. Der Unterschied ist
+nicht die Optik, sondern die Frage: Bestimmt es, **wie** etwas aussieht (Theme), oder
+**ob** eine Information überhaupt erscheint (Nutzer)? Nach derselben Regel ist der
+Kontoring eine Nutzereinstellung — bis ein Theme mit `ringImage` die Fläche beansprucht
+und den Schalter sperrt.
+
 ### Muss
 
 1. **Formular für alle Schlüssel aus Abschnitt 4** — Farb-Picker paarweise
@@ -416,6 +438,14 @@ anbietet, existiert für den Nutzer praktisch nicht.
      verankert** zuschneiden, nicht zentriert, sonst zeigt der Builder etwas anderes als
      die App. Ist eines der Sonderfelder gefüllt und das Grundbild leer: **Fehler**, denn
      dann bleibt überall die Farbe.
+   - **Ringbild-Ablage** (4.1): ein Feld plus optionale Dunkel-Variante, Sollmaß
+     72 × 72, 512-KB-Grenze. Der Builder muss dazu sichtbar machen, was der Schlüssel
+     auslöst: **Er sperrt eine Einstellung in der App.** Wer das Feld füllt, nimmt dem
+     Nutzer den Kontoring — das gehört an die Oberfläche, nicht in die Dokumentation.
+   - **Zwei Auswahlfelder für die Darstellungs-Modi** (4.2a): `categoryIconStyle` mit
+     `auto`/`ink`/`color` und `bankLogoStyle` mit `color`/`mono`. Beim Mono-Modus einen
+     Hinweis zeigen, dass nur rund ein Viertel der Banken eine echte Maske hat und der
+     Rest geplättet wird — sonst wundert sich der Theme-Bauer über Flecken statt Logos.
    - **Icon-Tabelle** (4.4): je Zeile Funktion, Ruhe- und Aktiv-Symbol, mit
      SF-Symbol-Suche und Vorschau. Ein unbekannter Name muss im Builder auffallen —
      die App fällt still auf den Standard zurück, was beim Bauen niemand merkt.
@@ -429,8 +459,11 @@ anbietet, existiert für den Nutzer praktisch nicht.
      in den anderen nicht aufgehen; das ist der Fehler, der die drei Schlüssel überhaupt
      nötig gemacht hat. Die Flyout-Höhe zusätzlich mit offenem Schnellüberweisungs-Drawer,
      weil sie dort wächst.
-   - **Den Kontoring** in allen vier Zuständen (§4.2), sonst überrascht die Ampel in
-     Fremdfarben später.
+   - **Den Kontoring** in allen vier Zuständen (§4.2) — oder das Ringbild, wenn eines
+     gesetzt ist. Sonst überrascht die Ampel in Fremdfarben später.
+   - **Kategorie-Symbole und Bankmarke** in den gewählten Modi (§4.2a). Beim Mono-Modus
+     mit einer Marke ohne Maske, damit die Silhouette zu sehen ist, bevor sie im Betrieb
+     auffällt.
    - **Die Umsatzzeilen mit der Theme-Schrift** — sie sind der größte Textanteil und
      zugleich der, den man beim Bauen am ehesten übersieht.
 3. **Validierung:**
@@ -484,5 +517,6 @@ anbietet, existiert für den Nutzer praktisch nicht.
 - Tests, die den Vertrag absichern: `BTXThemeTests.swift` (Bool-Grammatik, Defaults,
   btx.cfg, Mosaik-Muster, Schrift-Registrierung), `ThemeWashTests.swift` (Surface/Ink-
   Ableitung), `ThemeContractV2Tests.swift` (Logo, Icons, Zeilenhöhen-Zusage aus §1),
-  `ThemeTypografieTests.swift` (Schrift in den Zeilentexten, Ringfarben, Wallpaper) und
+  `ThemeTypografieTests.swift` (Schrift in den Zeilentexten, Ink, Ringfarben, Wallpaper
+  samt Flächen, Darstellungs-Modi und Ringbild) und
   `PruefungsbefundeTests.swift` (Pfad- und Maßprüfung der Bilddateien).
