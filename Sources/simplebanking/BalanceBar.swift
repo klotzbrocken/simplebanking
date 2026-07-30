@@ -6270,16 +6270,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // WICHTIG: den vor dem Wizard aktivierten leeren Bank-Slot NICHT aktiv
             // lassen — sonst hängt die App auf einem nie gespeicherten Slot-Kontext.
             SlotContext.activate(slotId: previousSlot?.id ?? "legacy")
+            Self.rollBackSetupSlot(newSlot.id)
             connectMerchant(source)
 
         case .demoMode, .cancelled:
             // Vorherigen Slot wiederherstellen
             let restoreId = previousSlot?.id ?? "legacy"
             SlotContext.activate(slotId: restoreId)
+            Self.rollBackSetupSlot(newSlot.id)
             if let prev = previousSlot {
                 MultibankingStore.shared.setActive(index: MultibankingStore.shared.slots.firstIndex(where: { $0.id == prev.id }) ?? 0)
                 applySlotToViewModel(prev)
             }
+        }
+    }
+
+    /// Nimmt die vorläufige Slot-ID einer abgebrochenen Einrichtung zurück.
+    ///
+    /// „Konto hinzufügen" aktiviert die neue ID **vor** dem Assistenten, damit
+    /// `performSetupConnection` alles unter den richtigen Schlüsseln ablegt. Bricht der
+    /// Nutzer ab, wurde bisher nur der vorherige Slot wieder aktiviert — geschrieben
+    /// waren aber schon connectionId, Bankname, Credential-Modell, YAXI-Session samt
+    /// connectionData und je nach Fortschritt eine Credentials-Datei. Die blieben liegen,
+    /// unsichtbar in der Kontenliste und damit für den Nutzer nicht löschbar.
+    ///
+    /// Bewusst nur in den **abschließenden** Zweigen des Assistenten: Ein einzelner
+    /// fehlgeschlagener Verbindungsversuch lässt das Fenster offen, und der nächste
+    /// Versuch arbeitet mit derselben ID weiter (im HVB-Protokoll gut zu sehen — der
+    /// Kunde tippte neun Sekunden nach dem Fehler erneut auf „Verbinden"). Ein Aufräumen
+    /// pro Versuch würde genau diesen Wiederholungsversuch zerstören.
+    ///
+    /// Ein Slot, der es in den Store geschafft hat, wird nie angefasst — dann war die
+    /// Einrichtung erfolgreich und die ID gehört zu einem echten Konto.
+    nonisolated private static func rollBackSetupSlot(_ slotId: String) {
+        guard slotId != "legacy" else { return }
+        MainActor.assumeIsolated {
+            guard !MultibankingStore.shared.slots.contains(where: { $0.id == slotId }) else { return }
+            AppLogger.log("Einrichtung abgebrochen — vorläufigen Slot \(slotId.prefix(8)) samt Verbindungsdaten entfernt",
+                          category: "Setup")
+            MultibankingStore.purgePerSlotData(slotId: slotId)
         }
     }
 

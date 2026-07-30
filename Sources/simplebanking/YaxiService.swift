@@ -405,9 +405,6 @@ enum YaxiService {
         }
     }
 
-    private static nonisolated(unsafe) var lastRedirectOpenedAt: Date? = nil
-    /// Zur zuletzt geöffneten Freigabe-URL — die Drossel greift nur bei identischer URL.
-    private static nonisolated(unsafe) var lastRedirectURL: String? = nil
 
 
     // MARK: - Public API
@@ -1927,16 +1924,14 @@ enum YaxiService {
                 let slotEpochSnapshot = await onMainRunLoop {
                     MultibankingStore.shared.activeSlotEpoch
                 }
-                // Ausdrücklich der Slot DIESES Aufrufs, nicht der aktive: sonst nennt der
-                // Dialog die Bank eines fremden Kontos. Beim Ersteinrichten trägt der
-                // Slot noch keinen Namen — dann greift der aus der Banksuche.
+                // Ausdrücklich der Slot DIESES Aufrufs, nicht der aktive.
                 let slotName = await onMainRunLoop {
                     MultibankingStore.shared.slots.first(where: { $0.id == slotId })?.displayName
                 }
-                let bankName = [slotName,
-                                UserDefaults.standard.string(forKey: connectionNameKey(for: slotId))]
-                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .first(where: { !$0.isEmpty }) ?? "Bank"
+                let bankName = scaBankLabel(
+                    slotName: slotName,
+                    connectionName: UserDefaults.standard.string(forKey: connectionNameKey(for: slotId))
+                )
                 let spec = SCAFieldInput.Spec(
                     type: type, secrecyLevel: secrecy,
                     minLength: minLen, maxLength: maxLen,
@@ -1998,7 +1993,7 @@ enum YaxiService {
 
         case .redirect(let url, let context):
             AppLogger.log("SCA Redirect: opening browser", category: "YaxiService")
-            openRedirectURL(url)
+            await openRedirectURL(url, vorgang: redirectVorgang(slotId: slotId, ticket: ticket))
             return await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                       confirm: confirm, respond: respond)
 
@@ -2022,7 +2017,7 @@ enum YaxiService {
                 return nil
             }
             AppLogger.log("SCA RedirectHandle: opening bank URL in browser", category: "YaxiService")
-            openRedirectURL(bankURL)
+            await openRedirectURL(bankURL, vorgang: redirectVorgang(slotId: slotId, ticket: ticket))
             // Signal stream: fires immediately when localhost callback arrives
             let callbackSignal = AsyncStream<Void> { continuation in
                 callbackServer.onCallbackReceived = { continuation.yield(); continuation.finish() }
@@ -2369,22 +2364,26 @@ enum YaxiService {
     /// Ein Fenster-Sturm droht dadurch nicht: `pollRedirect` öffnet URLs nicht erneut
     /// (`:2026-2029` aktualisiert nur den Kontext), diese Funktion läuft genau einmal
     /// je Freigabe-Zyklus.
-    private static func openRedirectURL(_ url: URL) {
-        let now = Date()
-        let key = url.absoluteString
-        if key == lastRedirectURL,
-           let last = lastRedirectOpenedAt,
-           now.timeIntervalSince(last) < 290 {
-            AppLogger.log("SCA: redirect URL throttled — identische URL vor \(Int(now.timeIntervalSince(last)))s geöffnet",
+    /// Öffnet die Freigabe-Seite — höchstens einmal je Freigabe-Vorgang.
+    ///
+    /// `vorgang` ist Slot plus Ticket. Das Ticket wird pro Dienstaufruf neu ausgestellt,
+    /// ist also genau die Einheit, die der Nutzer als „eine Freigabe" erlebt.
+    ///
+    /// Vorher war der Schlüssel die vollständige URL, und der Zustand lag in zwei
+    /// prozessweiten Variablen. Beides war falsch, in beide Richtungen: Bei bunq, das je
+    /// Dienst eine eigene Freigabe verlangt, wurde die zweite verschluckt, weil sie in
+    /// dasselbe Zeitfenster fiel — und umgekehrt hätte ein Wiederholungsversuch, der nur
+    /// `state` oder eine Nonce ändert, ein zweites Browserfenster aufgemacht, obwohl es
+    /// logisch dieselbe Freigabe ist. Über das Ticket sind beide Fälle richtig: neuer
+    /// Dienstaufruf → neues Ticket → neues Fenster; Wiederholung derselben Anfrage →
+    /// gleiches Ticket → kein zweites Fenster.
+    private static func openRedirectURL(_ url: URL, vorgang: String) async {
+        guard await RedirectCoordinator.shared.darfOeffnen(vorgang: vorgang) else {
+            AppLogger.log("SCA: Freigabe-Seite für diesen Vorgang bereits geöffnet — kein zweites Fenster",
                           category: "YaxiService")
             return
         }
-        if lastRedirectOpenedAt != nil, key != lastRedirectURL {
-            AppLogger.log("SCA: neue Freigabe-URL (host=\(url.host ?? "?"), \(key.count) Zeichen) — öffne Browser",
-                          category: "YaxiService")
-        }
-        lastRedirectOpenedAt = now
-        lastRedirectURL = key
+        AppLogger.log("SCA: öffne Freigabe-Seite (host=\(url.host ?? "?"))", category: "YaxiService")
         NSWorkspace.shared.open(url)
         sendSCANotification()
     }
@@ -2418,5 +2417,81 @@ final class FieldInputResumeGuard {
         guard let c = cont else { return }
         cont = nil
         c.resume(returning: value)
+    }
+}
+
+// MARK: - Freigabe-Weiterleitungen
+
+/// Merkt sich, für welchen Freigabe-Vorgang schon eine Browser-Seite geöffnet wurde.
+///
+/// Ein Actor, weil der Zustand vorher in zwei `nonisolated(unsafe)`-Variablen lag und
+/// von jedem SCA-Ablauf ohne Absicherung verändert wurde. In der Praxis serialisieren
+/// `BankRequestQueue` und `isHBCICallInFlight` die meisten Bank-Aufrufe, aber nicht alle
+/// Pfade gehen dort durch — eine Einrichtung und ein Hintergrund-Abgleich auf einem
+/// anderen Konto können sich überschneiden.
+actor RedirectCoordinator {
+
+    static let shared = RedirectCoordinator()
+
+    /// So lange gilt ein Vorgang als „schon geöffnet". Entspricht der bisherigen
+    /// Drosselzeit; die Freigabefrist der Banken liegt darunter.
+    static let frist: TimeInterval = 290
+
+    private var geoeffnet: [String: Date] = [:]
+
+    /// `true`, wenn für diesen Vorgang noch keine Seite geöffnet wurde (oder die Frist
+    /// abgelaufen ist). Der Aufrufer öffnet dann und gilt als vermerkt.
+    func darfOeffnen(vorgang: String, jetzt: Date = Date()) -> Bool {
+        aufraeumen(jetzt: jetzt)
+        if let zuvor = geoeffnet[vorgang], jetzt.timeIntervalSince(zuvor) < Self.frist {
+            return false
+        }
+        geoeffnet[vorgang] = jetzt
+        return true
+    }
+
+    /// Alte Einträge verwerfen, damit die Tabelle nicht mit jedem Vorgang wächst.
+    private func aufraeumen(jetzt: Date) {
+        geoeffnet = geoeffnet.filter { jetzt.timeIntervalSince($0.value) < Self.frist }
+    }
+
+    #if DEBUG
+    func zuruecksetzenFuerTests() { geoeffnet = [:] }
+    #endif
+}
+
+extension YaxiService {
+
+    /// Welche Bank der TAN-Dialog nennt.
+    ///
+    /// Reihenfolge: erst der Name des Slots, zu dem **dieser Aufruf** gehört, dann der
+    /// Name aus der Banksuche. Beides ist nötig, und die Reihenfolge ist es auch:
+    ///
+    /// - Beim **Abruf eines bestehenden Kontos** trägt der Slot den Namen, den der
+    ///   Nutzer vergeben hat. Der muss gewinnen, sonst überschreibt der Katalogname
+    ///   („UniCredit Bank - HypoVereinsbank") die eigene Benennung.
+    /// - Beim **Hinzufügen eines Kontos** ist der Slot noch nicht im Store — die
+    ///   vorläufige ID wird vor dem Assistenten aktiviert und erst bei Erfolg zu einem
+    ///   sichtbaren Konto. `slotName` ist dann nil, und der Name der gerade eingerichteten
+    ///   Verbindung greift.
+    ///
+    /// Genau hier lag ein Fehler: Solange über den **aktiven** Slot gegangen wurde, nannte
+    /// der Dialog beim Hinzufügen das bisherige Konto — gemeldet als „REWE" während einer
+    /// HypoVereinsbank-Einrichtung. In einem Fenster, in das jemand eine TAN tippt, ist
+    /// die falsche Bank kein Schönheitsfehler.
+    static func scaBankLabel(slotName: String?, connectionName: String?) -> String {
+        [slotName, connectionName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? "Bank"
+    }
+
+    /// Der Vorgangsschlüssel: Konto plus Ticket.
+    ///
+    /// Das Ticket ist ein signiertes Token und gehört nicht ins Protokoll — deshalb geht
+    /// nur seine Länge und ein kurzer Ausschnitt in den Schlüssel ein, nie der ganze
+    /// Wert. Für die Unterscheidung zweier Dienstaufrufe genügt das: Jedes Ticket trägt
+    /// eine eigene UUID (siehe `YaxiTicketMaker.issueTicket`).
+    static func redirectVorgang(slotId: String, ticket: Ticket) -> String {
+        "\(slotId)|\(ticket.hashValue)"
     }
 }

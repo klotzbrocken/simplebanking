@@ -220,11 +220,12 @@ final class MultibankingStore: ObservableObject {
     /// `legacy` das Suffix WEG, die Liste hängte immer `.legacy` an und traf damit ins
     /// Leere. Deshalb werden die Keys jetzt über die Builder von `YaxiService` gebildet.
     ///
-    /// **Diese Funktion läuft nur auf ausdrückliche Nutzerentscheidung** — einziger
-    /// Aufrufer ist `removeSlot`, dessen einziger Aufrufer der destruktive Button des
-    /// Bestätigungsdialogs ist. Deshalb `.delete` für den Legacy-Slot: der Dialog
-    /// verspricht „und alle zugehörigen Daten werden unwiderruflich gelöscht", und das
-    /// muss auch für das Konto gelten, mit dem der Nutzer angefangen hat.
+    /// **Diese Funktion läuft nur auf ausdrückliche Nutzerentscheidung.** Zwei Aufrufer:
+    /// `removeSlot` (hinter dem destruktiven Button des Bestätigungsdialogs) und der
+    /// Abbruch des „Konto hinzufügen"-Assistenten, der seine vorläufige Slot-ID
+    /// zurücknimmt. Deshalb `.delete` für den Legacy-Slot: der Dialog verspricht „und
+    /// alle zugehörigen Daten werden unwiderruflich gelöscht", und das muss auch für das
+    /// Konto gelten, mit dem der Nutzer angefangen hat.
     ///
     /// YAXI-Session-Cleanup läuft in einem detached Task (actor-isolated),
     /// die anderen Cleanups sync.
@@ -244,6 +245,7 @@ final class MultibankingStore: ObservableObject {
             YaxiService.credModelFullKey(for: slotId),
             YaxiService.credModelUserIdKey(for: slotId),
             YaxiService.credModelNoneKey(for: slotId),
+            YaxiService.connectionNameKey(for: slotId),
             "simplebanking.cachedBalance.\(slotId)",
             "simplebanking.lastSeenTxSig.\(slotId)",
         ] {

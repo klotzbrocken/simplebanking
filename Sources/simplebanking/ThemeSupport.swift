@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageIO
 import SwiftUI
 
 struct AppTheme: Identifiable, Equatable {
@@ -521,6 +522,11 @@ enum ThemeChrome {
         let stamp = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let key = "\(url.path)|\(stamp)"
         if let cached = logoCache[key] { return cached }
+        guard logoDimensionsAreSane(at: url) else {
+            AppLogger.log("Theme-Logo übersprungen: \(url.lastPathComponent) hat unzulässige Bildmaße (max \(maxLogoEdge) px je Kante, \(maxLogoPixels / 1_000_000) MP gesamt)",
+                          category: "Theme", level: "WARN")
+            return nil
+        }
         guard let image = NSImage(contentsOf: url) else { return nil }
         logoCache = [key: image]   // immer nur ein Logo aktiv — kein Wachstum nötig
         return image
@@ -530,7 +536,47 @@ enum ThemeChrome {
     /// synchron geladen.
     static let maxLogoBytes = 512 * 1024
 
+    /// Die Byte-Grenze sagt nichts über den Speicher beim Dekodieren: Ein stark
+    /// komprimiertes PNG von 300 KB kann 40 000 × 40 000 Pixel groß sein und beim
+    /// Zeichnen mehrere Gigabyte belegen. Deshalb zusätzlich eine Grenze für die
+    /// Bildmaße — geprüft aus den Metadaten, **bevor** dekodiert wird.
+    static let maxLogoEdge = 8_000
+    static let maxLogoPixels = 16_000_000
+
+    /// Was THEMES.md §4.1 zusagt: PNG, PDF, SVG. Nicht mehr — ein Theme soll ein Logo
+    /// mitbringen, keine beliebige Datei öffnen lassen.
+    static let allowedLogoExtensions: Set<String> = ["png", "pdf", "svg"]
+
     @MainActor private static var logoCache: [String: NSImage] = [:]
+
+    /// Prüft den Dateinamen aus der `.cfg`.
+    ///
+    /// THEMES.md verspricht „Dateiname **relativ zum Theme-Ordner**" — genau das wird
+    /// hier erzwungen und nichts darüber hinaus. Ohne die Prüfung genügte
+    /// `logo=../../Pictures/privat.png`, um ein beliebiges Bild des Nutzers in die App
+    /// zu holen: `appendingPathComponent` normalisiert nicht, das Dateisystem löst `..`
+    /// erst beim Öffnen auf. Themes sind ausdrücklich zum Weitergeben gedacht (§8), ein
+    /// fremdes darf deshalb nicht aus seinem Ordner herausgreifen.
+    /// Prüft **und normalisiert** in einem Schritt: Der Rückgabewert ist der Name, der
+    /// tatsächlich an den Theme-Ordner angehängt werden darf — `nil`, wenn er unzulässig
+    /// ist. Zwei getrennte Funktionen wären hier eine Falle: Prüfte die eine den
+    /// beschnittenen Wert und baute die andere den Pfad aus dem rohen, hätte ein
+    /// angehängter Zeilenumbruch die Prüfung bestanden und eine andere Datei geöffnet.
+    static func sanitizedLogoFileName(_ raw: String) -> String? {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 255 else { return nil }
+        // Ein einzelner Name — keine Verzeichnisanteile, kein Aufstieg, nichts Verstecktes.
+        guard !name.contains("/"), !name.contains("\\"), !name.contains(".."),
+              !name.hasPrefix("."), !name.contains("\0"),
+              name.rangeOfCharacter(from: .newlines) == nil
+        else { return nil }
+        guard allowedLogoExtensions.contains((name as NSString).pathExtension.lowercased()) else { return nil }
+        return name
+    }
+
+    static func isValidLogoFileName(_ raw: String) -> Bool {
+        sanitizedLogoFileName(raw) != nil
+    }
 
     /// Ein globales Logo ersetzt die Bankmarke — aber nur, wenn Bildmarken überhaupt
     /// gezeichnet werden. `bankLogos` entscheidet OB, `logo` nur WOMIT.
@@ -539,11 +585,42 @@ enum ThemeChrome {
         let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let name = (dark ? theme.logoDarkFileName : nil) ?? theme.logoFileName
         guard let name else { return nil }
-        let url = URL(fileURLWithPath: ThemeManager.shared.themesDirectoryPath)
-            .appendingPathComponent(name)
+        guard let sauber = sanitizedLogoFileName(name) else {
+            AppLogger.log("Theme-Logo abgelehnt: „\(name)\" ist kein einfacher Dateiname im Theme-Ordner (erlaubt: \(allowedLogoExtensions.sorted().joined(separator: ", ")))",
+                          category: "Theme", level: "WARN")
+            return nil
+        }
+        let ordner = URL(fileURLWithPath: ThemeManager.shared.themesDirectoryPath)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let url = ordner.appendingPathComponent(sauber)
+        // Zweiter Riegel gegen Verknüpfungen: Der Name ist harmlos, aber die Datei
+        // selbst kann ein Symlink nach draußen sein — ein weitergegebener Ordner
+        // bringt so etwas leicht mit.
+        let ziel = url.resolvingSymlinksInPath().standardizedFileURL
+        guard ziel.path.hasPrefix(ordner.path + "/") else {
+            AppLogger.log("Theme-Logo abgelehnt: \(name) zeigt aus dem Theme-Ordner heraus",
+                          category: "Theme", level: "WARN")
+            return nil
+        }
         // Fehlende Datei → still zurück auf die Bankmarke. Ein Theme darf keine
         // leere Fläche hinterlassen, nur weil ein Bild vergessen wurde.
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        return FileManager.default.fileExists(atPath: ziel.path) ? ziel : nil
+    }
+
+    /// Liest die Bildmaße aus den Metadaten, ohne zu dekodieren.
+    ///
+    /// Liefert `true`, wenn keine Maße zu ermitteln sind — bei SVG kennt ImageIO keine
+    /// Pixelgröße, und ein Vektorbild hat auch keine. Dort bleibt die Byte-Grenze die
+    /// einzige Schranke; das ist eine bewusste Lücke und keine vergessene.
+    static func logoDimensionsAreSane(at url: URL) -> Bool {
+        guard let quelle = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(quelle, 0, nil) as? [CFString: Any]
+        else { return true }
+        let breite = props[kCGImagePropertyPixelWidth] as? Int ?? 0
+        let hoehe = props[kCGImagePropertyPixelHeight] as? Int ?? 0
+        guard breite > 0, hoehe > 0 else { return true }
+        return breite <= maxLogoEdge && hoehe <= maxLogoEdge
+            && breite * hoehe <= maxLogoPixels
     }
 }
 

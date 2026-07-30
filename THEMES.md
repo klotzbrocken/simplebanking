@@ -95,7 +95,9 @@ sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe ein
 
 | | |
 |---|---|
-| **Akzeptiert** | PNG, PDF, SVG (geladen über `NSImage(contentsOf:)`) |
+| **Akzeptiert** | PNG, PDF, SVG (geladen über `NSImage(contentsOf:)`) — andere Endungen werden abgelehnt |
+| **Dateiname** | Ein **einfacher Name** im Theme-Ordner. Keine Verzeichnisse, kein `..`, keine absoluten Pfade, nichts mit Punkt am Anfang. Auch eine Verknüpfung, die aus dem Ordner herausführt, wird abgelehnt — Themes werden weitergegeben, und ein fremdes darf nicht auf beliebige Bilder des Nutzers zugreifen. |
+| **Maße** | Höchstens 8000 px je Kante und 16 MP gesamt, geprüft vor dem Dekodieren. Die Byte-Grenze allein genügt nicht: Ein stark komprimiertes PNG von 300 KB kann 40 000 × 40 000 Pixel groß sein. Bei SVG greift nur die Byte-Grenze — ein Vektorbild hat keine Pixelmaße. |
 | **Empfohlen** | Vektor — PDF oder SVG. Bleibt in jeder Größe scharf. |
 | **Raster (PNG)** | quadratisch, **mindestens 128 × 128 px**. Gezeichnet wird bei 20 pt (Flyout) bzw. 18 pt (Liste), auf Retina also 40 bzw. 36 px — 128 gibt Reserve. |
 | **Hintergrund** | transparent. Die Marke sitzt auf der Theme-Fläche; ein deckendes Rechteck sieht aus wie ein aufgeklebter Sticker. |
