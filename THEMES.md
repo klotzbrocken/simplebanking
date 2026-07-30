@@ -89,8 +89,8 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 |---|---|---|
 | `id` | Dateiname | Stabile Kennung; landet in `themeId`. Kebab-case, keine Built-in-/Retired-Namen. |
 | `name` | Dateiname kapitalisiert | Anzeigename in den Einstellungen. |
-| `bodyFont` | `System` | Fließtext in Flyout + Liste (`ThemeFonts.flyoutBody`). PostScript-/Familienname; `System` = Systemschrift. |
-| `headingFont` | `System` | Saldo-Zahl, Händlernamen, Beträge, Datumsköpfe (`ThemeFonts.flyoutHeading`). |
+| `bodyFont` | `System` | Fließtext in Flyout + Liste — **einschließlich der Umsatzzeilen** (Empfänger, Absender, Kategorien, Notizen). `ThemeFonts.flyoutBody`/`rowBody`. PostScript-/Familienname; `System` = Systemschrift. |
+| `headingFont` | `System` | Saldo-Zahl, Händlernamen, Beträge, Datumsköpfe. `ThemeFonts.flyoutHeading`/`rowHeading`. |
 | `logo` | *(leer)* | **Globale Bildmarke** statt der Bankmarke in Flyout- und Listenkopf — für **alle** Konten gleich, auch PayPal und Händler-Slots. Dateiname **relativ zum Theme-Ordner**. Format siehe unten. |
 | `logoDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel wird `logo` in beiden Modi unverändert gezeigt — es wird **nichts automatisch invertiert**. |
 | `wallpaper` | *(leer)* | **Hintergrundbild** für Flyout und Umsatzliste. Ersetzt die flache Theme-Farbe (`cardLight`/`cardDark`). Dateiname relativ zum Theme-Ordner, gleiche Regeln wie `logo`. Format siehe unten. |
@@ -98,6 +98,12 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 
 **Die Schrift ist gefahrlos wählbar.** Zeilenhöhen hängen nicht an ihr (siehe §1), eine
 sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe einer Karte.
+
+**Schriftgrade bleiben die der App.** Ein Theme wählt die Familie, nicht die Größe. Nur
+textgetriebene Themes (`glyphControls=off`, §4.3) bekommen in den Umsatzzeilen größere
+Grade — Rasterschriften wie VT323 bauen kleiner und wären sonst unlesbar. Wer eine
+ähnlich klein bauende Schrift verwendet, ohne `glyphControls` abzuschalten, muss mit
+kleiner Darstellung rechnen; einen eigenen Größenfaktor gibt es bewusst nicht.
 
 #### Format des globalen Logos
 
@@ -136,6 +142,13 @@ Karten- und Kopfflächen werden durchsichtig, damit das Bild durchscheint. Die N
 Flyout-Sprechblase bekommt die Durchschnittsfarbe der oberen Bildkante — dort lässt sich
 kein Bild zeichnen.
 
+> **Falle: Ink bei aktivem Wallpaper.** Bleiben `inkLight`/`inkDark` leer, rechnet die App
+> den Schwarz/Weiß-Kontrast gegen die **Surface-Farbe** (`cardLight`/`cardDark`) — nicht
+> gegen das Bild. Ein weißes `cardLight` mit dunklem Wallpaper ergibt damit dunkle Schrift
+> auf dunklem Grund. **Mit Wallpaper deshalb `inkLight`/`inkDark` immer ausdrücklich
+> setzen**, oder `cardLight`/`cardDark` so wählen, dass ihre Helligkeit zum Bild passt.
+> Letzteres ist ohnehin sinnvoll: Diese Farben sind der Rückfall, wenn das Bild fehlt.
+
 **Vorrang:** `bankLogos` entscheidet, **ob** überhaupt eine Bildmarke erscheint, `logo`
 nur **womit**. Bei `bankLogos=off` bleibt es also beim Mosaik-Block, auch wenn ein Logo
 hinterlegt ist. Fehlt die Datei oder lässt sie sich nicht laden, erscheint still wieder
@@ -155,12 +168,33 @@ beachten (VT323: OFL-1.1, Lizenztext muss mit ausgeliefert werden).
 | Schlüssel | Default (Fallback) | Wirkung |
 |---|---|---|
 | `accent` | `#4E79A7` | **Leitfarbe** aktiver Bedienelemente: aktive Konto-Umschalter, gefüllte Filter-Blöcke, aktive Textkommandos, „Weiter"-Button, Ungelesen-Marker, Aufrunden-Button. |
-| `positive` / `positiveLight` / `positiveDark` | `#4F8A6A` | Einnahmen-Beträge, „verfügbar"-Zeile, Sparbeträge, grüner Anteil der Blockleiste. `positive` gilt für beide Appearances, die `…Light/Dark`-Varianten überschreiben je Modus. |
-| `negative` / `negativeLight` / `negativeDark` | `#C65A5A` | Ausgaben-Beträge, Datumsköpfe (Theme), Dispo-Warnzeile, **negativer Kontostand**, roter Anteil der Blockleiste. |
-| `cardLight` / `cardDark` | `#FFFFFF` / `#1F1F1F` | **Surface**: vollflächige Kartenfarbe von Flyout-Karte und Listen-Kopf; bei aktivem Theme zugleich Hintergrund der gesamten Liste und des Flyouts (flach, kein Money-Heat). Auch Textfarbe AUF gefüllten Accent-Flächen. |
+| `positive` / `positiveLight` / `positiveDark` | `#4F8A6A` | Einnahmen-Beträge, „verfügbar"-Zeile, Sparbeträge, grüner Anteil der Blockleiste — **und der grüne Bereich des Kontorings**. `positive` gilt für beide Appearances, die `…Light/Dark`-Varianten überschreiben je Modus. |
+| `negative` / `negativeLight` / `negativeDark` | `#C65A5A` | Ausgaben-Beträge, Datumsköpfe (Theme), Dispo-Warnzeile, **negativer Kontostand**, roter Anteil der Blockleiste — **und Dispo sowie der knappe Bereich des Kontorings**. |
+| `cardLight` / `cardDark` | `#FFFFFF` / `#1F1F1F` | **Surface**: vollflächige Kartenfarbe von Flyout-Karte und Listen-Kopf; bei aktivem Theme zugleich Hintergrund der gesamten Liste und des Flyouts (flach, kein Money-Heat). Auch Textfarbe AUF gefüllten Accent-Flächen. **Mit `wallpaper` wird diese Fläche durchsichtig** — die Farbe bleibt dann nur der Rückfall, wenn das Bild fehlt oder abgelehnt wird. |
 | `panelLight` / `panelDark` | `#F9F9F9` / `#171717` | Panel-Hintergrund — wird bei aktivem Theme praktisch von Surface überdeckt; relevant v. a. für das Default-Theme. |
 | `inkLight` / `inkDark` | *(leer)* | **Ink**: Vordergrund (große Saldo-Zahl, Namen, Fließtext) auf der Surface. Leer ⇒ automatischer Schwarz/Weiß-Kontrast per Luminanz (Schwelle 0,55, WCAG-nah — `AppTheme.contrastingInk`). |
 | `screenBorder` | *(leer)* | Farbe der **CRT-Blende** um Flyout + Liste (außen bis zur Fensterkante gefüllt, innen gerundet ausgestanzt; 5–6 pt stark). Leer = keine Blende. |
+
+#### Kontoring (Ampel)
+
+Der Ring im Flyout und in der Liste hat vier Zustände. Er nimmt seine Farben aus der
+Palette, sobald ein Theme aktiv ist:
+
+| Zustand | Farbe |
+|---|---|
+| Dispo (Kontostand negativ) | `negative…` |
+| knapp (unter 34 % des Bezugseinkommens) | `negative…` |
+| mittel (34–67 %) | **Mischung** aus `negative…` und `positive…` zu gleichen Teilen |
+| gut (ab 67 %) | `positive…` |
+
+Für das Mittelband gibt es **keinen eigenen Schlüssel** und soll keiner dazukommen: Eine
+Farbe, die zwischen zwei vorhandenen liegt, lässt sich ausrechnen. Bei einer rot/grünen
+Palette wird daraus Olivgelb, bei einer blau/violetten entsprechend anderes.
+
+**Folge für den Builder:** Wer `positive`/`negative` weit von Rot/Grün wegzieht, verändert
+damit auch den Ring. Das ist gewollt — eine Ampel in Fremdfarben ist stimmiger als eine,
+die aus dem Theme herausfällt. Die Preview sollte den Ring deshalb zeigen, sonst überrascht
+es später.
 
 Abgeleitete Töne (nicht konfigurierbar): gedämpfte Ink-Stufen `0.45` (Platzhalter),
 `0.6–0.75` (Sekundärtext, inaktive Kommandos), `0.85–0.9` (Labels); Feld-Füllung
@@ -326,13 +360,25 @@ bestehende bearbeitet — ohne die App zu verändern.
      Quadratmaß und die 512-KB-Grenze, Kopieren in den Theme-Ordner, optional eine
      zweite Datei für den Dunkelmodus. Die Schriftwahl gehört **hier** hin und nicht
      in die App — sie ist Teil der Gestaltung, die ein Theme mitbringt.
+   - **Wallpaper-Ablage** (4.1): Bild per Auswahl oder Drag & Drop, Prüfung auf Format
+     und die 4-MB-Grenze, Kopieren in den Theme-Ordner, optional eine zweite Datei für
+     den Dunkelmodus. Die Vorschau muss **oben verankert** zuschneiden, nicht zentriert —
+     sonst zeigt der Builder etwas anderes als die App. Empfehlung 840 × 620 anzeigen,
+     aber nicht erzwingen.
    - **Icon-Tabelle** (4.4): je Zeile Funktion, Ruhe- und Aktiv-Symbol, mit
      SF-Symbol-Suche und Vorschau. Ein unbekannter Name muss im Builder auffallen —
      die App fällt still auf den Standard zurück, was beim Bauen niemand merkt.
 2. **Live-Preview** nach der Wirkungs-Landkarte (Abschnitt 5): Flyout-Karte +
    Listen-Ausschnitt mit Beispieldaten, umschaltbar Hell/Dunkel. Die Preview muss die
    Schalter-Effekte zeigen (Mosaik statt Logo, Textkommandos, Punktlinien, Blende,
-   Blockleiste, eckige Felder).
+   Blockleiste, eckige Felder). Dazu drei Dinge, die man sonst erst in der App merkt:
+   - **Beide Listenbreiten** (348 und 840 bei je 620 Höhe) und die Flyout-Höhen. Ein
+     Wallpaper sieht in jeder davon anders beschnitten aus; wer nur eine Breite zeigt,
+     baut Themes, die in der anderen nicht aufgehen.
+   - **Den Kontoring** in allen vier Zuständen (§4.2), sonst überrascht die Ampel in
+     Fremdfarben später.
+   - **Die Umsatzzeilen mit der Theme-Schrift** — sie sind der größte Textanteil und
+     zugleich der, den man beim Bauen am ehesten übersieht.
 3. **Validierung:**
    - Hex-Format (`#RRGGBB`/`#AARRGGBB`), sonst Feld-Fehler;
    - `id`: kebab-case, nicht in {`default`, `sunrise`, `gameboy`, `btx`, `ocean`,
@@ -341,6 +387,12 @@ bestehende bearbeitet — ohne die App zu verändern.
      (WCAG AA) — Warnung, kein Blocker;
    - Hinweis, wenn eine gewählte Schrift nicht installiert ist (App fiele still auf
      System zurück).
+   - **Bei gesetztem Wallpaper und leerem Ink: Warnung.** Der Auto-Kontrast rechnet gegen
+     die Surface-Farbe, nicht gegen das Bild (§4.1) — das ist die wahrscheinlichste
+     Ursache für unlesbare Schrift und im Builder billig zu verhindern.
+   - Dateinamen für `logo`/`wallpaper`: **einfacher Name**, keine Verzeichnisse, kein
+     `..`, keine absoluten Pfade. Die App lehnt solche Namen ab und protokolliert es;
+     der Builder darf sie gar nicht erst erzeugen (§4.1).
 4. **Export/Install:** `.cfg` nach
    `~/Library/Application Support/com.maik.simplebanking/themes/<id>.cfg` schreiben;
    Bool-Werte als `on`/`off`, Kommentar-Kopf mit Name/Datum. Hinweistext: Aktivierung
@@ -371,6 +423,8 @@ bestehende bearbeitet — ohne die App zu verändern.
   Bestandsverhalten → alte Themes bleiben gültig, neue Themes funktionieren
   (reduziert) in alten App-Versionen.
 - Der Vertrag ist **additiv**: Schlüssel werden nie umbenannt oder entfernt.
-- Tests, die den Vertrag absichern: `Tests/simplebankingTests/BTXThemeTests.swift`
-  (Bool-Grammatik, Defaults, btx.cfg, Mosaik-Muster, Schrift-Registrierung) und
-  `ThemeWashTests.swift` (Surface/Ink-Ableitung).
+- Tests, die den Vertrag absichern: `BTXThemeTests.swift` (Bool-Grammatik, Defaults,
+  btx.cfg, Mosaik-Muster, Schrift-Registrierung), `ThemeWashTests.swift` (Surface/Ink-
+  Ableitung), `ThemeContractV2Tests.swift` (Logo, Icons, Zeilenhöhen-Zusage aus §1),
+  `ThemeTypografieTests.swift` (Schrift in den Zeilentexten, Ringfarben, Wallpaper) und
+  `PruefungsbefundeTests.swift` (Pfad- und Maßprüfung der Bilddateien).
