@@ -93,8 +93,10 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 | `headingFont` | `System` | Saldo-Zahl, Händlernamen, Beträge, Datumsköpfe. `ThemeFonts.flyoutHeading`/`rowHeading`. |
 | `logo` | *(leer)* | **Globale Bildmarke** statt der Bankmarke in Flyout- und Listenkopf — für **alle** Konten gleich, auch PayPal und Händler-Slots. Dateiname **relativ zum Theme-Ordner**. Format siehe unten. |
 | `logoDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel wird `logo` in beiden Modi unverändert gezeigt — es wird **nichts automatisch invertiert**. |
-| `wallpaper` | *(leer)* | **Hintergrundbild** für Flyout und Umsatzliste. Ersetzt die flache Theme-Farbe (`cardLight`/`cardDark`). Dateiname relativ zum Theme-Ordner, gleiche Regeln wie `logo`. Format siehe unten. |
+| `wallpaper` | *(leer)* | **Grundbild** für Flyout und Umsatzliste. Ersetzt die flache Theme-Farbe (`cardLight`/`cardDark`). Dateiname relativ zum Theme-Ordner, gleiche Regeln wie `logo`. Format siehe unten. |
 | `wallpaperDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel gilt `wallpaper` in beiden Modi. |
+| `wallpaperFlyout` / `wallpaperFlyoutDark` | *(leer)* | Eigenes Bild nur fürs **Flyout**. Ohne diese Schlüssel gilt `wallpaper`. |
+| `wallpaperWide` / `wallpaperWideDark` | *(leer)* | Eigenes Bild nur für die **breite Umsatzliste**. Ohne diese Schlüssel gilt `wallpaper`. |
 
 **Die Schrift ist gefahrlos wählbar.** Zeilenhöhen hängen nicht an ihr (siehe §1), eine
 sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe einer Karte.
@@ -123,19 +125,33 @@ kleiner Darstellung rechnen; einen eigenen Größenfaktor gibt es bewusst nicht.
 | | |
 |---|---|
 | **Akzeptiert** | PNG, PDF, SVG — wie beim Logo |
-| **Empfohlene Maße** | **840 × 620** (als @2x: 1680 × 1240) |
+| **Empfohlene Maße** | Flyout 348 × 140, schmale Liste 348 × 620, breite Liste 840 × 620 — jeweils @2x verdoppelt |
 | **Größe** | bis 4 MB (das Logo darf nur 512 KB — ein Wallpaper braucht mehr) |
 | **Dateiname** | einfacher Name im Theme-Ordner, dieselben Regeln wie beim Logo |
 
-**Warum 840 × 620 und warum nicht exakt:** Die Umsatzliste hat zwei feste Größen —
-348 × 620 schmal und 840 × 620 breit (der grüne Fensterknopf schaltet um, Kantenziehen ist
-gesperrt). Das Flyout ist 348 breit, wechselt aber die Höhe (mit/ohne Konto-Punkte, und
-noch einmal, wenn der Schnellüberweisungs-Drawer aufgeht). Ein Bild, das überall exakt
-passt, gibt es deshalb nicht.
+**Drei Flächen, drei Seitenverhältnisse.** Das ist der Grund für die zusätzlichen
+Schlüssel:
+
+| Fläche | Größe | Verhältnis | Schlüssel |
+|---|---|---|---|
+| Flyout | 348 × 140 (bzw. 178, plus Drawer) | ≈ 2,5 : 1 breit-flach | `wallpaperFlyout` |
+| Umsatzliste schmal | 348 × 620 | 0,56 : 1 hochkant | `wallpaper` |
+| Umsatzliste breit | 840 × 620 | 1,35 : 1 quer | `wallpaperWide` |
+
+Kantenziehen ist gesperrt, nur der grüne Fensterknopf schaltet die Listenbreite um.
 
 Das Wallpaper wird **flächenfüllend skaliert und oben verankert**, der Überhang
-beschnitten. Eine Datei reicht damit für alle Zustände. Was oben im Bild steht, ist immer
-sichtbar — das Motiv gehört nach oben, nicht in die Mitte.
+beschnitten. **Was oben im Bild steht, ist immer sichtbar; was unten steht, verschwindet
+zuerst** — im Flyout bleibt von einem hochkanten Bild praktisch nur der obere Rand.
+Ein Motiv am unteren Bildrand überlebt das nicht.
+
+Eine einzige Datei bleibt gültig: `wallpaperFlyout` und `wallpaperWide` sind optional und
+fallen auf `wallpaper` zurück. Für ein ruhiges Muster oder einen Verlauf genügt sie. Wer
+ein erkennbares Motiv zeigen will, braucht drei.
+
+> **`wallpaper` ist Pflicht, sobald eines der anderen gesetzt ist.** Ob die Farbflächen
+> durchsichtig werden, hängt am Grundbild. Ein `wallpaperFlyout` allein ließe die Liste
+> deckend, das Bild läge unsichtbar darunter. Die App lehnt das ab und protokolliert es.
 
 Bei aktivem Wallpaper entfällt der Money-Heat-Verlauf (wie bei jedem Theme) und die
 Karten- und Kopfflächen werden durchsichtig, damit das Bild durchscheint. Die Nase der
@@ -360,11 +376,14 @@ bestehende bearbeitet — ohne die App zu verändern.
      Quadratmaß und die 512-KB-Grenze, Kopieren in den Theme-Ordner, optional eine
      zweite Datei für den Dunkelmodus. Die Schriftwahl gehört **hier** hin und nicht
      in die App — sie ist Teil der Gestaltung, die ein Theme mitbringt.
-   - **Wallpaper-Ablage** (4.1): Bild per Auswahl oder Drag & Drop, Prüfung auf Format
-     und die 4-MB-Grenze, Kopieren in den Theme-Ordner, optional eine zweite Datei für
-     den Dunkelmodus. Die Vorschau muss **oben verankert** zuschneiden, nicht zentriert —
-     sonst zeigt der Builder etwas anderes als die App. Empfehlung 840 × 620 anzeigen,
-     aber nicht erzwingen.
+   - **Wallpaper-Ablage** (4.1): **drei Felder** — Flyout, schmale Liste (Grundbild),
+     breite Liste —, je optional mit zweiter Datei für den Dunkelmodus. Prüfung auf
+     Format und die 4-MB-Grenze, Kopieren in den Theme-Ordner. Je Feld das Sollmaß
+     anzeigen (348 × 140, 348 × 620, 840 × 620) und einen Hinweis, wenn das gewählte
+     Bild stark davon abweicht — erzwingen aber nicht. Die Vorschau muss **oben
+     verankert** zuschneiden, nicht zentriert, sonst zeigt der Builder etwas anderes als
+     die App. Ist eines der Sonderfelder gefüllt und das Grundbild leer: **Fehler**, denn
+     dann bleibt überall die Farbe.
    - **Icon-Tabelle** (4.4): je Zeile Funktion, Ruhe- und Aktiv-Symbol, mit
      SF-Symbol-Suche und Vorschau. Ein unbekannter Name muss im Builder auffallen —
      die App fällt still auf den Standard zurück, was beim Bauen niemand merkt.

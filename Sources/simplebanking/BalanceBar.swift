@@ -7847,7 +7847,7 @@ private struct StatusBalanceFlyoutCardView: View {
             // Kanten reicht — sonst blitzte am unteren Rand die Panelfarbe durch.
             .background(
                 ZStack {
-                    ThemeWallpaper()
+                    ThemeWallpaper(flaeche: .flyout)
                     (roundupView.isActive && !ThemeChrome.lofi) ? Color.roundupPanelBackground
                         : (isDefaultTheme ? Color.panelBackground : Color.themedSurfaceOrClear)
                 }

@@ -77,6 +77,21 @@ struct AppTheme: Identifiable, Equatable {
     /// Modi — wie beim Logo wird nichts automatisch invertiert.
     var wallpaperDarkFileName: String? = nil
 
+    /// Eigenes Bild nur fürs Flyout, und eigenes nur für die breite Liste.
+    ///
+    /// Die drei Flächen haben Seitenverhältnisse von 2,5:1 (Flyout 348 × 140) über
+    /// 0,56:1 (schmale Liste 348 × 620) bis 1,35:1 (breite Liste 840 × 620). Ein
+    /// einzelnes Bild kann das nicht bedienen: Was in der schmalen Liste passt, zeigt im
+    /// Flyout nur den oberen Rand. Wer ein Motiv unten im Bild hat, verliert es dort
+    /// vollständig.
+    ///
+    /// Beide sind optional und fallen auf `wallpaper` zurück. Ein Theme mit einer
+    /// einzigen Datei bleibt damit gültig.
+    var wallpaperFlyoutFileName: String? = nil
+    var wallpaperFlyoutDarkFileName: String? = nil
+    var wallpaperWideFileName: String? = nil
+    var wallpaperWideDarkFileName: String? = nil
+
     /// Pro Funktion austauschbares SF-Symbol, z. B. `icon.filter=slider.horizontal.3`.
     /// Leer → überall die Standardsymbole. Greift nur, solange `glyphControls` an ist;
     /// bei textgetriebenen Themes stehen weiterhin die Kürzel.
@@ -349,6 +364,10 @@ final class ThemeManager: @unchecked Sendable {
             logoDarkFileName: values["logodark"].flatMap { $0.isEmpty ? nil : $0 },
             wallpaperFileName: values["wallpaper"].flatMap { $0.isEmpty ? nil : $0 },
             wallpaperDarkFileName: values["wallpaperdark"].flatMap { $0.isEmpty ? nil : $0 },
+            wallpaperFlyoutFileName: values["wallpaperflyout"].flatMap { $0.isEmpty ? nil : $0 },
+            wallpaperFlyoutDarkFileName: values["wallpaperflyoutdark"].flatMap { $0.isEmpty ? nil : $0 },
+            wallpaperWideFileName: values["wallpaperwide"].flatMap { $0.isEmpty ? nil : $0 },
+            wallpaperWideDarkFileName: values["wallpaperwidedark"].flatMap { $0.isEmpty ? nil : $0 },
             iconOverrides: Self.parseIconOverrides(from: values)
         )
     }
@@ -579,12 +598,15 @@ enum ThemeChrome {
         return themeImage(at: url, maxBytes: maxLogoBytes, art: "Logo")
     }
 
-    /// Das Wallpaper als fertiges Bild, oder `nil`.
+    /// Das Wallpaper einer Fläche als fertiges Bild, oder `nil`.
     @MainActor
-    static var wallpaperImage: NSImage? {
-        guard let url = wallpaperURL else { return nil }
+    static func wallpaperImage(for flaeche: WallpaperFlaeche) -> NSImage? {
+        guard let url = wallpaperURL(for: flaeche) else { return nil }
         return themeImage(at: url, maxBytes: maxWallpaperBytes, art: "Wallpaper")
     }
+
+    @MainActor
+    static var wallpaperImage: NSImage? { wallpaperImage(for: .listeSchmal) }
 
     /// Durchschnittsfarbe der **oberen Bildkante** des Wallpapers.
     ///
@@ -594,7 +616,9 @@ enum ThemeChrome {
     /// dieselbe Stelle, die vor der Nasen-Tönung weiß geblieben war.
     @MainActor
     static var wallpaperTopEdgeColor: NSColor? {
-        guard let bild = wallpaperImage else { return nil }
+        // Ausdrücklich das Flyout-Bild: Die Nase sitzt am Flyout, und seit es ein eigenes
+        // Bild dafür geben kann, wäre die Oberkante des Listenbildes die falsche Quelle.
+        guard let bild = wallpaperImage(for: .flyout) else { return nil }
         return averageTopEdgeColor(of: bild)
     }
 
@@ -708,18 +732,50 @@ enum ThemeChrome {
         return themeAssetURL(named: name, art: "Logo")
     }
 
-    /// True, sobald das aktive Theme ein brauchbares Wallpaper mitbringt. Ein Wallpaper
-    /// setzt ein Theme voraus — der Schlüssel steht in der `.cfg`, das Default-Theme hat
-    /// keine.
-    static var wallpaperActive: Bool { wallpaperURL != nil }
+    /// Die drei Flächen, die ein eigenes Wallpaper haben können.
+    enum WallpaperFlaeche {
+        /// 348 × 140 bzw. 178, plus Drawer-Höhe — sehr breit und flach.
+        case flyout
+        /// 348 × 620 — hochkant.
+        case listeSchmal
+        /// 840 × 620 — querformat.
+        case listeBreit
+    }
 
-    /// Wallpaper für Flyout und Umsatzliste. Ersetzt die flache Theme-Farbe.
-    static var wallpaperURL: URL? {
+    /// True, sobald das aktive Theme ein **Grundbild** mitbringt.
+    ///
+    /// Bewusst am Grundbild und nicht an den flächenspezifischen Schlüsseln: Von dieser
+    /// Auskunft hängt ab, ob die Farbflächen durchsichtig werden. Wäre sie schon bei
+    /// einem reinen `wallpaperFlyout` wahr, hätte die Umsatzliste durchsichtige Flächen
+    /// ohne Bild dahinter — ein durchscheinendes Fenster statt eines Hintergrunds.
+    static var wallpaperActive: Bool { wallpaperURL(for: .listeSchmal) != nil }
+
+    /// Wallpaper einer Fläche. Fällt auf das Grundbild zurück, sodass ein Theme mit einer
+    /// einzigen Datei gültig bleibt.
+    static func wallpaperURL(for flaeche: WallpaperFlaeche) -> URL? {
         let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let name = (dark ? theme.wallpaperDarkFileName : nil) ?? theme.wallpaperFileName
-        guard let name else { return nil }
+        let spezifisch: String? = {
+            switch flaeche {
+            case .flyout:      return (dark ? theme.wallpaperFlyoutDarkFileName : nil) ?? theme.wallpaperFlyoutFileName
+            case .listeBreit:  return (dark ? theme.wallpaperWideDarkFileName : nil) ?? theme.wallpaperWideFileName
+            case .listeSchmal: return nil
+            }
+        }()
+        let grund = (dark ? theme.wallpaperDarkFileName : nil) ?? theme.wallpaperFileName
+        // Ein flächenspezifisches Bild ohne Grundbild ist eine Falle: `wallpaperActive`
+        // hängt am Grundbild, die Farbflächen blieben also deckend, und das spezifische
+        // Bild läge unsichtbar darunter. Lieber deutlich melden als still ignorieren.
+        if spezifisch != nil, grund == nil {
+            AppLogger.log("Theme-Wallpaper: flächenspezifisches Bild ohne `wallpaper` — ohne Grundbild bleibt überall die Farbe. Bitte zusätzlich `wallpaper=` setzen.",
+                          category: "Theme", level: "WARN")
+            return nil
+        }
+        guard let name = spezifisch ?? grund else { return nil }
         return themeAssetURL(named: name, art: "Wallpaper")
     }
+
+    /// Rückwärtskompatibler Zugriff auf das Grundbild.
+    static var wallpaperURL: URL? { wallpaperURL(for: .listeSchmal) }
 
     /// Liest die Bildmaße aus den Metadaten, ohne zu dekodieren.
     ///
@@ -1088,11 +1144,14 @@ extension Color {
 ///
 /// Ohne Wallpaper zeichnet der View nichts — Aufrufer können ihn bedingungslos einhängen.
 struct ThemeWallpaper: View {
+    /// Welche Fläche gezeichnet wird — bestimmt, welches der drei Bilder greift.
+    let flaeche: ThemeChrome.WallpaperFlaeche
+
     // Kein `@ObservedObject`: `ThemeManager` ist kein ObservableObject, die übrigen
     // Theme-Stellen lesen `currentTheme` ebenfalls direkt. Ein Themewechsel baut
     // Flyout und Liste neu auf.
     var body: some View {
-        if let bild = ThemeChrome.wallpaperImage {
+        if let bild = ThemeChrome.wallpaperImage(for: flaeche) {
             Image(nsImage: bild)
                 .resizable()
                 .aspectRatio(contentMode: .fill)

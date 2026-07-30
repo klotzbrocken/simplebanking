@@ -2360,7 +2360,7 @@ private struct TransactionsPanelView: View {
         // Wallpaper durchsichtig und lässt es stehen.
         .background {
             ZStack {
-                ThemeWallpaper()
+                ThemeWallpaper(flaeche: panelIsWide ? .listeBreit : .listeSchmal)
                 activePanelBg
             }
             .ignoresSafeArea(.all, edges: .top)

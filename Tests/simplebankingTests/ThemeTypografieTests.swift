@@ -215,6 +215,33 @@ final class ThemeWallpaperTests: XCTestCase {
         return try XCTUnwrap(ThemeManager.shared.parseTheme(from: url))
     }
 
+    /// Drei Flächen, drei mögliche Bilder. Ein Bild kann sie nicht bedienen: Das Flyout
+    /// ist 2,5:1 breit-flach, die schmale Liste 0,56:1 hochkant, die breite 1,35:1 quer.
+    /// Ein Motiv am unteren Bildrand überlebt die Verankerung oben im Flyout nicht.
+    func test_flaechenspezifischeSchluesselWerdenGelesen() throws {
+        let t = try parse("""
+        id=t
+        wallpaper=grund.png
+        wallpaperFlyout=flach.png
+        wallpaperWide=quer.png
+        wallpaperFlyoutDark=flach-dunkel.png
+        wallpaperWideDark=quer-dunkel.png
+        """)
+        XCTAssertEqual(t.wallpaperFileName, "grund.png")
+        XCTAssertEqual(t.wallpaperFlyoutFileName, "flach.png")
+        XCTAssertEqual(t.wallpaperWideFileName, "quer.png")
+        XCTAssertEqual(t.wallpaperFlyoutDarkFileName, "flach-dunkel.png")
+        XCTAssertEqual(t.wallpaperWideDarkFileName, "quer-dunkel.png")
+    }
+
+    /// Ein Theme mit einer einzigen Datei muss gültig bleiben — die Flächen fallen auf
+    /// das Grundbild zurück.
+    func test_ohneFlaechenbilder_bleibtEsBeimGrundbild() throws {
+        let t = try parse("id=t\nwallpaper=grund.png")
+        XCTAssertNil(t.wallpaperFlyoutFileName)
+        XCTAssertNil(t.wallpaperWideFileName)
+    }
+
     func test_schluesselWerdenGelesen() throws {
         let t = try parse("id=t\nwallpaper=hinten.png\nwallpaperDark=hinten-dunkel.png")
         XCTAssertEqual(t.wallpaperFileName, "hinten.png")
