@@ -240,13 +240,26 @@ zurück — dieselbe Haltung wie bei `parseBool` und den Icon-Namen.
 | Schlüssel | Werte | Standard | Wirkung |
 |---|---|---|---|
 | `categoryIconStyle` | `auto` · `ink` · `color` | `auto` | Einfärbung der Kategorie-Symbole in den Umsatzzeilen. `auto`: ohne Theme Systemgrau wie bisher, **mit Theme die Ink-Farbe**. `ink` erzwingt die Ink-Farbe, `color` nimmt die Farbe der Kategorie (dieselbe wie Mosaik-Blöcke und Ringe). |
-| `bankLogoStyle` | `color` · `mono` | `color` | **Bildmarke** in Flyout- und Listenkopf. `mono` zeichnet sie einfarbig in der Ink-Farbe und passt sich damit Hell/Dunkel von selbst an. Gilt für die Bankmarke **und für ein globales `logo`** — der Schlüssel beschreibt die Marke an dieser Stelle, nicht ihre Herkunft. |
+| `bankLogoStyle` | `color` · `mono` | `color` | Bank-Icons im **Konto-Umschalter**: die Pillen in Flyout und Listenkopf, mit denen man zwischen den Konten wechselt. `mono` zeichnet sie einfarbig in der Ink-Farbe und passt sich damit Hell/Dunkel von selbst an. **Nicht betroffen:** die große Bildmarke über dem Kontostand — die setzt ein Theme mit `logo`, und die bleibt farbig. |
 
 **Warum `auto` und nicht einfach immer Ink:** Die Symbole standen auf Systemgrau. Auf
 einer hellen Fläche ist das richtig, auf einer dunklen Theme-Fläche oder einem dunklen
 Wallpaper verschwinden sie. `auto` löst genau das, ohne dass ein Theme etwas setzen muss.
 
-**Reihenfolge an dieser Stelle** — wichtig, weil sich die Schlüssel gegenseitig
+**Zwei Bildmarken, die man auseinanderhalten muss** — sie sehen ähnlich aus, gehorchen
+aber verschiedenen Schlüsseln:
+
+| Wo | Größe | Woher | `bankLogoStyle`? |
+|---|---|---|---|
+| Über dem Kontostand | 18–20 pt | `logo` des Themes, sonst die Marke der aktiven Bank | **nein** — bleibt farbig |
+| Konto-Umschalter (Pillen) | 15–16 pt | immer die Marke des jeweiligen Kontos | **ja** |
+
+Das ist die Trennung, die der Schlüssel meint: Die Pillen zeigen **mehrere** Konten
+nebeneinander und gewinnen durch eine einheitliche Anmutung. Die Marke über dem
+Kontostand ist dagegen die eine Stelle, an der ein Theme bewusst ein eigenes, farbiges
+Bild setzen darf — dort wäre es widersinnig, es anschließend zu entfärben.
+
+**Reihenfolge über dem Kontostand** — wichtig, weil sich die Schlüssel dort gegenseitig
 verdecken:
 
 1. `bankLogos=off` → Mosaik-Block, alles Weitere entfällt.
@@ -254,15 +267,12 @@ verdecken:
    erscheint dann nirgends mehr.
 3. sonst → die Marke der Bank aus dem YAXI-Katalog.
 
-`bankLogoStyle` wirkt auf Fall 2 und 3. Wer ein farbiges `logo` mitbringt und trotzdem
-`mono` setzt, bekommt sein eigenes Logo als Silhouette — das ist gewollt, aber selten
-gemeint. Ein Schlüssel, der bei jedem Theme mit eigenem Logo einfach nichts täte, wäre
-die schlechtere Alternative.
-
-**Warum `color` der Standard der Bankmarke bleibt:** YAXI liefert nur für 43 der 192
-Banken eine echte einfarbige Maske. Für die übrigen wird das Farblogo über seinen
-Alphakanal geplättet — bei detailreichen Marken wird daraus ein Fleck. `mono` passt zu
-Themes mit strenger Farbwelt; wer bunte Marken erwartet, lässt es bei `color`.
+**Warum `color` der Standard bleibt:** YAXI liefert nur für 43 der 192 Banken eine echte
+einfarbige Maske. Für die übrigen wird das Farblogo über seinen Alphakanal geplättet —
+bei detailreichen Marken wird daraus ein Fleck. `mono` passt zu Themes mit strenger
+Farbwelt; wer bunte Marken erwartet, lässt es bei `color`. Im Konto-Umschalter fällt das
+milder aus als anderswo, weil die Pillen mit 15 bis 16 Punkt ohnehin klein sind und die
+Marke dort eher als Wiedererkennungszeichen dient denn als Bild.
 
 ### 4.3 Chrome-Schalter
 
@@ -340,7 +350,7 @@ Bereiche zeigen (Flyout-Karte 348 pt breit + ein Listen-Ausschnitt, Light und Da
 | Fläche der breiten Liste | `wallpaperWide…` → sonst `wallpaper…` → sonst `cardLight` / `cardDark` |
 | Kontoring (Ampel) | `negative*` für Dispo und knapp, `positive*` für den grünen Bereich, das Mittelband ist die Mischung aus beiden — oder `ringImage` statt des Rings |
 | Kategorie-Symbol der Zeile | `categoryIconStyle` (§4.2a) |
-| Bankmarke in Kopf und Zeile | `bankLogoStyle` (§4.2a) |
+| Bank-Icons im Konto-Umschalter | `bankLogoStyle` (§4.2a) — die Marke über dem Kontostand bleibt farbig |
 | Suchfeld | Ink 10 % Füllung, Ink 30 % Rahmen — bei `squareControls` ohne Rundung |
 | Kapsel „Vorgemerkt" | Ink 16 % Füllung, Ink 85 % Text. Abschaltbar in den Einstellungen (Nutzersache, kein Theme-Schlüssel) |
 | Bildmarke über dem Kontostand | `logo` / `logoDark` — sonst die Bankmarke, bei `bankLogos=off` ein Mosaik-Block |
@@ -456,9 +466,11 @@ und den Schalter sperrt.
      auslöst: **Er sperrt eine Einstellung in der App.** Wer das Feld füllt, nimmt dem
      Nutzer den Kontoring — das gehört an die Oberfläche, nicht in die Dokumentation.
    - **Zwei Auswahlfelder für die Darstellungs-Modi** (4.2a): `categoryIconStyle` mit
-     `auto`/`ink`/`color` und `bankLogoStyle` mit `color`/`mono`. Beim Mono-Modus einen
-     Hinweis zeigen, dass nur rund ein Viertel der Banken eine echte Maske hat und der
-     Rest geplättet wird — sonst wundert sich der Theme-Bauer über Flecken statt Logos.
+     `auto`/`ink`/`color` und `bankLogoStyle` mit `color`/`mono`. Beim Mono-Modus zwei
+     Hinweise zeigen: dass er nur die Pillen des Konto-Umschalters betrifft und nicht die
+     Marke über dem Kontostand, und dass nur rund ein Viertel der Banken eine echte Maske
+     hat — sonst wundert sich der Theme-Bauer über Flecken statt Logos, oder sucht die
+     Wirkung an der falschen Stelle.
    - **Icon-Tabelle** (4.4): je Zeile Funktion, Ruhe- und Aktiv-Symbol, mit
      SF-Symbol-Suche und Vorschau. Ein unbekannter Name muss im Builder auffallen —
      die App fällt still auf den Standard zurück, was beim Bauen niemand merkt.

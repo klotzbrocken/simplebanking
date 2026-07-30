@@ -7358,10 +7358,11 @@ private struct FlyoutSlotSegmentedControl: View {
     @ViewBuilder
     private func logoTile(_ item: FlyoutSlotItem, size: CGFloat) -> some View {
         if let logo = item.logo {
-            Image(nsImage: logo)
-                .resizable().scaledToFit()
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+            // Konto-Umschalter: Hier greift `bankLogoStyle`. Die Marke ÜBER dem
+            // Kontostand bleibt davon unberührt — dort kann ein Theme mit `logo` eine
+            // eigene, farbige Bildmarke setzen, und die soll farbig bleiben.
+            BankMark(image: logo, brandId: item.brandId,
+                     size: size, cornerRadius: size * 0.28)
         } else {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                 .fill(item.barColor)
@@ -8152,9 +8153,10 @@ private struct StatusBalanceFlyoutCardView: View {
                 } else if let logo = ThemeChrome.globalLogoImage {
                     // Globales Theme-Logo: gilt für ALLE Konten, deshalb ohne die
                     // Marken-Invertierung — die weiß nur bei Banken, wie das Logo
-                    // gebaut ist (`brandId: nil`). Für den Dunkelmodus gibt es `logoDark`.
-                    // `bankLogoStyle` greift auch hier, siehe Kommentar in der Liste.
-                    BankMark(image: logo, brandId: nil, size: 20, cornerRadius: 5)
+                    // gebaut ist. Für den Dunkelmodus gibt es `logoDark`.
+                    Image(nsImage: logo).resizable().scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 } else if let img = bankLogoImage {
                     BankMark(image: img, brandId: bankLogoBrandId, size: 20,
                              cornerRadius: 5, dark: dark)
