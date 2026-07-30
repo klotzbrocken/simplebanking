@@ -8065,10 +8065,10 @@ private struct StatusBalanceFlyoutCardView: View {
                                         : nil
                                     )
                             )
-                            .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : heat)
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : heat)
                     }
                 }
-                .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : toggleColor)
+                .foregroundColor(themed ? Color.themedInk.opacity(0.85) : toggleColor)
             }
             .buttonStyle(.plain)
             .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))

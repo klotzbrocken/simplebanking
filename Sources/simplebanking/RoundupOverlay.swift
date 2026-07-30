@@ -60,10 +60,10 @@ struct RoundupOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(lofi ? Color.themedSurfaceOrClear : Color.roundupPanelBackground)
+        .background(themed ? Color.themedSurfaceOrClear : Color.roundupPanelBackground)
         .overlay(
             Rectangle()
-                .fill(lofi ? Color.themedInk.opacity(0.4) : Color.roundupAccent.opacity(0.25))
+                .fill(themed ? Color.themedInk.opacity(0.4) : Color.roundupAccent.opacity(0.25))
                 .frame(height: 1),
             alignment: .bottom
         )
@@ -88,9 +88,9 @@ struct RoundupOverlay: View {
             .frame(maxWidth: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
-                    .fill(lofi ? Color.themedAccent : Color.roundupAccent)
+                    .fill(themed ? Color.themedAccent : Color.roundupAccent)
             )
-            .foregroundColor(lofi ? Color.themedSurface : .white)
+            .foregroundColor(themed ? Color.themedSurface : .white)
         }
         .buttonStyle(.plain)
         .help(L10n.t("Öffnet den Auswahl-Dialog (Heute / Gestern / Vorgestern / Monat).",

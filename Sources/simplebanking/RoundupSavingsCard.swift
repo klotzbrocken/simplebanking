@@ -48,7 +48,7 @@ struct RoundupSavingsCard: View {
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
     private var lofi: Bool { themed && ThemeChrome.lofi }
     private var heroColor: Color { lofi ? .themedIncome : Color.roundupAccent }
-    private var eyebrowColor: Color { lofi ? Color.themedInk.opacity(0.75) : .secondary }
+    private var eyebrowColor: Color { themed ? Color.themedInk.opacity(0.75) : .secondary }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -99,7 +99,7 @@ struct RoundupSavingsCard: View {
         .padding(.horizontal, 14)
         .background(
             RoundedRectangle(cornerRadius: lofi ? 0 : 12, style: .continuous)
-                .fill(lofi ? Color.themedSurfaceOrClear : Color.roundupPanelBackground)
+                .fill(themed ? Color.themedSurfaceOrClear : Color.roundupPanelBackground)
         )
     }
 }

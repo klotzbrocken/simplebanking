@@ -243,7 +243,7 @@ struct QuickSendDrawerView: View {
                         }
                     Text("€")
                         .font(fieldFont())
-                        .foregroundColor(lofi ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
+                        .foregroundColor(themed ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
                 }
                 .padding(.horizontal, 9)
                 .frame(width: 122, height: 30)
@@ -362,12 +362,12 @@ struct QuickSendDrawerView: View {
         return Button { onAddTemplate?() } label: {
             Text("+")
                 .font(ThemeFonts.rowHeading(size: 12, weight: .semibold, lofiSize: 16))
-                .foregroundColor(lofi ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
+                .foregroundColor(themed ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
                 .frame(width: 30, height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: radius)
                         .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
-                        .foregroundColor(lofi ? Color.themedInk.opacity(0.4) : .sbBorder)
+                        .foregroundColor(themed ? Color.themedInk.opacity(0.4) : .sbBorder)
                 )
         }
         .buttonStyle(.plain)

@@ -313,3 +313,87 @@ final class ThemeWallpaperTests: XCTestCase {
         return url
     }
 }
+
+// MARK: - Ink erreicht die Zeilentexte
+//
+// Gemeldet am 30.07.: `inkLight=#F4E9CD` wirkte nicht auf Empfänger und Absender in der
+// Umsatzliste. Ursache war dieselbe wie bei der Schrift — die Farbstellen der Zeilen
+// hingen an `lofi` (also an BTX), während Kopf- und Saldo-Bereiche schon `themed`
+// prüften. Die Schriften hatte ich gelöst, die Farben übersehen.
+
+@MainActor
+final class ThemeInkTests: XCTestCase {
+
+    private var gesichertesTheme: String = ThemeManager.defaultThemeID
+
+    override func setUp() async throws {
+        try await super.setUp()
+        gesichertesTheme = ThemeManager.shared.currentTheme.id
+    }
+    override func tearDown() async throws {
+        ThemeManager.shared.selectThemeForTesting(id: gesichertesTheme)
+        try await super.tearDown()
+    }
+
+    private func rgb(_ farbe: NSColor, dark: Bool) throws -> [CGFloat] {
+        let erscheinung = try XCTUnwrap(NSAppearance(named: dark ? .darkAqua : .aqua))
+        var werte: [CGFloat] = []
+        erscheinung.performAsCurrentDrawingAppearance {
+            if let c = farbe.usingColorSpace(.sRGB) {
+                werte = [c.redComponent, c.greenComponent, c.blueComponent]
+            }
+        }
+        return werte
+    }
+
+    /// Der gemeldete Wert: gesetztes `inkLight` muss genau so herauskommen.
+    func test_gesetztesInk_kommtUnveraendertAn() throws {
+        let theme = AppTheme(
+            id: "t", name: "T", bodyFontName: "System", headingFontName: "System",
+            accentHex: "#4E79A7", positiveHex: "#4F8A6A", negativeHex: "#C65A5A",
+            cardLightHex: "#F4E9CD", cardDarkHex: "#1F1F1F",
+            panelLightHex: "#F4E9CD", panelDarkHex: "#171717",
+            positiveLightHex: nil, positiveDarkHex: nil,
+            negativeLightHex: nil, negativeDarkHex: nil,
+            inkLightHex: "#F4E9CD", inkDarkHex: nil)
+        let hell = try rgb(theme.inkColor(dark: false), dark: false)
+        XCTAssertEqual(hell[0], 0xF4 / 255.0, accuracy: 0.004)
+        XCTAssertEqual(hell[1], 0xE9 / 255.0, accuracy: 0.004)
+        XCTAssertEqual(hell[2], 0xCD / 255.0, accuracy: 0.004)
+    }
+
+    /// Die dokumentierte Falle (THEMES.md §4.1): Fehlt `inkDark`, rechnet die App den
+    /// Kontrast gegen `cardDark` — **nicht** gegen ein Wallpaper. Wer nur `inkLight`
+    /// setzt, bekommt im Dunkelmodus etwas anderes als seine Farbe.
+    func test_fehlendesInkDark_ergibtAutoKontrast_nichtDieHelleFarbe() throws {
+        let theme = AppTheme(
+            id: "t", name: "T", bodyFontName: "System", headingFontName: "System",
+            accentHex: "#4E79A7", positiveHex: "#4F8A6A", negativeHex: "#C65A5A",
+            cardLightHex: "#F4E9CD", cardDarkHex: "#1F1F1F",
+            panelLightHex: "#F4E9CD", panelDarkHex: "#171717",
+            positiveLightHex: nil, positiveDarkHex: nil,
+            negativeLightHex: nil, negativeDarkHex: nil,
+            inkLightHex: "#F4E9CD", inkDarkHex: nil)
+        let dunkel = try rgb(theme.inkColor(dark: true), dark: true)
+        let creme: [CGFloat] = [0xF4 / 255.0, 0xE9 / 255.0, 0xCD / 255.0]
+        XCTAssertNotEqual(dunkel, creme,
+                          "Ohne inkDark darf nicht zufällig die helle Farbe herauskommen")
+        // Auf dunkler Fläche wählt der Auto-Kontrast Weiß.
+        XCTAssertGreaterThan(dunkel[0], 0.9)
+    }
+
+    /// Ink und Surface identisch ist ohne Wallpaper unlesbar — der Builder soll davor
+    /// warnen. Hier nur festgehalten, dass die App es nicht heimlich korrigiert.
+    func test_inkGleichSurface_wirdNichtStillKorrigiert() throws {
+        let theme = AppTheme(
+            id: "t", name: "T", bodyFontName: "System", headingFontName: "System",
+            accentHex: "#4E79A7", positiveHex: "#4F8A6A", negativeHex: "#C65A5A",
+            cardLightHex: "#F4E9CD", cardDarkHex: "#1F1F1F",
+            panelLightHex: "#F4E9CD", panelDarkHex: "#171717",
+            positiveLightHex: nil, positiveDarkHex: nil,
+            negativeLightHex: nil, negativeDarkHex: nil,
+            inkLightHex: "#F4E9CD", inkDarkHex: nil)
+        XCTAssertEqual(try rgb(theme.inkColor(dark: false), dark: false),
+                       try rgb(theme.surfaceColor(dark: false), dark: false))
+    }
+}
