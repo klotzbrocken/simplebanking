@@ -23,12 +23,51 @@ struct GreenZoneRing: View {
     }
 
     private func ringColor(for f: Double) -> Color {
-        // Color Harmony Palette — diskrete semantische Bands statt Continuous Hue.
-        // Dispo nutzt Red (urgent), sonst Red→Orange→Green nach Threshold.
-        guard !isDispoMode else { return .sbRedStrong }
-        if f < 0.34 { return .sbRedStrong }
-        if f < 0.67 { return .sbOrangeStrong }
-        return .sbGreenStrong
+        GreenZoneRing.color(for: GreenZoneRing.band(fraction: f, isDispo: isDispoMode),
+                            themed: themed, lofi: themed && ThemeChrome.lofi)
+    }
+
+    // MARK: - Bänder und Farben
+
+    /// Die semantischen Bänder des Rings — bewusst getrennt von der Farbe, damit die
+    /// Zuordnung prüfbar ist und die Palette darüber entscheidet, wie sie aussieht.
+    enum Band: Equatable { case dispo, knapp, mittel, gut }
+
+    /// Reine Zuordnung Bruchteil → Band. Die Schwellen sind unverändert (0,34 / 0,67).
+    static func band(fraction f: Double, isDispo: Bool) -> Band {
+        if isDispo { return .dispo }
+        if f < 0.34 { return .knapp }
+        if f < 0.67 { return .mittel }
+        return .gut
+    }
+
+    /// Farbe eines Bandes.
+    ///
+    /// Vorher gab es zwei Farbfunktionen: eine mit der festen App-Palette und eine mit
+    /// den Theme-Farben — und gewählt wurde nach `!glyphControls`, also nur für BTX.
+    /// Jedes andere Theme bekam Grün/Rot der App, obwohl es eigene Einnahmen- und
+    /// Ausgabenfarben mitbringt. Jetzt entscheidet `themed`.
+    ///
+    /// `lofi` hält allein das Mittelband von BTX fest: dort ist das Bernstein `#c08a00`
+    /// Teil der Gestaltung eines ausgelieferten Themes, und das soll sich nicht durch
+    /// eine Mischung ersetzen.
+    static func color(for band: Band, themed: Bool, lofi: Bool = false) -> Color {
+        guard themed else {
+            // Color Harmony Palette — diskrete semantische Bänder statt Continuous Hue.
+            switch band {
+            case .dispo, .knapp: return .sbRedStrong
+            case .mittel:        return .sbOrangeStrong
+            case .gut:           return .sbGreenStrong
+            }
+        }
+        switch band {
+        case .dispo, .knapp: return .themedExpense
+        case .mittel:
+            return lofi
+                ? Color(nsColor: AppTheme.color(from: "#c08a00", fallback: .systemOrange))
+                : .themedMidBand
+        case .gut:           return .themedIncome
+        }
     }
 
     private var day: Int { Calendar.current.component(.day, from: date) }
@@ -45,10 +84,8 @@ struct GreenZoneRing: View {
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
 
     private func btxColor(for f: Double) -> Color {
-        guard !isDispoMode else { return .themedExpense }
-        if f < 0.34 { return .themedExpense }
-        if f < 0.67 { return Color(nsColor: AppTheme.color(from: "#c08a00", fallback: .systemOrange)) }
-        return .themedIncome
+        GreenZoneRing.color(for: GreenZoneRing.band(fraction: f, isDispo: isDispoMode),
+                            themed: true, lofi: true)
     }
 
     private var btxBlockGauge: some View {

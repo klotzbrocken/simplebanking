@@ -64,6 +64,19 @@ struct AppTheme: Identifiable, Equatable {
     /// Bild weiß das niemand, deshalb wird nichts automatisch invertiert.
     var logoDarkFileName: String? = nil
 
+    /// Hintergrundbild für Flyout und Umsatzliste, **relativ zum Theme-Ordner**.
+    /// Ersetzt die flache Theme-Farbe (`cardLight`/`cardDark`) und damit auch den
+    /// Money-Heat-Verlauf, der bei aktivem Theme ohnehin entfällt.
+    ///
+    /// Beide Flächen haben feste Maße — die Umsatzliste 348 × 620 schmal und 840 × 620
+    /// breit, das Flyout 348 breit. Nur die Flyout-Höhe wechselt (Punkte, Drawer).
+    /// Deshalb wird das Bild flächenfüllend skaliert und **oben verankert**, statt exakte
+    /// Maße zu verlangen: Ein Theme mit einer Datei funktioniert so in allen Zuständen.
+    var wallpaperFileName: String? = nil
+    /// Variante für den Dunkelmodus. Ohne diesen Schlüssel gilt `wallpaper` in beiden
+    /// Modi — wie beim Logo wird nichts automatisch invertiert.
+    var wallpaperDarkFileName: String? = nil
+
     /// Pro Funktion austauschbares SF-Symbol, z. B. `icon.filter=slider.horizontal.3`.
     /// Leer → überall die Standardsymbole. Greift nur, solange `glyphControls` an ist;
     /// bei textgetriebenen Themes stehen weiterhin die Kürzel.
@@ -161,7 +174,22 @@ final class ThemeManager: @unchecked Sendable {
     static let didChangeNotification = Notification.Name("ThemeChanged")
     static let defaultThemeID = "default"
 
-    private let defaults = UserDefaults.standard
+    /// Im Testlauf eine Wegwerf-Domain statt der echten — sonst änderte ein Test, der
+    /// das Theme umschaltet, die Einstellung des Nutzers. Dieselbe Erkennung und
+    /// Begründung wie bei `MultibankingStore.defaults` und `CredentialsStore.appSupportURL`.
+    /// `nonisolated(unsafe)`, weil `ThemeManager` selbst `@unchecked Sendable` ist und
+    /// `UserDefaults` nicht als Sendable gilt — dieselbe Bewertung wie bei den übrigen
+    /// prozessweiten Werten hier. Der Wert wird einmal berechnet und nie verändert.
+    nonisolated(unsafe) static let defaults: UserDefaults = {
+        let sandbox = "simplebanking.tests.theme"
+        if NSClassFromString("XCTestCase") != nil, let d = UserDefaults(suiteName: sandbox) {
+            d.removePersistentDomain(forName: sandbox)
+            return d
+        }
+        return .standard
+    }()
+
+    private var defaults: UserDefaults { Self.defaults }
     private let fileManager = FileManager.default
 
     private var cachedThemes: [AppTheme] = []
@@ -177,6 +205,15 @@ final class ThemeManager: @unchecked Sendable {
         let themes = availableThemes()
         return themes.first(where: { $0.id == selectedID }) ?? themes.first ?? .fallback
     }
+
+    #if DEBUG
+    /// Nur für Tests: schaltet das Theme um. Im Betrieb schreibt die Oberfläche den
+    /// Schlüssel selbst; hier braucht es einen benannten Weg, damit Tests nicht am
+    /// UserDefaults-Schlüssel kleben.
+    func selectThemeForTesting(id: String) {
+        defaults.set(id, forKey: Self.storageKey)
+    }
+    #endif
 
     func availableThemes() -> [AppTheme] {
         if !hasLoadedThemes {
@@ -310,6 +347,8 @@ final class ThemeManager: @unchecked Sendable {
             screenBorderHex: values["screenborder"].flatMap { $0.isEmpty ? nil : $0 },
             logoFileName: values["logo"].flatMap { $0.isEmpty ? nil : $0 },
             logoDarkFileName: values["logodark"].flatMap { $0.isEmpty ? nil : $0 },
+            wallpaperFileName: values["wallpaper"].flatMap { $0.isEmpty ? nil : $0 },
+            wallpaperDarkFileName: values["wallpaperdark"].flatMap { $0.isEmpty ? nil : $0 },
             iconOverrides: Self.parseIconOverrides(from: values)
         )
     }
@@ -502,34 +541,83 @@ enum ThemeChrome {
         return override
     }
 
-    /// Das globale Logo als fertiges Bild, oder `nil`.
+    /// Lädt ein Theme-Bild mit allen Schranken, oder `nil`.
     ///
     /// Gecacht, weil ein SwiftUI-Body sehr oft ausgewertet wird und
     /// `NSImage(contentsOf:)` jedes Mal von der Platte läse. Schlüssel ist Pfad plus
     /// Änderungsdatum — damit sieht man ein ausgetauschtes Bild ohne Neustart.
     @MainActor
-    static var globalLogoImage: NSImage? {
-        guard let url = globalLogoURL else { return nil }
+    static func themeImage(at url: URL, maxBytes: Int, art: String) -> NSImage? {
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
         let size = (attrs?[.size] as? Int) ?? 0
-        guard size > 0, size <= maxLogoBytes else {
-            if size > maxLogoBytes {
-                AppLogger.log("Theme-Logo übersprungen: \(url.lastPathComponent) ist \(size / 1024) KB, erlaubt sind \(maxLogoBytes / 1024) KB",
+        guard size > 0, size <= maxBytes else {
+            if size > maxBytes {
+                AppLogger.log("Theme-\(art) übersprungen: \(url.lastPathComponent) ist \(size / 1024) KB, erlaubt sind \(maxBytes / 1024) KB",
                               category: "Theme", level: "WARN")
             }
             return nil
         }
         let stamp = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let key = "\(url.path)|\(stamp)"
-        if let cached = logoCache[key] { return cached }
+        if let cached = bildCache[key] { return cached }
         guard logoDimensionsAreSane(at: url) else {
-            AppLogger.log("Theme-Logo übersprungen: \(url.lastPathComponent) hat unzulässige Bildmaße (max \(maxLogoEdge) px je Kante, \(maxLogoPixels / 1_000_000) MP gesamt)",
+            AppLogger.log("Theme-\(art) übersprungen: \(url.lastPathComponent) hat unzulässige Bildmaße (max \(maxLogoEdge) px je Kante, \(maxLogoPixels / 1_000_000) MP gesamt)",
                           category: "Theme", level: "WARN")
             return nil
         }
         guard let image = NSImage(contentsOf: url) else { return nil }
-        logoCache = [key: image]   // immer nur ein Logo aktiv — kein Wachstum nötig
+        // Höchstens Logo + Wallpaper gleichzeitig, hell oder dunkel — vier Einträge
+        // genügen, danach beginnt der Cache von vorn.
+        if bildCache.count >= 4 { bildCache.removeAll() }
+        bildCache[key] = image
         return image
+    }
+
+    @MainActor
+    static var globalLogoImage: NSImage? {
+        guard let url = globalLogoURL else { return nil }
+        return themeImage(at: url, maxBytes: maxLogoBytes, art: "Logo")
+    }
+
+    /// Das Wallpaper als fertiges Bild, oder `nil`.
+    @MainActor
+    static var wallpaperImage: NSImage? {
+        guard let url = wallpaperURL else { return nil }
+        return themeImage(at: url, maxBytes: maxWallpaperBytes, art: "Wallpaper")
+    }
+
+    /// Durchschnittsfarbe der **oberen Bildkante** des Wallpapers.
+    ///
+    /// Gebraucht für die Sprechblasen-Nase des Flyouts: Dort lässt sich kein Bild
+    /// zeichnen, der Zipfel wird flächig getönt (`tintFlyoutPopoverArrow`). Ohne diesen
+    /// Wert behielte er die alte Theme-Farbe und stäche unter einem Wallpaper heraus —
+    /// dieselbe Stelle, die vor der Nasen-Tönung weiß geblieben war.
+    @MainActor
+    static var wallpaperTopEdgeColor: NSColor? {
+        guard let bild = wallpaperImage else { return nil }
+        return averageTopEdgeColor(of: bild)
+    }
+
+    /// Mittelt einen schmalen Streifen an der Oberkante zu einer Farbe, indem er auf
+    /// einen einzigen Bildpunkt gezeichnet wird.
+    static func averageTopEdgeColor(of image: NSImage, stripFraction: CGFloat = 0.06) -> NSColor? {
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+        guard let rep = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let ctx = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        let streifen = max(1, image.size.height * stripFraction)
+        // `from:` rechnet von unten links — die Oberkante liegt bei height - streifen.
+        let quelle = NSRect(x: 0, y: image.size.height - streifen,
+                            width: image.size.width, height: streifen)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: 1, height: 1),
+                   from: quelle, operation: .copy, fraction: 1.0)
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.colorAt(x: 0, y: 0)
     }
 
     /// Theme-Ordner sollen weitergebbar bleiben, und die Datei wird beim Themewechsel
@@ -547,7 +635,11 @@ enum ThemeChrome {
     /// mitbringen, keine beliebige Datei öffnen lassen.
     static let allowedLogoExtensions: Set<String> = ["png", "pdf", "svg"]
 
-    @MainActor private static var logoCache: [String: NSImage] = [:]
+    /// Byte-Grenze fürs Wallpaper. Deutlich höher als beim Logo: 840 × 620 in @2x sind
+    /// 1680 × 1240 Pixel, und dafür reichen 512 KB nicht.
+    static let maxWallpaperBytes = 4 * 1024 * 1024
+
+    @MainActor private static var bildCache: [String: NSImage] = [:]
 
     /// Prüft den Dateinamen aus der `.cfg`.
     ///
@@ -578,15 +670,14 @@ enum ThemeChrome {
         sanitizedLogoFileName(raw) != nil
     }
 
-    /// Ein globales Logo ersetzt die Bankmarke — aber nur, wenn Bildmarken überhaupt
-    /// gezeichnet werden. `bankLogos` entscheidet OB, `logo` nur WOMIT.
-    static var globalLogoURL: URL? {
-        guard theme.bankLogosEnabled else { return nil }
-        let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let name = (dark ? theme.logoDarkFileName : nil) ?? theme.logoFileName
-        guard let name else { return nil }
+    /// Löst einen Dateinamen aus der `.cfg` zu einer Datei **im Theme-Ordner** auf.
+    ///
+    /// Gemeinsamer Weg für Logo und Wallpaper: Beide stehen in derselben bearbeitbaren
+    /// Datei und tragen dieselbe Gefahr. `art` geht nur in die Protokollzeile ein, damit
+    /// im Log steht, welcher Schlüssel abgelehnt wurde.
+    static func themeAssetURL(named name: String, art: String) -> URL? {
         guard let sauber = sanitizedLogoFileName(name) else {
-            AppLogger.log("Theme-Logo abgelehnt: „\(name)\" ist kein einfacher Dateiname im Theme-Ordner (erlaubt: \(allowedLogoExtensions.sorted().joined(separator: ", ")))",
+            AppLogger.log("Theme-\(art) abgelehnt: „\(name)\" ist kein einfacher Dateiname im Theme-Ordner (erlaubt: \(allowedLogoExtensions.sorted().joined(separator: ", ")))",
                           category: "Theme", level: "WARN")
             return nil
         }
@@ -598,13 +689,36 @@ enum ThemeChrome {
         // bringt so etwas leicht mit.
         let ziel = url.resolvingSymlinksInPath().standardizedFileURL
         guard ziel.path.hasPrefix(ordner.path + "/") else {
-            AppLogger.log("Theme-Logo abgelehnt: \(name) zeigt aus dem Theme-Ordner heraus",
+            AppLogger.log("Theme-\(art) abgelehnt: \(name) zeigt aus dem Theme-Ordner heraus",
                           category: "Theme", level: "WARN")
             return nil
         }
-        // Fehlende Datei → still zurück auf die Bankmarke. Ein Theme darf keine
-        // leere Fläche hinterlassen, nur weil ein Bild vergessen wurde.
+        // Fehlende Datei → still zurück auf das Bisherige. Ein Theme darf keine leere
+        // Fläche hinterlassen, nur weil ein Bild vergessen wurde.
         return FileManager.default.fileExists(atPath: ziel.path) ? ziel : nil
+    }
+
+    /// Ein globales Logo ersetzt die Bankmarke — aber nur, wenn Bildmarken überhaupt
+    /// gezeichnet werden. `bankLogos` entscheidet OB, `logo` nur WOMIT.
+    static var globalLogoURL: URL? {
+        guard theme.bankLogosEnabled else { return nil }
+        let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let name = (dark ? theme.logoDarkFileName : nil) ?? theme.logoFileName
+        guard let name else { return nil }
+        return themeAssetURL(named: name, art: "Logo")
+    }
+
+    /// True, sobald das aktive Theme ein brauchbares Wallpaper mitbringt. Ein Wallpaper
+    /// setzt ein Theme voraus — der Schlüssel steht in der `.cfg`, das Default-Theme hat
+    /// keine.
+    static var wallpaperActive: Bool { wallpaperURL != nil }
+
+    /// Wallpaper für Flyout und Umsatzliste. Ersetzt die flache Theme-Farbe.
+    static var wallpaperURL: URL? {
+        let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let name = (dark ? theme.wallpaperDarkFileName : nil) ?? theme.wallpaperFileName
+        guard let name else { return nil }
+        return themeAssetURL(named: name, art: "Wallpaper")
     }
 
     /// Liest die Bildmaße aus den Metadaten, ohne zu dekodieren.
@@ -725,6 +839,41 @@ enum ThemeFonts {
         themedFont(named: ThemeManager.shared.currentTheme.bodyFontName, size: size, weight: weight)
     }
 
+    // MARK: - Zeilentexte in Flyout und Umsatzliste
+    //
+    // Vorher stand an diesen Stellen `lofi ? flyoutBody(…) : .system(…)`. `lofi` heißt
+    // `!isDefault && !glyphControls` — in der Praxis also „das ist BTX". Damit erreichte
+    // die Theme-Schrift den Kontostand und die Überschriften (die rufen `flyoutHeading`
+    // ungatet), nicht aber Empfänger, Betrag oder Kategorie in der Umsatzliste. Ein
+    // Theme mit eigener Schrift wirkte deshalb nur halb.
+    //
+    // `size`/`weight` gelten für den Normalfall — auch für Themes mit eigener Schrift.
+    // `lofiSize`/`lofiWeight` gelten nur für textgetriebene Themes (BTX/VT323), deren
+    // Schrift kleiner baut und deshalb größere Grade braucht. Ohne Theme kommt weiterhin
+    // die Systemschrift; das Bild des Default-Themes bleibt damit unverändert.
+    //
+    // Die Geometrie kann sich dabei nicht verschieben: Zeilenhöhen stammen aus
+    // `lineHeight(forSize:weight:)` und damit aus der Systemschrift, nicht aus der
+    // Theme-Familie.
+
+    static func rowBody(size: CGFloat, weight: Font.Weight = .regular,
+                        lofiSize: CGFloat? = nil, lofiWeight: Font.Weight? = nil) -> Font {
+        guard !ThemeManager.shared.currentTheme.isDefault else {
+            return .system(size: size, weight: weight)
+        }
+        guard ThemeChrome.lofi else { return flyoutBody(size: size, weight: weight) }
+        return flyoutBody(size: lofiSize ?? size, weight: lofiWeight ?? weight)
+    }
+
+    static func rowHeading(size: CGFloat, weight: Font.Weight = .semibold,
+                           lofiSize: CGFloat? = nil, lofiWeight: Font.Weight? = nil) -> Font {
+        guard !ThemeManager.shared.currentTheme.isDefault else {
+            return .system(size: size, weight: weight)
+        }
+        guard ThemeChrome.lofi else { return flyoutHeading(size: size, weight: weight) }
+        return flyoutHeading(size: lofiSize ?? size, weight: lofiWeight ?? weight)
+    }
+
     /// Feste Zeilenhöhe für theme-getönte Textstellen — abgeleitet aus der
     /// **Systemschrift** dieser Größe, nicht aus der Theme-Schrift.
     ///
@@ -804,6 +953,34 @@ extension Color {
             return appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil ? t.negativeDarkColor : t.negativeLightColor
         })
     }
+    /// Die Theme-Fläche — oder durchsichtig, wenn ein Wallpaper darunterliegt.
+    ///
+    /// Flyout und Liste malen ihre Flächen mehrfach übereinander (Karte, Kopfzeile,
+    /// Panel). Jede davon würde ein Wallpaper verdecken, das nur ganz unten liegt.
+    /// Deshalb weichen sie zurück, sobald eines aktiv ist, statt das Bild in jede
+    /// einzelne Ebene zu kopieren.
+    static var themedSurfaceOrClear: Color {
+        ThemeChrome.wallpaperActive ? .clear : themedSurface
+    }
+
+    /// Mittelband des Kontorings: die Mischung aus Ausgaben- und Einnahmenfarbe.
+    ///
+    /// Der Ring hat drei Bänder (knapp / mittel / gut). Für das mittlere gibt es im
+    /// Theme-Vertrag keinen eigenen Wert, und es soll auch keiner dazukommen — ein
+    /// weiterer Schlüssel für eine Farbe, die zwischen zwei vorhandenen liegt, wäre
+    /// Ballast. Die Mischung folgt der Palette automatisch: Bei einer roten/grünen
+    /// Palette wird es olivgelb, bei einer blau/violetten entsprechend anders.
+    static var themedMidBand: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let t = ThemeManager.shared.currentTheme
+            let dark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            let negativ = (dark ? t.negativeDarkColor : t.negativeLightColor).usingColorSpace(.sRGB)
+            let positiv = (dark ? t.positiveDarkColor : t.positiveLightColor).usingColorSpace(.sRGB)
+            guard let negativ, let positiv else { return .systemOrange }
+            return negativ.blended(withFraction: 0.5, of: positiv) ?? negativ
+        })
+    }
+
     static var themedAccent: Color { Color(nsColor: ThemeManager.shared.currentTheme.accentColor) }
 
     /// Rahmenfarbe des „Bildschirms" (BTX: gelber Rand). nil → kein Rahmen.
@@ -895,4 +1072,33 @@ extension Color {
     static var sbNeutralStrong: Color { dynamicHex(light: "#8A7F70", dark: "#A89D8D") }
     static var sbNeutralMid: Color    { dynamicHex(light: "#B0A699", dark: "#BAB0A3") }
     static var sbNeutralSoft: Color   { dynamicHex(light: "#EEEAE3", dark: "#2E2A24") }
+}
+
+
+// MARK: - Wallpaper-Ebene
+
+/// Zeichnet das Theme-Wallpaper flächenfüllend, **oben verankert**, Überhang beschnitten.
+///
+/// Die Verankerung oben ist die Entscheidung, die ein Theme mit einer einzigen Datei
+/// tragfähig macht: Die Umsatzliste hat zwei feste Breiten (348 und 840 bei 620 Höhe),
+/// das Flyout wechselt seine Höhe (Punkte, Schnellüberweisungs-Drawer). Wer exakte Maße
+/// verlangte, bräuchte vier Dateien und bekäme trotzdem beim Aufklappen des Drawers ein
+/// falsches Bild. So bleibt oben immer derselbe Bildausschnitt stehen, und nach unten
+/// wird gezeigt, was Platz hat.
+///
+/// Ohne Wallpaper zeichnet der View nichts — Aufrufer können ihn bedingungslos einhängen.
+struct ThemeWallpaper: View {
+    // Kein `@ObservedObject`: `ThemeManager` ist kein ObservableObject, die übrigen
+    // Theme-Stellen lesen `currentTheme` ebenfalls direkt. Ein Themewechsel baut
+    // Flyout und Liste neu auf.
+    var body: some View {
+        if let bild = ThemeChrome.wallpaperImage {
+            Image(nsImage: bild)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .clipped()
+                .allowsHitTesting(false)
+        }
+    }
 }

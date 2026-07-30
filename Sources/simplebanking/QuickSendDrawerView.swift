@@ -361,7 +361,7 @@ struct QuickSendDrawerView: View {
         let radius = ThemeChrome.cornerRadius(7)
         return Button { onAddTemplate?() } label: {
             Text("+")
-                .font(lofi ? ThemeFonts.flyoutHeading(size: 16) : .system(size: 12, weight: .semibold))
+                .font(ThemeFonts.rowHeading(size: 12, weight: .semibold, lofiSize: 16))
                 .foregroundColor(lofi ? Color.themedInk.opacity(0.7) : .sbTextSecondary)
                 .frame(width: 30, height: 30)
                 .background(
@@ -379,7 +379,7 @@ struct QuickSendDrawerView: View {
         Button { review() } label: {
             HStack(spacing: 5) {
                 Text(L10n.t("Weiter", "Next"))
-                    .font(lofi ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
+                    .font(ThemeFonts.rowBody(size: 12, weight: .semibold, lofiSize: 15))
                     .textCase(ThemeChrome.textCase)
                 if lofi {
                     Text(">").font(ThemeFonts.flyoutBody(size: 15))

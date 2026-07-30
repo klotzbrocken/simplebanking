@@ -63,8 +63,8 @@ struct RoundupSavingsCard: View {
             }
 
             Text("+ \(formatEuros(state.monthToDateCents))")
-                .font(lofi ? ThemeFonts.flyoutHeading(size: heroFontSize, weight: .bold)
-                           : .system(size: heroFontSize, weight: .bold, design: .rounded))
+                .font(themed ? ThemeFonts.flyoutHeading(size: heroFontSize, weight: .bold)
+                             : .system(size: heroFontSize, weight: .bold, design: .rounded))
                 .foregroundColor(heroColor)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -72,7 +72,7 @@ struct RoundupSavingsCard: View {
 
             Text(L10n.t("hättest Du diesen Monat durch Aufrunden zur Seite legen können",
                         "you could have set this aside through round-up this month"))
-                .font(lofi ? ThemeFonts.flyoutBody(size: eyebrowFontSize + 3) : .system(size: eyebrowFontSize))
+                .font(ThemeFonts.rowBody(size: eyebrowFontSize, lofiSize: eyebrowFontSize + 3))
                 .textCase(ThemeChrome.textCase)
                 .foregroundColor(eyebrowColor)
                 .multilineTextAlignment(.center)
@@ -87,7 +87,7 @@ struct RoundupSavingsCard: View {
                     Text(streakLabel)
                 }
             }
-            .font(lofi ? ThemeFonts.flyoutBody(size: subFontSize + 3) : .system(size: subFontSize))
+            .font(ThemeFonts.rowBody(size: subFontSize, lofiSize: subFontSize + 3))
             .textCase(ThemeChrome.textCase)
             .foregroundColor(eyebrowColor)
             .monospacedDigit()
@@ -99,7 +99,7 @@ struct RoundupSavingsCard: View {
         .padding(.horizontal, 14)
         .background(
             RoundedRectangle(cornerRadius: lofi ? 0 : 12, style: .continuous)
-                .fill(lofi ? Color.themedSurface : Color.roundupPanelBackground)
+                .fill(lofi ? Color.themedSurfaceOrClear : Color.roundupPanelBackground)
         )
     }
 }

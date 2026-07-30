@@ -21,6 +21,12 @@ Elementen. Es bestimmt nur, *welche* Farbe/Schrift ein Element trägt, *ob* ein 
 gezeichnet wird und *womit* ein vorhandener Platz gefüllt ist (z. B. Mosaik-Block im
 20×20-Logo-Platz). Der Builder braucht deshalb keine Layout-Werkzeuge.
 
+**Die Schrift wirkt auf alle getönten Texte.** Kontostand, Überschriften **und** die
+Zeilen der Umsatzliste (Empfänger, Absender, Betrag, Kategorien) nehmen `bodyFont` bzw.
+`headingFont`. Die Punktgrade bleiben dabei die der App; nur textgetriebene Themes
+(`glyphControls=off`, siehe §4.3) bekommen größere Grade, weil Rasterschriften wie VT323
+kleiner bauen.
+
 **Die Schrift kann die Geometrie nicht verschieben.** Das war einmal anders: Die
 Kontostand-Zeile übernahm die Zeilenhöhe der Theme-Schrift, wodurch Game Boy höhere
 Karten bekam als das Default-Theme — und die Höhe zusätzlich mit der Länge des Betrags
@@ -87,6 +93,8 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 | `headingFont` | `System` | Saldo-Zahl, Händlernamen, Beträge, Datumsköpfe (`ThemeFonts.flyoutHeading`). |
 | `logo` | *(leer)* | **Globale Bildmarke** statt der Bankmarke in Flyout- und Listenkopf — für **alle** Konten gleich, auch PayPal und Händler-Slots. Dateiname **relativ zum Theme-Ordner**. Format siehe unten. |
 | `logoDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel wird `logo` in beiden Modi unverändert gezeigt — es wird **nichts automatisch invertiert**. |
+| `wallpaper` | *(leer)* | **Hintergrundbild** für Flyout und Umsatzliste. Ersetzt die flache Theme-Farbe (`cardLight`/`cardDark`). Dateiname relativ zum Theme-Ordner, gleiche Regeln wie `logo`. Format siehe unten. |
+| `wallpaperDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel gilt `wallpaper` in beiden Modi. |
 
 **Die Schrift ist gefahrlos wählbar.** Zeilenhöhen hängen nicht an ihr (siehe §1), eine
 sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe einer Karte.
@@ -103,6 +111,30 @@ sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe ein
 | **Hintergrund** | transparent. Die Marke sitzt auf der Theme-Fläche; ein deckendes Rechteck sieht aus wie ein aufgeklebter Sticker. |
 | **Seitenverhältnis** | Nicht quadratisches wird eingepasst, nie beschnitten oder verzerrt. |
 | **Dateigröße** | höchstens **512 KB**. Größeres wird ignoriert und protokolliert — Theme-Ordner sollen weitergebbar bleiben. |
+
+#### Format des Wallpapers
+
+| | |
+|---|---|
+| **Akzeptiert** | PNG, PDF, SVG — wie beim Logo |
+| **Empfohlene Maße** | **840 × 620** (als @2x: 1680 × 1240) |
+| **Größe** | bis 4 MB (das Logo darf nur 512 KB — ein Wallpaper braucht mehr) |
+| **Dateiname** | einfacher Name im Theme-Ordner, dieselben Regeln wie beim Logo |
+
+**Warum 840 × 620 und warum nicht exakt:** Die Umsatzliste hat zwei feste Größen —
+348 × 620 schmal und 840 × 620 breit (der grüne Fensterknopf schaltet um, Kantenziehen ist
+gesperrt). Das Flyout ist 348 breit, wechselt aber die Höhe (mit/ohne Konto-Punkte, und
+noch einmal, wenn der Schnellüberweisungs-Drawer aufgeht). Ein Bild, das überall exakt
+passt, gibt es deshalb nicht.
+
+Das Wallpaper wird **flächenfüllend skaliert und oben verankert**, der Überhang
+beschnitten. Eine Datei reicht damit für alle Zustände. Was oben im Bild steht, ist immer
+sichtbar — das Motiv gehört nach oben, nicht in die Mitte.
+
+Bei aktivem Wallpaper entfällt der Money-Heat-Verlauf (wie bei jedem Theme) und die
+Karten- und Kopfflächen werden durchsichtig, damit das Bild durchscheint. Die Nase der
+Flyout-Sprechblase bekommt die Durchschnittsfarbe der oberen Bildkante — dort lässt sich
+kein Bild zeichnen.
 
 **Vorrang:** `bankLogos` entscheidet, **ob** überhaupt eine Bildmarke erscheint, `logo`
 nur **womit**. Bei `bankLogos=off` bleibt es also beim Mosaik-Block, auch wenn ein Logo
@@ -205,6 +237,8 @@ Bereiche zeigen (Flyout-Karte 348 pt breit + ein Listen-Ausschnitt, Light und Da
 | Aktiver Konto-Umschalter / Filter | `accent` (Text auf Füllung: Surface-Farbe) |
 | Suchfeld/Eingabefelder | Weiß 65 % + 2-pt-Ink-Rahmen, Radius via `squareControls` |
 | Blende um alles | `screenBorder` |
+| Fläche von Flyout und Liste | `wallpaper` / `wallpaperDark` — sonst `cardLight` / `cardDark` |
+| Kontoring (Ampel) | `negative*` für Dispo und knapp, `positive*` für den grünen Bereich, das Mittelband ist die Mischung aus beiden |
 | Bildmarke über dem Kontostand | `logo` / `logoDark` — sonst die Bankmarke, bei `bankLogos=off` ein Mosaik-Block |
 | Icons in Fuß-, Steuer- und Titelzeile | `icon.<name>` / `icon.<name>.active` (§4.4) |
 | Mosaik-Blöcke | Muster fix, Farben fix je Kategorie (nicht konfigurierbar) |

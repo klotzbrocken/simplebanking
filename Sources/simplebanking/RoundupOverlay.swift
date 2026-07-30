@@ -35,7 +35,7 @@ struct RoundupOverlay: View {
             // EIGENER voller Zeile — sonst wird im schmalen Fenster die 5€-Pille beschnitten.
             HStack(spacing: 10) {
                 Text(L10n.t("Aufrunden um:", "Round up to:"))
-                    .font(lofi ? ThemeFonts.flyoutBody(size: 15) : .system(size: 12, weight: .semibold))
+                    .font(ThemeFonts.rowBody(size: 12, weight: .semibold, lofiSize: 15))
                     .textCase(ThemeChrome.textCase)
                     .foregroundColor(lofi ? .themedInk : .primary)
                     .fixedSize()
@@ -60,7 +60,7 @@ struct RoundupOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(lofi ? Color.themedSurface : Color.roundupPanelBackground)
+        .background(lofi ? Color.themedSurfaceOrClear : Color.roundupPanelBackground)
         .overlay(
             Rectangle()
                 .fill(lofi ? Color.themedInk.opacity(0.4) : Color.roundupAccent.opacity(0.25))
@@ -79,7 +79,7 @@ struct RoundupOverlay: View {
                 }
                 Text(L10n.t("Aufgerundeten Betrag zur Seite legen",
                             "Set aside round-up amount"))
-                    .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 13, weight: .semibold))
+                    .font(ThemeFonts.rowBody(size: 13, weight: .semibold, lofiSize: 14))
                     .textCase(ThemeChrome.textCase)
                 Spacer(minLength: 0)
             }
@@ -128,7 +128,7 @@ struct RoundupOverlay: View {
             // BTX: eckige Blöcke mit Tintenrahmen statt Mint-Kapseln; aktiv = gefüllt
             // in Leitfarbe (wie die Filter-Blöcke der Umsatzliste).
             Text(label)
-                .font(lofi ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11, weight: selected ? .semibold : .regular))
+                .font(ThemeFonts.rowBody(size: 11, weight: selected ? .semibold : .regular, lofiSize: 13))
                 .textCase(ThemeChrome.textCase)
                 .foregroundColor(lofi
                                  ? (selected ? Color.themedSurface : Color.themedInk.opacity(0.85))

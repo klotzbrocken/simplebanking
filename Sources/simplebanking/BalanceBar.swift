@@ -4158,6 +4158,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Die frühere Fassung kannte nur den Money-Heat und hätte bei einem aktiven Theme
     /// eine Nase in fremder Farbe erzeugt.
     private func currentFlyoutSurfaceNSColor() -> NSColor {
+        // Mit Wallpaper: die Durchschnittsfarbe der oberen Bildkante. In den Zipfel der
+        // Sprechblase lässt sich kein Bild zeichnen — er wird flächig getönt. Nähme man
+        // hier weiter die flache Theme-Farbe, stäche die Nase unter einem Wallpaper
+        // heraus, so wie sie vor dieser Tönung weiß geblieben ist.
+        if let kante = ThemeChrome.wallpaperTopEdgeColor { return kante }
         if ThemeManager.shared.currentTheme.isDefault == false {
             let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             return ThemeManager.shared.currentTheme.surfaceColor(dark: dark)
@@ -7837,8 +7842,16 @@ private struct StatusBalanceFlyoutCardView: View {
             .clipped()
             // Bei aktivem Theme füllt die flache Theme-Farbe auch Footer/Kanten (sonst
             // blitzt am unteren Rand die Default-Panelfarbe durch → „Rahmen").
-            .background((roundupView.isActive && !ThemeChrome.lofi) ? Color.roundupPanelBackground
-                        : (isDefaultTheme ? Color.panelBackground : Color.themedSurface))
+            // Wallpaper zuunterst, darüber die Farbe (die unter einem Wallpaper
+            // durchsichtig wird). Beides in einem ZStack, damit das Bild bis in die
+            // Kanten reicht — sonst blitzte am unteren Rand die Panelfarbe durch.
+            .background(
+                ZStack {
+                    ThemeWallpaper()
+                    (roundupView.isActive && !ThemeChrome.lofi) ? Color.roundupPanelBackground
+                        : (isDefaultTheme ? Color.panelBackground : Color.themedSurfaceOrClear)
+                }
+            )
             // Das GANZE Flyout ist Drop-Zone: Rechnung (PDF/Bild) darauf ziehen →
             // Textebene/OCR → Quick-Send-Drawer öffnet sich vorbefüllt.
             .onDrop(of: [.fileURL], isTargeted: $isDocumentDropTargeted) { providers in
@@ -7951,7 +7964,7 @@ private struct StatusBalanceFlyoutCardView: View {
         .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
             lofi
-            ? AnyView(Color.themedSurface)
+            ? AnyView(Color.themedSurfaceOrClear)
             : AnyView(LinearGradient(colors: [wash.top, wash.bottom],
                                      startPoint: .topTrailing, endPoint: .bottomLeading))
         )
@@ -8036,11 +8049,11 @@ private struct StatusBalanceFlyoutCardView: View {
                         Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
                     }
                     Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
-                        .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
+                        .font(ThemeFonts.rowBody(size: 12, lofiSize: 14))
                         .textCase(ThemeChrome.textCase)
                     if let badge = budgetBadge {
                         Text(badge)
-                            .font(lofi ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
+                            .font(ThemeFonts.rowBody(size: 10, weight: .semibold, lofiSize: 12))
                             .padding(.horizontal, 6).padding(.vertical, 1)
                             .background(
                                 RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
@@ -8073,7 +8086,7 @@ private struct StatusBalanceFlyoutCardView: View {
         .frame(maxWidth: .infinity, maxHeight: hasDots ? nil : .infinity, alignment: .topLeading)
         .background(
             lofi
-            ? AnyView(Color.themedSurface)
+            ? AnyView(Color.themedSurfaceOrClear)
             : AnyView(LinearGradient(colors: [wash.top, wash.bottom],
                                      startPoint: .topTrailing, endPoint: .bottomLeading))
         )
@@ -8111,8 +8124,8 @@ private struct StatusBalanceFlyoutCardView: View {
         // Aktives Theme (nicht Default): Money-Heat AUS → flache Theme-Fläche + Ink +
         // Theme-Schrift. Default: unveränderte Money-Heat.
         let themed = !isDefaultTheme
-        let fillTop:    Color = themed ? .themedSurface : wash.top
-        let fillBottom: Color = themed ? .themedSurface : wash.bottom
+        let fillTop:    Color = themed ? .themedSurfaceOrClear : wash.top
+        let fillBottom: Color = themed ? .themedSurfaceOrClear : wash.bottom
         // Negativer Saldo trägt auch im Theme die Warnfarbe (BTX-Rot).
         let balanceColor: Color = themed
             ? ((balanceValue ?? 0) < 0 ? .themedExpense : .themedInk)

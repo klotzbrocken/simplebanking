@@ -273,10 +273,10 @@ private struct TransactionsPanelView: View {
     private var activePanelBg: Color {
         // Bei aktivem Theme bleibt die Theme-Fläche auch im Sparmodus erhalten — das
         // Mint-Grün des Aufrunden-Views würde die BTX-Farbwelt sprengen.
-        if roundupView.isActive { return lofi ? .themedSurface : .roundupPanelBackground }
+        if roundupView.isActive { return lofi ? .themedSurfaceOrClear : .roundupPanelBackground }
         // Lo-Fi (BTX) schlägt auch den Händler-Marken-Ton — BTX kennt keine
         // Markenfarben, die ganze Liste bleibt auf der Theme-Fläche.
-        if lofi { return .themedSurface }
+        if lofi { return .themedSurfaceOrClear }
         // Händler-/eBon-Slots: Liste im Marken-Ton (untere Wash-Farbe), damit der
         // Marken-Header nahtlos in die Liste übergeht. WICHTIG: vor dem Money-Heat-
         // Zweig — sonst würde der (als cachedBalance gespeicherte) Letzt-Bon-Betrag
@@ -291,8 +291,9 @@ private struct TransactionsPanelView: View {
         if isDefaultTheme {
             return moneyHeatListTint
         }
-        // Aktives Theme (nicht Default): flache Theme-Farbe über die ganze Liste.
-        return .themedSurface
+        // Aktives Theme (nicht Default): flache Theme-Farbe über die ganze Liste —
+        // oder durchsichtig, wenn ein Wallpaper darunterliegt.
+        return .themedSurfaceOrClear
     }
 
     /// Heller Temperatur-Ton (untere Money-Heat-Farbe) für den Listen-Hintergrund,
@@ -643,8 +644,8 @@ private struct TransactionsPanelView: View {
         let wash = BalanceWash.colors(level: level, style: style, dark: dark)
         // Aktives Theme (nicht Default): Money-Heat AUS → flache Theme-Fläche + Ink + Font.
         let themed = !isDefaultTheme
-        let fillTop:    Color = themed ? .themedSurface : wash.top
-        let fillMid:    Color = themed ? .themedSurface : wash.bottom
+        let fillTop:    Color = themed ? .themedSurfaceOrClear : wash.top
+        let fillMid:    Color = themed ? .themedSurfaceOrClear : wash.bottom
         // Negativer Saldo trägt auch im Theme die Warnfarbe (BTX-Rot) — Blau würde
         // die wichtigste Information der Karte verschlucken.
         let balanceColor: Color = themed
@@ -900,11 +901,11 @@ private struct TransactionsPanelView: View {
                         Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .semibold))
                     }
                     Text("\(L10n.t("Einkäufe", "Purchases")) \(reweRangeLabel): \(reweRangeAmount)")
-                        .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
+                        .font(ThemeFonts.rowBody(size: 12, lofiSize: 14))
                         .textCase(ThemeChrome.textCase)
                     if let badge = budgetBadge {
                         Text(badge)
-                            .font(lofi ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
+                            .font(ThemeFonts.rowBody(size: 10, weight: .semibold, lofiSize: 12))
                             .padding(.horizontal, 6).padding(.vertical, 1)
                             .background(
                                 RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(999))
@@ -937,7 +938,7 @@ private struct TransactionsPanelView: View {
             Group {
                 if lofi {
                     // BTX: flache Theme-Fläche statt Marken-Verlauf.
-                    Color.themedSurface
+                    Color.themedSurfaceOrClear
                 } else {
                     LinearGradient(
                         stops: [
@@ -972,7 +973,7 @@ private struct TransactionsPanelView: View {
                 } else {
                     ForEach(reweReceiptDayGroups, id: \.day) { group in
                         Text(formatDateDE(group.day))
-                            .font(lofi ? ThemeFonts.flyoutHeading(size: 17) : .system(size: 13))
+                            .font(ThemeFonts.rowHeading(size: 13, lofiSize: 17))
                             .textCase(ThemeChrome.textCase)
                             .foregroundColor(lofi ? .themedExpense : .secondary)
                             .padding(.top, 8).padding(.bottom, 4).padding(.horizontal, 12)
@@ -1041,15 +1042,15 @@ private struct TransactionsPanelView: View {
                                         .font(.system(size: 13)).foregroundColor(ringColor ?? .secondary).frame(width: 20)
                                 }
                                 Text(entry.label)
-                                    .font(lofi ? ThemeFonts.flyoutHeading(size: 14, weight: .medium) : .system(size: 14, weight: .medium))
+                                    .font(ThemeFonts.rowHeading(size: 14, weight: .medium))
                                     .textCase(ThemeChrome.textCase)
                                     .foregroundColor(lofi ? .themedInk : .primary)
                                 Text("· \(entry.count)")
-                                    .font(lofi ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11))
+                                    .font(ThemeFonts.rowBody(size: 11, lofiSize: 13))
                                     .foregroundColor(lofi ? Color.themedInk.opacity(0.7) : Color(NSColor.tertiaryLabelColor))
                                 Spacer()
                                 Text(reweEuro(entry.totalCents))
-                                    .font(lofi ? ThemeFonts.flyoutHeading(size: 16, weight: .medium) : .system(size: 14, weight: .medium))
+                                    .font(ThemeFonts.rowHeading(size: 14, weight: .medium, lofiSize: 16))
                                     .foregroundColor(lofi ? .themedInk : .primary)
                                     .monospacedDigit()
                             }
@@ -1097,17 +1098,17 @@ private struct TransactionsPanelView: View {
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(r.marketName ?? receiptBrandName)
-                            .font(lofi ? ThemeFonts.flyoutHeading(size: 14, weight: .medium) : .system(size: 14, weight: .medium))
+                            .font(ThemeFonts.rowHeading(size: 14, weight: .medium))
                             .textCase(ThemeChrome.textCase)
                             .foregroundColor(lofi ? .themedInk : .primary).lineLimit(1)
                         Text("\(r.items.count) Artikel")
-                            .font(lofi ? ThemeFonts.flyoutBody(size: 13) : .system(size: 11))
+                            .font(ThemeFonts.rowBody(size: 11, lofiSize: 13))
                             .textCase(ThemeChrome.textCase)
                             .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : .secondary).lineLimit(1)
                     }
                     Spacer()
                     Text(reweEuro(r.totalCents))
-                        .font(lofi ? ThemeFonts.flyoutHeading(size: 17, weight: .medium) : .system(size: 14, weight: .medium))
+                        .font(ThemeFonts.rowHeading(size: 14, weight: .medium, lofiSize: 17))
                         .monospacedDigit()
                         .foregroundColor(lofi ? .themedInk : .primary)
                     if themed && !ThemeChrome.glyphControls {
@@ -1679,7 +1680,7 @@ private struct TransactionsPanelView: View {
                               text: $vm.query,
                               prompt: lofi ? Text("") : nil)
                         .textFieldStyle(PlainTextFieldStyle())
-                        .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 13))
+                        .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
                         .foregroundColor(lofi ? .themedInk : .primary)
                         .overlay(alignment: .leading) {
                             if lofi && vm.query.isEmpty {
@@ -1872,12 +1873,12 @@ private struct TransactionsPanelView: View {
             if !receiptActive && (vm.isSearchActive || vm.activeFilter != .all) {
                 HStack(spacing: 6) {
                     Text("\(vm.filteredTransactions.count) Ergebnisse")
-                        .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12, weight: .semibold))
+                        .font(ThemeFonts.rowBody(size: 12, weight: .semibold, lofiSize: 14))
                         .textCase(ThemeChrome.textCase)
                         .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : .secondary)
                     if vm.activeFilter != .all {
                         Text("· \(vm.activeFilter.label)")
-                            .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 12))
+                            .font(ThemeFonts.rowBody(size: 12, lofiSize: 14))
                             .textCase(ThemeChrome.textCase)
                             .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : .secondary)
                         Button(action: { vm.activeFilter = .all }) {
@@ -1987,8 +1988,7 @@ private struct TransactionsPanelView: View {
                             // vorhandenen Kombination aus Text und Linie entspricht.
                             HStack(spacing: 10) {
                                 Text(formatDateDE(group.date))
-                                    .font(lofi ? ThemeFonts.flyoutHeading(size: 17)
-                                               : .system(size: 13))
+                                    .font(ThemeFonts.rowHeading(size: 13, lofiSize: 17))
                                     .textCase(ThemeChrome.textCase)
                                     .foregroundColor(lofi ? .themedExpense : .secondary)
                                     .fixedSize()
@@ -2146,7 +2146,7 @@ private struct TransactionsPanelView: View {
                             HStack {
                                 Spacer(minLength: 0)
                                 Text("Alle Umsätze geladen")
-                                    .font(lofi ? ThemeFonts.flyoutBody(size: 14) : .system(size: 11, weight: .medium))
+                                    .font(ThemeFonts.rowBody(size: 11, weight: .medium, lofiSize: 14))
                                     .textCase(ThemeChrome.textCase)
                                     .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : .secondary)
                                 Spacer(minLength: 0)
@@ -2301,7 +2301,7 @@ private struct TransactionsPanelView: View {
                         }
                     } label: {
                         Text(L10n.t("Mehr ▾", "More ▾"))
-                            .font(lofi ? ThemeFonts.flyoutBody(size: 13) : .system(size: 13, weight: .medium))
+                            .font(ThemeFonts.rowBody(size: 13, weight: .medium))
                             .textCase(ThemeChrome.textCase)
                             .foregroundColor(lofi ? Color.themedInk.opacity(0.75) : .secondary)
                     }
@@ -2356,7 +2356,15 @@ private struct TransactionsPanelView: View {
             .background(activePanelBg)
         }
         .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
-        .background { activePanelBg.ignoresSafeArea(.all, edges: .top) } // extends panel-bg into titlebar/toolbar area (theme-aware)
+        // Wallpaper zuunterst, bis in die Titelleiste. `activePanelBg` wird unter einem
+        // Wallpaper durchsichtig und lässt es stehen.
+        .background {
+            ZStack {
+                ThemeWallpaper()
+                activePanelBg
+            }
+            .ignoresSafeArea(.all, edges: .top)
+        }
         // „Bildschirmrand" des BTX-Themes: liegt als Overlay INNEN auf der Fläche,
         // verbraucht also keinen Platz und verschiebt nichts. Themes ohne
         // `screenBorder` bekommen hier nichts.
@@ -3337,14 +3345,13 @@ private struct TransactionRowNew: View {
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(name)
-                            .font(lofi ? ThemeFonts.flyoutHeading(size: 14, weight: .medium)
-                                         : .system(size: 14, weight: .medium))
+                            .font(ThemeFonts.rowHeading(size: 14, weight: .medium))
                             .textCase(ThemeChrome.textCase)
                             .lineLimit(1)
                             .foregroundColor(lofi ? .themedInk : .primary)
                         if showCategories {
                             Text(category.rawValue)
-                                .font(lofi ? ThemeFonts.flyoutBody(size: 13) : .system(size: 10))
+                                .font(ThemeFonts.rowBody(size: 10, lofiSize: 13))
                                 .textCase(ThemeChrome.textCase)
                                 .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : .secondary)
                                 .padding(.horizontal, 5)
@@ -3357,7 +3364,7 @@ private struct TransactionRowNew: View {
                 if isWide {
                     let remittance = transaction.remittanceInformation?.first ?? ""
                     Text(remittance)
-                        .font(lofi ? ThemeFonts.flyoutBody(size: 11) : .system(size: 11))
+                        .font(ThemeFonts.rowBody(size: 11))
                         .textCase(ThemeChrome.textCase)
                         .foregroundStyle(lofi ? Color.themedInk.opacity(0.72) : Color.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -3393,7 +3400,7 @@ private struct TransactionRowNew: View {
                         // das Mint des Default-Looks passt nicht in die BTX-Farbwelt.
                         HStack(spacing: 4) {
                             Text(rd.original)
-                                .font(lofi ? ThemeFonts.flyoutBody(size: 13) : .system(size: 12, weight: .regular))
+                                .font(ThemeFonts.rowBody(size: 12, weight: .regular, lofiSize: 13))
                                 .foregroundColor(lofi ? Color.themedInk.opacity(0.6) : .sbTextSecondary)
                             if lofi {
                                 Text(">")
@@ -3405,20 +3412,19 @@ private struct TransactionRowNew: View {
                                     .foregroundColor(.sbTextSecondary)
                             }
                             Text(rd.rounded)
-                                .font(lofi ? ThemeFonts.flyoutHeading(size: 14, weight: .medium) : .system(size: 14, weight: .semibold))
+                                .font(ThemeFonts.rowHeading(size: 14, weight: .semibold, lofiWeight: .medium))
                                 .foregroundColor(lofi ? Color.themedIncome : Color.roundupAccent)
                         }
                     } else {
                         Text(amount)
-                            .font(lofi ? ThemeFonts.flyoutHeading(size: 17, weight: .medium)
-                                         : .system(size: 14, weight: .medium))
+                            .font(ThemeFonts.rowHeading(size: 14, weight: .medium, lofiSize: 17))
                             .foregroundColor(amountColor)
                     }
                     if isPending {
                         // BTX: reiner Text ohne Kapsel/Rahmen — die Zeile ist ohnehin
                         // schon auf 65 % gedimmt, das Wort genügt.
                         Text(L10n.t("Vorgemerkt", "Pending"))
-                            .font(lofi ? ThemeFonts.flyoutBody(size: 12) : .system(size: 10, weight: .semibold))
+                            .font(ThemeFonts.rowBody(size: 10, weight: .semibold, lofiSize: 12))
                             .textCase(ThemeChrome.textCase)
                             .foregroundColor(lofi ? Color.themedInk.opacity(0.85) : .sbOrangeStrong)
                             .padding(.horizontal, lofi ? 0 : 6)
