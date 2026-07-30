@@ -158,7 +158,7 @@ struct BalanceSubtitleSwitch: View {
                      : themed ? ThemeFonts.flyoutBody(size: 13)
                               : .system(size: 13, weight: .regular))
                 .textCase(ThemeChrome.textCase)
-                .foregroundColor(lofi ? .themedIncome : (detailColor ?? Color(NSColor.secondaryLabelColor)))
+                .foregroundColor(themed ? .themedIncome : (detailColor ?? Color(NSColor.secondaryLabelColor)))
                 .lineLimit(1)
         } else {
             // Placeholder reserves vertical space while value is computing

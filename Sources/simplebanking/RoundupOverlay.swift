@@ -37,7 +37,7 @@ struct RoundupOverlay: View {
                 Text(L10n.t("Aufrunden um:", "Round up to:"))
                     .font(ThemeFonts.rowBody(size: 12, weight: .semibold, lofiSize: 15))
                     .textCase(ThemeChrome.textCase)
-                    .foregroundColor(lofi ? .themedInk : .primary)
+                    .foregroundColor(themed ? .themedInk : .primary)
                     .fixedSize()
                 Spacer(minLength: 4)
                 Button(action: onClose) {

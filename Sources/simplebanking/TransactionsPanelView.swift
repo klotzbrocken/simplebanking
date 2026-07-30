@@ -983,7 +983,7 @@ private struct TransactionsPanelView: View {
                         Text(formatDateDE(group.day))
                             .font(ThemeFonts.rowHeading(size: 13, lofiSize: 17))
                             .textCase(ThemeChrome.textCase)
-                            .foregroundColor(lofi ? .themedExpense : .secondary)
+                            .foregroundColor(themed ? .themedExpense : .secondary)
                             .padding(.top, 8).padding(.bottom, 4).padding(.horizontal, 12)
                         ForEach(group.items) { r in
                             reweRow(r)
@@ -1052,14 +1052,14 @@ private struct TransactionsPanelView: View {
                                 Text(entry.label)
                                     .font(ThemeFonts.rowHeading(size: 14, weight: .medium))
                                     .textCase(ThemeChrome.textCase)
-                                    .foregroundColor(lofi ? .themedInk : .primary)
+                                    .foregroundColor(themed ? .themedInk : .primary)
                                 Text("· \(entry.count)")
                                     .font(ThemeFonts.rowBody(size: 11, lofiSize: 13))
                                     .foregroundColor(themed ? Color.themedInk.opacity(0.7) : Color(NSColor.tertiaryLabelColor))
                                 Spacer()
                                 Text(reweEuro(entry.totalCents))
                                     .font(ThemeFonts.rowHeading(size: 14, weight: .medium, lofiSize: 16))
-                                    .foregroundColor(lofi ? .themedInk : .primary)
+                                    .foregroundColor(themed ? .themedInk : .primary)
                                     .monospacedDigit()
                             }
                             GeometryReader { geo in
@@ -1108,7 +1108,7 @@ private struct TransactionsPanelView: View {
                         Text(r.marketName ?? receiptBrandName)
                             .font(ThemeFonts.rowHeading(size: 14, weight: .medium))
                             .textCase(ThemeChrome.textCase)
-                            .foregroundColor(lofi ? .themedInk : .primary).lineLimit(1)
+                            .foregroundColor(themed ? .themedInk : .primary).lineLimit(1)
                         Text("\(r.items.count) Artikel")
                             .font(ThemeFonts.rowBody(size: 11, lofiSize: 13))
                             .textCase(ThemeChrome.textCase)
@@ -1118,7 +1118,7 @@ private struct TransactionsPanelView: View {
                     Text(reweEuro(r.totalCents))
                         .font(ThemeFonts.rowHeading(size: 14, weight: .medium, lofiSize: 17))
                         .monospacedDigit()
-                        .foregroundColor(lofi ? .themedInk : .primary)
+                        .foregroundColor(themed ? .themedInk : .primary)
                     if themed && !ThemeChrome.glyphControls {
                         Text(isOpen ? "v" : ">")
                             .font(ThemeFonts.flyoutBody(size: 13))
@@ -1246,8 +1246,8 @@ private struct TransactionsPanelView: View {
         let v = amountDouble(t)
         // Nur im Lo-Fi-Modus (BTX) tragen die Theme-Farben die Zeilenbeträge —
         // Farb-Themes (Game Boy/Sunrise) behalten die Default-Tokens wie zuvor.
-        if v < 0 { return lofi ? .themedExpense : .expenseRed }
-        if v > 0 { return lofi ? .themedIncome : .incomeGreen }
+        if v < 0 { return themed ? .themedExpense : .expenseRed }
+        if v > 0 { return themed ? .themedIncome : .incomeGreen }
         return themed ? Color.themedInk.opacity(0.5) : Color(NSColor.tertiaryLabelColor)
     }
 
@@ -1689,7 +1689,7 @@ private struct TransactionsPanelView: View {
                               prompt: lofi ? Text("") : nil)
                         .textFieldStyle(PlainTextFieldStyle())
                         .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
-                        .foregroundColor(lofi ? .themedInk : .primary)
+                        .foregroundColor(themed ? .themedInk : .primary)
                         .overlay(alignment: .leading) {
                             if lofi && vm.query.isEmpty {
                                 Text(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"))
@@ -1998,7 +1998,7 @@ private struct TransactionsPanelView: View {
                                 Text(formatDateDE(group.date))
                                     .font(ThemeFonts.rowHeading(size: 13, lofiSize: 17))
                                     .textCase(ThemeChrome.textCase)
-                                    .foregroundColor(lofi ? .themedExpense : .secondary)
+                                    .foregroundColor(themed ? .themedExpense : .secondary)
                                     .fixedSize()
                                 // Lo-Fi (BTX): KEINE Trennlinie nach dem Datum — nur der Text.
                                 if lofi {
@@ -2364,10 +2364,6 @@ private struct TransactionsPanelView: View {
             .background(activePanelBg)
         }
         .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
-        // Ein Themewechsel baut ab hier alles neu (siehe `themeRevision`). Die Kennung
-        // sitzt bewusst INNEN — die Beobachter, die sie hochzählen, hängen weiter oben
-        // und dürfen dabei nicht selbst verworfen werden.
-        .id(themeRevision)
         // Wallpaper zuunterst, bis in die Titelleiste. `activePanelBg` wird unter einem
         // Wallpaper durchsichtig und lässt es stehen.
         .background {
@@ -2423,6 +2419,17 @@ private struct TransactionsPanelView: View {
                 showChatSheet = false
             }
         }
+        // Ein Themewechsel baut ab hier alles neu (siehe `themeRevision`).
+        //
+        // Die Stelle ist entscheidend, und ich hatte sie erst falsch: `.id` erneuert nur,
+        // was UNTER ihr in der Kette steht. Saß sie vor dem Wallpaper-Hintergrund, wurde
+        // die Liste zwar neu gebaut, das Wallpaper aber nicht — beim Themewechsel blieb
+        // das Bild des vorigen Themes stehen, während die Farben schon wechselten.
+        //
+        // Sie muss also HINTER dem Wallpaper und den Overlays stehen, aber VOR
+        // `.background(notificationObservers)` — sonst nähme der Neubau die Beobachter
+        // mit, die ihn auslösen, und er fände genau einmal statt.
+        .id(themeRevision)
         .background(notificationObservers)
         .onAppear {
             loadReweReceipts()
@@ -3368,7 +3375,7 @@ private struct TransactionRowNew: View {
                             .font(ThemeFonts.rowHeading(size: 14, weight: .medium))
                             .textCase(ThemeChrome.textCase)
                             .lineLimit(1)
-                            .foregroundColor(lofi ? .themedInk : .primary)
+                            .foregroundColor(themed ? .themedInk : .primary)
                         if showCategories {
                             Text(category.rawValue)
                                 .font(ThemeFonts.rowBody(size: 10, lofiSize: 13))

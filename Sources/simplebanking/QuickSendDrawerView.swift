@@ -527,7 +527,7 @@ struct QuickSendDrawerView: View {
         if lofi { return ThemeFonts.flyoutBody(size: 15) }
         return mono ? .system(size: 12.5, design: .monospaced) : .system(size: 12.5)
     }
-    private var fieldTextColor: Color { lofi ? .themedInk : .primary }
+    private var fieldTextColor: Color { themed ? .themedInk : .primary }
 
     /// Platzhalter-Behandlung: der System-Prompt folgt dem (ggf. dunklen) Appearance-
     /// Modus und wäre auf dem hellen BTX-Feld weiß = unlesbar. Eine Prompt-Farbe wird

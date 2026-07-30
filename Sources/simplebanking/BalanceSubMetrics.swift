@@ -177,7 +177,7 @@ struct BalanceSubMetricsLabel: View {
                       : .system(size: 13, weight: .regular)
     }
     private var normalColor: Color {
-        lofi ? .themedIncome : Color(NSColor.secondaryLabelColor)
+        themed ? .themedIncome : Color(NSColor.secondaryLabelColor)
     }
     private var textCase: Text.Case? { ThemeChrome.textCase }
 

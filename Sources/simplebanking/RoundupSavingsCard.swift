@@ -47,7 +47,7 @@ struct RoundupSavingsCard: View {
     // Farb-Themes (Game Boy/Sunrise) behalten den Mint-Look wie vor 2.0.
     private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
     private var lofi: Bool { themed && ThemeChrome.lofi }
-    private var heroColor: Color { lofi ? .themedIncome : Color.roundupAccent }
+    private var heroColor: Color { themed ? .themedIncome : Color.roundupAccent }
     private var eyebrowColor: Color { themed ? Color.themedInk.opacity(0.75) : .secondary }
 
     var body: some View {
