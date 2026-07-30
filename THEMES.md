@@ -287,7 +287,9 @@ Bereiche zeigen (Flyout-Karte 348 pt breit + ein Listen-Ausschnitt, Light und Da
 | Aktiver Konto-Umschalter / Filter | `accent` (Text auf Füllung: Surface-Farbe) |
 | Suchfeld/Eingabefelder | Weiß 65 % + 2-pt-Ink-Rahmen, Radius via `squareControls` |
 | Blende um alles | `screenBorder` |
-| Fläche von Flyout und Liste | `wallpaper` / `wallpaperDark` — sonst `cardLight` / `cardDark` |
+| Fläche des Flyouts | `wallpaperFlyout…` → sonst `wallpaper…` → sonst `cardLight` / `cardDark` |
+| Fläche der schmalen Liste | `wallpaper…` → sonst `cardLight` / `cardDark` |
+| Fläche der breiten Liste | `wallpaperWide…` → sonst `wallpaper…` → sonst `cardLight` / `cardDark` |
 | Kontoring (Ampel) | `negative*` für Dispo und knapp, `positive*` für den grünen Bereich, das Mittelband ist die Mischung aus beiden |
 | Bildmarke über dem Kontostand | `logo` / `logoDark` — sonst die Bankmarke, bei `bankLogos=off` ein Mosaik-Block |
 | Icons in Fuß-, Steuer- und Titelzeile | `icon.<name>` / `icon.<name>.active` (§4.4) |
@@ -366,6 +368,12 @@ CRT-Shader (Scanlines, Lochmaske, Tonnen-Verzerrung, Vignette, Flicker —
 **Ziel:** eigenständiges Werkzeug, das valide `.cfg`-Dateien erzeugt, installiert und
 bestehende bearbeitet — ohne die App zu verändern.
 
+**Arbeitsteilung.** Schrift, Logo und Wallpaper sind Teil der Gestaltung, die ein Theme
+mitbringt — die App bietet dafür **keine Einstellung** und soll auch keine bekommen. Der
+Nutzer wählt ein Theme, die Bilder kommen mit. Wer eigene will, baut ein Theme. Der
+Builder ist damit der einzige Ort, an dem diese Dinge gesetzt werden; was er nicht
+anbietet, existiert für den Nutzer praktisch nicht.
+
 ### Muss
 
 1. **Formular für alle Schlüssel aus Abschnitt 4** — Farb-Picker paarweise
@@ -391,9 +399,12 @@ bestehende bearbeitet — ohne die App zu verändern.
    Listen-Ausschnitt mit Beispieldaten, umschaltbar Hell/Dunkel. Die Preview muss die
    Schalter-Effekte zeigen (Mosaik statt Logo, Textkommandos, Punktlinien, Blende,
    Blockleiste, eckige Felder). Dazu drei Dinge, die man sonst erst in der App merkt:
-   - **Beide Listenbreiten** (348 und 840 bei je 620 Höhe) und die Flyout-Höhen. Ein
-     Wallpaper sieht in jeder davon anders beschnitten aus; wer nur eine Breite zeigt,
-     baut Themes, die in der anderen nicht aufgehen.
+   - **Alle drei Flächen** (Flyout 348 × 140, Liste 348 × 620, Liste 840 × 620), und zwar
+     mit dem Bild, das dort tatsächlich greift — einschließlich des Rückfalls aufs
+     Grundbild, wenn ein Sonderfeld leer ist. Wer nur eine Fläche zeigt, baut Themes, die
+     in den anderen nicht aufgehen; das ist der Fehler, der die drei Schlüssel überhaupt
+     nötig gemacht hat. Die Flyout-Höhe zusätzlich mit offenem Schnellüberweisungs-Drawer,
+     weil sie dort wächst.
    - **Den Kontoring** in allen vier Zuständen (§4.2), sonst überrascht die Ampel in
      Fremdfarben später.
    - **Die Umsatzzeilen mit der Theme-Schrift** — sie sind der größte Textanteil und
@@ -422,6 +433,10 @@ bestehende bearbeitet — ohne die App zu verändern.
 
 ### Soll
 
+- **Sonderbilder aus dem Grundbild ableiten.** Aus einem Bild die beiden anderen
+  Seitenverhältnisse erzeugen: Ausschnitt wählen, auf 348 × 140 bzw. 840 × 620 setzen,
+  Randfarbe aus dem Original übernehmen. Das ist der häufigste Fall — jemand hat *ein*
+  Bild und braucht drei. Von Hand ist es fummelig, im Builder sind es zwei Schieberegler.
 - Vorlagen: „Leer (Default-Verhalten)", „Retro-Preset" (Faustregel aus 4.3), die vier
   Built-ins als Startpunkte.
 - Duplizieren eines bestehenden Themes.
