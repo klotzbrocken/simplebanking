@@ -71,6 +71,14 @@ private struct TransactionsPanelView: View {
         return Calendar.current.date(from: comps) ?? Date()
     }()
     @State private var panelIsWide: Bool = false
+    /// Wird bei jedem Themewechsel hochgezählt und hängt als `.id` an der Wurzel.
+    ///
+    /// `ThemeManager` ist kein `ObservableObject` — die Theme-Stellen lesen
+    /// `currentTheme` direkt, SwiftUI kennt also keine Abhängigkeit und invalidiert
+    /// nichts. Das Flyout fiel damit nicht auf, weil es bei jedem Öffnen neu entsteht;
+    /// die Umsatzliste bleibt offen und zeigte das neue Theme erst nach Schließen und
+    /// Öffnen. Die Kennung erzwingt genau diesen Neubau — nur ohne Handarbeit.
+    @State private var themeRevision: Int = 0
     @State private var greenZoneFractionCached: Double = 0
     @State private var chatDraft = ""
     @State private var chatMessages: [ChatMessage] = []
@@ -2356,6 +2364,10 @@ private struct TransactionsPanelView: View {
             .background(activePanelBg)
         }
         .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
+        // Ein Themewechsel baut ab hier alles neu (siehe `themeRevision`). Die Kennung
+        // sitzt bewusst INNEN — die Beobachter, die sie hochzählen, hängen weiter oben
+        // und dürfen dabei nicht selbst verworfen werden.
+        .id(themeRevision)
         // Wallpaper zuunterst, bis in die Titelleiste. `activePanelBg` wird unter einem
         // Wallpaper durchsichtig und lässt es stehen.
         .background {
@@ -2579,6 +2591,14 @@ private struct TransactionsPanelView: View {
                 vm.objectWillChange.send()
             }
             .onReceive(NotificationCenter.default.publisher(for: .bankTintChanged)) { _ in
+                vm.objectWillChange.send()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ThemeManager.didChangeNotification)) { _ in
+                // Reicht nicht, nur das ViewModel anzustoßen: Schrift, Ink und Wallpaper
+                // liest jede Zeile selbst aus `ThemeChrome`, ohne dass es als Eingabe
+                // sichtbar wäre. SwiftUI übersähe unveränderte Zeilen. Die Kennung baut
+                // die Liste deshalb vollständig neu.
+                themeRevision &+= 1
                 vm.objectWillChange.send()
             }
             .onChange(of: multibankingStore.activeIndex) { _ in loadReweReceipts() }
