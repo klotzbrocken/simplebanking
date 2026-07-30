@@ -8152,10 +8152,9 @@ private struct StatusBalanceFlyoutCardView: View {
                 } else if let logo = ThemeChrome.globalLogoImage {
                     // Globales Theme-Logo: gilt für ALLE Konten, deshalb ohne die
                     // Marken-Invertierung — die weiß nur bei Banken, wie das Logo
-                    // gebaut ist. Für den Dunkelmodus gibt es `logoDark`.
-                    Image(nsImage: logo).resizable().scaledToFit()
-                        .frame(width: 20, height: 20)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    // gebaut ist (`brandId: nil`). Für den Dunkelmodus gibt es `logoDark`.
+                    // `bankLogoStyle` greift auch hier, siehe Kommentar in der Liste.
+                    BankMark(image: logo, brandId: nil, size: 20, cornerRadius: 5)
                 } else if let img = bankLogoImage {
                     BankMark(image: img, brandId: bankLogoBrandId, size: 20,
                              cornerRadius: 5, dark: dark)

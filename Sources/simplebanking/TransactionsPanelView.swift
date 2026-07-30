@@ -680,13 +680,14 @@ private struct TransactionsPanelView: View {
                     // BTX: keine Bildmarke über dem Kontostand — neutraler Mosaik-Block.
                     BTXMosaicIcon(category: .sonstiges, side: 18)
                 } else if let logo = ThemeChrome.globalLogoImage {
-                    // Globales Theme-Logo — für alle Konten gleich, deshalb ohne die
-                    // marken-abhängige Invertierung (siehe `logoDark`).
-                    Image(nsImage: logo)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    // Globales Theme-Logo — für alle Konten gleich, deshalb OHNE die
+                    // marken-abhängige Invertierung (siehe `logoDark`): `brandId: nil`.
+                    //
+                    // `bankLogoStyle` gilt auch hier. Der Schalter beschreibt die
+                    // Bildmarke an DIESER Stelle, nicht ihre Herkunft — sonst wäre er
+                    // bei jedem Theme mit eigenem Logo stillschweigend wirkungslos, und
+                    // genau das ist am 30.07. als Fehler gemeldet worden.
+                    BankMark(image: logo, brandId: nil, size: 18, cornerRadius: 3)
                 } else if let img = (isPayPal ? PayPalLogoAsset.image : nil) ?? vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
                     BankMark(image: img, brandId: balanceBrand?.id, size: 18,
                              cornerRadius: 3, dark: activeColorScheme == .dark)

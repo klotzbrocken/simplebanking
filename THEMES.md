@@ -240,11 +240,24 @@ zurück — dieselbe Haltung wie bei `parseBool` und den Icon-Namen.
 | Schlüssel | Werte | Standard | Wirkung |
 |---|---|---|---|
 | `categoryIconStyle` | `auto` · `ink` · `color` | `auto` | Einfärbung der Kategorie-Symbole in den Umsatzzeilen. `auto`: ohne Theme Systemgrau wie bisher, **mit Theme die Ink-Farbe**. `ink` erzwingt die Ink-Farbe, `color` nimmt die Farbe der Kategorie (dieselbe wie Mosaik-Blöcke und Ringe). |
-| `bankLogoStyle` | `color` · `mono` | `color` | Bankmarke in Flyout und Umsatzliste. `mono` zeichnet sie einfarbig in der Ink-Farbe und passt sich damit Hell/Dunkel von selbst an. |
+| `bankLogoStyle` | `color` · `mono` | `color` | **Bildmarke** in Flyout- und Listenkopf. `mono` zeichnet sie einfarbig in der Ink-Farbe und passt sich damit Hell/Dunkel von selbst an. Gilt für die Bankmarke **und für ein globales `logo`** — der Schlüssel beschreibt die Marke an dieser Stelle, nicht ihre Herkunft. |
 
 **Warum `auto` und nicht einfach immer Ink:** Die Symbole standen auf Systemgrau. Auf
 einer hellen Fläche ist das richtig, auf einer dunklen Theme-Fläche oder einem dunklen
 Wallpaper verschwinden sie. `auto` löst genau das, ohne dass ein Theme etwas setzen muss.
+
+**Reihenfolge an dieser Stelle** — wichtig, weil sich die Schlüssel gegenseitig
+verdecken:
+
+1. `bankLogos=off` → Mosaik-Block, alles Weitere entfällt.
+2. `logo` gesetzt → das globale Theme-Logo, für **alle** Konten gleich; die Bankmarke
+   erscheint dann nirgends mehr.
+3. sonst → die Marke der Bank aus dem YAXI-Katalog.
+
+`bankLogoStyle` wirkt auf Fall 2 und 3. Wer ein farbiges `logo` mitbringt und trotzdem
+`mono` setzt, bekommt sein eigenes Logo als Silhouette — das ist gewollt, aber selten
+gemeint. Ein Schlüssel, der bei jedem Theme mit eigenem Logo einfach nichts täte, wäre
+die schlechtere Alternative.
 
 **Warum `color` der Standard der Bankmarke bleibt:** YAXI liefert nur für 43 der 192
 Banken eine echte einfarbige Maske. Für die übrigen wird das Farblogo über seinen
