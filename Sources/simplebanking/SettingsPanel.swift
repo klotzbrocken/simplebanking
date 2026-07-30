@@ -218,6 +218,7 @@ struct SettingsView: View {
     @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
+    @AppStorage("pendingAsPill") private var pendingAsPill: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = BankTintProvider.globalDefault
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
     @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.sidebar.rawValue
@@ -2000,12 +2001,19 @@ struct SettingsView: View {
 
             SettingsToggleRow(
                 title: t("Kontoring anzeigen", "Show Account Ring"),
-                subtitle: t(
-                    "Zeigt einen Ring im Flyout und in der Umsatzliste, der deinen Kontostand ins Verhältnis zu deinem Gehalt setzt und zeigt, ob du bis zum nächsten Gehalt im grünen Bereich bist.",
-                    "Shows a ring in the flyout and transaction list that compares your balance to your salary and indicates whether you're in the green until next payday."
-                ),
+                subtitle: ThemeChrome.ringImageActive
+                    ? t("Das aktive Theme belegt diese Fläche mit einer eigenen Grafik. Beides gleichzeitig gibt der Platz nicht her — wähle ein anderes Theme, um den Ring zurückzubekommen.",
+                        "The active theme fills this spot with its own graphic. There isn't room for both — pick another theme to get the ring back.")
+                    : t(
+                        "Zeigt einen Ring im Flyout und in der Umsatzliste, der deinen Kontostand ins Verhältnis zu deinem Gehalt setzt und zeigt, ob du bis zum nächsten Gehalt im grünen Bereich bist.",
+                        "Shows a ring in the flyout and transaction list that compares your balance to your salary and indicates whether you're in the green until next payday."
+                    ),
                 isOn: $monthRingEnabled
             )
+            // Gesperrt, solange das Theme `ringImage` setzt: Ein Schalter ohne Wirkung
+            // ist schlimmer als keiner — der Nutzer klickt und nichts passiert.
+            .disabled(ThemeChrome.ringImageActive)
+            .opacity(ThemeChrome.ringImageActive ? 0.55 : 1)
 
             SettingsToggleRow(
                 title: t("Weitere Einnahmen berücksichtigen", "Include other income"),
@@ -2187,6 +2195,17 @@ struct SettingsView: View {
                          "Only bank logo in the menu bar — click opens the flyout card with balance."))
                     .font(ThemeFonts.body(size: 11))
                     .foregroundColor(.secondary)
+
+                Divider().padding(.vertical, 2)
+
+                SettingsToggleRow(
+                    title: t("„Vorgemerkt\" als Pille anzeigen", "Show “Pending” as a pill"),
+                    subtitle: t(
+                        "Markiert vorgemerkte Buchungen in der Umsatzliste mit einer eigenen Kapsel. Aus: Die Zeile bleibt gedimmt, aber ohne Kapsel — ruhiger, wenn viele Buchungen noch nicht gebucht sind.",
+                        "Marks pending transactions in the list with their own pill. Off: the row stays dimmed but without the pill — calmer when many transactions are still pending."
+                    ),
+                    isOn: $pendingAsPill
+                )
             }
             .padding(12)
             .background(

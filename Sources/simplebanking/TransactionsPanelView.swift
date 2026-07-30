@@ -596,7 +596,7 @@ private struct TransactionsPanelView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 90, alignment: .topLeading)   // wie Einzelkarte → Pillen darunter auf gleicher Höhe
 
-        let ringVisible = monthRingEnabled && !vm.isUnifiedMode
+        let ringVisible = (monthRingEnabled || ThemeChrome.ringImageActive) && !vm.isUnifiedMode
         return Group {
             if panelIsWide {
                 HStack(alignment: .center, spacing: 0) {
@@ -688,21 +688,8 @@ private struct TransactionsPanelView: View {
                         .frame(width: 18, height: 18)
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 } else if let img = (isPayPal ? PayPalLogoAsset.image : nil) ?? vm.connectedBankLogoImage ?? logoStore.image(for: balanceBrand) {
-                    let invertActive = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: balanceBrand?.id ?? "")
-                    if invertActive {
-                        Image(nsImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 18, height: 18)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                            .colorInvert()
-                    } else {
-                        Image(nsImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 18, height: 18)
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                    }
+                    BankMark(image: img, brandId: balanceBrand?.id, size: 18,
+                             cornerRadius: 3, dark: activeColorScheme == .dark)
                 } else {
                     Image(systemName: "wallet.pass")
                         .font(.system(size: 16))
@@ -739,7 +726,7 @@ private struct TransactionsPanelView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        let ringVisible = monthRingEnabled && !vm.isUnifiedMode && !isPayPal   // PayPal: kein Ring
+        let ringVisible = (monthRingEnabled || ThemeChrome.ringImageActive) && !vm.isUnifiedMode && !isPayPal   // PayPal: kein Ring
         return HStack(alignment: .center, spacing: 0) {
             leftContent
                 // Oben ausgerichtet, damit Header/Betrag NICHT springen, wenn der
@@ -1714,14 +1701,17 @@ private struct TransactionsPanelView: View {
                 .padding(.vertical, 6)
                 .background(
                     // BTX-Lo-Fi: heller Block + harter 2-px-Tintenrahmen (wie der
-                    // Eingabebereich einer BTX-Seite) statt Soft-Grau mit dünner Linie.
+                    // Eingabebereich einer BTX-Seite). Sonstige Themes: eine leichte
+                    // Aufhellung der Ink-Farbe statt der System-Kartenfarbe — die stand
+                    // vorher als heller Kasten auf jeder dunklen Theme-Fläche.
                     RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
-                        .fill(lofi ? Color.white.opacity(0.65) : Color.cardBackground)
+                        .fill(lofi ? Color.white.opacity(0.65)
+                              : (themed ? Color.themedInk.opacity(0.10) : Color.cardBackground))
                         .overlay(
-                            lofi
-                            ? RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
-                                .stroke(Color.themedInk, lineWidth: 2)
-                            : nil
+                            RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
+                                .stroke(themed ? Color.themedInk.opacity(lofi ? 1 : 0.30)
+                                               : Color.clear,
+                                        lineWidth: lofi ? 2 : 1)
                         )
                 )
 
@@ -3291,6 +3281,10 @@ private struct TransactionRowNew: View {
     var onSelect: (() -> Void)? = nil
 
     private var isPending: Bool { transaction.status == "pending" }
+    /// „Vorgemerkt" als Kapsel zeigen. Eine Nutzereinstellung, keine Theme-Sache: Sie
+    /// ändert nicht das Aussehen, sondern ob die Information überhaupt erscheint —
+    /// wer viele vorgemerkte Buchungen hat, findet die Kapsel in jeder zweiten Zeile.
+    @AppStorage("pendingAsPill") private var pendingAsPill: Bool = true
 
     @ObservedObject private var logoService = MerchantLogoService.shared
     @State private var showDetail: Bool = false
@@ -3365,7 +3359,9 @@ private struct TransactionRowNew: View {
                     } else if ThemeChrome.categoryIconsEnabled {
                         Image(systemName: category.icon)
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(ThemeChrome.categoryIconColor(
+                                Color(nsColor: AppTheme.color(from: BTXMosaic.style(for: category).hex,
+                                                              fallback: .secondaryLabelColor))))
                             .frame(width: 20, height: 20)
                     } else {
                         BTXMosaicIcon(category: category)
@@ -3447,7 +3443,7 @@ private struct TransactionRowNew: View {
                             .font(ThemeFonts.rowHeading(size: 14, weight: .medium, lofiSize: 17))
                             .foregroundColor(amountColor)
                     }
-                    if isPending {
+                    if isPending, pendingAsPill {
                         // BTX: reiner Text ohne Kapsel/Rahmen — die Zeile ist ohnehin
                         // schon auf 65 % gedimmt, das Wort genügt.
                         Text(L10n.t("Vorgemerkt", "Pending"))
@@ -3457,7 +3453,11 @@ private struct TransactionRowNew: View {
                             .padding(.horizontal, lofi ? 0 : 6)
                             .padding(.vertical, 2)
                             .background(
-                                lofi ? nil : Capsule().fill(Color.sbOrangeSoft)
+                                // Das feste Orange stand bisher auf jeder Theme-Fläche;
+                                // mit Theme nimmt die Kapsel die Ink-Farbe leicht getönt.
+                                lofi ? nil
+                                     : Capsule().fill(themed ? Color.themedInk.opacity(0.16)
+                                                             : Color.sbOrangeSoft)
                             )
                     }
                 }

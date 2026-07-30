@@ -8157,17 +8157,8 @@ private struct StatusBalanceFlyoutCardView: View {
                         .frame(width: 20, height: 20)
                         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 } else if let img = bankLogoImage {
-                    let invertActive = dark && BankLogoAssets.isDark(brandId: bankLogoBrandId ?? "")
-                    if invertActive {
-                        Image(nsImage: img).resizable().scaledToFit()
-                            .frame(width: 20, height: 20)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .colorInvert()
-                    } else {
-                        Image(nsImage: img).resizable().scaledToFit()
-                            .frame(width: 20, height: 20)
-                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    }
+                    BankMark(image: img, brandId: bankLogoBrandId, size: 20,
+                             cornerRadius: 5, dark: dark)
                 } else {
                     Image(systemName: "wallet.pass")
                         .font(.system(size: 16))

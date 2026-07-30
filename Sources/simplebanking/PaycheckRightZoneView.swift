@@ -116,7 +116,16 @@ struct GreenZoneRing: View {
     var body: some View {
         let color = ringColor(for: displayedFraction)
         ZStack {
-            if themed && !ThemeChrome.glyphControls {
+            if let grafik = ThemeChrome.ringImage {
+                // Grafik statt Ring: Das Theme belegt diese Fläche, der Schalter in den
+                // Einstellungen ist dann gesperrt. Beides gleichzeitig gibt der Platz
+                // nicht her — und ein halb überdeckter Ring wäre schlechter als keiner.
+                Image(nsImage: grafik)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 72, height: 72)
+                    .accessibilityHidden(true)
+            } else if themed && !ThemeChrome.glyphControls {
                 btxBlockGauge
             } else {
             Circle()

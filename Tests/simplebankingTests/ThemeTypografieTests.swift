@@ -397,3 +397,83 @@ final class ThemeInkTests: XCTestCase {
                        try rgb(theme.surfaceColor(dark: false), dark: false))
     }
 }
+
+// MARK: - Vier Erweiterungen: Icons, Bankmarke, Ringbild, Vorgemerkt
+//
+// Alle vier haben denselben Kern: Etwas war auf eine feste Farbe oder eine feste
+// Darstellung verdrahtet und fiel auf dunklen Themes durch.
+
+final class ThemeErweiterungenTests: XCTestCase {
+
+    private func parse(_ cfg: String) throws -> AppTheme {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("theme-\(UUID().uuidString).cfg")
+        try cfg.write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try XCTUnwrap(ThemeManager.shared.parseTheme(from: url))
+    }
+
+    // MARK: Kategorie-Icons
+
+    func test_iconStilWirdGelesen() throws {
+        XCTAssertEqual(try parse("id=t\ncategoryIconStyle=ink").categoryIconStyle, .ink)
+        XCTAssertEqual(try parse("id=t\ncategoryIconStyle=COLOR").categoryIconStyle, .color)
+        XCTAssertEqual(try parse("id=t\ncategoryIconStyle=auto").categoryIconStyle, .auto)
+    }
+
+    /// Ein Tippfehler darf kein leeres Bild erzeugen — dieselbe Haltung wie bei
+    /// `parseBool` und den Icon-Overrides: unbekannt heißt Standard.
+    func test_unbekannterIconStil_faelltAufAutoZurueck() throws {
+        XCTAssertEqual(try parse("id=t\ncategoryIconStyle=quatsch").categoryIconStyle, .auto)
+        XCTAssertEqual(try parse("id=t").categoryIconStyle, .auto)
+    }
+
+    // MARK: Bankmarke
+
+    func test_logoStilWirdGelesen() throws {
+        XCTAssertEqual(try parse("id=t\nbankLogoStyle=mono").bankLogoStyle, .mono)
+        XCTAssertEqual(try parse("id=t\nbankLogoStyle=Color").bankLogoStyle, .color)
+    }
+
+    /// Standard bleibt farbig: `mono` plättet bei den rund drei Vierteln der Banken ohne
+    /// Maske das Farblogo, und detailreiche Marken werden dabei zum Fleck.
+    func test_bankmarkeIstStandardmaessigFarbig() throws {
+        XCTAssertEqual(try parse("id=t").bankLogoStyle, .color)
+        XCTAssertEqual(try parse("id=t\nbankLogoStyle=unsinn").bankLogoStyle, .color)
+    }
+
+    /// Ohne Maske muss eine Schablone entstehen — sonst gäbe es im Mono-Modus
+    /// überhaupt kein Bild.
+    @MainActor
+    func test_monoOhneMaske_plaettetDasFarblogo() throws {
+        let bild = NSImage(size: NSSize(width: 20, height: 20))
+        bild.lockFocus(); NSColor.systemRed.setFill()
+        NSRect(x: 0, y: 0, width: 20, height: 20).fill(); bild.unlockFocus()
+        let mono = try XCTUnwrap(BankMark.monoImage(bild, brandId: "gibtesnicht"))
+        XCTAssertTrue(mono.isTemplate)
+        XCTAssertFalse(bild.isTemplate, "Das geteilte Farbbild darf nicht verändert werden")
+    }
+
+    // MARK: Ringbild
+
+    func test_ringbildWirdGelesen() throws {
+        let t = try parse("id=t\nringImage=marke.png\nringImageDark=marke-dunkel.png")
+        XCTAssertEqual(t.ringImageFileName, "marke.png")
+        XCTAssertEqual(t.ringImageDarkFileName, "marke-dunkel.png")
+    }
+
+    func test_ohneRingbild_bleibtDerRing() throws {
+        XCTAssertNil(try parse("id=t").ringImageFileName)
+    }
+
+    /// Additive Zusage: kein mitgeliefertes Theme bringt eine der Neuerungen mit.
+    func test_mitgelieferteThemesBleibenUnberuehrt() throws {
+        for datei in ["default.cfg", "sunrise.cfg", "gameboy.cfg", "btx.cfg"] {
+            let cfg = try XCTUnwrap(ThemeManager.builtInThemes[datei], "\(datei) fehlt")
+            let t = try parse(cfg)
+            XCTAssertNil(t.ringImageFileName, "\(datei)")
+            XCTAssertEqual(t.categoryIconStyle, .auto, "\(datei)")
+            XCTAssertEqual(t.bankLogoStyle, .color, "\(datei)")
+        }
+    }
+}

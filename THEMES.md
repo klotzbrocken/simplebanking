@@ -97,6 +97,7 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 | `wallpaperDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel gilt `wallpaper` in beiden Modi. |
 | `wallpaperFlyout` / `wallpaperFlyoutDark` | *(leer)* | Eigenes Bild nur fürs **Flyout**. Ohne diese Schlüssel gilt `wallpaper`. |
 | `wallpaperWide` / `wallpaperWideDark` | *(leer)* | Eigenes Bild nur für die **breite Umsatzliste**. Ohne diese Schlüssel gilt `wallpaper`. |
+| `ringImage` / `ringImageDark` | *(leer)* | **Grafik statt Kontoring**, gleiche Fläche (72 × 72). Ring und Grafik schließen einander aus; ist der Schlüssel gesetzt, wird der Schalter „Kontoring anzeigen" in den Einstellungen gesperrt. Getrennt von `logo`, das über dem Kontostand sitzt — sonst stünde dasselbe Bild zweimal im Fenster. |
 
 **Die Schrift ist gefahrlos wählbar.** Zeilenhöhen hängen nicht an ihr (siehe §1), eine
 sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe einer Karte.
@@ -216,6 +217,25 @@ Abgeleitete Töne (nicht konfigurierbar): gedämpfte Ink-Stufen `0.45` (Platzhal
 `0.6–0.75` (Sekundärtext, inaktive Kommandos), `0.85–0.9` (Labels); Feld-Füllung
 Weiß 65 % mit 2-pt-Ink-Rahmen; Money-Heat bleibt exklusiv dem Default-Theme.
 
+### 4.2a Darstellungs-Modi
+
+Zwei Schlüssel mit mehr als An/Aus. Unbekannte Werte fallen still auf den Standard
+zurück — dieselbe Haltung wie bei `parseBool` und den Icon-Namen.
+
+| Schlüssel | Werte | Standard | Wirkung |
+|---|---|---|---|
+| `categoryIconStyle` | `auto` · `ink` · `color` | `auto` | Einfärbung der Kategorie-Symbole in den Umsatzzeilen. `auto`: ohne Theme Systemgrau wie bisher, **mit Theme die Ink-Farbe**. `ink` erzwingt die Ink-Farbe, `color` nimmt die Farbe der Kategorie (dieselbe wie Mosaik-Blöcke und Ringe). |
+| `bankLogoStyle` | `color` · `mono` | `color` | Bankmarke in Flyout und Umsatzliste. `mono` zeichnet sie einfarbig in der Ink-Farbe und passt sich damit Hell/Dunkel von selbst an. |
+
+**Warum `auto` und nicht einfach immer Ink:** Die Symbole standen auf Systemgrau. Auf
+einer hellen Fläche ist das richtig, auf einer dunklen Theme-Fläche oder einem dunklen
+Wallpaper verschwinden sie. `auto` löst genau das, ohne dass ein Theme etwas setzen muss.
+
+**Warum `color` der Standard der Bankmarke bleibt:** YAXI liefert nur für 43 der 192
+Banken eine echte einfarbige Maske. Für die übrigen wird das Farblogo über seinen
+Alphakanal geplättet — bei detailreichen Marken wird daraus ein Fleck. `mono` passt zu
+Themes mit strenger Farbwelt; wer bunte Marken erwartet, lässt es bei `color`.
+
 ### 4.3 Chrome-Schalter
 
 Alle Defaults = Bestandsverhalten; ein leeres Theme sieht aus wie bisher.
@@ -290,7 +310,11 @@ Bereiche zeigen (Flyout-Karte 348 pt breit + ein Listen-Ausschnitt, Light und Da
 | Fläche des Flyouts | `wallpaperFlyout…` → sonst `wallpaper…` → sonst `cardLight` / `cardDark` |
 | Fläche der schmalen Liste | `wallpaper…` → sonst `cardLight` / `cardDark` |
 | Fläche der breiten Liste | `wallpaperWide…` → sonst `wallpaper…` → sonst `cardLight` / `cardDark` |
-| Kontoring (Ampel) | `negative*` für Dispo und knapp, `positive*` für den grünen Bereich, das Mittelband ist die Mischung aus beiden |
+| Kontoring (Ampel) | `negative*` für Dispo und knapp, `positive*` für den grünen Bereich, das Mittelband ist die Mischung aus beiden — oder `ringImage` statt des Rings |
+| Kategorie-Symbol der Zeile | `categoryIconStyle` (§4.2a) |
+| Bankmarke in Kopf und Zeile | `bankLogoStyle` (§4.2a) |
+| Suchfeld | Ink 10 % Füllung, Ink 30 % Rahmen — bei `squareControls` ohne Rundung |
+| Kapsel „Vorgemerkt" | Ink 16 % Füllung, Ink 85 % Text. Abschaltbar in den Einstellungen (Nutzersache, kein Theme-Schlüssel) |
 | Bildmarke über dem Kontostand | `logo` / `logoDark` — sonst die Bankmarke, bei `bankLogos=off` ein Mosaik-Block |
 | Icons in Fuß-, Steuer- und Titelzeile | `icon.<name>` / `icon.<name>.active` (§4.4) |
 | Mosaik-Blöcke | Muster fix, Farben fix je Kategorie (nicht konfigurierbar) |

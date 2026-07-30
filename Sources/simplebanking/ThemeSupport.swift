@@ -3,6 +3,41 @@ import Foundation
 import ImageIO
 import SwiftUI
 
+/// Einfärbung der Kategorie-Symbole.
+enum IconStyle: String, Equatable {
+    /// Ohne Theme Systemgrau wie bisher, mit Theme die Textfarbe — löst die
+    /// Lesbarkeit auf dunklen Flächen, ohne dass ein Theme etwas setzen muss.
+    case auto
+    /// Immer die Textfarbe des Themes.
+    case ink
+    /// Die Farbe der Kategorie (dieselbe, die Ringe und Mosaik-Blöcke verwenden).
+    case color
+
+    static func parse(_ raw: String?) -> IconStyle {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              let wert = IconStyle(rawValue: raw) else { return .auto }
+        return wert
+    }
+}
+
+/// Darstellung der Bankmarke.
+enum LogoStyle: String, Equatable {
+    /// Das Marken-SVG in seinen Farben.
+    case color
+    /// Einfarbige Silhouette in der Textfarbe des Themes — passt sich damit Hell und
+    /// Dunkel an. Bevorzugt die Maske aus dem YAXI-Katalog; für die rund drei Viertel
+    /// der Banken ohne Maske wird das Farblogo über seinen Alphakanal geplättet. Bei
+    /// detailreichen Marken wird daraus ein Fleck — das ist der Preis der Einheitlichkeit
+    /// und der Grund, warum `color` der Standard bleibt.
+    case mono
+
+    static func parse(_ raw: String?) -> LogoStyle {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              let wert = LogoStyle(rawValue: raw) else { return .color }
+        return wert
+    }
+}
+
 struct AppTheme: Identifiable, Equatable {
     let id: String
     let name: String
@@ -91,6 +126,27 @@ struct AppTheme: Identifiable, Equatable {
     var wallpaperFlyoutDarkFileName: String? = nil
     var wallpaperWideFileName: String? = nil
     var wallpaperWideDarkFileName: String? = nil
+
+    /// Grafik **statt** des Kontorings, gleiche Fläche (72 × 72).
+    ///
+    /// Ring und Grafik schließen einander aus — beides nebeneinander gäbe es den Platz
+    /// nicht her. Setzt ein Theme dieses Bild, gewinnt es: Der Schalter „Kontoring
+    /// anzeigen" in den Einstellungen wird gesperrt, damit nicht zwei Stellen um
+    /// dieselbe Fläche streiten und der Nutzer einen Schalter ohne Wirkung sieht.
+    ///
+    /// Getrennt von `logo`, das über dem Kontostand sitzt: Sonst stünde dasselbe Bild
+    /// zweimal nebeneinander im selben Fenster.
+    var ringImageFileName: String? = nil
+    var ringImageDarkFileName: String? = nil
+
+    /// Wie die Kategorie-Symbole der Umsatzzeilen eingefärbt werden.
+    ///
+    /// Sie standen fest auf Systemgrau — auf einer dunklen Theme-Fläche oder einem
+    /// dunklen Wallpaper praktisch unsichtbar.
+    var categoryIconStyle: IconStyle = .auto
+
+    /// Wie die Bankmarke in Flyout und Umsatzliste gezeichnet wird.
+    var bankLogoStyle: LogoStyle = .color
 
     /// Pro Funktion austauschbares SF-Symbol, z. B. `icon.filter=slider.horizontal.3`.
     /// Leer → überall die Standardsymbole. Greift nur, solange `glyphControls` an ist;
@@ -368,6 +424,10 @@ final class ThemeManager: @unchecked Sendable {
             wallpaperFlyoutDarkFileName: values["wallpaperflyoutdark"].flatMap { $0.isEmpty ? nil : $0 },
             wallpaperWideFileName: values["wallpaperwide"].flatMap { $0.isEmpty ? nil : $0 },
             wallpaperWideDarkFileName: values["wallpaperwidedark"].flatMap { $0.isEmpty ? nil : $0 },
+            ringImageFileName: values["ringimage"].flatMap { $0.isEmpty ? nil : $0 },
+            ringImageDarkFileName: values["ringimagedark"].flatMap { $0.isEmpty ? nil : $0 },
+            categoryIconStyle: IconStyle.parse(values["categoryiconstyle"]),
+            bankLogoStyle: LogoStyle.parse(values["banklogostyle"]),
             iconOverrides: Self.parseIconOverrides(from: values)
         )
     }
@@ -740,6 +800,40 @@ enum ThemeChrome {
         case listeSchmal
         /// 840 × 620 — querformat.
         case listeBreit
+    }
+
+    static var categoryIconStyle: IconStyle { theme.categoryIconStyle }
+    static var bankLogoStyle: LogoStyle { theme.bankLogoStyle }
+
+    /// Farbe eines Kategorie-Symbols in der Umsatzzeile.
+    ///
+    /// `kategoriefarbe` ist die Farbe, die Ringe und Mosaik-Blöcke für diese Kategorie
+    /// verwenden — sie wird nur im Modus `color` gebraucht und deshalb erst dann gelesen.
+    static func categoryIconColor(_ kategoriefarbe: @autoclosure () -> Color) -> Color {
+        let themed = !theme.isDefault
+        switch theme.categoryIconStyle {
+        case .ink:   return themed ? .themedInk : .secondary
+        case .color: return kategoriefarbe()
+        case .auto:  return themed ? .themedInk : .secondary
+        }
+    }
+
+    /// Grafik statt Kontoring, oder `nil`.
+    static var ringImageURL: URL? {
+        let dark = NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let name = (dark ? theme.ringImageDarkFileName : nil) ?? theme.ringImageFileName
+        guard let name else { return nil }
+        return themeAssetURL(named: name, art: "Ringbild")
+    }
+
+    /// True, wenn das Theme den Ringplatz belegt. Der Schalter „Kontoring anzeigen"
+    /// wird dann gesperrt — sonst stritten Theme und Einstellung um dieselbe Fläche.
+    static var ringImageActive: Bool { ringImageURL != nil }
+
+    @MainActor
+    static var ringImage: NSImage? {
+        guard let url = ringImageURL else { return nil }
+        return themeImage(at: url, maxBytes: maxLogoBytes, art: "Ringbild")
     }
 
     /// True, sobald das aktive Theme ein **Grundbild** mitbringt.
@@ -1159,5 +1253,68 @@ struct ThemeWallpaper: View {
                 .clipped()
                 .allowsHitTesting(false)
         }
+    }
+}
+
+
+// MARK: - Bankmarke nach Theme-Stil
+
+/// Zeichnet die Bankmarke in Flyout und Umsatzliste — farbig oder einfarbig.
+///
+/// `bankLogoStyle=mono` macht daraus eine Silhouette in der Textfarbe des Themes und
+/// passt sich damit Hell und Dunkel von selbst an. Bevorzugt wird die einfarbige Maske
+/// aus dem YAXI-Katalog; wo es keine gibt — und das ist bei rund drei Vierteln der
+/// Banken so —, wird das Farblogo über seinen Alphakanal geplättet. Bei detailreichen
+/// Marken wird daraus ein Fleck. Genau deshalb bleibt `color` der Standard.
+struct BankMark: View {
+    let image: NSImage
+    var brandId: String? = nil
+    var size: CGFloat = 20
+    var cornerRadius: CGFloat = 5
+    /// Für die Invertierung im Dunkelmodus (nur im Farbmodus relevant).
+    var dark: Bool = false
+
+    var body: some View {
+        if ThemeChrome.bankLogoStyle == .mono, let mono = Self.monoImage(image, brandId: brandId) {
+            Image(nsImage: mono)
+                .resizable()
+                .renderingMode(.template)
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .foregroundColor(.themedInk)
+        } else if dark, BankLogoAssets.isDark(brandId: brandId ?? "") {
+            farbig.colorInvert()
+        } else {
+            farbig
+        }
+    }
+
+    private var farbig: some View {
+        Image(nsImage: image)
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+
+    /// Liefert ein Bild, das als Schablone gezeichnet werden kann.
+    ///
+    /// Der Maskenzugriff geht über `brandId`. Für zehn der gepflegten Marken weicht die
+    /// id vom Katalogschlüssel ab (`commerzbank` lädt unter `commerz`) — dort schlägt der
+    /// Zugriff fehl und es wird geplättet. Das ist bekannt und hier bewusst nicht
+    /// repariert: Der Versatz gehört in die Markenauflösung, nicht hierher.
+    @MainActor
+    static func monoImage(_ original: NSImage, brandId: String?) -> NSImage? {
+        if let id = brandId, BankLogoCache.hasMask(forLogoId: id),
+           let url = BankLogoCache.url(forLogoId: id, mask: true),
+           let maske = NSImage(contentsOf: url) {
+            maske.isTemplate = true
+            return maske
+        }
+        // Kopie, damit das geteilte Farbbild nicht dauerhaft zur Schablone wird — es
+        // wird an anderer Stelle weiterhin farbig gebraucht.
+        guard let kopie = original.copy() as? NSImage else { return nil }
+        kopie.isTemplate = true
+        return kopie
     }
 }
