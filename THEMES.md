@@ -23,8 +23,8 @@ gezeichnet wird und *womit* ein vorhandener Platz gefüllt ist (z. B. Mosaik-Blo
 
 **Die Schrift wirkt auf alle getönten Texte.** Kontostand, Überschriften **und** die
 Zeilen der Umsatzliste (Empfänger, Absender, Betrag, Kategorien) nehmen `bodyFont` bzw.
-`headingFont`. Die Punktgrade bleiben dabei die der App; nur textgetriebene Themes
-(`glyphControls=off`, siehe §4.3) bekommen größere Grade, weil Rasterschriften wie VT323
+`headingFont`. Die Punktgrade bleiben dabei die der App; nur Themes mit
+`lofiTypography=on` (siehe §4.3) bekommen größere Grade, weil Rasterschriften wie VT323
 kleiner bauen.
 
 **Die Schrift kann die Geometrie nicht verschieben.** Das war einmal anders: Die
@@ -35,7 +35,7 @@ wanderte. Die theme-getönten Saldo-Zeilen in Flyout und Umsatzliste haben desha
 (`ThemeFonts.lineHeight(forSize:weight:)`), nicht aus der gewählten Familie. Für den
 Builder heißt das: Die Schriftwahl ist gefahrlos — eine sehr schmale oder sehr breite
 Familie ändert Zeichnung und Laufweite, aber nie die Höhe einer Karte oder eines
-Fensters. Ausgenommen ist der Lo-Fi-Modus (siehe §4.3, `glyphControls=off`), der eigene,
+Fensters. Ausgenommen ist der Lo-Fi-Modus (siehe §4.3, `lofiTypography=on`), der eigene,
 absichtlich größere Metriken setzt.
 
 ---
@@ -103,10 +103,10 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe einer Karte.
 
 **Schriftgrade bleiben die der App.** Ein Theme wählt die Familie, nicht die Größe. Nur
-textgetriebene Themes (`glyphControls=off`, §4.3) bekommen in den Umsatzzeilen größere
-Grade — Rasterschriften wie VT323 bauen kleiner und wären sonst unlesbar. Wer eine
-ähnlich klein bauende Schrift verwendet, ohne `glyphControls` abzuschalten, muss mit
-kleiner Darstellung rechnen; einen eigenen Größenfaktor gibt es bewusst nicht.
+`lofiTypography=on` (§4.3) bringt in den Umsatzzeilen größere Grade — Rasterschriften wie
+VT323 bauen kleiner und wären sonst unlesbar. Wer eine ähnlich klein bauende Schrift
+verwendet, setzt diesen Schlüssel; einen frei wählbaren Größenfaktor gibt es bewusst
+nicht.
 
 #### Format des globalen Logos
 
@@ -287,11 +287,23 @@ Alle Defaults = Bestandsverhalten; ein leeres Theme sieht aus wie bisher.
 | `uppercase` | `off` | `on`: alle getönten Texte in Großbuchstaben (`ThemeChrome.textCase`). |
 | `dottedLeaders` | `off` | `on`: gepunktete Führungslinie zwischen Name und Betrag statt Leerraum. |
 | `squareControls` | `off` | `on`: Eckenradius aller getönten Bedienelemente = 0 (`ThemeChrome.cornerRadius(_:)`) — Suchfeld, Filter-Blöcke, Buttons, Eingabefelder. |
-| `glyphControls` | `on` | `off`: Bedien-**Icons werden Text** — „FILTER", „KAT.", „SPAREN", „SENDEN", „AUSWERTUNG", „INBOX (n)", „X" zum Leeren, `>`-Pfeile; Konto-Umschalter werden unterstrichene Textkommandos statt Pillen; Konto-/Kategorien-**Ringe werden Mosaik-Blockleisten**; blinkendes ☎ erscheint im Kopf; Segmented-Controls werden Text-Paare. |
+| `glyphControls` | `on` | `off`: Bedien-**Icons werden Text** — „FILTER", „KAT.", „SPAREN", „SENDEN", „AUSWERTUNG", „INBOX (n)", „X" zum Leeren, `>`-Pfeile; der Konto-Umschalter wird zu unterstrichenen Textkommandos statt Pillen; Segmented-Controls werden Text-Paare. **Nur die Bedienelemente** — Schriftgrade und Metriken bleiben unberührt. |
+| `lofiTypography` | `off` | `on`: die **Rasterschrift-Gestaltung** — größere Schriftgrade in den Umsatzzeilen, „double height"-Kontostand, Eingabefelder als helle Blöcke mit hartem Rahmen, Konto- und Kategorien-**Ringe werden Mosaik-Blockleisten**, Flächentausch im Sparmodus, bündige Zeilen ohne Gutter, blinkendes ☎ im Kopf. |
 
-**Faustregel für Retro-Themes:** `uppercase`, `dottedLeaders`, `squareControls` an,
-`glyphControls`, Logos, Icons, `ripple` aus — dann trägt Text die Bedienung, wie es
-Terminals und BTX taten.
+**Die beiden gehörten bis 2.0.2 zusammen.** `glyphControls=off` schaltete auch die
+Typografie um — eine Abkürzung aus der BTX-Arbeit, als es genau ein Theme gab, das beides
+wollte. Für jedes andere war es eine Falle: Wer nur Textkommandos statt Icons wollte,
+bekam ungefragt andere Schriftgrade dazu und konnte sie nicht abwählen. Jetzt zwei
+Schlüssel.
+
+**Was das für bestehende Themes heißt:** Ein Theme mit `glyphControls=off`, das die
+Lo-Fi-Typografie behalten will, muss `lofiTypography=on` ergänzen — sonst behält es seine
+Textkommandos, bekommt aber die normalen Schriftgrade. Das mitgelieferte BTX setzt beides
+und sieht unverändert aus.
+
+**Faustregel für Retro-Themes:** `uppercase`, `dottedLeaders`, `squareControls`,
+`lofiTypography` an, `glyphControls`, Logos, Icons, `ripple` aus — dann trägt Text die
+Bedienung, wie es Terminals und BTX taten.
 
 ### 4.4 Bedien-Icons einzeln austauschen
 
@@ -412,6 +424,7 @@ uppercase=on
 dottedLeaders=on
 squareControls=on
 glyphControls=off
+lofiTypography=on
 screenBorder=#e8b200
 ```
 
@@ -465,6 +478,10 @@ und den Schalter sperrt.
      72 × 72, 512-KB-Grenze. Der Builder muss dazu sichtbar machen, was der Schlüssel
      auslöst: **Er sperrt eine Einstellung in der App.** Wer das Feld füllt, nimmt dem
      Nutzer den Kontoring — das gehört an die Oberfläche, nicht in die Dokumentation.
+   - **`glyphControls` und `lofiTypography` als zwei getrennte Schalter** (4.3), nicht
+     als einen. Sie waren bis 2.0.2 gekoppelt, und ein Builder, der sie wieder
+     zusammenfasst, baut die Falle nach. Wer das Retro-Preset anbietet, setzt beide —
+     aber sichtbar, damit man einen davon wieder ausschalten kann.
    - **Zwei Auswahlfelder für die Darstellungs-Modi** (4.2a): `categoryIconStyle` mit
      `auto`/`ink`/`color` und `bankLogoStyle` mit `color`/`mono`. Beim Mono-Modus zwei
      Hinweise zeigen: dass er nur die Pillen des Konto-Umschalters betrifft und nicht die

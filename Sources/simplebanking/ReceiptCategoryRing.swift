@@ -53,8 +53,6 @@ struct ReceiptCategoryRing: View {
 
     /// BTX-Theme: statt des Kreisrings eine Mosaik-Segmentleiste — die Warengruppen
     /// als proportionale, farbige Blöcke in einer Zeile (gleiche 72×72-Fläche).
-    private var themed: Bool { !ThemeManager.shared.currentTheme.isDefault }
-
     private var btxSegmentBar: some View {
         VStack(spacing: 5) {
             if let date {
@@ -82,7 +80,8 @@ struct ReceiptCategoryRing: View {
 
     var body: some View {
         Group {
-            if themed && !ThemeChrome.glyphControls {
+            if ThemeChrome.lofi {
+                // Blockleiste statt Ring — siehe GreenZoneRing.
                 btxSegmentBar
             } else {
                 ZStack {

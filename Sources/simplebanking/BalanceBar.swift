@@ -8170,7 +8170,8 @@ private struct StatusBalanceFlyoutCardView: View {
                     .textCase(ThemeChrome.textCase)
                     .lineLimit(1)
                 // BTX: blinkendes Telefon-Steuerzeichen neben der Bank (wie Demo-Kopf).
-                if themed && !ThemeChrome.glyphControls {
+                // Zierrat, kein Bedienelement — folgt `lofiTypography`.
+                if ThemeChrome.lofi {
                     BTXBlinkingPhone(size: 13)
                 }
                 Spacer()

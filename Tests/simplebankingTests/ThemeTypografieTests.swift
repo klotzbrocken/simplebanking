@@ -8,13 +8,13 @@ import SwiftUI
 // Gemeldet: Die Typografie eines Themes wirkte auf Kontostand und Überschrift, nicht aber
 // auf Empfänger, Absender, Betrag und Kategorien in der Umsatzliste.
 //
-// Ursache: Die Zeilentexte hingen an `ThemeChrome.lofi`, definiert als
-// `!isDefault && !glyphControls`. Da `glyphControls` standardmäßig an ist, bedeutete das
-// „nur BTX". Kontostand und Überschrift riefen `flyoutHeading` dagegen ungatet — deshalb
-// wirkten sie.
+// Ursache: Die Zeilentexte hingen an `ThemeChrome.lofi`, das damals über
+// `!glyphControls` lief und in der Praxis „nur BTX" bedeutete. Kontostand und Überschrift
+// riefen `flyoutHeading` dagegen ungatet — deshalb wirkten sie.
 //
-// `rowBody`/`rowHeading` trennen das: Familie nach `themed`, Schriftgrad nur bei
-// textgetriebenen Themes größer.
+// `rowBody`/`rowHeading` trennen das: Familie nach `themed`, Schriftgrad nur bei Themes
+// mit `lofiTypography=on` größer (der Schlüssel, der die Kopplung seit 2.0.2 ersetzt —
+// siehe `LofiEntkopplungTests`).
 
 @MainActor
 final class ThemeTypografieTests: XCTestCase {
@@ -45,13 +45,13 @@ final class ThemeTypografieTests: XCTestCase {
                        Font.system(size: 14, weight: .semibold))
     }
 
-    /// Der gemeldete Fall: Ein Theme mit eigener Schrift, aber ohne `glyphControls=off`.
+    /// Der gemeldete Fall: Ein Theme mit eigener Schrift, aber ohne Lo-Fi-Gestaltung.
     /// Vorher bekam die Zeile hier die Systemschrift.
     func test_mitTheme_kommtDieThemeSchrift() throws {
         let gameboy = try XCTUnwrap(
             ThemeManager.shared.availableThemes().first { $0.id != ThemeManager.defaultThemeID
-                                                        && $0.glyphControls },
-            "kein Theme mit glyphControls=on gefunden")
+                                                        && !$0.lofiTypography },
+            "kein schlichtes Theme gefunden")
         ThemeManager.shared.selectThemeForTesting(id: gameboy.id)
 
         XCTAssertNotEqual(ThemeFonts.rowBody(size: 10), Font.system(size: 10),
@@ -67,7 +67,7 @@ final class ThemeTypografieTests: XCTestCase {
     func test_mitTheme_bleibenDieSchriftgradeWieBisher() throws {
         let gameboy = try XCTUnwrap(
             ThemeManager.shared.availableThemes().first { $0.id != ThemeManager.defaultThemeID
-                                                        && $0.glyphControls })
+                                                        && !$0.lofiTypography })
         ThemeManager.shared.selectThemeForTesting(id: gameboy.id)
         XCTAssertEqual(ThemeFonts.rowBody(size: 10, lofiSize: 13),
                        ThemeFonts.flyoutBody(size: 10),
@@ -77,8 +77,8 @@ final class ThemeTypografieTests: XCTestCase {
     /// BTX behält seine größeren Grade — VT323 baut klein, deshalb war das so gewählt.
     func test_btx_behaeltDieGroesserenGrade() throws {
         let btx = try XCTUnwrap(
-            ThemeManager.shared.availableThemes().first { !$0.glyphControls },
-            "kein textgetriebenes Theme gefunden")
+            ThemeManager.shared.availableThemes().first { $0.lofiTypography },
+            "kein Theme mit Rasterschrift-Gestaltung gefunden")
         ThemeManager.shared.selectThemeForTesting(id: btx.id)
         XCTAssertTrue(ThemeChrome.lofi)
         XCTAssertEqual(ThemeFonts.rowBody(size: 10, lofiSize: 13),
@@ -474,6 +474,10 @@ final class ThemeErweiterungenTests: XCTestCase {
             XCTAssertNil(t.ringImageFileName, "\(datei)")
             XCTAssertEqual(t.categoryIconStyle, .auto, "\(datei)")
             XCTAssertEqual(t.bankLogoStyle, .color, "\(datei)")
+            // Ausnahme mit Grund: BTX hatte die Lo-Fi-Gestaltung schon, sie hing bis
+            // 2.0.2 nur an `glyphControls`. Der Schlüssel schreibt sie fest, er fügt
+            // dem Theme nichts hinzu.
+            XCTAssertEqual(t.lofiTypography, datei == "btx.cfg", "\(datei)")
         }
     }
 }

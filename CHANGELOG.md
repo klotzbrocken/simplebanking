@@ -1,6 +1,10 @@
 # Changelog — simplebanking
 
-## [Unreleased]
+## [Unreleased] (2.0.2)
+
+### Geändert
+
+- **Themes: Bedien-Icons und Rasterschrift sind jetzt zwei Schalter** — `glyphControls=off` ersetzte bisher nicht nur die Bedien-Icons durch Textkommandos, sondern stellte zugleich Schriftgrade, Ringe und Metriken auf die Lo-Fi-Gestaltung um. Wer nur Textkommandos wollte, konnte den Rest nicht abwählen. Die Gestaltung hängt jetzt am neuen Schlüssel `lofiTypography` (Standard: aus). Das mitgelieferte BTX-Theme setzt beide und sieht unverändert aus; ein eigenes Theme mit `glyphControls=off`, das die großen Grade behalten will, ergänzt `lofiTypography=on`. Dokumentiert in THEMES.md §4.3.
 
 ### Behoben
 

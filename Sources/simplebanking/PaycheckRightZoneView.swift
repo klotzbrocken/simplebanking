@@ -125,7 +125,8 @@ struct GreenZoneRing: View {
                     .scaledToFit()
                     .frame(width: 72, height: 72)
                     .accessibilityHidden(true)
-            } else if themed && !ThemeChrome.glyphControls {
+            } else if ThemeChrome.lofi {
+                // Blockleiste statt Ring: eine Darstellungsform, kein Bedienelement.
                 btxBlockGauge
             } else {
             Circle()

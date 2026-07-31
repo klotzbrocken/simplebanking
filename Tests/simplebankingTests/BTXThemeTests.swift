@@ -67,6 +67,7 @@ final class BTXThemeTests: XCTestCase {
         XCTAssertTrue(t.dottedLeaders)
         XCTAssertTrue(t.squareControls)
         XCTAssertFalse(t.glyphControls)
+        XCTAssertTrue(t.lofiTypography, "seit 2.0.2 ein eigener Schlüssel, nicht mehr an glyphControls")
         XCTAssertEqual(t.screenBorderHex?.lowercased(), "#e8b200")
     }
 
@@ -77,7 +78,7 @@ final class BTXThemeTests: XCTestCase {
     }
 
     /// Regression: die Lo-Fi-Gestaltung (große Raster-Typografie, Block-Felder,
-    /// Flächen-Swaps) gehört NUR Themes mit `glyphControls=off`. Game Boy und
+    /// Flächen-Swaps) gehört NUR Themes mit `lofiTypography=on`. Game Boy und
     /// Sunrise sind reine Farb-Themes und müssen die Default-Metriken behalten —
     /// genau das war nach der ersten BTX-Runde verletzt.
     func test_colorThemes_areNotLofi() throws {
@@ -88,12 +89,13 @@ final class BTXThemeTests: XCTestCase {
             try cfg.write(to: url, atomically: true, encoding: .utf8)
             defer { try? FileManager.default.removeItem(at: url) }
             let t = try XCTUnwrap(ThemeManager.shared.parseTheme(from: url))
-            XCTAssertTrue(t.glyphControls, "\(file) darf NICHT in den Lo-Fi-Modus rutschen")
+            XCTAssertFalse(t.lofiTypography, "\(file) darf NICHT in den Lo-Fi-Modus rutschen")
+            XCTAssertTrue(t.glyphControls, "\(file): grafische Bedienelemente")
             XCTAssertFalse(t.uppercaseText, "\(file): keine Großschreibung")
             XCTAssertFalse(t.squareControls, "\(file): keine eckigen Controls")
         }
         let btx = try parsedBTX()
-        XCTAssertFalse(btx.glyphControls, "BTX ist das (bisher einzige) Lo-Fi-Theme")
+        XCTAssertTrue(btx.lofiTypography, "BTX ist das (bisher einzige) Lo-Fi-Theme")
     }
 
     /// Ein BTX-Schirm sah in Hell wie Dunkel gleich aus — die Palette darf nicht

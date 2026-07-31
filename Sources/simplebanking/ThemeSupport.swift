@@ -82,7 +82,17 @@ struct AppTheme: Identifiable, Equatable {
     var squareControls: Bool = false
     /// Bedien-Icons als SF-Symbol (`true`) oder als Textkürzel (`false`). BTX kannte
     /// keine grafischen Icons — Kommandos standen als Text in der Fußleiste.
+    ///
+    /// Betrifft **nur** die Bedienelemente. Die übrige Lo-Fi-Gestaltung hängt an
+    /// `lofiTypography` — siehe dort, warum das getrennt ist.
     var glyphControls: Bool = true
+    /// Rasterschrift-Gestaltung: größere Schriftgrade, „double height"-Kontostand,
+    /// Block-Felder, Blockleisten statt Ringe, bündige Zeilen ohne Gutter.
+    ///
+    /// Früher hing das an `glyphControls=off`. Ein Theme, das nur seine Bedienelemente
+    /// als Text wollte, bekam ungefragt auch andere Schriftgrade — zwei Entscheidungen
+    /// an einem Schalter. Jetzt getrennt: Wer beides will (BTX), setzt beides.
+    var lofiTypography: Bool = false
     /// Farbe eines Rahmens um Flyout/Liste („Bildschirmrand"). nil → kein Rahmen.
     var screenBorderHex: String? = nil
 
@@ -415,6 +425,7 @@ final class ThemeManager: @unchecked Sendable {
             dottedLeaders: Self.parseBool(values["dottedleaders"], default: false),
             squareControls: Self.parseBool(values["squarecontrols"], default: false),
             glyphControls: Self.parseBool(values["glyphcontrols"], default: true),
+            lofiTypography: Self.parseBool(values["lofitypography"], default: false),
             screenBorderHex: values["screenborder"].flatMap { $0.isEmpty ? nil : $0 },
             logoFileName: values["logo"].flatMap { $0.isEmpty ? nil : $0 },
             logoDarkFileName: values["logodark"].flatMap { $0.isEmpty ? nil : $0 },
@@ -563,6 +574,9 @@ final class ThemeManager: @unchecked Sendable {
         dottedLeaders=on
         squareControls=on
         glyphControls=off
+        # Die Rasterschrift-Gestaltung hängt seit 2.0.2 an einem eigenen Schlüssel —
+        # vorher kam sie ungefragt mit `glyphControls=off`. BTX will beides.
+        lofiTypography=on
         screenBorder=#e8b200
         """
     ]
@@ -586,6 +600,7 @@ enum ThemeChrome {
     static var dottedLeaders: Bool { theme.dottedLeaders }
     static var squareControls: Bool { theme.squareControls }
     static var glyphControls: Bool { theme.glyphControls }
+    static var lofiTypography: Bool { theme.lofiTypography }
 
     /// Eckenradius für Bedienelemente: 0 bei `squareControls`, sonst der übergebene Wert.
     static func cornerRadius(_ rounded: CGFloat) -> CGFloat { theme.squareControls ? 0 : rounded }
@@ -594,12 +609,19 @@ enum ThemeChrome {
     static var textCase: Text.Case? { theme.uppercaseText ? .uppercase : nil }
 
     /// Lo-Fi-Modus: die tiefgreifende Text-Terminal-Gestaltung (größere Rasterschrift-
-    /// Typografie, „double height"-Kontostand, Block-Felder, Flächen-Swaps im Sparmodus,
-    /// bündige Zeilen ohne Gutter). Hängt an `glyphControls=off` — dem Schalter, der ein
-    /// Theme zur textgetriebenen Oberfläche erklärt (derzeit nur BTX). Themes wie
-    /// Game Boy oder Sunrise, die nur Farben und Schriftfamilie setzen, behalten
-    /// exakt die Default-Metriken.
-    static var lofi: Bool { !theme.isDefault && !theme.glyphControls }
+    /// Typografie, „double height"-Kontostand, Block-Felder, Blockleisten statt Ringe,
+    /// Flächen-Swaps im Sparmodus, bündige Zeilen ohne Gutter).
+    ///
+    /// Hing bis 2.0.2 an `glyphControls=off`. Das war eine Abkürzung aus der BTX-Arbeit:
+    /// Damals gab es genau ein Theme, das beides wollte, und ein Schalter reichte. Für
+    /// jedes andere Theme war die Kopplung eine Falle — wer nur Textkommandos statt
+    /// Icons wollte, bekam ungefragt andere Schriftgrade dazu und konnte das nicht
+    /// abwählen.
+    ///
+    /// Jetzt ein eigener Schlüssel. Themes wie Game Boy oder Sunrise, die nur Farben und
+    /// Schriftfamilie setzen, behalten wie bisher exakt die Default-Metriken — sie haben
+    /// ihn nicht gesetzt, und sein Standard ist `off`.
+    static var lofi: Bool { !theme.isDefault && theme.lofiTypography }
 
 
     // MARK: - Austauschbare Bedien-Icons
@@ -991,8 +1013,8 @@ enum ThemeFonts {
 
     // MARK: - Zeilentexte in Flyout und Umsatzliste
     //
-    // Vorher stand an diesen Stellen `lofi ? flyoutBody(…) : .system(…)`. `lofi` heißt
-    // `!isDefault && !glyphControls` — in der Praxis also „das ist BTX". Damit erreichte
+    // Vorher stand an diesen Stellen `lofi ? flyoutBody(…) : .system(…)`. `lofi` hing
+    // damals an `!glyphControls` — in der Praxis also „das ist BTX". Damit erreichte
     // die Theme-Schrift den Kontostand und die Überschriften (die rufen `flyoutHeading`
     // ungatet), nicht aber Empfänger, Betrag oder Kategorie in der Umsatzliste. Ein
     // Theme mit eigener Schrift wirkte deshalb nur halb.

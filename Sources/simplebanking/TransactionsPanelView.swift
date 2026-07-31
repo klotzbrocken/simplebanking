@@ -539,7 +539,9 @@ private struct TransactionsPanelView: View {
             // keine Konten-Aufschlüsselung/Pillen mehr, nur der Gesamt-Saldo).
             HStack(spacing: 8) {
                 // Aggregat-Kopf folgt dem Theme (BTX: Mosaik-Block statt Stapel-Symbol).
-                if themed && !ThemeChrome.glyphControls {
+                // Ein Mosaik-Block ist kein Textkommando, deshalb hängt er an
+                // `lofiTypography` und nicht an `glyphControls`.
+                if ThemeChrome.lofi {
                     BTXMosaicIcon(category: .sonstiges, side: 18)
                 } else {
                     Image(systemName: "square.stack.3d.up.fill")
@@ -704,7 +706,8 @@ private struct TransactionsPanelView: View {
                     .textCase(ThemeChrome.textCase)
                     .foregroundColor(headerColor)
                 // BTX: blinkendes Telefon-Steuerzeichen neben der Bank (wie Demo-Kopf).
-                if themed && !ThemeChrome.glyphControls {
+                // Zierrat, kein Bedienelement — folgt `lofiTypography`.
+                if ThemeChrome.lofi {
                     BTXBlinkingPhone(size: 14)
                 }
                 Spacer()
