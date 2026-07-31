@@ -142,7 +142,7 @@ nicht.
 | | |
 |---|---|
 | **Akzeptiert** | PNG, PDF, SVG — wie beim Logo |
-| **Empfohlene Maße** | Flyout 348 × 178, schmale Liste 348 × 620, breite Liste 840 × 620 — jeweils @2x verdoppelt |
+| **Empfohlene Maße** | Flyout 348 × 178, schmale Liste 348 × 652, breite Liste 840 × 652 — jeweils @2x verdoppelt |
 | **Größe** | bis 4 MB (das Logo darf nur 512 KB — ein Wallpaper braucht mehr) |
 | **Dateiname** | einfacher Name im Theme-Ordner, dieselben Regeln wie beim Logo |
 
@@ -152,8 +152,14 @@ Schlüssel:
 | Fläche | Größe | Verhältnis | Schlüssel |
 |---|---|---|---|
 | Flyout | 348 × **178** (Normalfall) | ≈ 2 : 1 breit-flach | `wallpaperFlyout` |
-| Umsatzliste schmal | 348 × 620 | 0,56 : 1 hochkant | `wallpaper` |
-| Umsatzliste breit | 840 × 620 | 1,35 : 1 quer | `wallpaperWide` |
+| Umsatzliste schmal | 348 × 652 | 0,53 : 1 hochkant | `wallpaper` |
+| Umsatzliste breit | 840 × 652 | 1,29 : 1 quer | `wallpaperWide` |
+
+> **Die Maße sind am laufenden Fenster gemessen, nicht aus dem Quelltext abgelesen.**
+> Im Code steht `TransactionsPanel.panelHeight = 620` — das ist die *Content*-Höhe.
+> AppKit legt die Titelleiste darauf, und weil das Fenster `.fullSizeContentView`
+> benutzt, reicht die Theme-Fläche über die vollen **652**. Wer die Konstante als
+> Bildhöhe nimmt, liefert 32 pt zu wenig.
 
 **348 × 178 ist die Größe, die man sieht** — im Ruhezustand immer
 (`BalanceBar.flyoutContentSize`). Die 140, die hier früher standen, sind die Höhe *ohne*
@@ -515,7 +521,7 @@ und den Schalter sperrt.
    - **Wallpaper-Ablage** (4.1): **drei Felder** — Flyout, schmale Liste (Grundbild),
      breite Liste —, je optional mit zweiter Datei für den Dunkelmodus. Prüfung auf
      Format und die 4-MB-Grenze, Kopieren in den Theme-Ordner. Je Feld das Sollmaß
-     anzeigen (348 × 178, 348 × 620, 840 × 620) und einen Hinweis, wenn das gewählte
+     anzeigen (348 × 178, 348 × 652, 840 × 652) und einen Hinweis, wenn das gewählte
      Bild stark davon abweicht — erzwingen aber nicht. Die Vorschau muss **oben
      verankert** zuschneiden, nicht zentriert, sonst zeigt der Builder etwas anderes als
      die App. Ist eines der Sonderfelder gefüllt und das Grundbild leer: **Fehler**, denn
@@ -545,7 +551,7 @@ und den Schalter sperrt.
    Listen-Ausschnitt mit Beispieldaten, umschaltbar Hell/Dunkel. Die Preview muss die
    Schalter-Effekte zeigen (Mosaik statt Logo, Textkommandos, Punktlinien, Blende,
    Blockleiste, eckige Felder). Dazu drei Dinge, die man sonst erst in der App merkt:
-   - **Alle drei Flächen** (Flyout 348 × 178, Liste 348 × 620, Liste 840 × 620), und zwar
+   - **Alle drei Flächen** (Flyout 348 × 178, Liste 348 × 652, Liste 840 × 652), und zwar
      mit dem Bild, das dort tatsächlich greift — einschließlich des Rückfalls aufs
      Grundbild, wenn ein Sonderfeld leer ist. Wer nur eine Fläche zeigt, baut Themes, die
      in den anderen nicht aufgehen; das ist der Fehler, der die drei Schlüssel überhaupt
@@ -583,7 +589,7 @@ und den Schalter sperrt.
 ### Soll
 
 - **Sonderbilder aus dem Grundbild ableiten.** Aus einem Bild die beiden anderen
-  Seitenverhältnisse erzeugen: Ausschnitt wählen, auf 348 × 178 bzw. 840 × 620 setzen,
+  Seitenverhältnisse erzeugen: Ausschnitt wählen, auf 348 × 178 bzw. 840 × 652 setzen,
   Randfarbe aus dem Original übernehmen. Das ist der häufigste Fall — jemand hat *ein*
   Bild und braucht drei. Von Hand ist es fummelig, im Builder sind es zwei Schieberegler.
 - Vorlagen: „Leer (Default-Verhalten)", „Retro-Preset" (Faustregel aus 4.3), die vier
