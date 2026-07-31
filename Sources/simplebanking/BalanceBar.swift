@@ -8159,9 +8159,11 @@ private struct StatusBalanceFlyoutCardView: View {
         // 4b-Karte zusammengelegt — seitdem fehlte er, obwohl die Einstellung ihn
         // ausdrücklich „im Flyout und in der Umsatzliste" verspricht.
         //
-        // Ein gesetztes `ringImage` zeichnet `GreenZoneRing` selbst, deshalb dieselbe
-        // Oder-Bedingung wie in der Liste. PayPal hat auch dort keinen Ring.
-        let ringSichtbar = (monthRingEnabled || ThemeChrome.ringImageActive) && !isPayPalCard
+        // Die Rangfolge — Grafik sticht Theme-Abschaltung sticht Nutzerschalter — steht
+        // in `ThemeChrome.kontoringSichtbar`, damit beide Fenster dieselbe Antwort
+        // bekommen. PayPal hat auch in der Liste keinen Ring.
+        let ringSichtbar = ThemeChrome.kontoringSichtbar(nutzerSchalter: monthRingEnabled)
+            && !isPayPalCard
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {

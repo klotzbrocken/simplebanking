@@ -603,7 +603,8 @@ private struct TransactionsPanelView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 90, alignment: .topLeading)   // wie Einzelkarte → Pillen darunter auf gleicher Höhe
 
-        let ringVisible = (monthRingEnabled || ThemeChrome.ringImageActive) && !vm.isUnifiedMode
+        let ringVisible = ThemeChrome.kontoringSichtbar(nutzerSchalter: monthRingEnabled)
+            && !vm.isUnifiedMode
         return Group {
             if panelIsWide {
                 HStack(alignment: .center, spacing: 0) {
@@ -734,7 +735,11 @@ private struct TransactionsPanelView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        let ringVisible = (monthRingEnabled || ThemeChrome.ringImageActive) && !vm.isUnifiedMode && !isPayPal   // PayPal: kein Ring
+        // Aggregat und PayPal bleiben außen vor — nicht als Gestaltungsfrage, sondern
+        // weil der Ring dort nichts Wahres zeigen kann: Über mehrere Konten hinweg gibt
+        // es keinen gemeinsamen Gehaltstag, und PayPal hat gar keinen.
+        let ringVisible = ThemeChrome.kontoringSichtbar(nutzerSchalter: monthRingEnabled)
+            && !vm.isUnifiedMode && !isPayPal
         return HStack(alignment: .center, spacing: 0) {
             leftContent
                 // Oben ausgerichtet, damit Header/Betrag NICHT springen, wenn der

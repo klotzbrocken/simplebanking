@@ -86,6 +86,10 @@ struct AppTheme: Identifiable, Equatable {
     /// Betrifft **nur** die Bedienelemente. Die übrige Lo-Fi-Gestaltung hängt an
     /// `lofiTypography` — siehe dort, warum das getrennt ist.
     var glyphControls: Bool = true
+    /// Kontoring (Ampel) zeichnen. `false` lässt die Fläche leer — für Themes, denen
+    /// der Ring ins Bild funkt. Ein `ringImage` sticht diesen Schalter, siehe
+    /// `kontoringSichtbar`.
+    var accountRingEnabled: Bool = true
     /// Rasterschrift-Gestaltung: größere Schriftgrade, „double height"-Kontostand,
     /// Block-Felder, Blockleisten statt Ringe, bündige Zeilen ohne Gutter.
     ///
@@ -425,6 +429,7 @@ final class ThemeManager: @unchecked Sendable {
             dottedLeaders: Self.parseBool(values["dottedleaders"], default: false),
             squareControls: Self.parseBool(values["squarecontrols"], default: false),
             glyphControls: Self.parseBool(values["glyphcontrols"], default: true),
+            accountRingEnabled: Self.parseBool(values["accountring"], default: true),
             lofiTypography: Self.parseBool(values["lofitypography"], default: false),
             screenBorderHex: values["screenborder"].flatMap { $0.isEmpty ? nil : $0 },
             logoFileName: values["logo"].flatMap { $0.isEmpty ? nil : $0 },
@@ -822,6 +827,38 @@ enum ThemeChrome {
         case listeSchmal
         /// 840 × 620 — querformat.
         case listeBreit
+    }
+
+    static var accountRingEnabled: Bool { theme.accountRingEnabled }
+
+    /// Ob auf der Ringfläche etwas steht — in Flyout und Umsatzliste dieselbe Antwort.
+    ///
+    /// Die Rangfolge, von stark nach schwach:
+    ///
+    /// 1. **Grafik des Themes** (`ringImage`). Sie ersetzt den Ring, statt ihn zu
+    ///    verbergen — deshalb sticht sie auch einen abgeschalteten Ring. Der Schalter in
+    ///    den Einstellungen ist in diesem Fall gesperrt, sein gespeicherter Wert also
+    ///    ohnehin nicht das, was der Nutzer zuletzt gemeint hat.
+    /// 2. **Theme sagt nein** (`accountRing=off`). Ein Theme, dem der Ring ins Bild
+    ///    funkt, darf ihn weglassen.
+    /// 3. **Nutzerschalter.** Sonst entscheidet „Kontoring anzeigen".
+    ///
+    /// Reine Funktion mit ausdrücklichen Eingaben, damit die Rangfolge prüfbar ist,
+    /// ohne für jede Kombination ein Theme anlegen zu müssen.
+    static func kontoringSichtbar(nutzerSchalter: Bool,
+                                  themeErlaubtRing: Bool,
+                                  grafikGesetzt: Bool) -> Bool {
+        if grafikGesetzt { return true }
+        guard themeErlaubtRing else { return false }
+        return nutzerSchalter
+    }
+
+    /// Dieselbe Frage, beantwortet aus dem aktiven Theme.
+    @MainActor
+    static func kontoringSichtbar(nutzerSchalter: Bool) -> Bool {
+        kontoringSichtbar(nutzerSchalter: nutzerSchalter,
+                          themeErlaubtRing: accountRingEnabled,
+                          grafikGesetzt: ringImageActive)
     }
 
     static var categoryIconStyle: IconStyle { theme.categoryIconStyle }

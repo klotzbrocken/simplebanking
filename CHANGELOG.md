@@ -6,6 +6,7 @@
 
 - **Themes: Bedien-Icons und Rasterschrift sind jetzt zwei Schalter** — `glyphControls=off` ersetzte bisher nicht nur die Bedien-Icons durch Textkommandos, sondern stellte zugleich Schriftgrade, Ringe und Metriken auf die Lo-Fi-Gestaltung um. Wer nur Textkommandos wollte, konnte den Rest nicht abwählen. Die Gestaltung hängt jetzt am neuen Schlüssel `lofiTypography` (Standard: aus). Das mitgelieferte BTX-Theme setzt beide und sieht unverändert aus; ein eigenes Theme mit `glyphControls=off`, das die großen Grade behalten will, ergänzt `lofiTypography=on`. Dokumentiert in THEMES.md §4.3.
 
+- **Themes können den Kontoring abschalten** — neuer Schlüssel `accountRing=off` für Themes, denen die Ampel ins Bild funkt. Zusammen mit `ringImage` gilt jetzt eine feste Rangfolge für diese Fläche: Grafik des Themes, dann Abschaltung durch das Theme, dann die Einstellung „Kontoring anzeigen". In beiden Theme-Fällen ist der Schalter gesperrt und nennt den Grund.
 - **Der Kontoring ist im Flyout zurück** — er war dort seit 2.0 verschwunden, als alle Saldo-Karten auf ein gemeinsames Layout zusammengelegt wurden; in den Einstellungen stand weiterhin, dass er „im Flyout und in der Umsatzliste" erscheint. Er folgt jetzt in beiden Fenstern demselben Schalter — und damit erscheint dort auch eine Grafik, die ein Theme per `ringImage` auf die Ringfläche legt. Ebenso zeigt die Karte „Alle Konten" ein globales Theme-Logo, das bisher als einzige Stelle das Stapel-Symbol behielt.
 
 ### Behoben

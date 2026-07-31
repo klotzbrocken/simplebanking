@@ -1999,21 +1999,27 @@ struct SettingsView: View {
             // ── Kontoring ───────────────────────────────────────
             SettingsSectionHeader(title: t("Kontoring", "Account Ring"), icon: "circle.dotted")
 
+            // Zwei Fälle, in denen das Theme entscheidet und der Schalter nichts mehr
+            // zu sagen hat — beide werden benannt, statt den Schalter stumm zu sperren.
+            let themeBestimmtDenRing = ThemeChrome.ringImageActive || !ThemeChrome.accountRingEnabled
             SettingsToggleRow(
                 title: t("Kontoring anzeigen", "Show Account Ring"),
                 subtitle: ThemeChrome.ringImageActive
                     ? t("Das aktive Theme belegt diese Fläche mit einer eigenen Grafik. Beides gleichzeitig gibt der Platz nicht her — wähle ein anderes Theme, um den Ring zurückzubekommen.",
                         "The active theme fills this spot with its own graphic. There isn't room for both — pick another theme to get the ring back.")
+                    : !ThemeChrome.accountRingEnabled
+                    ? t("Das aktive Theme lässt den Ring bewusst weg. Wähle ein anderes Theme, um ihn zurückzubekommen.",
+                        "The active theme deliberately omits the ring. Pick another theme to get it back.")
                     : t(
                         "Zeigt einen Ring im Flyout und in der Umsatzliste, der deinen Kontostand ins Verhältnis zu deinem Gehalt setzt und zeigt, ob du bis zum nächsten Gehalt im grünen Bereich bist.",
                         "Shows a ring in the flyout and transaction list that compares your balance to your salary and indicates whether you're in the green until next payday."
                     ),
                 isOn: $monthRingEnabled
             )
-            // Gesperrt, solange das Theme `ringImage` setzt: Ein Schalter ohne Wirkung
+            // Gesperrt, solange das Theme die Fläche bestimmt: Ein Schalter ohne Wirkung
             // ist schlimmer als keiner — der Nutzer klickt und nichts passiert.
-            .disabled(ThemeChrome.ringImageActive)
-            .opacity(ThemeChrome.ringImageActive ? 0.55 : 1)
+            .disabled(themeBestimmtDenRing)
+            .opacity(themeBestimmtDenRing ? 0.55 : 1)
 
             SettingsToggleRow(
                 title: t("Weitere Einnahmen berücksichtigen", "Include other income"),

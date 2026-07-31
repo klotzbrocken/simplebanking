@@ -207,6 +207,23 @@ beachten (VT323: OFL-1.1, Lizenztext muss mit ausgeliefert werden).
 | `inkLight` / `inkDark` | *(leer)* | **Ink**: Vordergrund (große Saldo-Zahl, Namen, Fließtext) auf der Surface. Leer ⇒ automatischer Schwarz/Weiß-Kontrast per Luminanz (Schwelle 0,55, WCAG-nah — `AppTheme.contrastingInk`). |
 | `screenBorder` | *(leer)* | Farbe der **CRT-Blende** um Flyout + Liste (außen bis zur Fensterkante gefüllt, innen gerundet ausgestanzt; 5–6 pt stark). Leer = keine Blende. |
 
+#### Wer über die Ringfläche entscheidet
+
+Drei Beteiligte, eine Fläche. Die Rangfolge, von stark nach schwach:
+
+1. **`ringImage` des Themes** — die Grafik tritt an die Stelle des Rings. Sie sticht
+   auch einen abgeschalteten Ring, denn sie *ersetzt* ihn, statt ihn zu verbergen.
+2. **`accountRing=off`** — das Theme lässt die Fläche leer.
+3. **„Kontoring anzeigen"** in den Einstellungen — sonst entscheidet der Nutzer.
+
+In beiden Fällen 1 und 2 ist der Schalter in den Einstellungen gesperrt und nennt den
+Grund. Ein Schalter, der sichtbar bleibt und nichts bewirkt, ist schlechter als keiner.
+
+Unabhängig davon bleibt die Fläche in zwei Ansichten leer, und zwar nicht aus
+Gestaltungsgründen: bei **„Alle Konten"** und bei **PayPal**. Über mehrere Konten hinweg
+gibt es keinen gemeinsamen Gehaltstag, gegen den sich ein Stand ins Verhältnis setzen
+ließe, und PayPal hat gar keinen. Ein Ring stünde dort für nichts.
+
 #### Kontoring (Ampel)
 
 Der Ring im Flyout und in der Liste hat vier Zustände. Er nimmt seine Farben aus der
@@ -287,6 +304,7 @@ Alle Defaults = Bestandsverhalten; ein leeres Theme sieht aus wie bisher.
 | `uppercase` | `off` | `on`: alle getönten Texte in Großbuchstaben (`ThemeChrome.textCase`). |
 | `dottedLeaders` | `off` | `on`: gepunktete Führungslinie zwischen Name und Betrag statt Leerraum. |
 | `squareControls` | `off` | `on`: Eckenradius aller getönten Bedienelemente = 0 (`ThemeChrome.cornerRadius(_:)`) — Suchfeld, Filter-Blöcke, Buttons, Eingabefelder. |
+| `accountRing` | `on` | `off`: **kein Kontoring** in Flyout und Umsatzliste — die Fläche bleibt leer. Für Themes, denen die Ampel ins Bild funkt. Wer die Fläche stattdessen belegen will, nimmt `ringImage` (§4.1). |
 | `glyphControls` | `on` | `off`: Bedien-**Icons werden Text** — „FILTER", „KAT.", „SPAREN", „SENDEN", „AUSWERTUNG", „INBOX (n)", „X" zum Leeren, `>`-Pfeile; der Konto-Umschalter wird zu unterstrichenen Textkommandos statt Pillen; Segmented-Controls werden Text-Paare. **Nur die Bedienelemente** — Schriftgrade und Metriken bleiben unberührt. |
 | `lofiTypography` | `off` | `on`: die **Rasterschrift-Gestaltung** — größere Schriftgrade in den Umsatzzeilen, „double height"-Kontostand, Eingabefelder als helle Blöcke mit hartem Rahmen, Konto- und Kategorien-**Ringe werden Mosaik-Blockleisten**, Flächentausch im Sparmodus, bündige Zeilen ohne Gutter, blinkendes ☎ im Kopf. |
 
@@ -474,10 +492,14 @@ und den Schalter sperrt.
      verankert** zuschneiden, nicht zentriert, sonst zeigt der Builder etwas anderes als
      die App. Ist eines der Sonderfelder gefüllt und das Grundbild leer: **Fehler**, denn
      dann bleibt überall die Farbe.
-   - **Ringbild-Ablage** (4.1): ein Feld plus optionale Dunkel-Variante, Sollmaß
-     72 × 72, 512-KB-Grenze. Der Builder muss dazu sichtbar machen, was der Schlüssel
-     auslöst: **Er sperrt eine Einstellung in der App.** Wer das Feld füllt, nimmt dem
-     Nutzer den Kontoring — das gehört an die Oberfläche, nicht in die Dokumentation.
+   - **Ringfläche** (4.1/4.3): das Ringbild-Feld plus optionale Dunkel-Variante,
+     Sollmaß 72 × 72, 512-KB-Grenze — und daneben `accountRing`. Beide gehören
+     zusammen gezeigt, weil sie dieselbe Fläche meinen: Bild setzen, leer lassen oder
+     dem Nutzer überlassen. Der Builder muss die Rangfolge sichtbar machen, sonst
+     wundert man sich, warum ein abgeschalteter Ring trotzdem ein Bild zeigt. Und der
+     Builder muss sichtbar machen, was beide Schlüssel auslösen: **Sie sperren eine
+     Einstellung in der App.** Wer sie setzt, nimmt dem Nutzer den Kontoring — das
+     gehört an die Oberfläche, nicht in die Dokumentation.
    - **`glyphControls` und `lofiTypography` als zwei getrennte Schalter** (4.3), nicht
      als einen. Sie waren bis 2.0.2 gekoppelt, und ein Builder, der sie wieder
      zusammenfasst, baut die Falle nach. Wer das Retro-Preset anbietet, setzt beide —
