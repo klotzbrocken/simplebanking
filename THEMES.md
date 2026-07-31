@@ -97,7 +97,7 @@ ein vertipptes `ripple=offf` schaltet also nichts ab. (`ThemeManager.parseBool`)
 | `wallpaperDark` | *(leer)* | Variante für den Dunkelmodus. Ohne diesen Schlüssel gilt `wallpaper` in beiden Modi. |
 | `wallpaperFlyout` / `wallpaperFlyoutDark` | *(leer)* | Eigenes Bild nur fürs **Flyout**. Ohne diese Schlüssel gilt `wallpaper`. |
 | `wallpaperWide` / `wallpaperWideDark` | *(leer)* | Eigenes Bild nur für die **breite Umsatzliste**. Ohne diese Schlüssel gilt `wallpaper`. |
-| `ringImage` / `ringImageDark` | *(leer)* | **Grafik statt Kontoring.** In der Umsatzliste auf der Ringfläche (72 × 72), im Flyout rechts neben dem Kontostand (64 × 64) — dort gibt es keinen Ring, wohl aber die freie Fläche, und ein Theme, das die Ringfläche belegt, meint beide Fenster. Ring und Grafik schließen einander aus; ist der Schlüssel gesetzt, wird der Schalter „Kontoring anzeigen" in den Einstellungen gesperrt. Nicht auf der PayPal-Karte — dort gibt es auch sonst keinen Ring. Getrennt von `logo`, das über dem Kontostand sitzt — sonst stünde dasselbe Bild zweimal im Fenster. |
+| `ringImage` / `ringImageDark` | *(leer)* | **Grafik statt Kontoring**, gleiche Fläche (72 × 72), in **Flyout und Umsatzliste**. Ring und Grafik schließen einander aus; ist der Schlüssel gesetzt, wird der Schalter „Kontoring anzeigen" in den Einstellungen gesperrt. Nicht auf der PayPal-Karte — dort gibt es auch sonst keinen Ring. Getrennt von `logo`, das über dem Kontostand sitzt — sonst stünde dasselbe Bild zweimal im Fenster. |
 
 **Die Schrift ist gefahrlos wählbar.** Zeilenhöhen hängen nicht an ihr (siehe §1), eine
 sehr schmale oder breite Familie ändert also das Schriftbild, nie die Höhe einer Karte.
@@ -360,7 +360,7 @@ Bereiche zeigen (Flyout-Karte 348 pt breit + ein Listen-Ausschnitt, Light und Da
 | Fläche des Flyouts | `wallpaperFlyout…` → sonst `wallpaper…` → sonst `cardLight` / `cardDark` |
 | Fläche der schmalen Liste | `wallpaper…` → sonst `cardLight` / `cardDark` |
 | Fläche der breiten Liste | `wallpaperWide…` → sonst `wallpaper…` → sonst `cardLight` / `cardDark` |
-| Kontoring (Ampel) | `negative*` für Dispo und knapp, `positive*` für den grünen Bereich, das Mittelband ist die Mischung aus beiden — oder `ringImage` statt des Rings (im Flyout erscheint die Grafik auch dann, wenn dort gar kein Ring war) |
+| Kontoring (Ampel) | `negative*` für Dispo und knapp, `positive*` für den grünen Bereich, das Mittelband ist die Mischung aus beiden — oder `ringImage` statt des Rings. Steht in beiden Fenstern an derselben Stelle. |
 | Kategorie-Symbol der Zeile | `categoryIconStyle` (§4.2a) |
 | Bank-Icons im Konto-Umschalter | `bankLogoStyle` (§4.2a) — die Marke über dem Kontostand bleibt farbig |
 | Suchfeld | Ink 10 % Füllung, Ink 30 % Rahmen — bei `squareControls` ohne Rundung |
@@ -475,7 +475,7 @@ und den Schalter sperrt.
      die App. Ist eines der Sonderfelder gefüllt und das Grundbild leer: **Fehler**, denn
      dann bleibt überall die Farbe.
    - **Ringbild-Ablage** (4.1): ein Feld plus optionale Dunkel-Variante, Sollmaß
-     72 × 72 (im Flyout auf 64 skaliert — quadratisch abliefern), 512-KB-Grenze. Der Builder muss dazu sichtbar machen, was der Schlüssel
+     72 × 72, 512-KB-Grenze. Der Builder muss dazu sichtbar machen, was der Schlüssel
      auslöst: **Er sperrt eine Einstellung in der App.** Wer das Feld füllt, nimmt dem
      Nutzer den Kontoring — das gehört an die Oberfläche, nicht in die Dokumentation.
    - **`glyphControls` und `lofiTypography` als zwei getrennte Schalter** (4.3), nicht
