@@ -8150,54 +8150,70 @@ private struct StatusBalanceFlyoutCardView: View {
                                      : .system(size: 14, weight: .semibold)
         let timeFont: Font = themed ? ThemeFonts.flyoutBody(size: 13) : .system(size: 13)
 
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                // Gleicher 20×20-Platz in jedem Fall — ein Theme ohne Bildmarken (BTX)
-                // setzt hier den Mosaik-Block der Kategorie „neutral/Bank".
-                if !ThemeChrome.bankLogosEnabled {
-                    BTXMosaicIcon(category: .sonstiges)
-                } else if let logo = ThemeChrome.globalLogoImage {
-                    // Globales Theme-Logo: gilt für ALLE Konten, deshalb ohne die
-                    // Marken-Invertierung — die weiß nur bei Banken, wie das Logo
-                    // gebaut ist. Für den Dunkelmodus gibt es `logoDark`.
-                    Image(nsImage: logo).resizable().scaledToFit()
-                        .frame(width: 20, height: 20)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                } else if let img = bankLogoImage {
-                    BankMark(image: img, brandId: bankLogoBrandId, size: 20,
-                             cornerRadius: 5, dark: dark)
-                } else {
-                    Image(systemName: "wallet.pass")
-                        .font(.system(size: 16))
-                        .foregroundColor(detailColor)
+        // Grafik statt Kontoring: Das Flyout hat keinen Ring, wohl aber die freie
+        // Fläche rechts vom Kontostand — und ein Theme, das die Ringfläche belegt,
+        // meint beide Fenster. In der Liste sitzt sie mit 72 pt neben dem Saldo; hier
+        // sind es 64, weil die Karte flacher ist. Auf der PayPal-Karte nicht: Dort gibt
+        // es auch in der Liste keinen Ring.
+        let ringGrafik: NSImage? = isPayPalCard ? nil : ThemeChrome.ringImage
+
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    // Gleicher 20×20-Platz in jedem Fall — ein Theme ohne Bildmarken (BTX)
+                    // setzt hier den Mosaik-Block der Kategorie „neutral/Bank".
+                    if !ThemeChrome.bankLogosEnabled {
+                        BTXMosaicIcon(category: .sonstiges)
+                    } else if let logo = ThemeChrome.globalLogoImage {
+                        // Globales Theme-Logo: gilt für ALLE Konten, deshalb ohne die
+                        // Marken-Invertierung — die weiß nur bei Banken, wie das Logo
+                        // gebaut ist. Für den Dunkelmodus gibt es `logoDark`.
+                        Image(nsImage: logo).resizable().scaledToFit()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    } else if let img = bankLogoImage {
+                        BankMark(image: img, brandId: bankLogoBrandId, size: 20,
+                                 cornerRadius: 5, dark: dark)
+                    } else {
+                        Image(systemName: "wallet.pass")
+                            .font(.system(size: 16))
+                            .foregroundColor(detailColor)
+                    }
+                    (Text(headerNameOnly).font(nameFont).foregroundColor(nameColor)
+                     + Text(headerTimeSuffix(balanceFetchedAt)).font(timeFont).foregroundColor(detailColor))
+                        .textCase(ThemeChrome.textCase)
+                        .lineLimit(1)
+                    // BTX: blinkendes Telefon-Steuerzeichen neben der Bank (wie Demo-Kopf).
+                    // Zierrat, kein Bedienelement — folgt `lofiTypography`.
+                    if ThemeChrome.lofi {
+                        BTXBlinkingPhone(size: 13)
+                    }
+                    Spacer()
                 }
-                (Text(headerNameOnly).font(nameFont).foregroundColor(nameColor)
-                 + Text(headerTimeSuffix(balanceFetchedAt)).font(timeFont).foregroundColor(detailColor))
-                    .textCase(ThemeChrome.textCase)
+
+                Text(displayBalance)
+                    .font(balanceFont)
+                    .tracking(lofi ? 1.0 : -0.6)
+                    .foregroundColor(balanceColor)
                     .lineLimit(1)
-                // BTX: blinkendes Telefon-Steuerzeichen neben der Bank (wie Demo-Kopf).
-                // Zierrat, kein Bedienelement — folgt `lofiTypography`.
-                if ThemeChrome.lofi {
-                    BTXBlinkingPhone(size: 13)
-                }
-                Spacer()
+                    .minimumScaleFactor(0.6)
+                    // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
+                    .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
+                    // Feste Zeilenhöhe im Lo-Fi-Modus — die Länge des Kontostands darf
+                    // die Kartenhöhe nie verändern.
+                    .frame(height: lofi ? 48 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
+
+                if isPayPalCard { paypalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
             }
-
-            Text(displayBalance)
-                .font(balanceFont)
-                .tracking(lofi ? 1.0 : -0.6)
-                .foregroundColor(balanceColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
-                .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
-                // Feste Zeilenhöhe im Lo-Fi-Modus — die Länge des Kontostands darf
-                // die Kartenhöhe nie verändern.
-                .frame(height: lofi ? 48 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
-
-            if isPayPalCard { paypalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let ringGrafik {
+                Image(nsImage: ringGrafik)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 64, height: 64)
+                    .accessibilityHidden(true)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 16)

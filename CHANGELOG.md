@@ -6,6 +6,8 @@
 
 - **Themes: Bedien-Icons und Rasterschrift sind jetzt zwei Schalter** — `glyphControls=off` ersetzte bisher nicht nur die Bedien-Icons durch Textkommandos, sondern stellte zugleich Schriftgrade, Ringe und Metriken auf die Lo-Fi-Gestaltung um. Wer nur Textkommandos wollte, konnte den Rest nicht abwählen. Die Gestaltung hängt jetzt am neuen Schlüssel `lofiTypography` (Standard: aus). Das mitgelieferte BTX-Theme setzt beide und sieht unverändert aus; ein eigenes Theme mit `glyphControls=off`, das die großen Grade behalten will, ergänzt `lofiTypography=on`. Dokumentiert in THEMES.md §4.3.
 
+- **Themes: Ringgrafik und Logo erscheinen jetzt überall** — eine per `ringImage` gesetzte Grafik gab es nur in der Umsatzliste; im Flyout blieb die Fläche leer. Sie steht jetzt auch dort, rechts neben dem Kontostand. Ebenso zeigt die Karte „Alle Konten" ein globales Theme-Logo, das bisher als einzige Stelle das Stapel-Symbol behielt.
+
 ### Behoben
 
 - **Ein Serverfehler kostete eine zweite Freigabe** — antwortete die Bankschnittstelle mit einem Fehler ohne Begründung, deutete simplebanking das als abgelaufene Zustimmung, warf sie weg und forderte eine neue TAN an. Bei der HypoVereinsbank scheiterte auch der zweite Anlauf mit demselben Fehler — die Freigabe war umsonst und die gültige Zustimmung dahin. Ein unbegründeter Fehler wird jetzt zuerst unverändert wiederholt; erst wenn auch das scheitert, kommt die Zustimmung als Ursache in Frage.
