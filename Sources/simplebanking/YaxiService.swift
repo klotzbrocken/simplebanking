@@ -808,6 +808,9 @@ enum YaxiService {
                 // die Bank das wirklich sagte oder unsere Heuristik es hineinlas.
                 AppLogger.log("fetchBalances: Rohfehler vor Einordnung: \(String(reflecting: error))",
                               category: "YaxiService", level: "WARN")
+                // Einmal ermittelt, weil die Deutung im zweistufigen Wiederanlauf
+                // ein zweites Mal gebraucht wird.
+                let cdAlter = await sessionStore.connectionDataAge(slotId: slotSnapshot)
                 // YAXI-Doku: nach jedem non-RequestError ist der Service in
                 // "failed state" → "need to start it again, with a new ticket".
                 // Wir holen daher in jedem retry-Branch (außer Network) einen
@@ -828,7 +831,7 @@ enum YaxiService {
                     )
                 } else if darfOhneConnectionDataWiederholen(
                               error: error,
-                              connectionDataAge: await sessionStore.connectionDataAge(slotId: slotSnapshot)),
+                              connectionDataAge: cdAlter),
                           storedCD != nil {
                     // Consent abgelaufen (Unauthorized / ConsentExpired):
                     // YAXI-Empfehlung "Restart the service without passing
@@ -836,20 +839,51 @@ enum YaxiService {
                     // weg. Session behalten: ein Drop führt bei Sparkasse zu
                     // erzwungenem SCA-Push bei JEDEM Refresh (Regression
                     // 2026-05-12). Yaxi-Doku verlangt das nicht explizit.
-                    AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
-                    let credsNoCD = buildCredentials(
-                        connectionId: connectionId, model: model,
-                        connectionData: nil, userId: userId, password: password
-                    )
+                    //
+                    // Beruht die Einordnung nur auf unserer Faustregel, geht ein
+                    // unveränderter Versuch voran (siehe
+                    // `erstMitConnectionDataWiederholen`).
+                    let ohneCD: @Sendable (Ticket) async throws -> Routex.BalancesResponse = { t in
+                        let credsNoCD = buildCredentials(
+                            connectionId: connectionId, model: model,
+                            connectionData: nil, userId: userId, password: password
+                        )
+                        return try await client.balances(
+                            credentials: credsNoCD,
+                            session: storedSession,
+                            recurringConsents: true,
+                            ticket: t,
+                            accounts: accountRefs
+                        )
+                    }
                     ticket = YaxiTicketMaker.issueTicket(service: "Balances")
-                    let retryTicket = ticket
-                    resp = try await client.balances(
-                        credentials: credsNoCD,
-                        session: storedSession,
-                        recurringConsents: true,
-                        ticket: retryTicket,
-                        accounts: accountRefs
-                    )
+                    if erstMitConnectionDataWiederholen(error) {
+                        AppLogger.log("fetchBalances: unklarer Serverfehler — erst unverändert wiederholen, Zustimmung bleibt", category: "YaxiService", level: "WARN")
+                        do {
+                            let retryTicket = ticket
+                            resp = try await client.balances(
+                                credentials: creds,
+                                session: storedSession,
+                                recurringConsents: true,
+                                ticket: retryTicket,
+                                accounts: accountRefs
+                            )
+                        } catch {
+                            // Zweiter Anlauf gescheitert. Nur wenn er dieselbe Deutung
+                            // trägt, ist die Zustimmung ein plausibler Verdächtiger —
+                            // bei einem Netzwerkfehler wäre das Wegwerfen eine
+                            // Freigabe für nichts.
+                            guard darfOhneConnectionDataWiederholen(error: error, connectionDataAge: cdAlter) else {
+                                throw error
+                            }
+                            AppLogger.log("fetchBalances: auch mit Zustimmung gescheitert — jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
+                            ticket = YaxiTicketMaker.issueTicket(service: "Balances")
+                            resp = try await ohneCD(ticket)
+                        }
+                    } else {
+                        AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                        resp = try await ohneCD(ticket)
+                    }
                 } else if storedSession != nil {
                     // Retry without session token (e.g. Revolut/Open Banking returns
                     // UnexpectedError when a stale YAXI session token is sent).
@@ -1027,6 +1061,9 @@ enum YaxiService {
                 // Rohfehler vor der Einordnung — wie bei fetchBalances, aus demselben Grund.
                 AppLogger.log("fetchTransactions: Rohfehler vor Einordnung: \(String(reflecting: error))",
                               category: "YaxiService", level: "WARN")
+                // Einmal ermittelt, weil die Deutung im zweistufigen Wiederanlauf
+                // ein zweites Mal gebraucht wird.
+                let cdAlter = await sessionStore.connectionDataAge(slotId: slotSnapshot)
                 // YAXI-Doku: nach jedem non-RequestError ist der Service in
                 // "failed state" → frischer Ticket nötig. Network-Errors
                 // sind explizit ausgenommen.
@@ -1045,24 +1082,48 @@ enum YaxiService {
                     )
                 } else if darfOhneConnectionDataWiederholen(
                               error: error,
-                              connectionDataAge: await sessionStore.connectionDataAge(slotId: slotSnapshot)),
+                              connectionDataAge: cdAlter),
                           storedCD != nil {
                     // Consent abgelaufen — frischer Ticket + connectionData
                     // weg, Session behalten (siehe fetchBalances: Sparkasse-
-                    // Regression bei Session-Drop, 2026-05-12).
-                    AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
-                    let credsNoCD = buildCredentials(
-                        connectionId: connectionId, model: model,
-                        connectionData: nil, userId: userId, password: password
-                    )
+                    // Regression bei Session-Drop, 2026-05-12). Beruht die
+                    // Einordnung nur auf der Faustregel, geht ein unveränderter
+                    // Versuch voran.
+                    let ohneCD: @Sendable (Ticket) async throws -> Routex.TransactionsResponse = { t in
+                        let credsNoCD = buildCredentials(
+                            connectionId: connectionId, model: model,
+                            connectionData: nil, userId: userId, password: password
+                        )
+                        return try await client.transactions(
+                            credentials: credsNoCD,
+                            session: storedSession,
+                            recurringConsents: true,
+                            ticket: t
+                        )
+                    }
                     ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
-                    let retryTicket = ticket
-                    resp = try await client.transactions(
-                        credentials: credsNoCD,
-                        session: storedSession,
-                        recurringConsents: true,
-                        ticket: retryTicket
-                    )
+                    if erstMitConnectionDataWiederholen(error) {
+                        AppLogger.log("fetchTransactions: unklarer Serverfehler — erst unverändert wiederholen, Zustimmung bleibt", category: "YaxiService", level: "WARN")
+                        do {
+                            let retryTicket = ticket
+                            resp = try await client.transactions(
+                                credentials: creds,
+                                session: storedSession,
+                                recurringConsents: true,
+                                ticket: retryTicket
+                            )
+                        } catch {
+                            guard darfOhneConnectionDataWiederholen(error: error, connectionDataAge: cdAlter) else {
+                                throw error
+                            }
+                            AppLogger.log("fetchTransactions: auch mit Zustimmung gescheitert — jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
+                            ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
+                            resp = try await ohneCD(ticket)
+                        }
+                    } else {
+                        AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
+                        resp = try await ohneCD(ticket)
+                    }
                 } else if storedSession != nil {
                     // Stale-Session-Retry für Revolut/Open-Banking-Quirks
                     // (UnexpectedError, nicht in isConnectionResetError).
@@ -1306,6 +1367,27 @@ enum YaxiService {
     /// Eine Zustimmung, die eben erst ausgestellt wurde, kann nicht abgelaufen sein.
     /// Der eindeutige `Unauthorized`/`ConsentExpired` bleibt unberührt — nur die
     /// Faustregel wird ausgesetzt.
+    /// Ob vor dem Wegwerfen der Zustimmung ein Versuch **mit** ihr gemacht werden muss.
+    ///
+    /// `UnexpectedError` ohne Meldung ist keine Aussage der Bank, sondern unsere
+    /// Vermutung — YAXI liefert ihn auch für serverseitige Fehler, die mit der
+    /// Zustimmung nichts zu tun haben (HypoVereinsbank, 31.07.: „Der Fehler geht primär
+    /// auf uns"). Ihn sofort als veraltete connectionData zu deuten, kostet den Nutzer
+    /// eine Freigabe für eine Vermutung.
+    ///
+    /// Deshalb zwei Stufen: erst unverändert wiederholen — das kostet nichts und deckt
+    /// den vorübergehenden Serverfehler ab. Erst wenn auch das scheitert, ist die
+    /// Zustimmung ein plausibler Verdächtiger und darf weggeworfen werden. Für den
+    /// Sparkassen-Fall, für den die Faustregel eingeführt wurde, bleibt der Weg damit
+    /// offen; er dauert nur einen Aufruf länger.
+    ///
+    /// Sagt die Bank ausdrücklich `Unauthorized`/`ConsentExpired`, entfällt die
+    /// Zwischenstufe — dann ist nichts zu vermuten.
+    static func erstMitConnectionDataWiederholen(_ error: Error) -> Bool {
+        guard let re = error as? RoutexClientError, case .UnexpectedError = re else { return false }
+        return true
+    }
+
     static func darfOhneConnectionDataWiederholen(error: Error,
                                                   connectionDataAge: TimeInterval?) -> Bool {
         guard isConnectionResetError(error) else { return false }

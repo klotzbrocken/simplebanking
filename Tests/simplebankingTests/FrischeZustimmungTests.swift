@@ -87,4 +87,61 @@ final class FrischeZustimmungTests: XCTestCase {
     func test_fristIstFuenfMinuten() {
         XCTAssertEqual(YaxiService.frischeZustimmungSekunden, 300)
     }
+
+    // MARK: - Erst wiederholen, dann wegwerfen
+    //
+    // YAXI am 31.07. zur HypoVereinsbank: „Wir liefern einen UnexpectedError.
+    // Daraufhin versucht simplebanking den Vorgang offenbar nochmal ohne
+    // ConnectionData. Das ist der Grund, dass die SCA nochmal startet. Prinzipiell
+    // spricht nichts dagegen bei UnexpectedError Dinge nochmal zu versuchen und zu
+    // hoffen, aber das Weglassen der ConnectionData ist da eher random."
+    //
+    // Die Altersschranke oben verhindert nur den Fall, dass die Zustimmung eben erst
+    // entstanden ist. Ist sie älter als fünf Minuten — der Normalfall bei jedem
+    // Refresh — greift die Faustregel weiter und kostet für einen Serverfehler eine
+    // Freigabe. Deshalb geht jetzt ein unveränderter Versuch voran.
+
+    func test_vermuteterFehler_erstUnveraendertWiederholen() {
+        XCTAssertTrue(
+            YaxiService.erstMitConnectionDataWiederholen(mehrdeutig),
+            "Der UnexpectedError ist unsere Deutung, keine Aussage der Bank — vor dem "
+            + "Wegwerfen der Zustimmung gehört ein Versuch mit ihr")
+    }
+
+    /// Die Zwischenstufe ist nur für Vermutungen da. Sagt die Bank selbst, dass die
+    /// Zustimmung weg ist, wäre ein Versuch mit ihr verlorene Zeit.
+    func test_ausdrucklicheAussage_brauchtKeineZwischenstufe() {
+        for fehler: RoutexClientError in [.Unauthorized(userMessage: nil), .ConsentExpired(userMessage: nil)] {
+            XCTAssertFalse(
+                YaxiService.erstMitConnectionDataWiederholen(fehler),
+                "\(fehler) ist eindeutig — da gibt es nichts zu prüfen")
+        }
+    }
+
+    /// Der Gegentest zur Altersschranke: Beim älteren Bestandskonto — dem Normalfall
+    /// im Betrieb — bleibt der Weg zum Wegwerfen offen, aber eben erst danach.
+    func test_alteZustimmung_wirdWeiterhinWeggeworfen_aberErstNachDemVersuch() {
+        XCTAssertTrue(
+            YaxiService.darfOhneConnectionDataWiederholen(error: mehrdeutig, connectionDataAge: 3600),
+            "Der Sparkassen-Fall, für den die Faustregel eingeführt wurde, muss erreichbar bleiben")
+        XCTAssertTrue(
+            YaxiService.erstMitConnectionDataWiederholen(mehrdeutig),
+            "… aber nicht im ersten Anlauf")
+    }
+
+    /// `UnexpectedError` mit Nachricht (HBCI-Gateway) löst den Zweig gar nicht erst
+    /// aus — die Zwischenstufe ist dort ohne Bedeutung, aber sie darf auch nicht
+    /// stören, falls die Reihenfolge der Zweige je umgestellt wird.
+    func test_gatewayFehler_bleibtUnberuehrt() {
+        let mitText = RoutexClientError.UnexpectedError(userMessage: "Fehlender Dialogkontext")
+        XCTAssertFalse(
+            YaxiService.darfOhneConnectionDataWiederholen(error: mitText, connectionDataAge: 3600))
+    }
+
+    func test_fremderFehler_hatKeineZwischenstufe() {
+        XCTAssertFalse(
+            YaxiService.erstMitConnectionDataWiederholen(RoutexClientError.InvalidCredentials(userMessage: nil)))
+        XCTAssertFalse(
+            YaxiService.erstMitConnectionDataWiederholen(URLError(.timedOut)))
+    }
 }

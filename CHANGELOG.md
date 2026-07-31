@@ -1,5 +1,11 @@
 # Changelog — simplebanking
 
+## [Unreleased]
+
+### Behoben
+
+- **Ein Serverfehler kostete eine zweite Freigabe** — antwortete die Bankschnittstelle mit einem Fehler ohne Begründung, deutete simplebanking das als abgelaufene Zustimmung, warf sie weg und forderte eine neue TAN an. Bei der HypoVereinsbank scheiterte auch der zweite Anlauf mit demselben Fehler — die Freigabe war umsonst und die gültige Zustimmung dahin. Ein unbegründeter Fehler wird jetzt zuerst unverändert wiederholt; erst wenn auch das scheitert, kommt die Zustimmung als Ursache in Frage.
+
 ## [2.0.1] — 2026-07-29
 
 ### Behoben
