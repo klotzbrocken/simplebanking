@@ -4,8 +4,24 @@ Grundlage für **(a)** den separaten Theme-Builder und **(b)** das Erstellen neu
 Themes von Hand. Beschreibt den vollständigen Vertrag: Dateiformat, alle Schlüssel,
 ihre Wirkung in der App, die Invarianten — und die Anforderungen an den Builder.
 
-Stand: App 2.0.0. Maßgebliche Implementierung: `Sources/simplebanking/ThemeSupport.swift`
+Stand: App 2.0.2. Maßgebliche Implementierung: `Sources/simplebanking/ThemeSupport.swift`
 (`AppTheme`, `ThemeManager`, `ThemeChrome`, `ThemeFonts`).
+
+**Seit 2.0.0 dazugekommen** — ein Builder, der auf dem 2.0.0-Stand gebaut wurde, kennt
+diese Schlüssel noch nicht:
+
+| Schlüssel | Was er tut | Abschnitt |
+|---|---|---|
+| `wallpaper` / `wallpaperFlyout` / `wallpaperWide` (+ `…Dark`) | Bild statt Hintergrundfarbe, je Fläche eigenes | §4.1 |
+| `ringImage` / `ringImageDark` | Grafik statt Kontoring — sperrt eine Einstellung in der App | §4.1, §4.2 |
+| `accountRing` | Kontoring ganz weglassen | §4.3 |
+| `categoryIconStyle` | Kategorie-Symbole hell/farbig | §4.2a |
+| `bankLogoStyle` | Bank-Icons im Konto-Umschalter einfarbig | §4.2a |
+| `lofiTypography` | Rasterschrift-Gestaltung — **abgetrennt von `glyphControls`** | §4.3 |
+
+Die letzte Zeile ist die einzige **verhaltensändernde**: Bis 2.0.2 brachte
+`glyphControls=off` die Lo-Fi-Typografie ungefragt mit. Ein bestehendes Theme, das sie
+behalten will, muss `lofiTypography=on` ergänzen.
 
 ---
 
