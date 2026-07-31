@@ -142,7 +142,7 @@ nicht.
 | | |
 |---|---|
 | **Akzeptiert** | PNG, PDF, SVG — wie beim Logo |
-| **Empfohlene Maße** | Flyout 348 × 346, schmale Liste 348 × 620, breite Liste 840 × 620 — jeweils @2x verdoppelt |
+| **Empfohlene Maße** | Flyout 348 × 178, schmale Liste 348 × 620, breite Liste 840 × 620 — jeweils @2x verdoppelt |
 | **Größe** | bis 4 MB (das Logo darf nur 512 KB — ein Wallpaper braucht mehr) |
 | **Dateiname** | einfacher Name im Theme-Ordner, dieselben Regeln wie beim Logo |
 
@@ -155,19 +155,17 @@ Schlüssel:
 | Umsatzliste schmal | 348 × 620 | 0,56 : 1 hochkant | `wallpaper` |
 | Umsatzliste breit | 840 × 620 | 1,35 : 1 quer | `wallpaperWide` |
 
-**Das Flyout ist nicht immer 178 hoch** (`BalanceBar.flyoutContentSize`):
+**348 × 178 ist die Größe, die man sieht** — im Ruhezustand immer
+(`BalanceBar.flyoutContentSize`). Die 140, die hier früher standen, sind die Höhe *ohne*
+Konto-Pillen, und die gilt nur, solange gar kein Konto eingerichtet ist. Das Flyout wird
+außerdem bei jedem Öffnen eingeklappt gestartet.
 
-| Zustand | Höhe | Wann |
-|---|---|---|
-| ohne Konto-Pillen | 140 | nur wenn gar kein Konto eingerichtet ist — praktisch nie |
-| **mit Konto-Pillen** | **178** | der Normalfall, ab dem ersten Konto |
-| Schnellüberweisung offen | **346** | 178 + 168 pt Drawer |
-
-Deshalb lautet die Empfehlung **348 × 346** und nicht 348 × 178: Das Bild wird
-flächenfüllend skaliert (siehe unten), und ein nur 178 hohes Bild müsste beim Öffnen des
-Drawers auf fast das Doppelte hochgerechnet werden — es würde unscharf und seitlich
-beschnitten. Wer auf Nummer sicher gehen will, legt die Bildaussage in die **oberen
-178 pt**; alles darunter sieht man nur mit offenem Drawer.
+Eine einzige Ausnahme, und sie ist flüchtig: Klappt der Nutzer die **Schnellüberweisung**
+auf, wächst das Popover auf 348 × 346 (178 + 168 pt Drawer). Solange sie offen steht, wird
+ein 178 hohes Bild auf die knapp doppelte Höhe hochgerechnet und links und rechts
+beschnitten. Wem das wichtig ist, der liefert 348 × 346 und legt die Bildaussage in die
+**oberen 178 pt** — alles darunter bekommt man sonst nie zu sehen. Für den Normalfall ist
+das unnötig.
 
 Kantenziehen ist gesperrt, nur der grüne Fensterknopf schaltet die Listenbreite um.
 
@@ -517,7 +515,7 @@ und den Schalter sperrt.
    - **Wallpaper-Ablage** (4.1): **drei Felder** — Flyout, schmale Liste (Grundbild),
      breite Liste —, je optional mit zweiter Datei für den Dunkelmodus. Prüfung auf
      Format und die 4-MB-Grenze, Kopieren in den Theme-Ordner. Je Feld das Sollmaß
-     anzeigen (348 × 346, 348 × 620, 840 × 620) und einen Hinweis, wenn das gewählte
+     anzeigen (348 × 178, 348 × 620, 840 × 620) und einen Hinweis, wenn das gewählte
      Bild stark davon abweicht — erzwingen aber nicht. Die Vorschau muss **oben
      verankert** zuschneiden, nicht zentriert, sonst zeigt der Builder etwas anderes als
      die App. Ist eines der Sonderfelder gefüllt und das Grundbild leer: **Fehler**, denn
@@ -547,7 +545,7 @@ und den Schalter sperrt.
    Listen-Ausschnitt mit Beispieldaten, umschaltbar Hell/Dunkel. Die Preview muss die
    Schalter-Effekte zeigen (Mosaik statt Logo, Textkommandos, Punktlinien, Blende,
    Blockleiste, eckige Felder). Dazu drei Dinge, die man sonst erst in der App merkt:
-   - **Alle drei Flächen** (Flyout 348 × 346, Liste 348 × 620, Liste 840 × 620), und zwar
+   - **Alle drei Flächen** (Flyout 348 × 178, Liste 348 × 620, Liste 840 × 620), und zwar
      mit dem Bild, das dort tatsächlich greift — einschließlich des Rückfalls aufs
      Grundbild, wenn ein Sonderfeld leer ist. Wer nur eine Fläche zeigt, baut Themes, die
      in den anderen nicht aufgehen; das ist der Fehler, der die drei Schlüssel überhaupt
@@ -585,7 +583,7 @@ und den Schalter sperrt.
 ### Soll
 
 - **Sonderbilder aus dem Grundbild ableiten.** Aus einem Bild die beiden anderen
-  Seitenverhältnisse erzeugen: Ausschnitt wählen, auf 348 × 346 bzw. 840 × 620 setzen,
+  Seitenverhältnisse erzeugen: Ausschnitt wählen, auf 348 × 178 bzw. 840 × 620 setzen,
   Randfarbe aus dem Original übernehmen. Das ist der häufigste Fall — jemand hat *ein*
   Bild und braucht drei. Von Hand ist es fummelig, im Builder sind es zwei Schieberegler.
 - Vorlagen: „Leer (Default-Verhalten)", „Retro-Preset" (Faustregel aus 4.3), die vier
