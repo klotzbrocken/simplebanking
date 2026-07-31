@@ -543,6 +543,11 @@ private struct TransactionsPanelView: View {
                 // `lofiTypography` und nicht an `glyphControls`.
                 if ThemeChrome.lofi {
                     BTXMosaicIcon(category: .sonstiges, side: 18)
+                } else if let logo = ThemeChrome.globalLogoImage {
+                    // Siehe Flyout: „für alle Konten" schließt die Aggregat-Karte ein.
+                    Image(nsImage: logo).resizable().scaledToFit()
+                        .frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
                 } else {
                     Image(systemName: "square.stack.3d.up.fill")
                         .font(.system(size: 16))

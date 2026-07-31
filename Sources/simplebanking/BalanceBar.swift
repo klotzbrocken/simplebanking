@@ -7927,6 +7927,12 @@ private struct StatusBalanceFlyoutCardView: View {
             HStack(spacing: 8) {
                 if lofi {
                     BTXMosaicIcon(category: .sonstiges)
+                } else if let logo = ThemeChrome.globalLogoImage {
+                    // Ein globales Theme-Logo gilt laut Vertrag für ALLE Konten — die
+                    // Aggregat-Karte ist genau das und zeigte es trotzdem nicht.
+                    Image(nsImage: logo).resizable().scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                 } else {
                     Image(systemName: "square.stack.3d.up.fill")
                         .font(.system(size: 16))
