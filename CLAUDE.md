@@ -147,6 +147,11 @@ openssl pkeyutl -verify -pubin -inkey /tmp/ed.pem -rawin -in <DMG> -sigfile /tmp
 
 ### Release steps
 
+0. **`WhatsNewContent.highlights(for:)` um die neue Version ergänzen**
+   (`Sources/simplebanking/WhatsNewSheet.swift`). Fehlt der `case`, liefert die Funktion
+   `nil` — dann erscheint beim Update **kein** „Was ist neu"-Fenster, und mit ihm auch
+   nicht die Newsletter-Anmeldung in dessen Fuß. Das fällt nicht auf, weil nichts
+   fehlschlägt; es passiert einfach nichts.
 1. Bump `VERSION_BASE` in `build-app.sh`.
 2. `BUILD_FIRST=1 bash sign-and-notarize.sh` → notarized, stapled DMG, and step 9 prints
    the ready-made `<item>` with version, length, signature and enclosure URL computed

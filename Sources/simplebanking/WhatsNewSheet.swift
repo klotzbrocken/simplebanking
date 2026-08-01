@@ -265,6 +265,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.0.2":
+            return v202
         case "2.0.1":
             return v201
         case "1.5.0":
@@ -273,6 +275,43 @@ enum WhatsNewContent {
             return nil
         }
     }
+
+    /// 2.0.2. Dieselbe Auswahlregel wie bei 2.0.1: nur, was jemand auch merkt. Die
+    /// beiden neuen Theme-Schlüssel stehen deshalb zusammen in einem Punkt — für einen
+    /// Nutzer ohne eigenes Theme ändert sich dadurch nichts, für den Theme-Bauer ist es
+    /// der Grund, in THEMES.md zu schauen.
+    private static let v202: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "checkmark.shield",
+            tint: .sbBlueStrong,
+            title: L10n.t("Keine zweite TAN für einen Serverfehler",
+                          "No second TAN for a server hiccup"),
+            description: L10n.t(
+                "Antwortete die Bank mit einem Fehler ohne Begründung, hielt simplebanking die Zustimmung für abgelaufen, warf sie weg und fragte eine neue TAN ab — die dann am selben Fehler scheiterte. Jetzt wird erst unverändert wiederholt; das kostet keine Freigabe.",
+                "When the bank returned an error without a reason, simplebanking assumed your consent had expired, discarded it and asked for a fresh TAN — which then failed on the very same error. It now simply retries first, at no cost to you."
+            )
+        ),
+        WhatsNewItem(
+            icon: "circle.dotted",
+            tint: .sbGreenStrong,
+            title: L10n.t("Der Kontoring ist im Flyout zurück",
+                          "The account ring is back in the flyout"),
+            description: L10n.t(
+                "Er war seit 2.0 verschwunden, während die Einstellungen weiter versprachen, dass er „im Flyout und in der Umsatzliste“ erscheint. Beide Fenster folgen jetzt demselben Schalter.",
+                "It had been gone since 2.0, while settings kept promising it appears \"in the flyout and the transaction list\". Both windows now follow the same switch."
+            )
+        ),
+        WhatsNewItem(
+            icon: "paintpalette",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Mehr Spielraum für eigene Themes",
+                          "More room for custom themes"),
+            description: L10n.t(
+                "Ein Theme kann den Kontoring jetzt weglassen oder durch eine eigene Grafik ersetzen. Und Textkommandos statt Bedien-Icons ziehen nicht länger ungefragt größere Schriftgrade nach sich.",
+                "A theme can now drop the account ring or replace it with its own graphic. And switching controls to text no longer drags larger type sizes along with it."
+            )
+        ),
+    ]
 
     /// 2.0.1 ist ein reines Fehlerbehebungs-Release. Aufgenommen wird nur, was jemand
     /// auch gemerkt hat — die Reparaturen an Zustellwegen und Protokollen bleiben
