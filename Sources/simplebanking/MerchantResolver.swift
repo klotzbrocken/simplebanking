@@ -40,7 +40,9 @@ enum MerchantResolver {
     static let rulesStorageKey = "merchantUserRules"
     static let overridesStorageKey = "merchantTxOverrides"
 
-    private static let unknownMerchant = "Unbekannt"
+    /// `internal`, weil Report und Export prüfen müssen, ob die Auflösung ergebnislos
+    /// war — dann zeigen sie lieber den Verwendungszweck als „Unbekannt".
+    static let unknownMerchant = "Unbekannt"
     private static let cashMerchant = "Bargeldabhebung"
     private static let cardIntermediaryMerchant = "Kartenzahlung (Intermediaer)"
 
@@ -627,6 +629,27 @@ enum MerchantResolver {
 
     // MARK: - Resolution
 
+    /// Richtung der Buchung — entscheidet, welche der beiden Parteien die Gegenseite ist.
+    ///
+    /// Bewusst kein `Bool`: Der Standardwert muss „ich weiß es nicht" heißen und nicht
+    /// „Ausgabe". Ohne Betrag bleibt es beim Bestandsverhalten.
+    enum TransactionDirection {
+        case outgoing   // wir zahlen → Gegenseite ist der Creditor
+        case incoming   // wir bekommen → Gegenseite ist der Debtor
+        case unknown
+
+        static func from(amount: String?) -> TransactionDirection {
+            // `parse` liefert 0 für leer/unlesbar — und 0 heißt hier „ich weiß es nicht",
+            // nicht „Ausgabe". Genau dieser Fall kommt vor: Im Kundenexport haben die
+            // Zeilen „Lohn/Gehalt" und „ABRECHNUNG" gar keinen Betrag.
+            guard let amount, !amount.isEmpty else { return .unknown }
+            let wert = AmountParser.parse(amount)
+            if wert < 0 { return .outgoing }
+            if wert > 0 { return .incoming }
+            return .unknown
+        }
+    }
+
     static func resolve(transaction: TransactionsResponse.Transaction) -> MerchantResolution {
         let remittance = (transaction.remittanceInformation ?? []).joined(separator: " ")
         let txID = TransactionRecord.fingerprint(for: transaction)
@@ -639,7 +662,10 @@ enum MerchantResolver {
             absender: transaction.debtor?.name,
             verwendungszweck: remittance,
             additionalInformation: transaction.additionalInformation,
-            endToEndId: transaction.endToEndId
+            endToEndId: transaction.endToEndId,
+            direction: .from(amount: transaction.amount?.amount),
+            empfaengerIban: transaction.creditor?.iban,
+            absenderIban: transaction.debtor?.iban
         )
     }
 
@@ -650,7 +676,10 @@ enum MerchantResolver {
         absender: String?,
         verwendungszweck: String?,
         additionalInformation: String?,
-        endToEndId: String? = nil
+        endToEndId: String? = nil,
+        direction: TransactionDirection = .unknown,
+        empfaengerIban: String? = nil,
+        absenderIban: String? = nil
     ) -> MerchantResolution {
         let payee = clean(empfaenger)
         let payer = clean(absender)
@@ -714,16 +743,43 @@ enum MerchantResolver {
             return makeResolution(merchant: abwaMerchant, source: "abwa_format", confidence: 0.88)
         }
 
-        if let payee, !payee.isEmpty {
-            return makeResolution(merchant: payee, source: "empfaenger", confidence: 0.9)
+        // Gegenseite nach Richtung wählen. Bei einer Ausgabe sind WIR der Debtor —
+        // seinen Namen als Händler zu zeigen, war der Fehler, den easybank sichtbar
+        // gemacht hat: Dort bleibt der Creditor bei Kartenzahlungen leer, und jede Zeile
+        // trug den Kontoinhaber. Die Datei-Importer werfen die eigene Seite längst weg
+        // (Camt053Importer, OFXImporter); der Live-Pfad zieht hier nach.
+        let gegenseite: String?
+        let gegenseiteQuelle: String
+        let gegenseiteIban: String?
+        switch direction {
+        case .outgoing: gegenseite = payee; gegenseiteQuelle = "empfaenger"; gegenseiteIban = empfaengerIban
+        case .incoming: gegenseite = payer; gegenseiteQuelle = "absender";   gegenseiteIban = absenderIban
+        case .unknown:
+            // Ohne Vorzeichen wie bisher: Empfänger vor Absender.
+            if let payee, !payee.isEmpty { gegenseite = payee; gegenseiteQuelle = "empfaenger"; gegenseiteIban = empfaengerIban }
+            else { gegenseite = payer; gegenseiteQuelle = "absender"; gegenseiteIban = absenderIban }
         }
 
-        if let payer, !payer.isEmpty {
-            return makeResolution(merchant: payer, source: "absender", confidence: 0.75)
+        if let gegenseite, !gegenseite.isEmpty,
+           !OwnPartyRegistry.istEigeneSeite(name: gegenseite, iban: gegenseiteIban, slotId: slotId) {
+            return makeResolution(merchant: gegenseite, source: gegenseiteQuelle,
+                                  confidence: gegenseiteQuelle == "empfaenger" ? 0.9 : 0.75)
+        }
+
+        // Keine brauchbare Gegenseite → im Verwendungszweck nachsehen. Bei Kartenzahlungen
+        // steht der Händler dort, und zwar zuverlässig: 40 von 40 Zeilen im Kundenexport.
+        if let karte = extractKartenzahlungMerchant(from: purpose) ?? extractKartenzahlungMerchant(from: additional) {
+            return makeResolution(merchant: karte, source: "kartenzahlung", confidence: 0.8)
         }
 
         if let inferred = extractGenericMerchant(from: purpose) ?? extractGenericMerchant(from: additional) {
             return makeResolution(merchant: inferred, source: "purpose_inferred", confidence: 0.6)
+        }
+
+        // Letzter Ausweg: die verbleibende Partei — aber NUR ohne bekannte Richtung.
+        // Bei bekannter Richtung wäre das wieder die eigene Seite.
+        if direction == .unknown, let payer, !payer.isEmpty {
+            return makeResolution(merchant: payer, source: "absender", confidence: 0.5)
         }
 
         return makeResolution(merchant: unknownMerchant, source: "unknown", confidence: 0.1)
@@ -930,6 +986,42 @@ enum MerchantResolver {
             return cleanMerchantName(merchant)
         }
         return nil
+    }
+
+    /// Händler aus dem Verwendungszweck einer Kartenzahlung.
+    ///
+    /// easybank (und andere österreichische Institute) liefern drei Segmente:
+    ///
+    ///     Bezahlung Karte  MC/000025647 | LIDL DANKT 3157 D005 31.07. 16:57 | LIDL DANKT 517\\WIENER NEUSTA\
+    ///
+    /// Der Händler steht im dritten Segment vor dem doppelten Backslash, der Ort dahinter.
+    /// Verlässlicher Anker ist die Uhrzeit `HH:MM` am Ende des zweiten Segments — danach
+    /// beginnt der Name. Fehlt der Ortsteil, greift die zweite Variante: alles nach der
+    /// Uhrzeit bis zum Zeilenende.
+    ///
+    /// Geprüft an 40 von 40 Kartenzahlungen eines Kundenexports (31.07.2026).
+    private static func extractKartenzahlungMerchant(from text: String?) -> String? {
+        guard let text else { return nil }
+        let kandidat = firstCapture(in: text, pattern: "\\d{1,2}:\\d{2}\\s*(.+?)\\\\")
+            ?? firstCapture(in: text, pattern: "\\d{1,2}:\\d{2}\\s*(.{3,60})$")
+        guard let kandidat else { return nil }
+        return cleanMerchantName(filialnummerEntfernen(kandidat))
+    }
+
+    /// Schneidet Filial- und Terminalnummern am Ende ab: „BILLA DANKT 0002220" → „BILLA
+    /// DANKT". Ohne das bekäme jede Filiale ihren eigenen Händler — in der Umsatzliste
+    /// unschön, in der Fixkosten-Gruppierung schädlich, und für die Logo-Suche wertlos.
+    /// Ein rein numerischer Rest wäre kein Name mehr, deshalb der Buchstaben-Test.
+    static func filialnummerEntfernen(_ name: String) -> String {
+        var rest = name.trimmingCharacters(in: .whitespaces)
+        while let letzte = rest.split(separator: " ").last,
+              letzte.count >= 2,
+              letzte.allSatisfy({ $0.isNumber }) {
+            let gekuerzt = rest.dropLast(letzte.count).trimmingCharacters(in: .whitespaces)
+            guard gekuerzt.contains(where: { $0.isLetter }) else { break }
+            rest = gekuerzt
+        }
+        return rest
     }
 
     private static func extractGenericMerchant(from text: String?) -> String? {

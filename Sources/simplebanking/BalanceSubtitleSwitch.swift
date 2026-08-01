@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Subtitle unter dem großen Kontostand mit Toggle zwischen drei Modi:
-/// • `0` = Classic: „Noch offen: X €" / „Alles gebucht für diesen Zyklus"
+/// • `0` = Classic: „Fixkosten offen: X €" / „Alle Fixkosten gebucht"
 /// • `1` = Sub-Metrics: „€ 847 bis zum 1. verfügbar"
 /// • `2` = Day-only: „€ 34/Tag verfügbar"
 ///
@@ -29,7 +29,7 @@ struct BalanceSubtitleSwitch: View {
     /// Flyout-Container kein Truncation-Wording zeigt. Default: false (breite Container).
     var compact: Bool = false
     /// Temperaturabhängige Detailfarbe (Prototyp §4: #5f8974 / #8a7d5f / #9a6060) für die
-    /// „Noch offen"-Zeile + Toggle-Icon auf der Money-Heat. Nil → Standard-Sekundärgrau.
+    /// „Fixkosten offen"-Zeile + Toggle-Icon auf der Money-Heat. Nil → Standard-Sekundärgrau.
     var detailColor: Color? = nil
 
     private static let classicFormatter: NumberFormatter = {
@@ -43,7 +43,10 @@ struct BalanceSubtitleSwitch: View {
 
     private func classicLabel(_ amount: Double) -> String {
         let formatted = Self.classicFormatter.string(from: NSNumber(value: amount)) ?? "\(Int(amount)) €"
-        return L10n.t("Noch offen: \(formatted)", "Still to pay: \(formatted)")
+        // „Noch offen" hat ein Kunde als „noch nicht abgebucht" gelesen und sich über
+        // 1.229 € gewundert — gemeint sind die erwarteten wiederkehrenden Zahlungen bis
+        // zum nächsten Gehalt. Die Zahl war richtig, das Wort war es nicht.
+        return L10n.t("Fixkosten offen: \(formatted)", "Recurring due: \(formatted)")
     }
 
     private func toggle() {
@@ -152,7 +155,7 @@ struct BalanceSubtitleSwitch: View {
         if let amount = leftToPayAmount {
             let text = amount > 0.5
                 ? classicLabel(amount)
-                : L10n.t("Alles gebucht für diesen Zyklus", "All paid for this cycle")
+                : L10n.t("Alle Fixkosten gebucht", "All recurring paid")
             Text(text)
                 .font(lofi ? ThemeFonts.flyoutBody(size: 16)
                      : themed ? ThemeFonts.flyoutBody(size: 13)

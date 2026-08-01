@@ -434,6 +434,18 @@ enum TransactionsDatabase {
             // als der Fix. Alle vorher importierten Buchungen tragen den falschen Namen bis heute.
             try backfillMerchantColumns(db: db)
         }
+        migrator.registerMigration("v26_recompute_merchant_direction_aware") { db in
+            // Der Resolver kannte das Vorzeichen einer Buchung nicht und fiel bei
+            // Ausgaben auf den Debtor zurück — bei easybank ist das der Kontoinhaber,
+            // in 43 von 48 Zeilen eines Kundenexports. Seit 2.0.2 entscheidet die
+            // Richtung, und bei Kartenzahlungen wird der Händler aus dem
+            // Verwendungszweck geholt.
+            //
+            // Nötig, weil `effective_merchant` beim Import persistiert wird: Die
+            // Umsatzliste rendert zwar aus `raw_json` und zeigt den Fix sofort, aber
+            // CLI und MCP lesen die Spalte — dort stünde sonst weiter der Kundenname.
+            try backfillMerchantColumns(db: db)
+        }
         return migrator
     }
 
@@ -1430,14 +1442,17 @@ enum TransactionsDatabase {
         let columns = try Row.fetchAll(db, sql: "PRAGMA table_info(transactions)")
         let hasSlotId = columns.contains { ($0["name"] as String?) == "slot_id" }
 
+        // `betrag` MUSS mit: Ohne ihn kennt der Resolver die Richtung der Buchung nicht
+        // und fällt bei Ausgaben auf die eigene Seite zurück — dann schriebe der
+        // Backfill genau den Fehler zurück, den er beheben soll.
         let selectSQL: String = hasSlotId
             ? """
-                SELECT tx_id, slot_id, empfaenger, absender, verwendungszweck,
+                SELECT tx_id, slot_id, betrag, empfaenger, absender, verwendungszweck,
                        additional_information, iban
                 FROM transactions
                 """
             : """
-                SELECT tx_id, empfaenger, absender, verwendungszweck,
+                SELECT tx_id, betrag, empfaenger, absender, verwendungszweck,
                        additional_information, iban
                 FROM transactions
                 """
@@ -1451,15 +1466,23 @@ enum TransactionsDatabase {
             let verwendungszweck: String? = row["verwendungszweck"]
             let additionalInformation: String? = row["additional_information"]
             let iban: String? = row["iban"]
+            let betrag: Double? = row["betrag"]
 
             let resolverSlotId = slotId ?? TransactionsDatabase.activeSlotId
+            // Die Tabelle führt nur EINE IBAN-Spalte (`creditor?.iban ?? debtor?.iban`).
+            // Sie für beide Seiten durchzureichen ist unschädlich: Ist ein Creditor da,
+            // ist es dessen fremde IBAN; fehlt er, ist es die eigene — in beiden Fällen
+            // beschreibt sie genau die Partei, die hier zur Debatte steht.
             let resolution = MerchantResolver.resolve(
                 txID: txID,
                 slotId: resolverSlotId,
                 empfaenger: empfaenger,
                 absender: absender,
                 verwendungszweck: verwendungszweck,
-                additionalInformation: additionalInformation
+                additionalInformation: additionalInformation,
+                direction: betrag.map { $0 < 0 ? .outgoing : ($0 > 0 ? .incoming : .unknown) } ?? .unknown,
+                empfaengerIban: iban,
+                absenderIban: iban
             )
             if let slotId {
                 try db.execute(

@@ -347,9 +347,13 @@ struct MonthlyReportBuilder {
         Decimal(tx.parsedAmount)
     }
 
+    /// Derselbe Name wie in der Umsatzliste. Vorher stand hier eine eigene
+    /// `creditor ?? debtor`-Kette, die das Vorzeichen nicht kannte — bei Banken, die
+    /// den Kontoinhaber als Gegenseite eintragen (easybank bei Kartenzahlungen), stand
+    /// im Report der Name des Lesers statt des Händlers.
     private func partyName(_ tx: TransactionsResponse.Transaction) -> String {
-        if let name = tx.creditor?.name, !name.isEmpty { return name }
-        if let name = tx.debtor?.name,  !name.isEmpty { return name }
+        let aufgeloest = MerchantResolver.resolve(transaction: tx).effectiveMerchant
+        if !aufgeloest.isEmpty, aufgeloest != MerchantResolver.unknownMerchant { return aufgeloest }
         return tx.remittanceInformation?.first ?? "Unbekannt"
     }
 

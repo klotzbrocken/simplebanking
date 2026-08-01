@@ -2907,9 +2907,13 @@ private struct TransactionsPanelView: View {
             let bookingDate = tx.bookingDate ?? ""
             let amount = tx.amount?.amount ?? ""
             let currency = tx.amount?.currency ?? ""
+            // Spalte heißt „Empfänger/Absender" — hier ist der Rohwert richtig, aber die
+            // Auswahl folgt jetzt dem Vorzeichen: Bei einer Ausgabe sind WIR der Debtor.
             let creditor = tx.creditor?.name ?? ""
             let debtor = tx.debtor?.name ?? ""
-            let party = creditor.isEmpty ? debtor : creditor
+            let party = tx.parsedAmount < 0
+                ? (creditor.isEmpty ? debtor : creditor)
+                : (debtor.isEmpty ? creditor : debtor)
             let iban = tx.creditor?.iban ?? tx.debtor?.iban ?? ""
             let remittance = (tx.remittanceInformation ?? []).joined(separator: " ").replacingOccurrences(of: ";", with: ",").replacingOccurrences(of: "\n", with: " ")
             let purposeCode = tx.purposeCode ?? ""
@@ -3006,8 +3010,10 @@ private struct TransactionsPanelView: View {
             let trnType = amount >= 0 ? "CREDIT" : "DEBIT"
             let amountStr = String(format: "%.2f", amount)
             let fitid = ofxEscape(tx.stableIdentifier)
+            // Wie in der Liste aufgelöst — sonst trägt der Export bei Kartenzahlungen
+            // den Kontoinhaber statt des Händlers in jede Zeile.
             let name = ofxEscape(
-                String((tx.creditor?.name ?? tx.debtor?.name ?? "").prefix(32))
+                String(MerchantResolver.resolve(transaction: tx).effectiveMerchant.prefix(32))
             )
             let memo = ofxEscape(
                 (tx.remittanceInformation ?? []).joined(separator: " ")

@@ -11,6 +11,8 @@
 
 ### Behoben
 
+- **In jeder Ausgabenzeile stand der eigene Name statt des Händlers** — gemeldet für die easybank, betrifft aber jede Bank, die bei Kartenzahlungen den Kontoinhaber als Gegenseite einträgt. simplebanking wusste beim Auflösen des Namens nicht, ob eine Buchung Eingang oder Ausgabe ist, und griff deshalb auf die falsche Seite zu — bei einer Ausgabe sind das wir selbst. Jetzt entscheidet die Richtung, und wo die Bank keinen Empfänger liefert, wird der Händler aus dem Verwendungszweck gelesen: In einem Kundenexport gelang das bei allen 40 Kartenzahlungen. Filialnummern werden dabei abgeschnitten, damit nicht jede BILLA-Filiale als eigener Händler zählt. Bestehende Buchungen werden beim ersten Start neu ausgewertet.
+- **„Noch offen" heißt jetzt „Fixkosten offen"** — gemeint waren immer die erwarteten wiederkehrenden Zahlungen bis zum nächsten Gehalt. Gelesen wurde es als „noch nicht abgebucht", was einen Kunden bei 1.229 € zu Recht stutzen ließ. An der Zahl ändert sich nichts, nur am Wort.
 - **Ein Serverfehler kostete eine zweite Freigabe** — antwortete die Bankschnittstelle mit einem Fehler ohne Begründung, deutete simplebanking das als abgelaufene Zustimmung, warf sie weg und forderte eine neue TAN an. Bei der HypoVereinsbank scheiterte auch der zweite Anlauf mit demselben Fehler — die Freigabe war umsonst und die gültige Zustimmung dahin. Ein unbegründeter Fehler wird jetzt zuerst unverändert wiederholt; erst wenn auch das scheitert, kommt die Zustimmung als Ursache in Frage.
 
 ## [2.0.1] — 2026-07-29

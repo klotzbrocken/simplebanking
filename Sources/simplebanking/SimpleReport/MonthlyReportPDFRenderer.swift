@@ -613,9 +613,11 @@ private func txShortDate(_ tx: TransactionsResponse.Transaction) -> String {
     return String(format: "%02d. %@", d, mon)
 }
 
+/// Siehe `MonthlyReportBuilder.partyName` — dieselbe Auflösung wie in der Umsatzliste,
+/// statt einer eigenen vorzeichen-blinden Kette.
 private func txMerchantName(_ tx: TransactionsResponse.Transaction) -> String {
-    if let name = tx.creditor?.name, !name.isEmpty { return name }
-    if let name = tx.debtor?.name,  !name.isEmpty { return name }
+    let aufgeloest = MerchantResolver.resolve(transaction: tx).effectiveMerchant
+    if !aufgeloest.isEmpty, aufgeloest != MerchantResolver.unknownMerchant { return aufgeloest }
     return tx.remittanceInformation?.first ?? "Unbekannt"
 }
 

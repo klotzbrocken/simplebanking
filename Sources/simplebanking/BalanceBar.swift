@@ -6260,7 +6260,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     let parts = [account.displayName, account.ownerName, String(iban.prefix(12)) + "…"].compactMap { $0?.nilIfEmpty }
                     return parts.first ?? iban
                 }()
-                let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle, logoId: bank.logoId)
+                // `ownerName` ist nur das Netz der Eigenerkennung — hart entscheidet die
+                // IBAN, und die steht bei jedem Slot. Hier liegt der Name ohnehin vor.
+                let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle,
+                                             logoId: bank.logoId, ownerName: account.ownerName)
                 MultibankingStore.shared.addSlot(extraBankSlot)
             }
             // Restore to primary slot
@@ -6391,7 +6394,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         let parts = [account.displayName, account.ownerName, String(iban.prefix(12)) + "…"].compactMap { $0?.nilIfEmpty }
                         return parts.first ?? iban
                     }()
-                    let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle, logoId: bank.logoId)
+                    // `ownerName` ist nur das Netz der Eigenerkennung — hart entscheidet die
+                    // IBAN, und die steht bei jedem Slot. Hier liegt der Name ohnehin vor.
+                    let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle,
+                                                 logoId: bank.logoId, ownerName: account.ownerName)
                     MultibankingStore.shared.addSlot(extraBankSlot)
                 }
                 // Restore to legacy slot

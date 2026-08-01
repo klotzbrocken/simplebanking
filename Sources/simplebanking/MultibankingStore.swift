@@ -28,6 +28,12 @@ struct BankSlot: Codable, Identifiable, Equatable {
     /// `nil` = Legacy/Bank-Slot (YAXI). Optional gehalten, damit bereits
     /// persistierte Slots ohne dieses Feld weiterhin sauber dekodieren.
     var source: SlotSource? = nil
+    /// Name des Kontoinhabers, wie ihn die Bank bei der Kontoauswahl nennt.
+    /// Dient allein der Eigenerkennung (`OwnPartyRegistry`): Manche Banken tragen bei
+    /// Kartenzahlungen den Inhaber dort ein, wo die Gegenseite stehen müsste.
+    /// Optional wie `source`, damit bestehende Slots weiter dekodieren; bei
+    /// Bestandskonten füllt es sich beim nächsten Kontenabruf.
+    var ownerName: String? = nil
 
     /// True für REWE-eBon-Slots — Bank-Call-/YAXI-Pfade müssen diese überspringen.
     var isREWE: Bool { source == .rewe }
@@ -127,7 +133,9 @@ final class MultibankingStore: ObservableObject {
     private let slotsKey        = "simplebanking.multibanking.slots"
     private let activeIndexKey  = "simplebanking.multibanking.activeIndex"
 
-    @Published private(set) var slots: [BankSlot] = []
+    @Published private(set) var slots: [BankSlot] = [] {
+        didSet { spiegeleEigeneKonten() }
+    }
     @Published private(set) var activeIndex: Int = 0
     /// Monoton steigender Counter, der bei jedem Slot-Switch inkrementiert
     /// wird. Async Bank-Calls schnappen einen Snapshot und verwerfen ihre
@@ -384,6 +392,13 @@ final class MultibankingStore: ObservableObject {
         }
         activeIndex = d.integer(forKey: activeIndexKey)
         if !slots.indices.contains(activeIndex) { activeIndex = 0 }
+    }
+
+    /// Hält `OwnPartyRegistry` an der Slot-Liste. Läuft im `didSet` von `slots`, damit
+    /// es keinen Einstiegspunkt gibt, der es vergessen kann — Laden, Hinzufügen,
+    /// Entfernen und Umbenennen gehen alle über diese Eigenschaft.
+    private func spiegeleEigeneKonten() {
+        OwnPartyRegistry.ersetzen(slots.map { ($0.id, $0.iban, $0.ownerName) })
     }
 
     private func save() {
