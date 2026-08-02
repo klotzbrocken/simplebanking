@@ -291,6 +291,9 @@ struct SettingsView: View {
         }
     }
     @State private var availableThemes: [AppTheme] = []
+    /// Rückmeldung neben dem Import-Knopf — Erfolg wie Fehlschlag stehen an derselben
+    /// Stelle, damit man nicht suchen muss, ob etwas passiert ist.
+    @State private var themeImportHinweis: (text: String, istFehler: Bool)?
     @State private var logStatusMessage: String = ""
     @State private var logoTapCount: Int = 0
     @State private var logoCacheClearStatus: String = ""
@@ -1993,6 +1996,46 @@ struct SettingsView: View {
 
     // MARK: - Finance Settings
 
+    /// Öffnet die Dateiauswahl und installiert ein Theme. Bei belegter Kennung wird
+    /// gefragt, statt still zu überschreiben — ein Theme zu verlieren, das man selbst
+    /// gebaut hat, wäre der teuerste Fehler an dieser Stelle.
+    @MainActor
+    private func themeImportieren() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = ["cfg", "zip"].compactMap { .init(filenameExtension: $0) }
+        panel.message = t("Theme-Datei (.cfg) oder Theme-Archiv (.zip) wählen",
+                          "Choose a theme file (.cfg) or theme archive (.zip)")
+        guard panel.runModal() == .OK, let quelle = panel.url else { return }
+
+        func ausfuehren(ueberschreiben: Bool) {
+            do {
+                let ergebnis = try ThemeImport.importieren(von: quelle, ueberschreiben: ueberschreiben)
+                availableThemes = ThemeManager.shared.availableThemes()
+                themeId = ergebnis.themeId          // direkt aktivieren — darum ging es
+                themeImportHinweis = (t("„\(ergebnis.themeName)“ importiert (\(ergebnis.dateien.count) Datei(en)).",
+                                        "„\(ergebnis.themeName)“ imported (\(ergebnis.dateien.count) file(s))."),
+                                      false)
+            } catch let fehler as ThemeImport.Fehler {
+                if case .idBereitsVergeben = fehler, !ueberschreiben {
+                    let warnung = NSAlert()
+                    warnung.messageText = t("Theme ersetzen?", "Replace theme?")
+                    warnung.informativeText = fehler.beschreibung
+                    warnung.addButton(withTitle: t("Ersetzen", "Replace"))
+                    warnung.addButton(withTitle: t("Abbrechen", "Cancel"))
+                    if warnung.runModal() == .alertFirstButtonReturn { ausfuehren(ueberschreiben: true) }
+                    return
+                }
+                themeImportHinweis = (fehler.beschreibung, true)
+            } catch {
+                themeImportHinweis = (error.localizedDescription, true)
+            }
+        }
+        ausfuehren(ueberschreiben: false)
+    }
+
     private var financeSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
 
@@ -2282,6 +2325,20 @@ struct SettingsView: View {
                     }
                     .pickerStyle(MenuPickerStyle())
                     .frame(width: 180)
+                }
+                HStack(spacing: 8) {
+                    Button(action: { themeImportieren() }) {
+                        Text(t("Theme importieren …", "Import theme …"))
+                            .font(ThemeFonts.body(size: 12))
+                    }
+                    if let themeImportHinweis {
+                        Text(themeImportHinweis.text)
+                            .font(ThemeFonts.body(size: 11))
+                            .foregroundColor(themeImportHinweis.istFehler ? .expenseRed : .secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
                 }
             }
 

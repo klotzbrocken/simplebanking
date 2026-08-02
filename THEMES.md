@@ -67,10 +67,35 @@ absichtlich größere Metriken setzt.
 | Auswahl | UserDefaults-Schlüssel `themeId` in der Domain `tech.yaxi.simplebanking`. Zeigt die `id` aus der `.cfg`. Unbekannte id → Rückfall auf `default`. |
 | Sortierung | Theme-Liste alphabetisch nach `name`. |
 
-Ein externer Builder installiert ein Theme, indem er die `.cfg` in den Ablageort
-schreibt. Aktivieren kann er es über `defaults write tech.yaxi.simplebanking themeId
--string <id>` — sichtbar wird das in einer laufenden App erst nach Neustart oder
-Theme-Wechsel in den Einstellungen (die App lauscht nicht auf externe Defaults-Writes).
+### Import über die App
+
+**Einstellungen → Verhalten → Theme → „Theme importieren …"** nimmt eine einzelne `.cfg`
+oder ein **ZIP** entgegen und aktiviert das Theme sofort. Für den Builder ist das der
+bequemere Weg als der Griff ins Dateisystem — und für den Nutzer der einzige.
+
+Was der Import mit einem ZIP macht, und warum ein Builder das wissen muss:
+
+- **Er zieht flach.** Ein gezippter Ordner ist der Normalfall; die Dateien landen
+  trotzdem alle direkt im Theme-Ordner, weil `wallpaper=`, `logo=` und `ringImage=` nur
+  einfache Dateinamen ohne Verzeichnis akzeptieren (§4.1).
+- **Er nimmt nur `.cfg`, `.png`, `.pdf`, `.svg`.** Alles andere — Textdateien, Skripte,
+  `.DS_Store`, macOS-Ressourcegabeln — bleibt draußen. Ein ZIP darf also ruhig eine
+  README enthalten, sie kommt nur nicht mit.
+- **Er glaubt den Pfaden im Archiv nicht** und kopiert ausschließlich über den
+  Basisnamen. Ein Eintrag `../../irgendwo/theme.cfg` kann nichts ausrichten.
+- **Ohne `.cfg` bricht er ab**, ohne irgendetwas zu kopieren.
+- **Reservierte Dateinamen werden abgewiesen** (siehe Tabelle oben) — sie würden beim
+  nächsten Start überschrieben oder gelöscht.
+- **Bei belegter `id`** fragt er, ob ersetzt werden soll.
+- Obergrenze fürs Archiv: **40 MB**.
+
+### Installation ohne die App
+
+Ein externer Builder kann die `.cfg` auch direkt in den Ablageort schreiben. Aktivieren
+lässt sie sich über `defaults write tech.yaxi.simplebanking themeId -string <id>` —
+sichtbar wird das in einer laufenden App erst nach Neustart oder Theme-Wechsel in den
+Einstellungen (die App lauscht nicht auf externe Defaults-Writes). Wer den Weg über den
+Import nimmt, spart sich das: Dort erscheint das Theme sofort in der Auswahl.
 
 ---
 

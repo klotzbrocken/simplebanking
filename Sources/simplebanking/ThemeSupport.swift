@@ -375,7 +375,16 @@ final class ThemeManager: @unchecked Sendable {
         themesDirectoryURL.path
     }
 
+    /// Unter Tests ein eigenes Verzeichnis — sonst schriebe jeder Import-Test in die
+    /// echte Theme-Sammlung des Nutzers, und ein abgebrochener Lauf ließe seinen Müll
+    /// dort liegen. Dieselbe Erkennung wie bei `CredentialsStore` und
+    /// `MultibankingStore.defaults`: `XCTestCase` existiert genau dann, wenn das
+    /// Test-Bundle geladen ist — vom Linker garantiert, keine Heuristik.
     private var themesDirectoryURL: URL {
+        if NSClassFromString("XCTestCase") != nil {
+            return URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("simplebanking-tests-themes", isDirectory: true)
+        }
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         return appSupport

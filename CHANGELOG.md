@@ -2,6 +2,10 @@
 
 ## [Unreleased] (2.0.2)
 
+### Neu
+
+- **Themes lassen sich importieren** — Einstellungen → Verhalten → Theme → „Theme importieren …". Nimmt eine einzelne `.cfg` oder ein ZIP mit Wallpaper, Logo und Ringbild, zieht das Archiv flach in den Theme-Ordner und aktiviert das Theme sofort. Übernommen werden nur `.cfg`, `.png`, `.pdf` und `.svg`; die Pfadangaben im Archiv werden dabei ignoriert, sodass ein manipuliertes ZIP nichts außerhalb des Theme-Ordners anlegen kann. Ein Theme mit bereits vergebener Kennung wird nicht still überschrieben, sondern nachgefragt.
+
 ### Geändert
 
 - **Themes: Bedien-Icons und Rasterschrift sind jetzt zwei Schalter** — `glyphControls=off` ersetzte bisher nicht nur die Bedien-Icons durch Textkommandos, sondern stellte zugleich Schriftgrade, Ringe und Metriken auf die Lo-Fi-Gestaltung um. Wer nur Textkommandos wollte, konnte den Rest nicht abwählen. Die Gestaltung hängt jetzt am neuen Schlüssel `lofiTypography` (Standard: aus). Das mitgelieferte BTX-Theme setzt beide und sieht unverändert aus; ein eigenes Theme mit `glyphControls=off`, das die großen Grade behalten will, ergänzt `lofiTypography=on`. Dokumentiert in THEMES.md §4.3.
