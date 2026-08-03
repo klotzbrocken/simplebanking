@@ -13,7 +13,6 @@ let package = Package(
         .executable(name: "simplebanking", targets: ["simplebanking"]),
         .executable(name: "simplebanking-mcp", targets: ["simplebanking-mcp"]),
         .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"]),
-        .executable(name: "list-foreign-banks", targets: ["list-foreign-banks"]),
         .executable(name: "rewe-poc", targets: ["rewe-poc"])
     ],
     dependencies: [
@@ -72,13 +71,6 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
             path: "Sources/simplebanking-cli"
-        ),
-        .executableTarget(
-            name: "list-foreign-banks",
-            dependencies: [
-                .product(name: "RoutexClient", package: "routex-client-swift")
-            ],
-            path: "Scripts/ListForeignBanks"
         ),
         // Phase-0-PoC für die REWE-eBon-Integration: isoliertes Tool, das per
         // WKWebView den REWE-Login zeigt, im JS-Kontext die Receipts-API +
