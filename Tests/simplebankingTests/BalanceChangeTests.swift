@@ -14,7 +14,7 @@ final class BalanceChangeTests: XCTestCase {
     private var stichtag: Date { heute.addingTimeInterval(-30 * 86_400) }
     private var historieAlt: Date { heute.addingTimeInterval(-90 * 86_400) }
 
-    private func gehalt() -> BalanceChange.Bezug { .seitGehalt(stichtag) }
+    private func bezug() -> BalanceChange.Bezug { .init(stichtag: stichtag) }
 
     // MARK: Normalfall
 
@@ -23,7 +23,7 @@ final class BalanceChangeTests: XCTestCase {
         let ergebnis = BalanceChange.berechne(
             aktuellerStand: 3_000,
             gebuchteSeitStichtag: [-200, -300],
-            bezug: gehalt(),
+            bezug: bezug(),
             historieReichtBis: historieAlt
         )
         guard case .prozent(let wert, _) = ergebnis else { return XCTFail("\(ergebnis)") }
@@ -36,7 +36,7 @@ final class BalanceChangeTests: XCTestCase {
         let ergebnis = BalanceChange.berechne(
             aktuellerStand: 2_100,
             gebuchteSeitStichtag: [+100],
-            bezug: gehalt(),
+            bezug: bezug(),
             historieReichtBis: historieAlt
         )
         XCTAssertTrue(ergebnis.steigt)
@@ -47,7 +47,7 @@ final class BalanceChangeTests: XCTestCase {
     func test_keineBewegung_istNullProzentUndNichtNichts() {
         let ergebnis = BalanceChange.berechne(
             aktuellerStand: 2_000, gebuchteSeitStichtag: [],
-            bezug: gehalt(), historieReichtBis: historieAlt
+            bezug: bezug(), historieReichtBis: historieAlt
         )
         XCTAssertEqual(BalanceChange.text(ergebnis), "▲ 0,0 %")
         XCTAssertNotEqual(ergebnis, .nichts)
@@ -61,7 +61,7 @@ final class BalanceChangeTests: XCTestCase {
         let ergebnis = BalanceChange.berechne(
             aktuellerStand: 110,
             gebuchteSeitStichtag: [+100],
-            bezug: gehalt(),
+            bezug: bezug(),
             historieReichtBis: historieAlt
         )
         guard case .euro(let wert, _) = ergebnis else { return XCTFail("\(ergebnis)") }
@@ -79,7 +79,7 @@ final class BalanceChangeTests: XCTestCase {
         let ergebnis = BalanceChange.berechne(
             aktuellerStand: -50,
             gebuchteSeitStichtag: [+50],
-            bezug: gehalt(),
+            bezug: bezug(),
             historieReichtBis: historieAlt
         )
         guard case .euro(let wert, _) = ergebnis else {
@@ -107,7 +107,7 @@ final class BalanceChangeTests: XCTestCase {
         let ergebnis = BalanceChange.berechne(
             aktuellerStand: 3_000,
             gebuchteSeitStichtag: [-500],
-            bezug: gehalt(),
+            bezug: bezug(),
             historieReichtBis: heute.addingTimeInterval(-10 * 86_400)   // erst 10 Tage
         )
         XCTAssertEqual(ergebnis, .nichts)
@@ -117,7 +117,7 @@ final class BalanceChangeTests: XCTestCase {
     func test_ohneSaldo_zeigtNichts() {
         XCTAssertEqual(
             BalanceChange.berechne(aktuellerStand: nil, gebuchteSeitStichtag: [-10],
-                                   bezug: gehalt(), historieReichtBis: historieAlt),
+                                   bezug: bezug(), historieReichtBis: historieAlt),
             .nichts
         )
     }
@@ -128,11 +128,11 @@ final class BalanceChangeTests: XCTestCase {
     func test_nurGebuchteGehenEin() {
         let nurGebucht = BalanceChange.berechne(
             aktuellerStand: 3_000, gebuchteSeitStichtag: [-500],
-            bezug: gehalt(), historieReichtBis: historieAlt
+            bezug: bezug(), historieReichtBis: historieAlt
         )
         let mitPending = BalanceChange.berechne(
             aktuellerStand: 3_000, gebuchteSeitStichtag: [-500, -200],
-            bezug: gehalt(), historieReichtBis: historieAlt
+            bezug: bezug(), historieReichtBis: historieAlt
         )
         XCTAssertNotEqual(nurGebucht, mitPending,
                           "wenn das gleich wäre, würde der Filter beim Aufrufer nichts ändern")
@@ -140,22 +140,24 @@ final class BalanceChangeTests: XCTestCase {
 
     // MARK: Bezug wird mitgeführt
 
-    /// Der Tooltip muss sagen können, welcher Zeitraum gerade gilt — die Anzeige selbst
-    /// sieht bei beiden gleich aus.
-    func test_bezugSteckImErgebnis() {
-        let ausGehalt = BalanceChange.berechne(
-            aktuellerStand: 3_000, gebuchteSeitStichtag: [-500],
-            bezug: .seitGehalt(stichtag), historieReichtBis: historieAlt
-        )
-        let ausFenster = BalanceChange.berechne(
-            aktuellerStand: 3_000, gebuchteSeitStichtag: [-500],
-            bezug: .letzte30Tage(stichtag), historieReichtBis: historieAlt
-        )
-        XCTAssertEqual(ausGehalt.bezug, .seitGehalt(stichtag))
-        XCTAssertEqual(ausFenster.bezug, .letzte30Tage(stichtag))
-        XCTAssertEqual(BalanceChange.text(ausGehalt), BalanceChange.text(ausFenster),
-                       "die Anzeige ist identisch — nur der Tooltip unterscheidet sich")
-        XCTAssertNil(BalanceChange.Anzeige.nichts.bezug)
+    /// **Kalendarisch, nicht 30 Tage.** Der 3. August vergleicht sich mit dem 3. Juli —
+    /// nicht mit dem 4. Juli. Nur so liegt jeder monatliche Posten (Gehalt, Miete)
+    /// genau einmal im Fenster; sonst springt der Wert um dessen vollen Betrag, sobald
+    /// er durch einen 31-Tage-Monat hinein- oder herausrutscht.
+    func test_bezugIstDerselbeTagImVormonat() {
+        let kal = Calendar(identifier: .gregorian)
+        let bezug = BalanceChange.Bezug.vormonat(von: datum("2026-08-03"), kalender: kal)
+        XCTAssertEqual(kal.startOfDay(for: bezug.stichtag), kal.startOfDay(for: datum("2026-07-03")))
+    }
+
+    /// Der 31. hat im Vormonat oft keine Entsprechung. `Calendar` kürzt auf den letzten
+    /// Tag — geprüft, weil ein Absturz oder ein Sprung ins Vorvormonat hier teuer wäre.
+    func test_monatsende_wirdGekuerzt() {
+        let kal = Calendar(identifier: .gregorian)
+        let bezug = BalanceChange.Bezug.vormonat(von: datum("2026-03-31"), kalender: kal)
+        let komponenten = kal.dateComponents([.year, .month, .day], from: bezug.stichtag)
+        XCTAssertEqual(komponenten.month, 2)
+        XCTAssertEqual(komponenten.day, 28, "2026 ist kein Schaltjahr")
     }
 
     // MARK: Der Filter in BalanceBar.berechneVeraenderung
@@ -185,7 +187,7 @@ final class BalanceChangeTests: XCTestCase {
              tx("-100,00", "2026-06-15", status: "Booked"),
              tx("-50,00",  "2026-06-20", status: "booked")],
             stand: 1_000,
-            bezug: .letzte30Tage(datum("2026-06-01"))
+            bezug: .init(stichtag: datum("2026-06-01"))
         )
         XCTAssertNotEqual(anzeige, .nichts, "gross geschriebenes Booked darf nicht durchfallen")
         XCTAssertEqual(euro, -150, accuracy: 0.001)
@@ -199,26 +201,25 @@ final class BalanceChangeTests: XCTestCase {
              tx("-999,00", "2026-06-16", status: "pending"),
              tx("-999,00", "2026-06-17", status: "PENDING")],
             stand: 1_000,
-            bezug: .letzte30Tage(datum("2026-06-01"))
+            bezug: .init(stichtag: datum("2026-06-01"))
         )
         XCTAssertEqual(euro, -100, accuracy: 0.001, "vorgemerkte Buchungen sind mitgezählt worden")
     }
 
-    func test_erklaerungNenntBetragUndZeitraum() {
-        let ausGehalt = BalanceChange.berechne(
+    /// Der Tooltip nennt den Eurobetrag, weil die Anzeige ein Prozentwert sein kann.
+    func test_erklaerungNenntDenEurobetrag() {
+        let ergebnis = BalanceChange.berechne(
             aktuellerStand: 3_000, gebuchteSeitStichtag: [-500],
-            bezug: .seitGehalt(stichtag), historieReichtBis: historieAlt
+            bezug: .init(stichtag: stichtag), historieReichtBis: historieAlt
         )
-        let text = BalanceChange.erklaerung(ausGehalt, bewegungEuro: -500) ?? ""
+        let text = BalanceChange.erklaerung(ergebnis, bewegungEuro: -500) ?? ""
         XCTAssertTrue(text.contains("500"), text)
-        XCTAssertTrue(text.localizedCaseInsensitiveContains("Gehalt"), text)
+        XCTAssertTrue(text.localizedCaseInsensitiveContains("Monat"), text)
+        XCTAssertTrue(text.localizedCaseInsensitiveContains("weniger"), text)
 
-        let ausFenster = BalanceChange.berechne(
-            aktuellerStand: 3_000, gebuchteSeitStichtag: [-500],
-            bezug: .letzte30Tage(stichtag), historieReichtBis: historieAlt
-        )
-        XCTAssertTrue(BalanceChange.erklaerung(ausFenster, bewegungEuro: -500)?
-            .contains("30") ?? false)
+        let plus = BalanceChange.erklaerung(ergebnis, bewegungEuro: 500) ?? ""
+        XCTAssertTrue(plus.localizedCaseInsensitiveContains("mehr"), plus)
+
         XCTAssertNil(BalanceChange.erklaerung(.nichts, bewegungEuro: 0))
     }
 }

@@ -14,18 +14,24 @@ import Foundation
 /// systematisch. Der Aufrufer filtert, diese Datei rechnet nur.
 enum BalanceChange {
 
-    /// Worauf sich die Veränderung bezieht. Der Wert wird mitgeführt, weil die Anzeige
-    /// zwischen beiden wechseln kann und der Tooltip sagen muss, welcher gerade gilt.
-    enum Bezug: Equatable {
-        /// Stichtag ist der letzte Gehaltseingang bzw. der Zyklusstart.
-        case seitGehalt(Date)
-        /// Rückfall: Gehalt unbekannt oder Aggregatansicht („Alle Konten").
-        case letzte30Tage(Date)
+    /// Der Stichtag: **derselbe Kalendertag im Vormonat**.
+    ///
+    /// Kalendarisch und nicht „vor 30 Tagen" — der entscheidende Unterschied. Ein Konto
+    /// läuft im Monatsrhythmus: Gehalt, Miete, Versicherungen, Abos je einmal pro
+    /// Kalendermonat. Ein starres 30-Tage-Fenster driftet dagegen; in einem 31-Tage-Monat
+    /// rutscht ein Fixposten hinein oder heraus und der Wert springt um dessen vollen
+    /// Betrag, ohne dass sich real etwas geändert hätte. Beim Vergleich mit demselben
+    /// Kalendertag liegt jeder monatliche Posten genau einmal im Fenster; Gehalt und
+    /// Fixkosten heben sich auf, übrig bleibt die echte Drift.
+    struct Bezug: Equatable {
+        let stichtag: Date
 
-        var stichtag: Date {
-            switch self {
-            case .seitGehalt(let d), .letzte30Tage(let d): return d
-            }
+        /// Derselbe Tag im Vormonat. Der 31. wird auf den letzten Tag des Vormonats
+        /// gekürzt — `Calendar` macht das von sich aus (31.03. → 28./29.02.).
+        static func vormonat(von heute: Date = Date(),
+                             kalender: Calendar = .current) -> Bezug {
+            let tag = kalender.startOfDay(for: heute)
+            return Bezug(stichtag: kalender.date(byAdding: .month, value: -1, to: tag) ?? tag)
         }
     }
 
@@ -173,21 +179,14 @@ enum BalanceChange {
         }
     }
 
-    /// Erklärt die Zahl: Eurobetrag **und** Zeitraum. Nötig, weil der Bezug zwischen
-    /// Gehalt und 30 Tagen wechseln kann, ohne dass man es der Anzeige ansieht.
+    /// Nennt den Eurobetrag — die Anzeige selbst kann ein Prozentwert sein.
     static func erklaerung(_ anzeige: Anzeige, bewegungEuro: Double) -> String? {
-        guard let bezug = anzeige.bezug else { return nil }
+        guard anzeige.bezug != nil else { return nil }
         let betrag = euroFormat.string(from: NSNumber(value: abs(bewegungEuro))) ?? "0 €"
         let richtung = bewegungEuro >= 0
             ? L10n.t("mehr", "more")
             : L10n.t("weniger", "less")
-        switch bezug {
-        case .seitGehalt:
-            return L10n.t("\(betrag) \(richtung) als beim letzten Gehaltseingang",
-                          "\(betrag) \(richtung) than at your last salary")
-        case .letzte30Tage:
-            return L10n.t("\(betrag) \(richtung) als vor 30 Tagen",
-                          "\(betrag) \(richtung) than 30 days ago")
-        }
+        return L10n.t("\(betrag) \(richtung) als vor einem Monat",
+                      "\(betrag) \(richtung) than a month ago")
     }
 }

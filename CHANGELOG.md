@@ -4,7 +4,7 @@
 
 ### Neu
 
-- **Kontostand-Veränderung neben dem Saldo** (Labs, standardmäßig aus) — zeigt klein die Veränderung seit dem letzten Gehaltseingang, etwa „▼ 14,3 %", in Flyout und Umsatzliste. Wo kein Gehalt erkennbar ist oder mehrere Konten zusammengefasst sind, gelten stattdessen 30 Tage; der Tooltip nennt Betrag und Zeitraum. Bei kleinem oder negativem Ausgangswert steht der Eurobetrag statt eines Prozentwerts — auf einem Konto im Dispo würde ein Prozentwert das Vorzeichen umdrehen und damit das Gegenteil aussagen.
+- **Kontostand-Veränderung neben dem Saldo** (Labs, standardmäßig aus) — zeigt klein, wie der Kontostand gegenüber demselben Tag im Vormonat steht, etwa „▼ 4,2 %", in Flyout und Umsatzliste. Bewusst kalendarisch und nicht „vor 30 Tagen": So liegt jeder monatliche Posten — Gehalt, Miete, Abos — genau einmal im Vergleichsfenster, und der Wert springt nicht um eine ganze Miete, nur weil ein Monat 31 Tage hat. Bei kleinem oder negativem Ausgangswert steht der Eurobetrag statt eines Prozentwerts: Auf einem Konto im Dispo würde ein Prozentwert das Vorzeichen umdrehen und damit das Gegenteil aussagen.
 - **Themes lassen sich importieren** — Einstellungen → Verhalten → Theme → „Theme importieren …". Nimmt eine einzelne `.cfg` oder ein ZIP mit Wallpaper, Logo und Ringbild, zieht das Archiv flach in den Theme-Ordner und aktiviert das Theme sofort. Übernommen werden nur `.cfg`, `.png`, `.pdf` und `.svg`; die Pfadangaben im Archiv werden dabei ignoriert, sodass ein manipuliertes ZIP nichts außerhalb des Theme-Ordners anlegen kann. Ein Theme mit bereits vergebener Kennung wird nicht still überschrieben, sondern nachgefragt.
 
 ### Geändert

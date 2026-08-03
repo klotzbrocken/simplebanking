@@ -3477,11 +3477,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         // Auch im Demo-Modus rechnen — sonst ließe sich ein
                         // Anzeige-Feature ausgerechnet dort nicht zeigen, wo die App
                         // vorgeführt wird, und niemand sähe es je ohne echtes Konto.
-                        let (cycS, _) = LeftToPayCalculator.cycleBounds(
-                            salaryDay: salaryDay, today: Date(),
-                            actualSalaryArrival: Self.mostRecentSalaryArrival(in: history, today: Date())
-                        )
-                        (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(history, stand: balanceSnapshot, bezug: .seitGehalt(cycS))
+                        (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(
+                            history, stand: balanceSnapshot, bezug: .vormonat())
                     }
                 }
             } else {
@@ -3512,12 +3509,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     if !isUnified { cycleEndForDisplay = cycE }   // Single-Slot: Datum für Untertitel
 
                     // Veränderungs-Abzeichen — dieselbe Historie, kein zweiter DB-Lesezugriff.
-                    //
-                    // Bezug ist der Zyklusstart, also der letzte Gehaltseingang. Im
-                    // Aggregat geht das nicht (mehrere Gehaltstage), dort greift weiter
-                    // unten der 30-Tage-Rückfall.
+                    // Bezug ist immer derselbe Kalendertag im Vormonat; das gilt auch
+                    // im Aggregat, weshalb es hier keine Fallunterscheidung braucht.
                     if !isUnified {
-                        (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(history, stand: balanceSnapshot, bezug: .seitGehalt(cycS))
+                        (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(
+                            history, stand: balanceSnapshot, bezug: .vormonat())
                     }
                     let counted = LeftToPayCalculator.countedPayments(
                         payments: payments,
@@ -3547,16 +3543,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 "leftToPay: demo=\(isDemo) multi=\(isMulti) unified=\(isUnified) activeIdx=\(activeIdx) sawAny=\(sawAny) total=\(String(format: "%.2f", total))",
                 category: "LeftToPay"
             )
-            // Aggregat: Gehaltsbezug ist fachlich nicht möglich, weil die Konten
-            // verschiedene Gehaltstage haben — deshalb weigert sich auch „Fixkosten
-            // offen" hier. 30 Tage rollierend ist der ehrliche Ersatz.
+            // Aggregat: derselbe Bezug wie überall, nur über alle Konten summiert.
+            // Der Vormonatsvergleich braucht keinen gemeinsamen Gehaltstag — genau
+            // deshalb funktioniert er hier, wo „Fixkosten offen" passen muss.
             if isUnified, !isDemo {
-                let stichtag = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
                 let gesamt = allSlots.flatMap { slot in
                     (try? TransactionsDatabase.loadUnifiedTransactions(
                         slots: [slot], days: 90, bankId: "primary")) ?? []
                 }
-                (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(gesamt, stand: balanceSnapshot, bezug: .letzte30Tage(stichtag))
+                (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(
+                    gesamt, stand: balanceSnapshot, bezug: .vormonat())
             }
 
             await MainActor.run { [weak self] in

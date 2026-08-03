@@ -3341,8 +3341,8 @@ struct SettingsView: View {
             SettingsToggleRow(
                 title: t("Kontostand-Veränderung anzeigen", "Show balance change"),
                 subtitle: t(
-                    "Zeigt neben dem Kontostand klein die Veränderung seit dem letzten Gehaltseingang, z. B. „▼ 14,3 %“. Wo kein Gehalt erkennbar ist oder mehrere Konten zusammengefasst sind, gelten stattdessen 30 Tage. Bei kleinem oder negativem Ausgangswert steht der Eurobetrag statt eines Prozentwerts — Prozent wäre dort irreführend.",
-                    "Shows the change since your last salary next to the balance, e.g. „▼ 14.3 %“. Where no salary is detectable or several accounts are combined, a 30-day window applies instead. With a small or negative starting value it shows euros rather than a percentage — a percentage would mislead there."
+                    "Zeigt neben dem Kontostand klein die Veränderung gegenüber demselben Tag im Vormonat, z. B. „▼ 4,2 %“. Kalendarisch und nicht „vor 30 Tagen“: So liegt jeder monatliche Posten — Gehalt, Miete, Abos — genau einmal im Vergleichsfenster, und der Wert springt nicht, wenn die Miete einen Tag wandert. Bei kleinem oder negativem Ausgangswert steht der Eurobetrag statt eines Prozentwerts, weil Prozent dort das Vorzeichen umdrehen würde.",
+                    "Shows the change against the same day last month next to the balance, e.g. „▼ 4.2 %“. Calendar-based rather than „30 days ago“: this way every monthly item — salary, rent, subscriptions — falls inside the window exactly once, so the value doesn't jump when rent shifts by a day. With a small or negative starting value it shows euros instead of a percentage, because a percentage would flip the sign there."
                 ),
                 isOn: $balanceChangeBadgeEnabled
             )
