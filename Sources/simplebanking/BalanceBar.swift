@@ -3428,11 +3428,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let isUnified = txVM.isUnifiedMode
         let allSlots = MultibankingStore.shared.slots.map { $0.id }
         let activeIdx = MultibankingStore.shared.activeIndex
+        // Für das Veränderungs-Abzeichen: Der Saldo lebt auf dem MainActor, die Rechnung
+        // läuft unten detached. Hier abgreifen, statt drüben darauf zuzugreifen.
+        let balanceSnapshot = lastBalance
 
         Task.detached(priority: .utility) {
             var total: Double = 0
             var sawAny = false
             var cycleEndForDisplay: Date? = nil   // gleicher Zyklus für die Untertitel-Anzeige
+            var balanceChange: BalanceChange.Anzeige = .nichts
+            var balanceChangeEuro: Double = 0
 
             if isDemo {
                 // Generate fake history per slot profile (matches what the panel shows).
@@ -3464,12 +3469,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     var seed = UInt64(truncatingIfNeeded: seedSnapshot)
                     let history = FakeData.generateDemoTransactions(seed: &seed, days: 90, slotProfile: 0)
                     if !history.isEmpty {
+                        let salaryDay = FakeData.demoSalaryDay(slotProfile: 0)
                         let payments = FixedCostsAnalyzer.analyze(transactions: history)
-                        total = LeftToPayCalculator.compute(
-                            payments: payments,
-                            salaryDay: FakeData.demoSalaryDay(slotProfile: 0)
-                        )
+                        total = LeftToPayCalculator.compute(payments: payments, salaryDay: salaryDay)
                         sawAny = total > 0
+
+                        // Auch im Demo-Modus rechnen — sonst ließe sich ein
+                        // Anzeige-Feature ausgerechnet dort nicht zeigen, wo die App
+                        // vorgeführt wird, und niemand sähe es je ohne echtes Konto.
+                        let (cycS, _) = LeftToPayCalculator.cycleBounds(
+                            salaryDay: salaryDay, today: Date(),
+                            actualSalaryArrival: Self.mostRecentSalaryArrival(in: history, today: Date())
+                        )
+                        (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(history, stand: balanceSnapshot, bezug: .seitGehalt(cycS))
                     }
                 }
             } else {
@@ -3498,6 +3510,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         category: "LeftToPay"
                     )
                     if !isUnified { cycleEndForDisplay = cycE }   // Single-Slot: Datum für Untertitel
+
+                    // Veränderungs-Abzeichen — dieselbe Historie, kein zweiter DB-Lesezugriff.
+                    //
+                    // Bezug ist der Zyklusstart, also der letzte Gehaltseingang. Im
+                    // Aggregat geht das nicht (mehrere Gehaltstage), dort greift weiter
+                    // unten der 30-Tage-Rückfall.
+                    if !isUnified {
+                        (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(history, stand: balanceSnapshot, bezug: .seitGehalt(cycS))
+                    }
                     let counted = LeftToPayCalculator.countedPayments(
                         payments: payments,
                         cycleStart: cycS,
@@ -3526,9 +3547,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 "leftToPay: demo=\(isDemo) multi=\(isMulti) unified=\(isUnified) activeIdx=\(activeIdx) sawAny=\(sawAny) total=\(String(format: "%.2f", total))",
                 category: "LeftToPay"
             )
+            // Aggregat: Gehaltsbezug ist fachlich nicht möglich, weil die Konten
+            // verschiedene Gehaltstage haben — deshalb weigert sich auch „Fixkosten
+            // offen" hier. 30 Tage rollierend ist der ehrliche Ersatz.
+            if isUnified, !isDemo {
+                let stichtag = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+                let gesamt = allSlots.flatMap { slot in
+                    (try? TransactionsDatabase.loadUnifiedTransactions(
+                        slots: [slot], days: 90, bankId: "primary")) ?? []
+                }
+                (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(gesamt, stand: balanceSnapshot, bezug: .letzte30Tage(stichtag))
+            }
+
             await MainActor.run { [weak self] in
                 self?.txVM.leftToPayAmount = sawAny ? total : nil
                 self?.txVM.leftToPayCycleEnd = cycleEndForDisplay
+                self?.txVM.balanceChange = balanceChange
+                self?.txVM.balanceChangeEuro = balanceChangeEuro
             }
         }
     }
@@ -4368,6 +4403,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
         }
         rootView.greenZoneFraction = computeGreenZoneFraction()
+        rootView.balanceChange = txVM.balanceChange
+        rootView.balanceChangeEuro = txVM.balanceChangeEuro
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
@@ -4714,6 +4751,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         applyPayPalFlyout(to: &rootView)
         rootView.rippleTrigger = flyoutRippleTrigger
         rootView.greenZoneFraction = computeGreenZoneFraction()
+        rootView.balanceChange = txVM.balanceChange
+        rootView.balanceChangeEuro = txVM.balanceChangeEuro
         rootView.dispoLimit = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").dispoLimit
         rootView.availableBalance = computeFlyoutAvailableBalance(isUnified: isUnified)
         applyFlyoutDots(to: &rootView)
@@ -7426,6 +7465,10 @@ private struct StatusBalanceFlyoutCardView: View {
     /// greift das CRT-Easter-Egg (im Popover am Status-Item nicht).
     var isDetachedWidget: Bool = false
     var unifiedTotalBalance: Double? = nil
+    /// Veränderungs-Abzeichen (Lab). Wird wie `leftToPayAmount` von `BalanceBar`
+    /// vorberechnet hereingereicht — die Flyout-Karte hat keine Umsätze.
+    var balanceChange: BalanceChange.Anzeige = .nichts
+    var balanceChangeEuro: Double = 0
     var greenZoneFraction: Double = 0     // 0...1, balance / referenceIncome ("Bin ich im grünen Bereich?")
     var dispoLimit: Int = 0               // overdraft limit in € for dispo-mode ring
     /// Derselbe Schlüssel wie in der Umsatzliste und in den Einstellungen. Vorher stand
@@ -8215,17 +8258,26 @@ private struct StatusBalanceFlyoutCardView: View {
             // sonst verliert „Bank · Uhrzeit" die halbe Breite und wird abgeschnitten.
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(displayBalance)
-                        .font(balanceFont)
-                        .tracking(lofi ? 1.0 : -0.6)
-                        .foregroundColor(balanceColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                        // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
-                        .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
-                        // Feste Zeilenhöhe im Lo-Fi-Modus — die Länge des Kontostands darf
-                        // die Kartenhöhe nie verändern.
-                        .frame(height: lofi ? 48 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
+                    // Abzeichen NEBEN der Zahl: Die feste Zeilenhöhe bleibt am
+                    // Betrags-Text, sonst würde es mitskaliert und die Kartenhöhe
+                    // (178 bzw. 140) hinge wieder an der Länge des Kontostands.
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(displayBalance)
+                            .font(balanceFont)
+                            .tracking(lofi ? 1.0 : -0.6)
+                            .foregroundColor(balanceColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
+                            .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
+                            // Feste Zeilenhöhe im Lo-Fi-Modus — die Länge des Kontostands darf
+                            // die Kartenhöhe nie verändern.
+                            .frame(height: lofi ? 48 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
+                        BalanceChangeBadge(anzeige: balanceChange,
+                                           bewegungEuro: balanceChangeEuro,
+                                           detailColor: detailColor)
+                        Spacer(minLength: 0)
+                    }
 
                     if isPayPalCard { paypalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
                 }

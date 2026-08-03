@@ -290,6 +290,7 @@ struct SettingsView: View {
         case .openai:    return openaiKeyPresent
         }
     }
+    @AppStorage(BalanceChangeBadge.einstellungsSchluessel) private var balanceChangeBadgeEnabled: Bool = false
     @State private var availableThemes: [AppTheme] = []
     /// Rückmeldung neben dem Import-Knopf — Erfolg wie Fehlschlag stehen an derselben
     /// Stelle, damit man nicht suchen muss, ob etwas passiert ist.
@@ -3334,6 +3335,17 @@ struct SettingsView: View {
                 .padding(.leading, 4)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
+            Divider()
+
+            SettingsToggleRow(
+                title: t("Kontostand-Veränderung anzeigen", "Show balance change"),
+                subtitle: t(
+                    "Zeigt neben dem Kontostand klein die Veränderung seit dem letzten Gehaltseingang, z. B. „▼ 14,3 %“. Wo kein Gehalt erkennbar ist oder mehrere Konten zusammengefasst sind, gelten stattdessen 30 Tage. Bei kleinem oder negativem Ausgangswert steht der Eurobetrag statt eines Prozentwerts — Prozent wäre dort irreführend.",
+                    "Shows the change since your last salary next to the balance, e.g. „▼ 14.3 %“. Where no salary is detectable or several accounts are combined, a 30-day window applies instead. With a small or negative starting value it shows euros rather than a percentage — a percentage would mislead there."
+                ),
+                isOn: $balanceChangeBadgeEnabled
+            )
 
             Divider()
 

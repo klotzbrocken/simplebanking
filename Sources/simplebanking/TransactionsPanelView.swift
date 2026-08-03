@@ -719,17 +719,26 @@ private struct TransactionsPanelView: View {
                 Spacer()
             }
 
-            Text(displayBalance)
-                .font(balanceFont)
-                .tracking(lofi ? 1.0 : -0.6)
-                .foregroundColor(balanceColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
-                .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
-                // Feste Zeilenhöhe im Lo-Fi-Modus: minimumScaleFactor darf die
-                // Layout-Höhe NIE von der Länge des Kontostands abhängen lassen.
-                .frame(height: lofi ? 58 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
+            // Das Abzeichen sitzt NEBEN der Zahl, nicht in ihr: Die feste Zeilenhöhe
+            // bleibt am Betrags-Text, sonst würde das Abzeichen mitskaliert und die
+            // Kartenhöhe hinge wieder an der Länge des Kontostands.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(displayBalance)
+                    .font(balanceFont)
+                    .tracking(lofi ? 1.0 : -0.6)
+                    .foregroundColor(balanceColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    // BTX „double height": vertikale Streckung wie das Steuerzeichen (Demo).
+                    .scaleEffect(x: 1, y: lofi ? 1.15 : 1.0, anchor: .leading)
+                    // Feste Zeilenhöhe im Lo-Fi-Modus: minimumScaleFactor darf die
+                    // Layout-Höhe NIE von der Länge des Kontostands abhängen lassen.
+                    .frame(height: lofi ? 58 : ThemeFonts.lineHeight(forSize: 38, weight: .bold), alignment: .leading)
+                BalanceChangeBadge(anzeige: vm.balanceChange,
+                                   bewegungEuro: vm.balanceChangeEuro,
+                                   detailColor: detailColor)
+                Spacer(minLength: 0)
+            }
 
             if isPayPal { panelPayPalSubtitle(detail: detailColor) } else { leftToPaySubtitle }
         }

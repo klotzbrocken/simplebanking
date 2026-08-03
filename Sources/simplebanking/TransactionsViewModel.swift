@@ -128,6 +128,12 @@ final class TransactionsViewModel: ObservableObject {
     /// Ende des aktuellen Gehaltszyklus (= nächster erwarteter Gehaltseingang) — derselbe
     /// Zyklus, den `leftToPayAmount` nutzt. Treibt das "bis zum …"-Datum im Untertitel.
     @Published var leftToPayCycleEnd: Date? = nil
+    /// Veränderung des Kontostands für das kleine Abzeichen neben dem Saldo (Lab).
+    /// Wird in `recomputeLeftToPay` aus derselben Historie mitberechnet.
+    @Published var balanceChange: BalanceChange.Anzeige = .nichts
+    /// Der Eurobetrag hinter dem Abzeichen — für den Tooltip, weil die angezeigte Zahl
+    /// ein Prozentwert sein kann.
+    @Published var balanceChangeEuro: Double = 0
     @Published var enrichmentData: [String: TxEnrichment] = [:] {
         didSet {
             // Re-apply filter when reminders filter is active — enrichment changes
