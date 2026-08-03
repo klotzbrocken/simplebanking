@@ -3504,10 +3504,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         cycleEnd: cycE
                     )
                     // Diagnose: jeder Posten, der in "Noch offen" einfließt — damit
-                    // sich eine zu hohe Summe nachvollziehen/zuordnen lässt.
+                    // sich eine zu hohe Summe nachvollziehen lässt.
+                    //
+                    // Ohne Händlernamen und ohne Betrag. Zusammen ergaben die beiden
+                    // ein vollständiges Fixkostenprofil (wer, wieviel, wie oft) in einer
+                    // Datei, die Kunden zur Fehlersuche verschicken — und der Sanitizer
+                    // greift bei Namen und Beträgen bewusst nicht. Für die Frage, der
+                    // die Zeile dient („warum ist die Summe so hoch?"), genügen Anzahl,
+                    // Frequenz und Konfidenz; das Muster erkennt man auch daran.
                     for c in counted {
                         AppLogger.log(
-                            "leftToPay item slot=\(slot) '\(c.merchant)' avg=\(String(format: "%.2f", c.averageAmount)) freq=\(c.frequency) last=\(c.lastDate) conf=\(String(format: "%.2f", c.confidence)) occ=\(c.occurrences) months=\(c.months)",
+                            "leftToPay item slot=\(slot) merchant=\(c.merchant.prefix(2))… freq=\(c.frequency) last=\(c.lastDate) conf=\(String(format: "%.2f", c.confidence)) occ=\(c.occurrences) months=\(c.months)",
                             category: "LeftToPay"
                         )
                     }

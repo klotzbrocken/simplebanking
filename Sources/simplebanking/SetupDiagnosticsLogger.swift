@@ -112,6 +112,11 @@ final class SetupDiagnosticsLogger: @unchecked Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Testzugang zur Bereinigung. `internal` statt `private`, damit
+    /// `SanitizerIbanTests` beide Wege gegeneinander prüfen kann — genau das Auseinander-
+    /// laufen der zwei Kopien war der Fehler.
+    static func sanitizeForTesting(_ input: String) -> String { sanitizeLine(input) }
+
     private static func sanitizeLine(_ input: String) -> String {
         var output = input
             .replacingOccurrences(of: "\n", with: " ")
@@ -119,19 +124,15 @@ final class SetupDiagnosticsLogger: @unchecked Sendable {
             .replacingOccurrences(of: "\u{2028}", with: " ")
             .replacingOccurrences(of: "\u{2029}", with: " ")
 
-        let patterns: [(String, String)] = [
-            ("(?i)DE[0-9A-Z]{15,32}", "<redacted-iban>"),
-            ("(?i)(user(id)?|leg\\.?-?id|login|anmeldename|pin|password|passwort|session|connectiondata)\\s*[:=]\\s*[^\\s,;]+", "<redacted-secret>"),
-            ("(?i)[A-Za-z0-9_\\-+/=]{24,}", "<redacted-token>"),
-        ]
-
-        for (pattern, replacement) in patterns {
-            output = output.replacingOccurrences(
-                of: pattern,
-                with: replacement,
-                options: [.regularExpression]
-            )
-        }
+        // Bis 2.0.2 stand hier eine eigene, ältere Kopie der Muster. Ihre IBAN-Regel
+        // begann mit `DE` — eine österreichische, niederländische oder belgische IBAN
+        // matchte sie nicht und landete ungekürzt in `setup/*.txt`, einer Datei, die
+        // Kunden zur Fehlersuche verschicken. Aufgefallen am easybank-Fall (AT).
+        //
+        // Jetzt dieselbe Quelle wie das Haupt-Log: `LogSanitizer` hat eine generische
+        // Regel (`[A-Z]{2}[0-9]{2}…`) und kennt zusätzlich gruppierte Schreibweisen
+        // („AT91 1420 …"). Zwei Kopien derselben Zusage laufen sonst wieder auseinander.
+        output = LogSanitizer.redact(output)
 
         if output.count > 700 {
             let idx = output.index(output.startIndex, offsetBy: 700)
