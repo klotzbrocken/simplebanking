@@ -92,12 +92,17 @@ enum AppLogger {
     private static func ensureLogFileExists() throws {
         if !FileManager.default.fileExists(atPath: logFileURL.path) {
             try Data().write(to: logFileURL, options: .atomic)
-            // Nur der Nutzer selbst. Ohne das erbt die Datei die Umask (0644) und ist
-            // für jeden anderen Prozess lesbar — bei einer Datei, die IBAN-Präfixe und
-            // Bankdialoge enthält, kein guter Standard.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                                   ofItemAtPath: logFileURL.path)
         }
+        // Nur der Nutzer selbst. Ohne das erbt die Datei die Umask (0644) und ist für
+        // jeden anderen Prozess lesbar — bei einer Datei, die IBAN-Präfixe und
+        // Bankdialoge enthält, kein guter Standard.
+        //
+        // Bewusst bei JEDEM Aufruf und nicht nur beim Anlegen: Bestehende Installationen
+        // haben ihre Datei längst mit 0644 — bei ihnen bliebe die Härtung sonst
+        // wirkungslos, bis jemand das Log von Hand löscht. `setAttributes` auf eine
+        // Datei, die schon 0600 hat, ist ein billiger No-op.
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                               ofItemAtPath: logFileURL.path)
     }
 
     /// Obergrenze für die Logdatei. Vorher wuchs sie unbegrenzt: Ein Jahr aktiviertes
