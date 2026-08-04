@@ -466,6 +466,52 @@ final class ThemeErweiterungenTests: XCTestCase {
         XCTAssertNil(try parse("id=t").ringImageFileName)
     }
 
+    // MARK: Bedienfarbe (controlInk)
+
+    /// Gemeldet am 04.08. für ein dunkles Theme: Bei hellem macOS-Erscheinungsbild
+    /// wurden Suchfeld-Text und Symbole schwarz. Ursache waren System-Farben, die der
+    /// Darstellung folgen statt dem Theme. Der Schlüssel macht sie einstellbar.
+    func test_controlInkWirdGelesen() throws {
+        let t = try parse("id=t\ncontrolInkLight=#112233\ncontrolInkDark=#445566")
+        XCTAssertEqual(t.controlInkLightHex, "#112233")
+        XCTAssertEqual(t.controlInkDarkHex, "#445566")
+    }
+
+    /// Ein Wert für beide Modi — die Kurzform, die ein Theme mit fester Farbwelt will.
+    func test_controlInkKurzformGiltFuerBeideModi() throws {
+        let t = try parse("id=t\ncontrolInk=#ABCDEF")
+        XCTAssertEqual(t.controlInkLightHex, "#ABCDEF")
+        XCTAssertEqual(t.controlInkDarkHex, "#ABCDEF")
+    }
+
+    /// Ohne den Schlüssel die Ink-Farbe gedämpft — nicht Systemgrau. Das ist der
+    /// eigentliche Fix: Auch ein Theme, das nichts setzt, bekommt eine Farbe aus seiner
+    /// eigenen Palette.
+    func test_ohneControlInk_kommtGedaempftesInk() throws {
+        let t = try parse("id=t\ninkLight=#FFFFFF\ninkDark=#FFFFFF")
+        let hell = t.controlInkColor(dark: false)
+        XCTAssertEqual(hell.alphaComponent, 0.65, accuracy: 0.01)
+        let voll = t.inkColor(dark: false)
+        XCTAssertEqual(hell.redComponent, voll.redComponent, accuracy: 0.01,
+                       "die Farbe soll aus der Ink-Familie kommen, nur zurückgenommen")
+    }
+
+    // MARK: Randausgleich
+
+    /// Der Rahmen liegt als Overlay innen auf und verbraucht keinen Platz — ohne
+    /// Ausgleich sitzen die Fußzeilen-Symbole auf der Kante.
+    @MainActor
+    func test_randAusgleich_nurMitRahmen() throws {
+        let ohne = try parse("id=t")
+        XCTAssertNil(ohne.screenBorderHex)
+        let mit = try parse("id=t\nscreenBorder=#C8FF2D")
+        XCTAssertEqual(mit.screenBorderHex, "#C8FF2D")
+
+        // `randAusgleich` liest das aktive Theme; hier nur die Zuordnung festhalten.
+        ThemeManager.shared.selectThemeForTesting(id: ThemeManager.defaultThemeID)
+        XCTAssertEqual(ThemeChrome.randAusgleich, 0, "ohne Rahmen kein Zusatzabstand")
+    }
+
     /// Additive Zusage: kein mitgeliefertes Theme bringt eine der Neuerungen mit.
     func test_mitgelieferteThemesBleibenUnberuehrt() throws {
         for datei in ["default.cfg", "sunrise.cfg", "gameboy.cfg", "btx.cfg"] {

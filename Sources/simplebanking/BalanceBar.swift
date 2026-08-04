@@ -7845,11 +7845,12 @@ private struct StatusBalanceFlyoutCardView: View {
                     )
                     quickSendToggleButton
                 }
-                // Mit CRT-Blende mehr Randabstand — sonst kleben Piles und „Senden"
-                // an der Schmucklinie.
-                .padding(.horizontal, ThemeChrome.lofi ? 16 : 12)
+                // Mit Rahmen mehr Randabstand — sonst kleben Pillen und „Senden" auf
+                // der Schmucklinie. Siehe `ThemeChrome.randAusgleich`: hing bis 2.0.2
+                // an `lofi` statt am Rahmen.
+                .padding(.horizontal, (ThemeChrome.lofi ? 16 : 12) + ThemeChrome.randAusgleich)
                 .padding(.top, 8)
-                .padding(.bottom, ThemeChrome.lofi ? 12 : 9)
+                .padding(.bottom, (ThemeChrome.lofi ? 12 : 9) + ThemeChrome.randAusgleich)
             }
             }
             .frame(height: cardRegionHeight, alignment: .top)

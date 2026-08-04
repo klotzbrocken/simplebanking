@@ -18,10 +18,15 @@ diese Schlüssel noch nicht:
 | `categoryIconStyle` | Kategorie-Symbole hell/farbig | §4.2a |
 | `bankLogoStyle` | Bank-Icons im Konto-Umschalter einfarbig | §4.2a |
 | `lofiTypography` | Rasterschrift-Gestaltung — **abgetrennt von `glyphControls`** | §4.3 |
+| `controlInk` / `controlInkLight` / `controlInkDark` | Farbe der Bedien-Symbole und Platzhaltertexte | §4.2 |
 
-Die letzte Zeile ist die einzige **verhaltensändernde**: Bis 2.0.2 brachte
-`glyphControls=off` die Lo-Fi-Typografie ungefragt mit. Ein bestehendes Theme, das sie
-behalten will, muss `lofiTypography=on` ergänzen.
+Zwei Zeilen sind **verhaltensändernd**:
+
+- `lofiTypography` — bis 2.0.2 brachte `glyphControls=off` die Lo-Fi-Typografie ungefragt
+  mit. Ein bestehendes Theme, das sie behalten will, muss `lofiTypography=on` ergänzen.
+- `controlInk` — mit dem Schlüssel kam die Korrektur, dass Bedien-Symbole, Platzhaltertexte
+  und Filter-Pillen am **Theme** hängen statt an `lofiTypography` (§4.2). Ein Theme ohne
+  Rasterschrift bekommt dort ab 2.0.3 seine eigenen Farben statt der System-Farben.
 
 ---
 
@@ -264,7 +269,40 @@ beachten (VT323: OFL-1.1, Lizenztext muss mit ausgeliefert werden).
 | `cardLight` / `cardDark` | `#FFFFFF` / `#1F1F1F` | **Surface**: vollflächige Kartenfarbe von Flyout-Karte und Listen-Kopf; bei aktivem Theme zugleich Hintergrund der gesamten Liste und des Flyouts (flach, kein Money-Heat). Auch Textfarbe AUF gefüllten Accent-Flächen. **Mit `wallpaper` wird diese Fläche durchsichtig** — die Farbe bleibt dann nur der Rückfall, wenn das Bild fehlt oder abgelehnt wird. |
 | `panelLight` / `panelDark` | `#F9F9F9` / `#171717` | Panel-Hintergrund — wird bei aktivem Theme praktisch von Surface überdeckt; relevant v. a. für das Default-Theme. |
 | `inkLight` / `inkDark` | *(leer)* | **Ink**: Vordergrund (große Saldo-Zahl, Namen, Fließtext) auf der Surface. Leer ⇒ automatischer Schwarz/Weiß-Kontrast per Luminanz (Schwelle 0,55, WCAG-nah — `AppTheme.contrastingInk`). |
+| `controlInk` / `controlInkLight` / `controlInkDark` | *(leer ⇒ Ink mit 65 % Deckkraft)* | **Bedienfarbe**: Lupe und Löschkreuz im Suchfeld, dessen Platzhaltertext, die Fußzeilen-Symbole (Filter, Kategorien, Sparen, Auswertung, Senden), Blätterpfeile, Kopfzeilen-Bedienung, der Ungelesen-Punkt. Also alles, was bedienbar, aber gerade nicht aktiv ist — Aktives trägt `accent`. `controlInk` setzt beide Modi auf einmal. |
 | `screenBorder` | *(leer)* | Farbe der **CRT-Blende** um Flyout + Liste (außen bis zur Fensterkante gefüllt, innen gerundet ausgestanzt; 5–6 pt stark). Leer = keine Blende. |
+
+#### Warum es `controlInk` gibt
+
+Gemeldet am 04.08.2026 für ein dunkles Theme: Bei **hellem** oder systemgesteuertem
+Erscheinungsbild wurden Suchfeld-Text und Bedien-Symbole schwarz — auf dunklem Grund also
+kaum lesbar. Die Ursache war nicht die Farbwahl des Themes, sondern dass diese Stellen
+überhaupt keine Theme-Farbe trugen: Sie benutzten `.secondary` bzw. `NSColor`-Systemfarben,
+und die folgen dem Erscheinungsbild von macOS, nicht dem Theme.
+
+Zwei Dinge sind daran geändert:
+
+- Die betroffenen Stellen fragen jetzt das **Theme**, nicht mehr `lofiTypography`. Bis
+  2.0.2 hing ein Teil der Theme-Gestaltung an `lofi`; ein Farb-Theme mit
+  `lofiTypography=off` fiel deshalb an diesen Stellen komplett auf System-Farben zurück.
+  Das betrifft neben den Symbolen auch den Platzhaltertext im Suchfeld und die
+  Filter-Pillen. **Ein bestehendes Theme sieht dadurch anders aus** — nämlich stärker nach
+  sich selbst.
+- Reicht die abgeleitete Farbe nicht, setzt `controlInk` sie ausdrücklich.
+
+Ohne den Schlüssel ist die Bedienfarbe die **Ink-Farbe mit 65 % Deckkraft** — sie stammt
+also immer aus der Palette des Themes. Ein Theme, das für beide Erscheinungsbilder taugen
+soll, setzt `inkLight` und `inkDark` (oder `controlInkLight` / `controlInkDark`) auf
+Werte, die auf *seiner* Fläche lesbar sind; siehe §6.
+
+#### Rahmen und Randabstand
+
+Die Blende aus `screenBorder` liegt als Overlay **innen** auf und verbraucht keinen
+Layout-Platz — sie legt sich über das, was am Rand steht. Damit die Fußzeilen-Symbole
+nicht auf der Kante sitzen, gibt die App bei gesetztem `screenBorder` automatisch 8 pt
+zusätzlichen Innenabstand. **Die Fenstermaße ändern sich dadurch nicht** (§1), der Platz
+kommt aus dem Inhalt. Auch das hing bis 2.0.2 an `lofiTypography`, weshalb ein Theme mit
+Rahmen ohne Rasterschrift gar keinen Ausgleich bekam.
 
 #### Wer über die Ringfläche entscheidet
 

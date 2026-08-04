@@ -60,6 +60,14 @@ struct AppTheme: Identifiable, Equatable {
     // Flyout/Umsatzliste. nil → automatischer Luminanz-Kontrast zur Surface (cardColor).
     let inkLightHex: String?
     let inkDarkHex: String?
+    /// Farbe der **Bedienelemente im Ruhezustand**: Lupe und Platzhalter im Suchfeld,
+    /// Fußzeilen-Symbole, Filter- und Kategorie-Symbole, Pager.
+    ///
+    /// Ohne diesen Schlüssel wird die Ink-Farbe gedämpft verwendet. Vorher standen dort
+    /// System-Farben, und die folgen der macOS-Darstellung statt dem Theme — bei einem
+    /// dunklen Theme mit hellem Erscheinungsbild wurden sie schwarz auf dunkel.
+    var controlInkLightHex: String? = nil
+    var controlInkDarkHex: String? = nil
 
     // MARK: - Chrome-Schalter
     //
@@ -192,7 +200,9 @@ struct AppTheme: Identifiable, Equatable {
         negativeLightHex: "#C65A5A", // Red Strong light
         negativeDarkHex: "#D77979",  // Red Strong dark
         inkLightHex: nil,
-        inkDarkHex: nil
+        inkDarkHex: nil,
+        controlInkLightHex: nil,
+        controlInkDarkHex: nil
     )
 
     // MARK: - Themed Flyout/Umsatzliste (flache Fläche statt Money-Heat)
@@ -207,6 +217,16 @@ struct AppTheme: Identifiable, Equatable {
             return c
         }
         return Self.contrastingInk(on: surfaceColor(dark: dark))
+    }
+
+    /// Farbe der Bedienelemente im Ruhezustand. Ohne eigenen Schlüssel die Ink-Farbe
+    /// gedämpft — dieselbe Familie, aber zurückgenommen, damit sie neben dem Kontostand
+    /// nicht mit ihm konkurriert. 0,65 ist an das gedämpfte Ink der Untertitel angelehnt.
+    func controlInkColor(dark: Bool) -> NSColor {
+        if let hex = dark ? controlInkDarkHex : controlInkLightHex {
+            return Self.color(from: hex, fallback: inkColor(dark: dark))
+        }
+        return inkColor(dark: dark).withAlphaComponent(0.65)
     }
 
     /// Schwarz oder Weiß je nach Helligkeit der Fläche (WCAG-nahe Luminanz).
@@ -430,6 +450,8 @@ final class ThemeManager: @unchecked Sendable {
             negativeDarkHex: values["negativedark"],
             inkLightHex: values["inklight"],
             inkDarkHex: values["inkdark"],
+            controlInkLightHex: values["controlinklight"] ?? values["controlink"],
+            controlInkDarkHex: values["controlinkdark"] ?? values["controlink"],
             rippleEnabled: Self.parseBool(values["ripple"], default: true),
             merchantLogosEnabled: Self.parseBool(values["merchantlogos"], default: true),
             categoryIconsEnabled: Self.parseBool(values["categoryicons"], default: true),
@@ -840,6 +862,17 @@ enum ThemeChrome {
 
     static var accountRingEnabled: Bool { theme.accountRingEnabled }
 
+    /// Zusätzlicher Innenabstand, wenn ein Bildschirmrahmen gezeichnet wird.
+    ///
+    /// Der Rahmen liegt als Overlay **innen** auf und verbraucht keinen Layout-Platz —
+    /// er legt sich also über das, was am Rand steht. Ohne Ausgleich kleben die
+    /// Fußzeilen-Symbole auf der Kante. Die Blende ist 5 pt (Flyout) bzw. 6 pt (Liste)
+    /// stark; 8 gibt ihr Luft, ohne die festen Fensterhöhen anzutasten.
+    ///
+    /// Hing bis 2.0.2 an `lofi` — ein Theme mit Rahmen, aber ohne Rasterschrift bekam
+    /// deshalb gar keinen Ausgleich. Genau der Fall, der gemeldet wurde.
+    static var randAusgleich: CGFloat { theme.screenBorderHex == nil ? 0 : 8 }
+
     /// Ob auf der Ringfläche etwas steht — in Flyout und Umsatzliste dieselbe Antwort.
     ///
     /// Die Rangfolge, von stark nach schwach:
@@ -1159,6 +1192,14 @@ extension Color {
             return ThemeManager.shared.currentTheme.inkColor(dark: dark)
         })
     }
+    /// Bedienelemente im Ruhezustand — themed statt System.
+    static var themedControlInk: Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            return ThemeManager.shared.currentTheme.controlInkColor(dark: dark)
+        })
+    }
+
     static var themedIncome: Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let t = ThemeManager.shared.currentTheme

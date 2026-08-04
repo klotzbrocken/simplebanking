@@ -551,7 +551,7 @@ private struct TransactionsPanelView: View {
                 } else {
                     Image(systemName: "square.stack.3d.up.fill")
                         .font(.system(size: 16))
-                        .foregroundColor(Color(NSColor.secondaryLabelColor))
+                        .foregroundColor(themed ? Color.themedControlInk : Color(NSColor.secondaryLabelColor))
                 }
                 Text(L10n.t("Alle Konten", "All accounts"))
                     .font(themed ? ThemeFonts.flyoutBody(size: lofi ? 15 : 13) : .system(size: 13))
@@ -1523,7 +1523,7 @@ private struct TransactionsPanelView: View {
             .help(L10n.t("Einstellungen", "Settings"))
         }
         .font(.system(size: 13, weight: .medium))
-        .foregroundColor(.secondary)
+        .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
         .buttonStyle(.plain)
     }
 
@@ -1630,7 +1630,7 @@ private struct TransactionsPanelView: View {
                 let unifiedActive = vm.unifiedModeEnabled
                 Image(systemName: "square.stack.3d.up.fill")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(unifiedActive ? tint : Color(NSColor.secondaryLabelColor))
+                    .foregroundColor(unifiedActive ? tint : (themed ? Color.themedControlInk : Color(NSColor.secondaryLabelColor)))
                     .frame(width: 26, height: 26)
                     .background(Capsule(style: .continuous).fill(unifiedActive ? activeFill : inactiveFill))
                     .contentShape(Capsule())
@@ -1688,7 +1688,7 @@ private struct TransactionsPanelView: View {
                     if ThemeChrome.glyphControls {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 13))
-                            .foregroundColor(Color(NSColor.placeholderTextColor))
+                            .foregroundColor(themed ? Color.themedControlInk : Color(NSColor.placeholderTextColor))
                     }
                     // System-Platzhalter folgt dem (ggf. dunklen) Appearance-Modus und
                     // wäre auf dem hellen BTX-Feld weiß = unlesbar. Prompt-Farben
@@ -1696,15 +1696,19 @@ private struct TransactionsPanelView: View {
                     // Prompt leeren und einen eigenen Platzhalter überlegen.
                     TextField(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"),
                               text: $vm.query,
-                              prompt: lofi ? Text("") : nil)
+                              prompt: themed ? Text("") : nil)
                         .textFieldStyle(PlainTextFieldStyle())
                         .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
                         .foregroundColor(themed ? .themedInk : .primary)
                         .overlay(alignment: .leading) {
-                            if lofi && vm.query.isEmpty {
+                            // Galt bis 2.0.2 nur für `lofi`. Der System-Platzhalter folgt
+                            // aber der macOS-Darstellung, nicht dem Theme — bei einem
+                            // dunklen Theme mit hellem Erscheinungsbild wurde er schwarz
+                            // auf dunkel. Jetzt für JEDES Theme ein eigener.
+                            if themed && vm.query.isEmpty {
                                 Text(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"))
-                                    .font(ThemeFonts.flyoutBody(size: 14))
-                                    .foregroundColor(Color.themedInk.opacity(0.45))
+                                    .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
+                                    .foregroundColor(Color.themedControlInk)
                                     .allowsHitTesting(false)
                             }
                         }
@@ -1712,7 +1716,7 @@ private struct TransactionsPanelView: View {
                         Button(action: { vm.query = "" }) {
                             if ThemeChrome.glyphControls {
                                 Image(systemName: ThemeChrome.symbol(for: .clear))
-                                    .foregroundColor(Color(NSColor.placeholderTextColor))
+                                    .foregroundColor(themed ? Color.themedControlInk : Color(NSColor.placeholderTextColor))
                             } else {
                                 BTXTextControl(text: "X")
                             }
@@ -1749,7 +1753,7 @@ private struct TransactionsPanelView: View {
                         Image(systemName: ThemeChrome.symbol(for: .filter, active: showFilterPills))
                             .font(.system(size: 15))
                             .foregroundColor(showFilterPills || vm.activeFilter != .all
-                                             ? .accentColor : .secondary)
+                                             ? (themed ? Color.themedAccent : Color.accentColor) : (themed ? Color.themedControlInk : Color.secondary))
                     } else {
                         BTXTextControl(text: L10n.t("Filter", "Filter"),
                                        active: showFilterPills || vm.activeFilter != .all)
@@ -1763,7 +1767,7 @@ private struct TransactionsPanelView: View {
                     if ThemeChrome.glyphControls {
                         Image(systemName: ThemeChrome.symbol(for: .categories, active: showCategories))
                             .font(.system(size: 14))
-                            .foregroundColor(showCategories ? .accentColor : .secondary)
+                            .foregroundColor(showCategories ? (themed ? Color.themedAccent : Color.accentColor) : (themed ? Color.themedControlInk : Color.secondary))
                     } else {
                         BTXTextControl(text: L10n.t("Kat.", "Cat."), active: showCategories)
                     }
@@ -1777,7 +1781,7 @@ private struct TransactionsPanelView: View {
                         if ThemeChrome.glyphControls {
                             Image(systemName: ThemeChrome.symbol(for: .savings, active: roundupView.isActive))
                                 .font(.system(size: 15))
-                                .foregroundColor(roundupView.isActive ? Color.roundupAccent : .secondary)
+                                .foregroundColor(roundupView.isActive ? (themed ? Color.themedAccent : Color.roundupAccent) : (themed ? Color.themedControlInk : Color.secondary))
                         } else {
                             BTXTextControl(text: L10n.t("Sparen", "Save"), active: roundupView.isActive)
                         }
@@ -1906,7 +1910,7 @@ private struct TransactionsPanelView: View {
                             if ThemeChrome.glyphControls {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
                             } else {
                                 BTXTextControl(text: "X", size: 13)
                             }
@@ -2050,7 +2054,7 @@ private struct TransactionsPanelView: View {
                                     ZStack {
                                         if txIsUnread && !lofi {
                                             Circle()
-                                                .fill(Color.accentColor)
+                                                .fill(themed ? Color.themedAccent : Color.accentColor)
                                                 .frame(width: 8, height: 8)
                                         }
                                     }
@@ -2139,7 +2143,8 @@ private struct TransactionsPanelView: View {
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
                                         .stroke(highlightedTxStableId == t.stableIdentifier
-                                                ? Color.accentColor
+                                                ? (ThemeManager.shared.currentTheme.isDefault
+                                                   ? Color.accentColor : Color.themedAccent)
                                                 : Color.clear,
                                                 lineWidth: 2)
                                 )
@@ -2232,7 +2237,7 @@ private struct TransactionsPanelView: View {
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .foregroundColor(.primary)
+                    .foregroundColor(themed ? Color.themedInk : Color.primary)
                 }
 
                 // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
@@ -2240,7 +2245,7 @@ private struct TransactionsPanelView: View {
                     if ThemeChrome.glyphControls {
                         Image(systemName: ThemeChrome.symbol(for: .dashboard))
                             .font(.system(size: 15))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
                     } else {
                         BTXTextControl(text: L10n.t("Auswertung", "Reports"))
                     }
@@ -2346,7 +2351,7 @@ private struct TransactionsPanelView: View {
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .foregroundColor(.primary)
+                    .foregroundColor(themed ? Color.themedInk : Color.primary)
                 }
 
                 // simplesend — Geld senden, ganz rechts (wie im Flyout-Footer).
@@ -2360,7 +2365,7 @@ private struct TransactionsPanelView: View {
                         if ThemeChrome.glyphControls {
                             Image(systemName: ThemeChrome.symbol(for: .send))
                                 .font(.system(size: 15))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
                         } else {
                             BTXTextControl(text: L10n.t("Senden", "Send"))
                         }
@@ -2369,11 +2374,13 @@ private struct TransactionsPanelView: View {
                     .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
                 }
             }
-            .padding(.horizontal, lofi ? 26 : 20)
+            // Der Rahmen liegt als Overlay INNEN auf und verbraucht keinen Layout-Platz.
+            // Ohne Ausgleich sitzen die Fußzeilen-Symbole exakt auf der Kante — das war
+            // die Meldung. Der Ausgleich hängt jetzt am Rahmen selbst, nicht mehr an
+            // `lofi`: Ein Theme mit Rahmen ohne Rasterschrift bekam vorher gar keinen.
+            .padding(.horizontal, (lofi ? 26 : 20) + ThemeChrome.randAusgleich)
             .padding(.top, 10)
-            // Bei aktiver CRT-Blende mehr Abstand, sonst kleben die Footer-Kommandos
-            // an der dicken Schmucklinie.
-            .padding(.bottom, lofi ? 14 : 6)
+            .padding(.bottom, (lofi ? 14 : 6) + ThemeChrome.randAusgleich)
             .background(activePanelBg)
         }
         .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
@@ -2416,7 +2423,7 @@ private struct TransactionsPanelView: View {
                 vm.query = ""
             }
         }
-        .tint(Color.themeAccent)
+        .tint(themed ? Color.themedAccent : Color.themeAccent)
         .preferredColorScheme(colorScheme)
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { newWidth in
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -3225,10 +3232,14 @@ private struct FilterPill: View {
 
     @ViewBuilder
     var body: some View {
-        if lofi {
-            // BTX/Theme: kein Icon, VT323 in Großbuchstaben, ausreichender Kontrast —
-            // aktiv als gefüllte Fläche in Leitfarbe mit Schirmfarbe als Text, inaktiv
-            // Ink-Text mit Rahmen. Eckig bei `squareControls`.
+        if themed {
+            // Jedes aktive Theme, nicht nur BTX: aktiv als gefüllte Fläche in der
+            // Leitfarbe mit Flächenfarbe als Text, inaktiv Ink-Text mit Rahmen. Eckig
+            // bei `squareControls`.
+            //
+            // Hing bis 2.0.2 an `lofi`. Ein dunkles Farb-Theme ohne `lofiTypography`
+            // bekam deshalb den kompletten System-Zweig — mit System-Akzent als
+            // Füllung und grauem Text, beides unabhängig vom Theme.
             let radius = ThemeChrome.cornerRadius(999)
             Button(action: onTap) {
                 Text(filter.label)
@@ -3360,7 +3371,13 @@ private struct TransactionRowNew: View {
     private var rowFillColor: Color {
         // Prototyp „Ton in Ton": keine schwebende Card mehr — nur die Selektion wird
         // hervorgehoben, sonst scheint der Panel-/Listen-Hintergrund durch.
-        if isSelected { return Color.accentColor.opacity(0.12) }
+        // Die Auswahl trägt die Leitfarbe des Themes, sonst leuchtet sie im
+        // System-Blau aus einer fremden Palette heraus.
+        if isSelected {
+            let basis = ThemeManager.shared.currentTheme.isDefault
+                ? Color.accentColor : Color.themedAccent
+            return basis.opacity(0.12)
+        }
         return .clear
     }
 
@@ -3813,7 +3830,8 @@ private struct SwipeableTransactionRow<Content: View>: View {
                     }
                 } label: {
                     ZStack {
-                        Color.accentColor
+                        ThemeManager.shared.currentTheme.isDefault
+                            ? Color.accentColor : Color.themedAccent
                         VStack(spacing: 3) {
                             Image(systemName: isUnread ? "circle" : "circle.fill")
                                 .font(.system(size: 16, weight: .semibold))
