@@ -119,9 +119,12 @@ enum YaxiService {
             var transactionsSession: Data?
             var transferSession: Data?
             var connectionData: Data?
-            /// Wann die connectionData zuletzt geschrieben wurde. Bewusst nur im
-            /// Speicher: Nach einem Neustart gilt sie als „nicht frisch", und damit
-            /// greift wieder das alte Verhalten — die vorsichtigere Annahme.
+            /// Wann die connectionData zuletzt geschrieben wurde.
+            ///
+            /// Bis 2.0.2 bewusst nur im Speicher, mit der Begründung, „nicht frisch" sei
+            /// die vorsichtigere Annahme. Das war ein Trugschluss: Unbekanntes Alter
+            /// **erlaubt** das Verwerfen (`darfOhneConnectionDataWiederholen`), der
+            /// Schutz war nach jedem App-Start also aus. Jetzt mitgespeichert.
             var connectionDataAt: Date?
         }
         private var slotStates: [String: SlotState] = [:]
@@ -136,6 +139,10 @@ enum YaxiService {
             state.transactionsSession = SessionStore.persistRead("session.transactions", slotId: slotId)
             state.transferSession     = SessionStore.persistRead("session.transfer",     slotId: slotId)
             state.connectionData      = SessionStore.persistRead("connectionData",       slotId: slotId)
+            state.connectionDataAt    = SessionStore.persistRead("connectionDataAt",     slotId: slotId)
+                .flatMap { String(data: $0, encoding: .utf8) }
+                .flatMap { TimeInterval($0) }
+                .map { Date(timeIntervalSince1970: $0) }
             // Legacy-UserDefaults-Migration (pre-multibanking) nur für den
             // "legacy"-Slot: damalige Builds schrieben in no-suffix UD-Keys.
             if slotId == "legacy" {
@@ -298,6 +305,7 @@ enum YaxiService {
                     state.connectionData = cd
                     state.connectionDataAt = Date()
                     persistWrite("connectionData", slotId: sid, data: cd)
+                    persistZeitstempel(state.connectionDataAt, slotId: sid)
                 }
             }
         }
@@ -309,7 +317,19 @@ enum YaxiService {
                 state.connectionData = connectionData
                 state.connectionDataAt = Date()
                 persistWrite("connectionData", slotId: sid, data: connectionData)
+                persistZeitstempel(state.connectionDataAt, slotId: sid)
             }
+        }
+
+        /// Der Zeitstempel geht denselben Weg wie die Zustimmung selbst (Keychain oder
+        /// UserDefaults, je nach Signatur), damit beide zusammen bleiben und nicht ein
+        /// Teil den Neustart überlebt und der andere nicht.
+        private func persistZeitstempel(_ wann: Date?, slotId: String) {
+            guard let wann, let daten = String(wann.timeIntervalSince1970).data(using: .utf8) else {
+                persistDelete("connectionDataAt", slotId: slotId)
+                return
+            }
+            persistWrite("connectionDataAt", slotId: slotId, data: daten)
         }
 
         func clearAll(slotId: String? = nil) {
@@ -319,6 +339,7 @@ enum YaxiService {
             persistDelete("session.transactions", slotId: sid)
             persistDelete("session.transfer",     slotId: sid)
             persistDelete("connectionData",       slotId: sid)
+            persistDelete("connectionDataAt",     slotId: sid)
             defaults.removeObject(forKey: "simplebanking.yaxi.session")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.balances\(SessionStore.suffix(for: sid))")
             defaults.removeObject(forKey: "simplebanking.yaxi.session.transactions\(SessionStore.suffix(for: sid))")
@@ -876,6 +897,13 @@ enum YaxiService {
                             guard darfOhneConnectionDataWiederholen(error: error, connectionDataAge: cdAlter) else {
                                 throw error
                             }
+                            // Bei einer Redirect-Bank wächst die Zustimmung nicht nach —
+                            // siehe `darfZustimmungVerwerfen`. Lieber den Fehler zeigen
+                            // als die Verbindung dauerhaft zerstören.
+                            guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
+                                AppLogger.log("fetchBalances: Redirect-Bank — Zustimmung wird NICHT verworfen, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                                throw error
+                            }
                             AppLogger.log("fetchBalances: auch mit Zustimmung gescheitert — jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
                             ticket = YaxiTicketMaker.issueTicket(service: "Balances")
                             resp = try await ohneCD(ticket)
@@ -967,9 +995,21 @@ enum YaxiService {
                 slotSnapshot: slotSnapshot, callName: "fetchBalances",
                 callSource: callSource
             )
-            if isConnectionResetError(error) {
+            // Die Frische-Regel galt bisher nur im inneren Retry-Zweig — hier, wo
+            // tatsächlich gelöscht wird, fehlte sie. Das war die Lücke aus dem Fix vom
+            // 31.07.: Der erste unbegründete Fehler ließ die Zustimmung stehen, der
+            // zweite räumte sie samt Sitzungen ab.
+            let alterHier = await sessionStore.connectionDataAge(slotId: slotSnapshot)
+            if isConnectionResetError(error),
+               darfOhneConnectionDataWiederholen(error: error, connectionDataAge: alterHier),
+               darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) {
                 AppLogger.log("fetchBalances: clearing ALL state after auth reset", category: "YaxiService")
                 await sessionStore.clearAll(slotId: slotSnapshot)
+            } else if isConnectionResetError(error) {
+                // Zustimmung behalten, Sitzungen weg: Sitzungen kommen von allein
+                // zurück, die Zustimmung einer Redirect-Bank nicht.
+                AppLogger.log("fetchBalances: Zustimmung bleibt, nur Sitzungen zurückgesetzt", category: "YaxiService")
+                await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
             } else if isObsoleteSessionError(error) || isHBCITransientError(error) {
                 // HBCI gateway errors and obsolete sessions: keep connectionData, just reset sessions.
                 // Avoids forcing full 2FA re-auth for transient HBCI infrastructure hiccups.
@@ -1116,6 +1156,13 @@ enum YaxiService {
                             guard darfOhneConnectionDataWiederholen(error: error, connectionDataAge: cdAlter) else {
                                 throw error
                             }
+                            // Bei einer Redirect-Bank wächst die Zustimmung nicht nach —
+                            // siehe `darfZustimmungVerwerfen`. Lieber den Fehler zeigen
+                            // als die Verbindung dauerhaft zerstören.
+                            guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
+                                AppLogger.log("fetchTransactions: Redirect-Bank — Zustimmung wird NICHT verworfen, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                                throw error
+                            }
                             AppLogger.log("fetchTransactions: auch mit Zustimmung gescheitert — jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
                             ticket = YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
                             resp = try await ohneCD(ticket)
@@ -1169,6 +1216,10 @@ enum YaxiService {
                                            userMessage: nil, scaRequired: true)
             }
 
+            // Gegenstück zur Zeile in fetchBalances. Beim Umsatzabruf war bislang nicht
+            // zu sehen, ob eine Zustimmung zurückkam — genau die Information, die bei
+            // der bunq-Analyse gefehlt hat.
+            AppLogger.log("fetchTransactions: outcome.connectionData=\(outcome.connectionData == nil ? "nil" : "\(outcome.connectionData!.count)b")", category: "YaxiService")
             await sessionStore.update(scope: .transactions,
                                       session: outcome.session,
                                       connectionData: outcome.connectionData,
@@ -1192,9 +1243,21 @@ enum YaxiService {
                 slotSnapshot: slotSnapshot, callName: "fetchTransactions",
                 callSource: callSource
             )
-            if isConnectionResetError(error) {
+            // Die Frische-Regel galt bisher nur im inneren Retry-Zweig — hier, wo
+            // tatsächlich gelöscht wird, fehlte sie. Das war die Lücke aus dem Fix vom
+            // 31.07.: Der erste unbegründete Fehler ließ die Zustimmung stehen, der
+            // zweite räumte sie samt Sitzungen ab.
+            let alterHier = await sessionStore.connectionDataAge(slotId: slotSnapshot)
+            if isConnectionResetError(error),
+               darfOhneConnectionDataWiederholen(error: error, connectionDataAge: alterHier),
+               darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) {
                 AppLogger.log("fetchTransactions: clearing ALL state after auth reset", category: "YaxiService")
                 await sessionStore.clearAll(slotId: slotSnapshot)
+            } else if isConnectionResetError(error) {
+                // Zustimmung behalten, Sitzungen weg: Sitzungen kommen von allein
+                // zurück, die Zustimmung einer Redirect-Bank nicht.
+                AppLogger.log("fetchTransactions: Zustimmung bleibt, nur Sitzungen zurückgesetzt", category: "YaxiService")
+                await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
             } else if isObsoleteSessionError(error) || isHBCITransientError(error) {
                 AppLogger.log("fetchTransactions: clearing sessions only (HBCI transient or obsolete)", category: "YaxiService")
                 await sessionStore.clearSessionsOnly(slotId: slotSnapshot)
@@ -1386,6 +1449,27 @@ enum YaxiService {
     static func erstMitConnectionDataWiederholen(_ error: Error) -> Bool {
         guard let re = error as? RoutexClientError, case .UnexpectedError = re else { return false }
         return true
+    }
+
+    /// Darf die Zustimmung dieses Kontos überhaupt verworfen werden?
+    ///
+    /// **Bei einer Redirect-Bank ist Verwerfen eine Einbahnstraße.** Zugangsdaten-Banken
+    /// liefern mit der nächsten normalen Antwort eine frische Zustimmung nach; darauf
+    /// beruht die ganze „wegwerfen und neu holen"-Strategie. Redirect-Banken tun das
+    /// nicht: Im Protokoll des gemeldeten bunq-Falls stehen 33 von 33 SCA-Ergebnissen
+    /// mit `connectionData=nil`. Neue Zustimmung entsteht dort nur beim `fetchAccounts`
+    /// der Ersteinrichtung — einmal weggeworfen, verlangt jeder Abruf für immer einen
+    /// neuen QR-Scan. Genau das war der Fehler.
+    ///
+    /// Sagt die Bank ausdrücklich `Unauthorized`/`ConsentExpired`, wird trotzdem
+    /// verworfen: Dann ist die Zustimmung ohnehin hin, und Behalten hilft niemandem.
+    static func darfZustimmungVerwerfen(error: Error, istRedirectBank: Bool) -> Bool {
+        guard istRedirectBank else { return true }
+        guard let re = error as? RoutexClientError else { return false }
+        switch re {
+        case .Unauthorized, .ConsentExpired: return true
+        default: return false
+        }
     }
 
     static func darfOhneConnectionDataWiederholen(error: Error,

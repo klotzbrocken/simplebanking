@@ -138,6 +138,48 @@ final class FrischeZustimmungTests: XCTestCase {
             YaxiService.darfOhneConnectionDataWiederholen(error: mitText, connectionDataAge: 3600))
     }
 
+    // MARK: - Redirect-Banken: Verwerfen ist eine Einbahnstraße
+    //
+    // Gemeldet am 04.08. für bunq: Nach der Einrichtung verlangte JEDER Abruf einen neuen
+    // QR-Scan. Im Protokoll stand der Hergang — Zustimmung vorhanden (167 Byte),
+    // unbegründeter Serverfehler, unveränderter Retry scheitert auch, dann „jetzt ohne
+    // connectionData" und „clearing ALL state". Danach nie wieder eine Zustimmung.
+    //
+    // Der Grund: Die Strategie „wegwerfen und neu holen" stammt von Zugangsdaten-Banken,
+    // wo die nächste normale Antwort eine frische Zustimmung mitliefert. Bei einer
+    // Redirect-Bank liefert das SCA-Ergebnis KEINE — im Kundenprotokoll 33 von 33 Mal
+    // `connectionData=nil`. Neue Zustimmung entsteht dort nur bei der Ersteinrichtung.
+
+    func test_redirectBank_behaeltDieZustimmungBeiUnklaremFehler() {
+        XCTAssertFalse(
+            YaxiService.darfZustimmungVerwerfen(error: mehrdeutig, istRedirectBank: true),
+            "bei einer Redirect-Bank wächst die Zustimmung nicht nach — sie darf nicht "
+            + "aufgrund unserer eigenen Deutung verworfen werden")
+    }
+
+    /// Sagt die Bank es selbst, wird trotzdem verworfen: Dann ist die Zustimmung ohnehin
+    /// hin, und sie zu behalten hülfe niemandem.
+    func test_redirectBank_verwirftBeiAusdruecklicherAussage() {
+        for fehler: RoutexClientError in [.Unauthorized(userMessage: nil), .ConsentExpired(userMessage: nil)] {
+            XCTAssertTrue(
+                YaxiService.darfZustimmungVerwerfen(error: fehler, istRedirectBank: true),
+                "\(fehler) ist eindeutig")
+        }
+    }
+
+    /// Der Gegentest: Zugangsdaten-Banken behalten das alte Verhalten. Der
+    /// Sparkassen-Fall, für den die Faustregel eingeführt wurde, darf nicht brechen.
+    func test_zugangsdatenBank_darfWeiterhinVerwerfen() {
+        XCTAssertTrue(YaxiService.darfZustimmungVerwerfen(error: mehrdeutig, istRedirectBank: false))
+        XCTAssertTrue(YaxiService.darfZustimmungVerwerfen(error: URLError(.timedOut), istRedirectBank: false))
+    }
+
+    /// Ein Netzwerkfehler ist auch bei einer Redirect-Bank kein Grund — dort erst recht
+    /// nicht.
+    func test_redirectBank_verwirftNichtBeiNetzfehler() {
+        XCTAssertFalse(YaxiService.darfZustimmungVerwerfen(error: URLError(.timedOut), istRedirectBank: true))
+    }
+
     func test_fremderFehler_hatKeineZwischenstufe() {
         XCTAssertFalse(
             YaxiService.erstMitConnectionDataWiederholen(RoutexClientError.InvalidCredentials(userMessage: nil)))
