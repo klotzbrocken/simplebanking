@@ -698,11 +698,13 @@ enum YaxiService {
                     filter: .ibanNotEq(value: nil)
                 )
             } catch let retryError {
-                // Final failure — capture für „Problem melden"-Flow
+                // Final failure — capture für „Problem melden"-Flow.
+                // Kennung sofort lesen: siehe Erläuterung in `fetchBalances`.
+                let traceId = client.traceId()
                 await captureUnexpectedErrorIfNeeded(
                     error: retryError, client: client, ticket: ticket,
                     slotSnapshot: slotSnapshot, callName: "fetchAccounts",
-                    callSource: callSource
+                    callSource: callSource, traceId: traceId
                 )
                 throw retryError
             }
@@ -988,12 +990,19 @@ enum YaxiService {
                                         requestedIban: iban)
 
         } catch {
-            await writeTrace(client: client, label: "fetchBalances", ticket: ticket, error: error)
+            // Die Kennung EINMAL lesen, bevor irgendein Trace-Abruf stattfindet.
+            // `traceId()` liefert laut SDK die Kennung „der letzten Anfrage" — und
+            // `client.trace(…)` in `writeTrace` ist selbst eine Anfrage. Wer die Kennung
+            // danach liest, bekommt die des Trace-Abrufs statt die des gescheiterten
+            // Bankaufrufs. Genau das landete bisher im Diagnosebericht.
+            let traceId = client.traceId()
+            await writeTrace(client: client, label: "fetchBalances", ticket: ticket,
+                             error: error, traceId: traceId)
             AppLogger.log("fetchBalances error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
             await captureUnexpectedErrorIfNeeded(
                 error: error, client: client, ticket: ticket,
                 slotSnapshot: slotSnapshot, callName: "fetchBalances",
-                callSource: callSource
+                callSource: callSource, traceId: traceId
             )
             // Die Frische-Regel galt bisher nur im inneren Retry-Zweig — hier, wo
             // tatsächlich gelöscht wird, fehlte sie. Das war die Lücke aus dem Fix vom
@@ -1236,12 +1245,19 @@ enum YaxiService {
             return makeTransactionsResponse(result, session: outcome.session, connectionData: outcome.connectionData)
 
         } catch {
-            await writeTrace(client: client, label: "fetchTransactions", ticket: ticket, error: error)
+            // Die Kennung EINMAL lesen, bevor irgendein Trace-Abruf stattfindet.
+            // `traceId()` liefert laut SDK die Kennung „der letzten Anfrage" — und
+            // `client.trace(…)` in `writeTrace` ist selbst eine Anfrage. Wer die Kennung
+            // danach liest, bekommt die des Trace-Abrufs statt die des gescheiterten
+            // Bankaufrufs. Genau das landete bisher im Diagnosebericht.
+            let traceId = client.traceId()
+            await writeTrace(client: client, label: "fetchTransactions", ticket: ticket,
+                             error: error, traceId: traceId)
             AppLogger.log("fetchTransactions error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
             await captureUnexpectedErrorIfNeeded(
                 error: error, client: client, ticket: ticket,
                 slotSnapshot: slotSnapshot, callName: "fetchTransactions",
-                callSource: callSource
+                callSource: callSource, traceId: traceId
             )
             // Die Frische-Regel galt bisher nur im inneren Retry-Zweig — hier, wo
             // tatsächlich gelöscht wird, fehlte sie. Das war die Lücke aus dem Fix vom
@@ -2363,7 +2379,12 @@ enum YaxiService {
     /// ~/Library/Logs/simplebanking/yaxi-trace-<timestamp>-<label>.txt
     /// Always creates a file — even when no traceId is available — so that
     /// the call site can be confirmed and the triggering error is recorded.
-    static func writeTrace(client: RoutexClient, label: String, ticket: Ticket, error: Error? = nil) async {
+    /// - Parameter traceId: Kennung des Aufrufs, um den es geht. Wird sie nicht
+    ///   übergeben, fragt die Funktion den Client — was nur solange stimmt, wie seither
+    ///   keine weitere Anfrage lief. Aufrufer in einem `catch` sollten sie deshalb
+    ///   ausdrücklich mitgeben.
+    static func writeTrace(client: RoutexClient, label: String, ticket: Ticket,
+                           error: Error? = nil, traceId: Data? = nil) async {
         // Trace files are gated on the same logging setting as the rest of the app.
         // Disable logging in Settings to prevent sensitive banking data from landing on disk.
         guard AppLogger.isEnabled else { return }
@@ -2383,7 +2404,7 @@ enum YaxiService {
             content += "=== Triggering error ===\n\(error)\n\n"
         }
 
-        if let traceId = client.traceId() {
+        if let traceId = traceId ?? client.traceId() {
             do {
                 let text = try await client.trace(ticket: ticket, traceId: traceId)
                 content += "=== YAXI trace ===\n\(text)\n"
@@ -2412,7 +2433,8 @@ enum YaxiService {
     static func writeTraceForReport(
         client: RoutexClient,
         ticket: Ticket,
-        callName: String
+        callName: String,
+        traceId: Data? = nil
     ) async -> URL? {
         let dir = ErrorReportStore.reportsDirectoryURL
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -2422,7 +2444,7 @@ enum YaxiService {
         let file = dir.appendingPathComponent("simplebanking-diagnose-\(ts)-\(callName).txt")
 
         var content = ""
-        if let traceId = client.traceId() {
+        if let traceId = traceId ?? client.traceId() {
             do {
                 let text = try await client.trace(ticket: ticket, traceId: traceId)
                 content = "=== YAXI trace ===\n\(text)\n"
@@ -2455,7 +2477,8 @@ enum YaxiService {
         ticket: Ticket,
         slotSnapshot: String,
         callName: String,
-        callSource: ErrorReportStore.CallSource
+        callSource: ErrorReportStore.CallSource,
+        traceId: Data? = nil
     ) async {
         // Nur RoutexClientError.UnexpectedError triggert den Report-Flow.
         guard let routexErr = error as? RoutexClientError else { return }
@@ -2474,15 +2497,16 @@ enum YaxiService {
 
         // 1. Trace ins reports/-Verzeichnis (kann nil sein bei Fail).
         let attachmentURL = await writeTraceForReport(
-            client: client, ticket: ticket, callName: callName
+            client: client, ticket: ticket, callName: callName, traceId: traceId
         )
         // Cleanup alter Reports.
         ErrorReportStore.pruneOldReports()
 
         // 2. Context capturen (alle non-Main).
         // SDK traceId() liefert Data? — wir wandeln in Hex für den Report-Context.
-        let traceIdData = client.traceId()
-        let traceId: String? = traceIdData.map { $0.map { String(format: "%02x", $0) }.joined() }
+        // Ohne die übergebene Kennung stünde hier die des Trace-Abrufs von oben.
+        let traceIdData = traceId ?? client.traceId()
+        let traceIdHex: String? = traceIdData.map { $0.map { String(format: "%02x", $0) }.joined() }
         let ticketId = JWTTicketDecoder.extractTicketId(from: ticket)
         let connectionId = UserDefaults.standard.string(forKey: connectionIdKey(for: slotSnapshot))
         let alertTitle = RoutexErrorMapper.userMessage(for: error).title
@@ -2500,7 +2524,7 @@ enum YaxiService {
                 slotId: slotSnapshot,
                 bankDisplayName: bankName,
                 connectionId: connectionId,
-                traceId: traceId,
+                traceId: traceIdHex,
                 ticketId: ticketId,
                 userMessageFromBank: userMsgFromBankCopy,
                 attachmentURL: attachmentURL,
