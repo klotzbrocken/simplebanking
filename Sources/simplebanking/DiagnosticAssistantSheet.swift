@@ -19,6 +19,11 @@ struct DiagnosticAssistantSheet: View {
     @StateObject private var session = DiagnosticSession()
     @State private var lastError: String? = nil
     @State private var runTask: Task<Void, Never>? = nil
+    /// Angehakte Banken. Leer = noch nicht initialisiert; wird beim Erscheinen
+    /// mit allen vorbelegt, damit sich am bisherigen Verhalten nichts ändert.
+    @State private var auswahl: Set<String> = []
+    /// Startzeit der laufenden Bank — für den Hinweis auf eine wartende Freigabe.
+    @State private var laufSeit: Date? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -29,6 +34,11 @@ struct DiagnosticAssistantSheet: View {
         }
         .frame(width: 540, height: 580)
         .background(Color.panelBackground)
+        .onAppear {
+            if auswahl.isEmpty {
+                auswahl = Set(MultibankingStore.shared.slots.map(\.id))
+            }
+        }
         .onDisappear {
             // Beim Schließen: laufende Diagnose-Task cancelen (sonst würde
             // sie weiter Slots aktivieren, Bank-Calls feuern und Traces
@@ -44,7 +54,11 @@ struct DiagnosticAssistantSheet: View {
     private var content: some View {
         switch session.phase {
         case .idle:                       idleView
-        case .running(let i, let n, let l): runningView(i: i, n: n, label: l)
+        case .running(let i, let n, let l):
+            runningView(i: i, n: n, label: l)
+                // Bei jedem Bankwechsel die Uhr neu stellen, sonst zeigt der
+                // Hinweis ab der zweiten Bank sofort an.
+                .onChange(of: l) { _ in laufSeit = Date() }
         case .done(let report):           doneView(report: report)
         case .failed(let msg):            errorView(msg: msg)
         }
@@ -71,27 +85,48 @@ struct DiagnosticAssistantSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.t("Wird probiert:", "Will be probed:"))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.sbTextSecondary)
-                ForEach(MultibankingStore.shared.slots, id: \.id) { slot in
-                    HStack(spacing: 8) {
-                        Image(systemName: "building.columns.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.sbTextSecondary)
-                            .frame(width: 14)
-                        Text(slot.displayName.nilIfEmpty ?? slot.id)
-                            .font(.system(size: 12.5, weight: .medium))
-                        Text(String(slot.iban.prefix(8)))
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundColor(.sbTextSecondary)
-                        Spacer()
+                HStack {
+                    Text(L10n.t("Wird probiert:", "Will be probed:"))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.sbTextSecondary)
+                    Spacer()
+                    Button(alleGewaehlt ? L10n.t("Keine", "None") : L10n.t("Alle", "All")) {
+                        auswahl = alleGewaehlt ? [] : Set(MultibankingStore.shared.slots.map(\.id))
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10).fill(Color.cardBackground)
-                    )
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.sbBlueStrong)
+                }
+                // Jede Bank einzeln abwählbar: Ein Probelauf kann eine Freigabe
+                // kosten, deshalb soll man einer einzelnen Bank nachgehen können,
+                // ohne alle anderen mit anzurufen.
+                ForEach(MultibankingStore.shared.slots, id: \.id) { slot in
+                    Button {
+                        if auswahl.contains(slot.id) { auswahl.remove(slot.id) }
+                        else { auswahl.insert(slot.id) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: auswahl.contains(slot.id)
+                                  ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 12))
+                                .foregroundColor(auswahl.contains(slot.id)
+                                                 ? .sbBlueStrong : .sbTextSecondary)
+                                .frame(width: 14)
+                            Text(slot.displayName.nilIfEmpty ?? slot.id)
+                                .font(.system(size: 12.5, weight: .medium))
+                            Text(String(slot.iban.prefix(8)))
+                                .font(.system(size: 11).monospacedDigit())
+                                .foregroundColor(.sbTextSecondary)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10).fill(Color.cardBackground)
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -137,6 +172,23 @@ struct DiagnosticAssistantSheet: View {
             Text(L10n.t("Aktuell: \(label)", "Current: \(label)"))
                 .font(.system(size: 12))
                 .foregroundColor(.sbTextSecondary)
+
+            // Dauert eine Bank auffällig lange, wartet fast immer eine Freigabe in
+            // deren App — die Abfrage pollt dann still vor sich hin. Ohne diesen
+            // Hinweis sieht man nur einen Balken und weiß nicht, dass man selbst
+            // am Zug ist. Die Schwelle ist großzügig, damit sie bei normalen
+            // Abrufen (unter zwei Sekunden) gar nicht erst auftaucht.
+            TimelineView(.periodic(from: .now, by: 1)) { zeit in
+                if let start = laufSeit,
+                   zeit.date.timeIntervalSince(start) > 15 {
+                    Label(L10n.t(
+                        "Wartet auf eine Freigabe — bitte in der App von \(label) bestätigen.",
+                        "Waiting for approval — please confirm in the \(label) app."),
+                          systemImage: "iphone.and.arrow.forward")
+                        .font(.system(size: 11.5))
+                        .foregroundColor(.sbBlueStrong)
+                }
+            }
 
             // Live Probe-Status der bisher fertigen Slots
             ForEach(session.probes, id: \.slotId) { p in
@@ -217,9 +269,11 @@ struct DiagnosticAssistantSheet: View {
 
     private func probeRow(_ p: DiagnosticSession.SlotProbe) -> some View {
         HStack(spacing: 10) {
-            Text(p.balance.glyph)
+            // Das Gesamtergebnis, nicht nur der Saldo — sonst steht eine Bank grün
+            // da, deren Umsatzabruf gescheitert ist. Genau das war der gemeldete Fall.
+            Text(p.gesamt.glyph)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(glyphColor(p.balance))
+                .foregroundColor(glyphColor(p.gesamt))
                 .frame(width: 16)
             VStack(alignment: .leading, spacing: 2) {
                 Text(p.bankName)
@@ -286,20 +340,33 @@ struct DiagnosticAssistantSheet: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut(.defaultAction)
+            .disabled(auswahl.isEmpty)
+            .opacity(auswahl.isEmpty ? 0.5 : 1)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
         .background(Color.panelBackground)
     }
 
+    private var alleGewaehlt: Bool {
+        auswahl.count == MultibankingStore.shared.slots.count
+    }
+
     private var footerRunning: some View {
         HStack(spacing: 10) {
             ProgressView().controlSize(.small)
-            Text(L10n.t("Bitte warten — schalte Slots durch.",
-                        "Please wait — switching slots."))
+            Text(L10n.t("Bitte warten — schalte Banken durch.",
+                        "Please wait — switching banks."))
                 .font(.system(size: 12))
                 .foregroundColor(.sbTextSecondary)
             Spacer()
+            // Ohne diesen Knopf blieb nur das Schließen des Fensters. Wartet eine
+            // Bank auf eine Freigabe, die nicht kommt, hängt der Lauf sonst
+            // dreieinhalb Minuten je Probe.
+            Button(L10n.t("Abbrechen", "Cancel")) {
+                runTask?.cancel()
+                laufSeit = nil
+            }
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -354,9 +421,11 @@ struct DiagnosticAssistantSheet: View {
             lastError = L10n.t("Master-Passwort wird benötigt.", "Master password required.")
             return
         }
-        // Task speichern, damit .onDisappear sie cancelen kann.
+        // Task speichern, damit .onDisappear und der Abbrechen-Knopf sie cancelen können.
         runTask?.cancel()
-        runTask = Task { await session.run(masterPassword: pw) }
+        laufSeit = Date()
+        let gewaehlt = auswahl
+        runTask = Task { await session.run(masterPassword: pw, nurSlots: gewaehlt) }
     }
 
     private func sendByMail(report: DiagnosticSession.Report) {

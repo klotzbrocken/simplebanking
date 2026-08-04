@@ -51,6 +51,13 @@ final class DiagnosticSession: ObservableObject {
         let balance: ProbeResult
         let transactions: ProbeResult
         var id: String { slotId }
+
+        /// Der Zustand der Bank als Ganzes — das schlechtere der beiden Proben.
+        ///
+        /// Gemeldet am 04.08.2026: Die Sparkasse stand grün in der Diagnose, obwohl der
+        /// Umsatzabruf auf eine Freigabe wartete. Die Zeile las nur `balance`, und der
+        /// Saldo kam durch. Ein Häkchen darf nicht bedeuten „die Hälfte hat geklappt".
+        var gesamt: ProbeResult { ProbeResult.schlechteres(balance, transactions) }
     }
 
     enum ProbeResult: Equatable {
@@ -64,6 +71,20 @@ final class DiagnosticSession: ObservableObject {
             case .failed:  return "✗"
             case .skipped: return "—"
             }
+        }
+
+        /// Rangfolge fürs Zusammenfassen: ein Fehler schlägt alles.
+        var rang: Int {
+            switch self {
+            case .failed:  return 2
+            case .skipped: return 1
+            case .ok:      return 0
+            }
+        }
+
+        /// Das schlechtere von beiden.
+        static func schlechteres(_ a: ProbeResult, _ b: ProbeResult) -> ProbeResult {
+            a.rang >= b.rang ? a : b
         }
     }
 
@@ -109,8 +130,12 @@ final class DiagnosticSession: ObservableObject {
     /// Probiert sequentiell alle Slots. Ruft `progress` bei jedem Slot-Wechsel
     /// auf, damit die UI mitlaufen kann. Liefert `Report` zurück; UI kann
     /// gleichzeitig `phase` per Combine beobachten.
-    func run(masterPassword: String) async {
-        let slots = MultibankingStore.shared.slots
+    /// - Parameter nurSlots: Kennungen der zu prüfenden Banken. `nil` = alle.
+    ///   Gemeldet als Wunsch am 04.08.2026: Wer einer einzelnen Bank nachgeht, will
+    ///   nicht jedes Mal alle anrufen — jeder Anruf kann eine Freigabe kosten.
+    func run(masterPassword: String, nurSlots: Set<String>? = nil) async {
+        let alle = MultibankingStore.shared.slots
+        let slots = nurSlots.map { auswahl in alle.filter { auswahl.contains($0.id) } } ?? alle
         guard !slots.isEmpty else {
             phase = .failed(L10n.t("Keine Banken konfiguriert.", "No banks configured."))
             return  // Kein finalize nötig — Logger wurde nie aktiviert.
@@ -142,7 +167,11 @@ final class DiagnosticSession: ObservableObject {
             }
             phase = .running(slotIndex: idx + 1, total: slots.count, label: slot.displayName)
 
-            MultibankingStore.shared.setActive(index: idx)
+            // Index im VOLLSTÄNDIGEN Store — bei einer Teilauswahl stimmt der
+            // Schleifenindex nicht mehr mit der Position im Store überein.
+            if let echterIndex = alle.firstIndex(where: { $0.id == slot.id }) {
+                MultibankingStore.shared.setActive(index: echterIndex)
+            }
             // Atomarer Switch aller 3 Storage-Layer (Yaxi/Credentials/DB) —
             // sonst feuern fetchBalances/fetchTransactions mit Connection-/
             // Session-Daten des vorherigen Slots gegen die Bank des neuen
