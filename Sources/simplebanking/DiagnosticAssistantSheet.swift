@@ -24,6 +24,9 @@ struct DiagnosticAssistantSheet: View {
     @State private var auswahl: Set<String> = []
     /// Startzeit der laufenden Bank — für den Hinweis auf eine wartende Freigabe.
     @State private var laufSeit: Date? = nil
+    /// Ergebnis der Einrichtungs-Auswertung, sobald sie einmal lief.
+    @State private var einrichtungsBericht: SetupDiagnosticsReport.Bericht? = nil
+    @State private var einrichtungsFehler: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -141,6 +144,39 @@ struct DiagnosticAssistantSheet: View {
                       systemImage: "lock.shield")
                     .font(.system(size: 11))
                     .foregroundColor(.sbTextSecondary)
+            }
+
+            // Ersteinrichtung: nicht nachspielbar, deshalb wird sie mitgeschrieben und
+            // hier im Nachhinein ausgewertet. Ein Knopf „Einrichtung testen" würde bei
+            // jedem Druck echte Freigaben kosten.
+            Divider().opacity(0.5)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L10n.t("Ersteinrichtung", "Initial setup"))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.sbTextSecondary)
+                HStack(spacing: 10) {
+                    Button(L10n.t("Letzte Einrichtung auswerten …", "Evaluate last setup …")) {
+                        werteEinrichtungAus()
+                    }
+                    if let b = einrichtungsBericht {
+                        Button(L10n.t("Im Finder zeigen", "Show in Finder")) {
+                            NSWorkspace.shared.activateFileViewerSelecting([b.summaryFile])
+                        }
+                        Button(L10n.t("Per Mail senden", "Send by email")) {
+                            sendeEinrichtung(b)
+                        }
+                    }
+                    Spacer()
+                }
+                if let b = einrichtungsBericht {
+                    Text(L10n.t("Bericht erstellt — \(b.anhaenge.count) Datei(en), \(b.traceAnzahl) Trace(s).",
+                                "Report created — \(b.anhaenge.count) file(s), \(b.traceAnzahl) trace(s)."))
+                        .font(.system(size: 10.5))
+                        .foregroundColor(b.traceAnzahl == 0 ? .sbRedStrong : .sbTextSecondary)
+                }
+                if let f = einrichtungsFehler {
+                    Text(f).font(.system(size: 10.5)).foregroundColor(.sbRedStrong)
+                }
             }
 
             if let err = lastError {
@@ -426,6 +462,23 @@ struct DiagnosticAssistantSheet: View {
         laufSeit = Date()
         let gewaehlt = auswahl
         runTask = Task { await session.run(masterPassword: pw, nurSlots: gewaehlt) }
+    }
+
+    private func werteEinrichtungAus() {
+        einrichtungsFehler = nil
+        do {
+            einrichtungsBericht = try SetupDiagnosticsReport.ausLetztemVersuch()
+        } catch {
+            einrichtungsBericht = nil
+            einrichtungsFehler = error.localizedDescription
+        }
+    }
+
+    private func sendeEinrichtung(_ b: SetupDiagnosticsReport.Bericht) {
+        guard let service = NSSharingService(named: .composeEmail) else { return }
+        service.recipients = ["support@simplebanking.de"]
+        service.subject = "simplebanking Einrichtungs-Diagnose"
+        service.perform(withItems: b.anhaenge)
     }
 
     private func sendByMail(report: DiagnosticSession.Report) {

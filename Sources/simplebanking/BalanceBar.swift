@@ -6764,8 +6764,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         connectionIdKeySnapshot: String = "simplebanking.yaxi.connectionId"
     ) async throws -> SetupConnectResult {
         AppLogger.log("Setup performSetupConnection start", category: "Setup")
+        // Immer mitschreiben, nicht nur wenn der Schalter im Assistenten an ist.
+        // Eine gescheiterte Einrichtung lässt sich nicht nachspielen — jeder Lauf
+        // kostet echte Freigaben. Wer den Schalter erst nach dem Fehlschlag findet,
+        // muss die Bank ein zweites Mal um eine TAN bitten, um überhaupt Material
+        // zu haben. Die Datei ist bereinigt (siehe SanitizerIbanTests) und wird auf
+        // zehn Versuche begrenzt.
         let diagnosticsLogger: SetupDiagnosticsLogger? = {
-            guard options.diagnosticsEnabled else { return nil }
             do {
                 return try SetupDiagnosticsLogger.startAttempt()
             } catch {
@@ -6787,6 +6792,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // YaxiService, ohne Zugriff auf `options`) meldet field vs. decoupled, wir
         // übersetzen das in den passenden Setup-Text. Nach dem Connect wieder lösen.
         let onProgress = options.onProgress
+        // Die Freigabe-Phasen ins Einrichtungsprotokoll spiegeln. Ohne das steht in
+        // der Datei nur „warmup_balances start … failure" und die eigentliche
+        // Geschichte — Browser auf, 180-mal gepollt, keine Zustimmung zurück — muss
+        // aus dem Hauptprotokoll rekonstruiert werden.
+        YaxiService.setupPhaseReporter = { [weak diagnosticsLogger] phase, details in
+            diagnosticsLogger?.log(step: "sca", event: phase, details: details)
+        }
+        defer { YaxiService.setupPhaseReporter = nil }
+
         YaxiService.scaMethodReporter = { hint in
             onProgress?(hint == .fieldInput ? .enteringCode : .requestingApproval)
         }
@@ -6846,7 +6860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             let discoveredAccounts = try await runSetupStepWithTimeout(step: "warmup_accounts", timeout: 720, logger: diagnosticsLogger) {
                 try await YaxiService.fetchAccounts(
                     userId: result.userId, password: result.password,
-                    callSource: .setupWarmup
+                    alwaysTrace: true, callSource: .setupWarmup
                 )
             }
             let selectableAccounts = discoveredAccounts.filter { account in
@@ -6887,6 +6901,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 try await YaxiService.fetchBalances(
                     userId: result.userId,
                     password: result.password,
+                    alwaysTrace: true,
                     callSource: .setupWarmup
                 )
             }
@@ -6914,6 +6929,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     userId: result.userId,
                     password: result.password,
                     from: warmupFrom,
+                    alwaysTrace: true,
                     callSource: .setupWarmup
                 )
             }
@@ -6929,7 +6945,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                                                                  succeeded: { $0.ok }) {
                     try await YaxiService.fetchBalances(
                         userId: result.userId, password: result.password,
-                        callSource: .setupWarmup
+                        alwaysTrace: true, callSource: .setupWarmup
                     )
                 }
                 warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions_retry", timeout: 720, logger: diagnosticsLogger,
@@ -6938,6 +6954,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         userId: result.userId,
                         password: result.password,
                         from: warmupFrom,
+                        alwaysTrace: true,
                         callSource: .setupWarmup
                     )
                 }

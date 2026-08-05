@@ -43,6 +43,16 @@ enum YaxiService {
     nonisolated(unsafe) static var scaMethodReporter:
         (@Sendable (SCAMethodHint) -> Void)?
 
+    /// Schreibt Zwischenschritte in das Einrichtungsprotokoll.
+    ///
+    /// Die Freigabe ist der Teil der Einrichtung, der am häufigsten hakt — und
+    /// gleichzeitig der einzige, von dem in der Diagnosedatei bisher nichts stand:
+    /// Redirect geöffnet, wie oft gepollt, ob eine Zustimmung zurückkam. Wer das
+    /// wissen wollte, musste es aus dem Hauptprotokoll zusammensuchen und die
+    /// Zeitstempel von Hand abgleichen. Vom Setup-Flow gesetzt (mit `defer nil`).
+    nonisolated(unsafe) static var setupPhaseReporter:
+        (@Sendable (String, [String: String]) -> Void)?
+
     // MARK: - UserDefaults keys (per-slot)
     // "legacy" slot uses the original key names for backward compatibility.
 
@@ -638,9 +648,15 @@ enum YaxiService {
     /// Calls accounts() API with SCA and returns discovered accounts.
     /// `callSource` steuert ob bei `UnexpectedError` ein User-Report-Prompt
     /// erscheint (siehe `ErrorReportStore.CallSource`). Default `.normal`.
+    /// - Parameter alwaysTrace: schreibt auch bei Erfolg einen YAXI-Trace. Die
+    ///   Einrichtung setzt das immer: Läuft sie durch und die Bank liefert trotzdem
+    ///   Unsinn, gab es hinterher nur Schrittnamen und Millisekunden — der eine
+    ///   Roundtrip, auf den es ankommt, fehlte. Konten ist dabei der erste und
+    ///   teuerste Schritt: Wer hier nachbessern will, zahlt eine neue Freigabe.
     static func fetchAccounts(
         userId: String,
         password: String,
+        alwaysTrace: Bool = false,
         callSource: ErrorReportStore.CallSource = .normal
     ) async throws -> [Routex.Account] {
         let slotSnapshot = activeSlotId
@@ -734,6 +750,10 @@ enum YaxiService {
         guard case .accounts(let authResult) = outcome.payload else {
             throw NSError(domain: "YaxiService", code: -3,
                           userInfo: [NSLocalizedDescriptionKey: "unexpected result type from accounts()"])
+        }
+        if alwaysTrace {
+            await writeTrace(client: client, label: "setup-fetchAccounts-ok",
+                             ticket: finalTicket, error: nil, traceId: client.traceId())
         }
         return authResult.toData().data
     }
@@ -2038,6 +2058,7 @@ enum YaxiService {
         switch initial {
 
         case .result(let payload, let session, let connectionData):
+            setupPhaseReporter?("sca_result", ["connection_data": connectionData == nil ? "none" : "\(connectionData!.count)b"])
             AppLogger.log("SCA result: connectionData=\(connectionData == nil ? "nil" : "\(connectionData!.count)b")", category: "YaxiService")
             return SCAOutcome(payload: payload, session: session, connectionData: connectionData)
 
@@ -2265,6 +2286,13 @@ enum YaxiService {
                         ctx = newCtx
                         currentDelay = newDelay.map { TimeInterval($0) } ?? currentDelay
                         AppLogger.log("SCA poll[\(i)]: still pending ctx=\(ctx.count)b changed=\(ctxChanged) delay=\(currentDelay)s", category: "YaxiService")
+                        // Nicht jede Runde melden — sonst erschlägt das Warten die
+                        // Diagnosedatei. Alle zehn genügt, um zu sehen, wie lange
+                        // gewartet wurde und ob sich überhaupt etwas bewegt.
+                        if i % 10 == 0 {
+                            setupPhaseReporter?("sca_waiting",
+                                                ["poll": String(i), "ctx_changed": ctxChanged ? "yes" : "no"])
+                        }
                         continue
                     }
                     // Non-confirmation dialog arrived during polling — log it
@@ -2287,6 +2315,7 @@ enum YaxiService {
                 if consecutiveErrors >= scaMaxConsecutiveErrors { return nil }
             }
         }
+        setupPhaseReporter?("sca_confirmation_timeout", ["attempts": "180"])
         AppLogger.log("SCA Confirmation: timeout (180 attempts)", category: "YaxiService", level: "WARN")
         return nil
     }
@@ -2573,6 +2602,7 @@ enum YaxiService {
                           category: "YaxiService")
             return
         }
+        setupPhaseReporter?("sca_redirect_open", ["host": url.host ?? "?"])
         AppLogger.log("SCA: öffne Freigabe-Seite (host=\(url.host ?? "?"))", category: "YaxiService")
         NSWorkspace.shared.open(url)
         sendSCANotification()
