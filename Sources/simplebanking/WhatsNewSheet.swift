@@ -302,13 +302,33 @@ enum WhatsNewContent {
             )
         ),
         WhatsNewItem(
+            icon: "qrcode",
+            tint: .sbGreenStrong,
+            title: L10n.t("bunq verlangt nicht mehr bei jedem Abruf einen QR-Scan",
+                          "bunq no longer asks for a QR scan on every refresh"),
+            description: L10n.t(
+                "Bei Banken, die im Browser freigegeben werden — bunq, N26, Revolut — warf simplebanking die erteilte Zustimmung nach einem unklaren Serverfehler weg. Anders als bei Banken mit Zugangsdaten wächst sie dort nicht nach: Sie entsteht nur bei der Einrichtung. Einmal verworfen, fing jeder Abruf wieder von vorn an. Bestehende bunq-Verbindungen müssen einmalig neu eingerichtet werden.",
+                "For banks approved in the browser — bunq, N26, Revolut — simplebanking discarded your consent after an unclear server error. Unlike with credential-based banks it does not come back: it is only created during setup. Once discarded, every refresh started over. Existing bunq connections need to be set up once more."
+            )
+        ),
+        WhatsNewItem(
             icon: "paintpalette",
             tint: .sbOrangeStrong,
-            title: L10n.t("Mehr Spielraum für eigene Themes",
-                          "More room for custom themes"),
+            title: L10n.t("Themes importieren — und mehr Spielraum beim Bauen",
+                          "Import themes — and more room to build them"),
             description: L10n.t(
-                "Ein Theme kann den Kontoring jetzt weglassen oder durch eine eigene Grafik ersetzen. Und Textkommandos statt Bedien-Icons ziehen nicht länger ungefragt größere Schriftgrade nach sich.",
-                "A theme can now drop the account ring or replace it with its own graphic. And switching controls to text no longer drags larger type sizes along with it."
+                "Einstellungen → Verhalten → „Theme importieren …“ nimmt eine einzelne .cfg oder ein ZIP mit Hintergrundbild, Logo und Ringgrafik und aktiviert es sofort. Wer selbst baut: Der Kontoring lässt sich weglassen oder durch eine eigene Grafik ersetzen, Textkommandos ziehen keine größeren Schriftgrade mehr nach sich, und die Farbe der Bedien-Symbole ist einstellbar.",
+                "Settings → Behaviour → \"Import theme …\" takes a single .cfg or a ZIP with wallpaper, logo and ring graphic, and activates it right away. If you build your own: the account ring can be dropped or replaced by a graphic, text controls no longer drag larger type sizes along, and the colour of the control icons is now yours to set."
+            )
+        ),
+        WhatsNewItem(
+            icon: "arrow.up.right",
+            tint: .sbBlueStrong,
+            title: L10n.t("Neu im Labor: Veränderung neben dem Kontostand",
+                          "New in Labs: change next to your balance"),
+            description: L10n.t(
+                "Klein neben dem Saldo, etwa „▼ 4,2 %“: wie der Kontostand gegenüber demselben Tag im Vormonat steht. Bewusst kalendarisch und nicht „vor 30 Tagen“ — so liegt jeder monatliche Posten wie Gehalt oder Miete genau einmal im Vergleich. Standardmäßig aus, einzuschalten unter Einstellungen → Labor.",
+                "Small, next to your balance, like \"▼ 4.2 %\": how it compares to the same day a month ago. Deliberately calendar-based rather than \"30 days ago\" — that way every monthly item like salary or rent falls inside the window exactly once. Off by default; switch it on under Settings → Labs."
             )
         ),
     ]
