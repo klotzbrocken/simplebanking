@@ -206,6 +206,39 @@ final class BalanceChangeTests: XCTestCase {
         XCTAssertEqual(euro, -100, accuracy: 0.001, "vorgemerkte Buchungen sind mitgezählt worden")
     }
 
+    // MARK: Welche Historie zählt
+
+    /// Gemeldet am 05.08.2026 als „geht nicht mehr": Im Multi-Banking-Demo blieb das
+    /// Abzeichen leer, im Single-Banking-Demo erschien es. Der Grund war kein Fehler in
+    /// der Rechnung, sondern dass sie im Multi-Zweig nie aufgerufen wurde.
+    func test_einzelkonto_nimmtDasAktive() throws {
+        let a = [tx("-10,00", "2026-06-01", status: "Booked")]
+        let b = [tx("-20,00", "2026-06-02", status: "Booked")]
+        let c = [tx("-30,00", "2026-06-03", status: "Booked")]
+        let gewaehlt = BalanceChange.massgeblicheHistorie(
+            proKonto: [a, b, c], aktivIndex: 1, aggregiert: false)
+        XCTAssertEqual(gewaehlt.count, 1)
+        XCTAssertEqual(try XCTUnwrap(gewaehlt.first).parsedAmount, -20, accuracy: 0.001)
+    }
+
+    func test_aggregat_nimmtAlle() {
+        let a = [tx("-10,00", "2026-06-01", status: "Booked")]
+        let b = [tx("-20,00", "2026-06-02", status: "Booked")]
+        let gewaehlt = BalanceChange.massgeblicheHistorie(
+            proKonto: [a, b], aktivIndex: 0, aggregiert: true)
+        XCTAssertEqual(gewaehlt.count, 2)
+    }
+
+    /// Der Index kann ins Leere zeigen, wenn gerade ein Konto entfernt wurde. Dann lieber
+    /// nichts zeigen als die Zahlen eines fremden Kontos.
+    func test_indexAusserhalb_liefertNichts() {
+        let a = [tx("-10,00", "2026-06-01", status: "Booked")]
+        XCTAssertTrue(BalanceChange.massgeblicheHistorie(
+            proKonto: [a], aktivIndex: 7, aggregiert: false).isEmpty)
+        XCTAssertTrue(BalanceChange.massgeblicheHistorie(
+            proKonto: [], aktivIndex: 0, aggregiert: false).isEmpty)
+    }
+
     /// Der Tooltip nennt den Eurobetrag, weil die Anzeige ein Prozentwert sein kann.
     func test_erklaerungNenntDenEurobetrag() {
         let ergebnis = BalanceChange.berechne(

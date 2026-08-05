@@ -3514,10 +3514,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     // Compute per profile first, then aggregate based on unified vs per-slot.
                     var seed = UInt64(truncatingIfNeeded: seedSnapshot)
                     var perProfile: [Double] = []
+                    // Historie je Profil behalten: Das Veränderungs-Abzeichen braucht sie
+                    // unten noch. Ohne das blieb es im Multi-Banking-Demo leer, während
+                    // es im Single-Banking-Demo erschien — gemeldet am 05.08.2026 als
+                    // „geht nicht mehr", nachdem das Demo-Profil gewechselt wurde.
+                    var historieProProfil: [[TransactionsResponse.Transaction]] = []
                     for (i, _) in allSlots.enumerated() {
                         let history = FakeData.generateDemoTransactions(
                             seed: &seed, days: 90, slotProfile: i
                         )
+                        historieProProfil.append(history)
                         guard !history.isEmpty else { perProfile.append(0); continue }
                         let payments = FixedCostsAnalyzer.analyze(transactions: history)
                         let salaryDay = FakeData.demoSalaryDay(slotProfile: i)
@@ -3532,6 +3538,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     } else if perProfile.indices.contains(activeIdx) {
                         total = perProfile[activeIdx]
                         sawAny = total > 0
+                    }
+                    // Im Aggregat zählt die Summe aller Konten, sonst das aktive —
+                    // dieselbe Regel wie im Echtbetrieb.
+                    let massgeblich = BalanceChange.massgeblicheHistorie(
+                        proKonto: historieProProfil,
+                        aktivIndex: activeIdx,
+                        aggregiert: isUnified)
+                    if !massgeblich.isEmpty {
+                        (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(
+                            massgeblich, stand: balanceSnapshot, bezug: .vormonat())
                     }
                 } else {
                     var seed = UInt64(truncatingIfNeeded: seedSnapshot)

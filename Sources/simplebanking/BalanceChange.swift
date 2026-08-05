@@ -143,6 +143,25 @@ enum BalanceChange {
         (tx.bookingDate ?? tx.valueDate).flatMap { datumsFormat.date(from: String($0.prefix(10))) }
     }
 
+    // MARK: - Welche Historie zählt
+
+    /// Die Buchungen, gegen die gerechnet wird: im Aggregat alle Konten, sonst das
+    /// aktive.
+    ///
+    /// Steht hier und nicht als Zweig in `recomputeLeftToPay`, weil genau diese Auswahl
+    /// zweimal danebenging: erst fehlte sie im Demo-Modus ganz, dann nur im
+    /// Multi-Banking-Demo — beide Male blieb das Abzeichen kommentarlos leer, und beide
+    /// Male fiel es erst jemandem beim Hinsehen auf.
+    static func massgeblicheHistorie(
+        proKonto: [[TransactionsResponse.Transaction]],
+        aktivIndex: Int,
+        aggregiert: Bool
+    ) -> [TransactionsResponse.Transaction] {
+        if aggregiert { return proKonto.flatMap { $0 } }
+        guard proKonto.indices.contains(aktivIndex) else { return [] }
+        return proKonto[aktivIndex]
+    }
+
     // MARK: - Formatierung
 
     private static let prozentFormat: NumberFormatter = {
