@@ -15,6 +15,9 @@ struct DiagnosticAssistantSheet: View {
 
     let requestMasterPassword: () -> String?
     let onClose: () -> Void
+    /// Startet den Einrichtungs-Assistenten im Aufzeichnungsmodus. Der Bericht
+    /// entsteht danach von selbst — siehe `SetupDiagnosticsReport.aufzeichnungFertig`.
+    var onAufzeichnen: () -> Void = {}
 
     @StateObject private var session = DiagnosticSession()
     @State private var lastError: String? = nil
@@ -154,8 +157,27 @@ struct DiagnosticAssistantSheet: View {
                 Text(L10n.t("Ersteinrichtung", "Initial setup"))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.sbTextSecondary)
+                Text(L10n.t(
+                    "Zeichnet eine neue Einrichtung vollständig auf — jeden Schritt, jede Freigabe und die YAXI-Traces. Der Bericht erscheint, sobald der Versuch endet, auch wenn er scheitert.",
+                    "Records a new setup in full — every step, every approval and the YAXI traces. The report appears once the attempt ends, even if it fails."))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.sbTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 10) {
-                    Button(L10n.t("Letzte Einrichtung auswerten …", "Evaluate last setup …")) {
+                    Button(action: onAufzeichnen) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "record.circle")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(L10n.t("Neue Einrichtung aufzeichnen …", "Record new setup …"))
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .foregroundColor(.white)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.sbRedStrong))
+                    }
+                    .buttonStyle(.plain)
+                    Button(L10n.t("Letzte auswerten", "Evaluate last")) {
                         werteEinrichtungAus()
                     }
                     if let b = einrichtungsBericht {

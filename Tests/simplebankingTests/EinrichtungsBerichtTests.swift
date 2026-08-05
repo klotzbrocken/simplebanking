@@ -85,6 +85,31 @@ final class EinrichtungsBerichtTests: XCTestCase {
         XCTAssertEqual(gewaehlt?.lastPathComponent, neu.lastPathComponent)
     }
 
+    // MARK: Aufzeichnung
+
+    /// Der Anker muss der aufgezeichnete Versuch sein, nicht „die jüngste Datei".
+    /// Ohne das Zurücksetzen würde ein späterer, nicht aufgezeichneter Versuch
+    /// ungefragt einen zweiten Bericht auswerfen.
+    func test_aufzeichnungGiltNurEinmal() {
+        SetupDiagnosticsReport.aufzeichnungAngefordert = true
+        SetupDiagnosticsReport.versuchAbgeschlossen(setupDatei: nil)
+        XCTAssertFalse(SetupDiagnosticsReport.aufzeichnungAngefordert,
+                       "die Anforderung muss nach dem Versuch verbraucht sein")
+    }
+
+    /// Ohne angeforderte Aufzeichnung passiert nichts — jede normale Einrichtung
+    /// läuft durch dieselbe Stelle.
+    func test_ohneAnforderung_keineAuswertung() {
+        SetupDiagnosticsReport.aufzeichnungAngefordert = false
+        let gerufen = XCTestExpectation(description: "darf nicht rufen")
+        gerufen.isInverted = true
+        SetupDiagnosticsReport.aufzeichnungFertig = { _ in gerufen.fulfill() }
+        defer { SetupDiagnosticsReport.aufzeichnungFertig = nil }
+
+        SetupDiagnosticsReport.versuchAbgeschlossen(setupDatei: ordner)
+        wait(for: [gerufen], timeout: 0.3)
+    }
+
     /// Ohne Versuch soll es einen benannten Fehler geben statt eines leeren Berichts,
     /// den niemand als solchen erkennt.
     func test_ohneVersuch_klarerFehler() {

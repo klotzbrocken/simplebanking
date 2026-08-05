@@ -1881,6 +1881,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             onClose: { [weak self] in
                 self?.bankDiagnosticsWindow?.close()
                 self?.bankDiagnosticsWindow = nil
+            },
+            onAufzeichnen: { [weak self] in
+                self?.starteAufgezeichneteEinrichtung()
             }
         )
         let host = NSHostingController(rootView: sheet)
@@ -1894,6 +1897,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         bankDiagnosticsWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Startet den Einrichtungs-Assistenten und wertet den Versuch danach aus.
+    ///
+    /// Mitgeschrieben wird ohnehin immer; das hier setzt nur den Anker auf **diesen**
+    /// Versuch. Ohne ihn wäre der Bericht „die jüngste Datei im Ordner" — was danebengeht,
+    /// sobald noch eine zweite Bank angelegt wird oder ein Versuch von gestern herumliegt.
+    private func starteAufgezeichneteEinrichtung() {
+        SetupDiagnosticsReport.aufzeichnungAngefordert = true
+        SetupDiagnosticsReport.aufzeichnungFertig = { ergebnis in
+            Task { @MainActor in
+                AppDelegate.zeigeAufzeichnungsErgebnis(ergebnis)
+            }
+        }
+        bankDiagnosticsWindow?.close()
+        bankDiagnosticsWindow = nil
+        connect()
+    }
+
+    /// Zeigt das Ergebnis der Aufzeichnung. Bewusst ein Hinweisfenster und keine Zeile
+    /// im Diagnosefenster: Das ist zu diesem Zeitpunkt geschlossen, und der Bericht
+    /// entsteht möglicherweise Minuten später — nach TAN, Browser und Kontoauswahl.
+    @MainActor
+    private static func zeigeAufzeichnungsErgebnis(_ ergebnis: Result<SetupDiagnosticsReport.Bericht, Error>) {
+        let alert = NSAlert()
+        switch ergebnis {
+        case .success(let bericht):
+            alert.messageText = L10n.t("Aufzeichnung der Einrichtung fertig",
+                                       "Setup recording complete")
+            var text = L10n.t("\(bericht.anhaenge.count) Datei(en), davon \(bericht.traceAnzahl) YAXI-Trace(s).",
+                              "\(bericht.anhaenge.count) file(s), including \(bericht.traceAnzahl) YAXI trace(s).")
+            if bericht.traceAnzahl == 0 {
+                // Ohne Trace ist der Bericht für die Fehlersuche fast wertlos — das
+                // gehört gesagt, nicht verschwiegen.
+                text += "\n\n" + L10n.t(
+                    "Ohne Trace: Entweder ist das Protokoll in den Einstellungen abgeschaltet, oder der Versuch endete vor dem ersten Bankaufruf.",
+                    "No trace: either logging is disabled in settings, or the attempt ended before the first bank call.")
+            }
+            alert.informativeText = text
+            alert.alertStyle = bericht.traceAnzahl == 0 ? .warning : .informational
+            alert.addButton(withTitle: L10n.t("Per Mail senden", "Send by email"))
+            alert.addButton(withTitle: L10n.t("Im Finder zeigen", "Show in Finder"))
+            alert.addButton(withTitle: L10n.t("Später", "Later"))
+            NSApp.activate(ignoringOtherApps: true)
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                if let service = NSSharingService(named: .composeEmail) {
+                    service.recipients = ["support@simplebanking.de"]
+                    service.subject = "simplebanking Einrichtungs-Diagnose"
+                    service.perform(withItems: bericht.anhaenge)
+                }
+            case .alertSecondButtonReturn:
+                NSWorkspace.shared.activateFileViewerSelecting([bericht.summaryFile])
+            default:
+                break
+            }
+        case .failure(let fehler):
+            alert.messageText = L10n.t("Aufzeichnung konnte nicht ausgewertet werden",
+                                       "Recording could not be evaluated")
+            alert.informativeText = fehler.localizedDescription
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
     }
 
     private func showTransferSheet(prefill: TransferRequest? = nil,
@@ -6997,6 +7065,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
 
             diagnosticsLogger?.finish(success: true, error: nil)
+            SetupDiagnosticsReport.versuchAbgeschlossen(setupDatei: diagnosticsLogger?.latestLogURL)
             AppLogger.log("Setup performSetupConnection success", category: "Setup")
             return SetupConnectResult(
                 bank: finalBank,
@@ -7010,11 +7079,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // (statt „Verbindungsprüfung fehlgeschlagen: …CancellationError").
             AppLogger.log("Setup performSetupConnection cancelled", category: "Setup")
             diagnosticsLogger?.finish(success: false, error: "cancelled")
+            SetupDiagnosticsReport.versuchAbgeschlossen(setupDatei: diagnosticsLogger?.latestLogURL)
             throw CancellationError()
         } catch {
             let setupError = normalizeSetupError(error)
             AppLogger.log("Setup performSetupConnection failed error=\(setupError.localizedDescription)", category: "Setup", level: "ERROR")
             diagnosticsLogger?.finish(success: false, error: setupError.localizedDescription)
+            // Gerade der Fehlschlag ist der Fall, für den aufgezeichnet wird.
+            SetupDiagnosticsReport.versuchAbgeschlossen(setupDatei: diagnosticsLogger?.latestLogURL)
             throw SetupConnectActionError(
                 message: setupError.localizedDescription,
                 diagnosticsLogURL: diagnosticsLogger?.latestLogURL

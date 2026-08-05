@@ -42,12 +42,46 @@ enum SetupDiagnosticsReport {
         }
     }
 
+    // MARK: - Aufzeichnung
+
+    /// Ist eine Aufzeichnung angefordert, wertet die Einrichtung sich am Ende selbst aus.
+    ///
+    /// Gesetzt vom Knopf „Neue Einrichtung aufzeichnen …", zurückgesetzt, sobald der
+    /// Versuch abgeschlossen ist. Der Bericht entsteht damit **zum Versuch**, nicht zur
+    /// jüngsten Datei im Ordner — was den Unterschied macht, sobald jemand zwischendurch
+    /// noch eine zweite Bank anlegt oder ein alter Versuch von gestern herumliegt.
+    nonisolated(unsafe) static var aufzeichnungAngefordert = false
+
+    /// Wird nach dem Abschluss eines aufgezeichneten Versuchs gerufen — mit dem fertigen
+    /// Bericht, oder mit dem Fehler beim Erstellen. Setzt die UI.
+    nonisolated(unsafe) static var aufzeichnungFertig:
+        (@Sendable (Result<Bericht, Error>) -> Void)?
+
+    /// Vom Einrichtungs-Flow am Ende jedes Versuchs gerufen. Tut nichts, solange keine
+    /// Aufzeichnung läuft.
+    static func versuchAbgeschlossen(setupDatei: URL?) {
+        guard aufzeichnungAngefordert else { return }
+        aufzeichnungAngefordert = false
+        guard let setupDatei else { return }
+        let melden = aufzeichnungFertig
+        // Kurz warten: Der letzte Trace kann noch im Schreiben sein — writeTrace läuft
+        // asynchron und der Abschluss des Versuchs wartet nicht darauf.
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.5) {
+            let ergebnis = Result { try ausVersuch(setupDatei: setupDatei) }
+            melden?(ergebnis)
+        }
+    }
+
     // MARK: - Öffentlich
 
     /// Wertet den jüngsten Einrichtungsversuch aus.
     static func ausLetztemVersuch() throws -> Bericht {
         guard let setupDatei = juengsteSetupDatei() else { throw Fehler.keinVersuchGefunden }
+        return try ausVersuch(setupDatei: setupDatei)
+    }
 
+    /// Wertet einen bestimmten Versuch aus.
+    static func ausVersuch(setupDatei: URL) throws -> Bericht {
         let begonnen = (try? setupDatei.resourceValues(forKeys: [.creationDateKey]))?
             .creationDate ?? Date()
         // Endezeitpunkt großzügig: Der Versuch kann nach der letzten Zeile noch
