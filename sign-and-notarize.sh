@@ -45,7 +45,7 @@ if [[ -z "$SIGN_IDENTITY" || -z "$NOTARY_PROFILE" ]]; then
 fi
 
 if [[ "$BUILD_FIRST" == "1" ]]; then
-    echo "[1/8] Build app bundle"
+    echo "[1/10] Build app bundle"
     bash "$ROOT/build-app.sh"
 fi
 
@@ -54,10 +54,10 @@ if [[ ! -d "$APP" ]]; then
     exit 1
 fi
 
-echo "[2/8] Prepare app bundle"
+echo "[2/10] Prepare app bundle"
 xattr -cr "$APP"
 
-echo "[3/8] Sign nested executables"
+echo "[3/10] Sign nested executables"
 
 # Sparkle.framework — sign nested components deepest-first, then the framework itself
 SPARKLE_FW="$APP/Contents/Frameworks/Sparkle.framework"
@@ -112,16 +112,48 @@ codesign --force --timestamp --options runtime \
     --entitlements "$ENTITLEMENTS" \
     "$APP/Contents/MacOS/simplebanking"
 
-echo "[4/8] Sign app bundle"
+echo "[4/10] Sign app bundle"
 codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
     "$APP"
 
-echo "[5/8] Verify app signature"
+echo "[5/10] Verify app signature"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
-echo "[6/8] Create DMG"
+# ---------------------------------------------------------------------------
+# Zwei Notarisierungen, nicht eine — und die Reihenfolge ist der ganze Punkt.
+#
+# Bis 05.08.2026 lief es so: DMG bauen, DMG notarisieren, danach App UND DMG
+# stapeln. Das Ticket landete damit auf der App im Build-Ordner — die Kopie im
+# Image war zu diesem Zeitpunkt längst gezogen und blieb ohne. Geprüft an drei
+# ausgelieferten Images (01.08., 04.08., 05.08.): überall
+# „does not have a ticket stapled to it".
+#
+# Solange der Kunde online ist, fällt das nicht auf: Gatekeeper fragt bei Apple
+# nach und lässt die App durch. Ohne Netz beim ersten Start fehlt die Auskunft,
+# und die App wird als ungeprüft abgewiesen — bei einer Banking-App der denkbar
+# schlechteste erste Eindruck.
+#
+# Deshalb jetzt: App notarisieren → App stapeln → DMG aus der GESTAPELTEN App
+# bauen → DMG notarisieren → DMG stapeln. Beide Ebenen tragen ihr Ticket, beide
+# funktionieren offline.
+# ---------------------------------------------------------------------------
+echo "[6/10] Notarize app bundle"
+APP_ZIP="$OUTDIR/.notarize-$TIMESTAMP.zip"
+# ditto statt zip: erhält Symlinks und die Bundle-Struktur, sonst lehnt der
+# Notardienst das Archiv ab.
+/usr/bin/ditto -c -k --keepParent "$APP" "$APP_ZIP"
+xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+rm -f "$APP_ZIP"
+
+echo "[7/10] Staple app bundle"
+xcrun stapler staple "$APP"
+# Harte Zusage: Ohne Ticket auf der App darf kein DMG entstehen — genau diese
+# stille Lücke hat monatelang niemand bemerkt.
+xcrun stapler validate "$APP"
+
+echo "[8/10] Create DMG (from the stapled app)"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp -R "$APP" "$STAGE_DIR/"
@@ -129,14 +161,31 @@ ln -s /Applications "$STAGE_DIR/Applications"
 hdiutil create -volname "simplebanking" -srcfolder "$STAGE_DIR" -ov -format UDZO "$DMG_PATH"
 rm -rf "$STAGE_DIR"
 
-echo "[7/8] Notarize DMG"
+echo "[9/10] Notarize + staple DMG"
 xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
-
-echo "[8/8] Staple + Gatekeeper checks"
-xcrun stapler staple "$APP"
 xcrun stapler staple "$DMG_PATH"
+
+echo "[10/10] Gatekeeper checks"
 spctl --assess --type execute --verbose=4 "$APP" || true
 spctl --assess --type open --verbose=4 "$DMG_PATH" || true
+
+# Nachweis am tatsächlich ausgelieferten Artefakt: die App IM Image, nicht die
+# im Build-Ordner. Die beiden liefen auseinander, und geprüft wurde die falsche.
+echo "Verify: stapled app inside the DMG"
+DMG_MOUNT="$(hdiutil attach -nobrowse -readonly "$DMG_PATH" | grep -o '/Volumes/.*' | head -1)"
+if [[ -n "$DMG_MOUNT" && -d "$DMG_MOUNT/$(basename "$APP")" ]]; then
+    if xcrun stapler validate "$DMG_MOUNT/$(basename "$APP")"; then
+        echo "  OK — die App im DMG trägt ihr Ticket."
+        hdiutil detach "$DMG_MOUNT" -quiet
+    else
+        echo "  FEHLER — die App im DMG hat kein Ticket. Nicht ausliefern." >&2
+        hdiutil detach "$DMG_MOUNT" -quiet
+        exit 1
+    fi
+else
+    echo "  WARNUNG — DMG liess sich zur Prüfung nicht mounten." >&2
+    [[ -n "$DMG_MOUNT" ]] && hdiutil detach "$DMG_MOUNT" -quiet
+fi
 
 if [[ "$SKIP_APPCAST" == "1" ]]; then
     echo "Appcast-Werte übersprungen (SKIP_APPCAST=1)"
@@ -148,7 +197,7 @@ if [[ "$SKIP_APPCAST" == "1" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# [9/9] Appcast-Werte ausgeben — bewusst KEIN `generate_appcast` mehr.
+# [11/11] Appcast-Werte ausgeben — bewusst KEIN `generate_appcast` mehr.
 #
 # Hier stand früher `generate_appcast "$OUTDIR"`. Das hatte zwei Fehler, von
 # denen der erste Kunden aussperrt:
@@ -170,7 +219,7 @@ fi
 # man dafür braucht, und rechnet sie aus der TATSÄCHLICH gebauten DMG aus —
 # damit Build-Nummer, Länge und Signatur nicht auseinanderlaufen können.
 # ---------------------------------------------------------------------------
-echo "[9/9] Appcast-Werte für den neuen Eintrag"
+echo "[11/11] Appcast-Werte für den neuen Eintrag"
 
 # Build-Nummer der ersten Fassung mit dem NEUEN Signaturschlüssel (2.0-Beta).
 # Alles darunter trägt den alten Schlüssel und darf nur den Hinweis sehen.
