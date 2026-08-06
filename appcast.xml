@@ -49,6 +49,41 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.0.2</title>
+            <pubDate>Thu, 06 Aug 2026 05:58:20 +0200</pubDate>
+            <sparkle:version>20260806603</sparkle:version>
+            <sparkle:shortVersionString>2.0.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.0.2/simplebanking-20260806-055354.dmg" length="32698875" type="application/octet-stream" sparkle:edSignature="0fbcjH37VcoSnc/lUkcwJkfFBoRImjWa1wx5mmlb+AYjAvHL/dDqlpcBPAXnWKwXMxNsSj5w2HkNEyUVkY0gCQ=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.0.2</h2>
+                <h3>Themes</h3>
+                <ul>
+                    <li><b>Themes lassen sich importieren</b> — Einstellungen &rarr; Verhalten &rarr; &bdquo;Theme importieren &hellip;&ldquo;. Nimmt eine einzelne .cfg oder ein ZIP mit Hintergrundbild, Logo und Grafiken und aktiviert es sofort.</li>
+                    <li><b>Mehr Spielraum beim Bauen</b> — der Kontoring l&auml;sst sich weglassen oder durch eine eigene Grafik ersetzen, Textkommandos ziehen keine gr&ouml;&szlig;eren Schriftgrade mehr nach sich, eigene Hintergrundbilder je Fl&auml;che.</li>
+                    <li><b>Dunkle Themes bleiben dunkel</b> — Suchfeld, Filter und Fu&szlig;zeilen-Symbole trugen bei hellem macOS-Erscheinungsbild Systemfarben statt der Theme-Farben. Neu einstellbar &uuml;ber <code>controlInk</code>.</li>
+                </ul>
+                <p>Fertige Themes und ein interaktiver Builder:
+                   <a href="https://simplebanking.de/themebuilder/">simplebanking.de/themebuilder</a> und
+                   <a href="https://simplebanking.de/themes">simplebanking.de/themes</a></p>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><b>bunq verlangte bei jedem Abruf einen neuen QR-Scan.</b> Bei Banken mit Freigabe im Browser &mdash; bunq, N26, Revolut &mdash; wurde die erteilte Zustimmung nach einem unklaren Serverfehler verworfen. Anders als bei Banken mit Zugangsdaten w&auml;chst sie dort nicht nach. <b>Bestehende bunq-Verbindungen m&uuml;ssen einmalig neu eingerichtet werden.</b></li>
+                    <li><b>Kein zweite TAN f&uuml;r einen Serverfehler</b> — ein unbegr&uuml;ndeter Fehler wird jetzt erst unver&auml;ndert wiederholt, statt sofort eine neue Freigabe zu kosten.</li>
+                    <li><b>In Ausgabenzeilen stand der eigene Name statt des H&auml;ndlers</b> — betraf jede Bank, die bei Kartenzahlungen den Kontoinhaber als Gegenseite eintr&auml;gt. Bestehende Buchungen werden beim ersten Start neu ausgewertet.</li>
+                    <li>Der Kontoring ist im Flyout zur&uuml;ck.</li>
+                </ul>
+                <h3>Neu im Labor</h3>
+                <ul>
+                    <li><b>Kontostand-Ver&auml;nderung</b> — klein neben dem Saldo, etwa &bdquo;&#9660; 4,2 %&ldquo;: der Vergleich mit demselben Tag im Vormonat. Standardm&auml;&szlig;ig aus, einzuschalten unter Einstellungen &rarr; Labs.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.0.0</title>
             <pubDate>Sun, 26 Jul 2026 07:30:00 +0200</pubDate>
             <sparkle:version>20260726541</sparkle:version>
