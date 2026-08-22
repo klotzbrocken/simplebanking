@@ -1,5 +1,6 @@
 import XCTest
 import GRDB
+import RoutexClient
 @testable import simplebanking
 
 // MARK: - Buchungstyp-Code der Bank
@@ -24,16 +25,16 @@ final class BankTransactionCodeTests: XCTestCase {
     }
 
     func test_compactsGermanGVC() {
-        XCTAssertEqual(YaxiService.compactBankTransactionCode([.national(code: "52", country: "DE")]),
+        XCTAssertEqual(YaxiService.compactBankTransactionCode([.national(code: "52", country: CountryCode("DE"))]),
                        "GVC:52")
-        XCTAssertEqual(YaxiService.compactBankTransactionCode([.national(code: "52", country: "AT")]),
+        XCTAssertEqual(YaxiService.compactBankTransactionCode([.national(code: "52", country: CountryCode("AT"))]),
                        "NAT-AT:52")
     }
 
     func test_compactsMultipleCodes() {
         let out = YaxiService.compactBankTransactionCode([
             .iso(domain: "PMNT", family: "ICDT", subFamily: "STDO"),
-            .national(code: "52", country: "DE"),
+            .national(code: "52", country: CountryCode("DE")),
         ])
         XCTAssertEqual(out, "ISO:PMNT/ICDT/STDO;GVC:52")
     }

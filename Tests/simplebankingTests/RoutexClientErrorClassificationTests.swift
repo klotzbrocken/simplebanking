@@ -1,5 +1,6 @@
 import XCTest
-import Routex
+import Foundation
+import RoutexClient
 @testable import simplebanking
 
 /// Sichert die Error-Klassifizierung ab, auf der die Catch-Branch-Reihenfolge
@@ -17,17 +18,17 @@ import Routex
 final class RoutexClientErrorClassificationTests: XCTestCase {
 
     func test_unauthorized_isConnectionReset() {
-        let err = RoutexClientError.Unauthorized(userMessage: nil)
+        let err = RoutexError.unauthorized(userMessage: nil)
         XCTAssertTrue(YaxiService.isConnectionResetError(err))
     }
 
     func test_unauthorized_withMessage_isConnectionReset() {
-        let err = RoutexClientError.Unauthorized(userMessage: "Consent invalid")
+        let err = RoutexError.unauthorized(userMessage: "Consent invalid")
         XCTAssertTrue(YaxiService.isConnectionResetError(err))
     }
 
     func test_consentExpired_isConnectionReset() {
-        let err = RoutexClientError.ConsentExpired(userMessage: nil)
+        let err = RoutexError.unauthorized(userMessage: nil)
         XCTAssertTrue(YaxiService.isConnectionResetError(err))
     }
 
@@ -35,12 +36,12 @@ final class RoutexClientErrorClassificationTests: XCTestCase {
         // HBCI-Transient-Errors wie „FGW Gatewaywechsel" kommen als
         // UnexpectedError MIT Message — die brauchen NICHT clearAll,
         // nur clearSessionsOnly (Volksbank-Pfad). Branch in isHBCITransientError.
-        let err = RoutexClientError.UnexpectedError(userMessage: "FGW Gatewaywechsel")
+        let err = RoutexError.unexpectedError(userMessage: "FGW Gatewaywechsel")
         XCTAssertFalse(YaxiService.isConnectionResetError(err))
     }
 
     func test_unexpectedError_withDialogkontextMessage_isNotConnectionReset() {
-        let err = RoutexClientError.UnexpectedError(userMessage: "Fehlender Dialogkontext")
+        let err = RoutexError.unexpectedError(userMessage: "Fehlender Dialogkontext")
         XCTAssertFalse(YaxiService.isConnectionResetError(err))
     }
 
@@ -48,7 +49,7 @@ final class RoutexClientErrorClassificationTests: XCTestCase {
         // Build-181-Logik (NetworkService.swift, bei Migration verloren):
         // UnexpectedError ohne userMessage = stale ConnectionData.
         // Muss retry-ohne-CD + Full-Reset triggern — sonst Sparkasse-Bug.
-        let err = RoutexClientError.UnexpectedError(userMessage: nil)
+        let err = RoutexError.unexpectedError(userMessage: nil)
         XCTAssertTrue(YaxiService.isConnectionResetError(err))
     }
 
@@ -56,29 +57,29 @@ final class RoutexClientErrorClassificationTests: XCTestCase {
         // Empty-String userMessage ist nicht das gleiche wie nil — wenn die
         // Bank explizit "" sendet, ist das kein „leer = stale CD"-Signal.
         // Bleibt im HBCI-Transient-Pfad.
-        let err = RoutexClientError.UnexpectedError(userMessage: "")
+        let err = RoutexError.unexpectedError(userMessage: "")
         XCTAssertFalse(YaxiService.isConnectionResetError(err))
     }
 
     func test_invalidCredentials_isNotConnectionReset() {
         // Falsche Credentials = User-Fehler, kein Auth-Reset.
-        let err = RoutexClientError.InvalidCredentials(userMessage: nil)
+        let err = RoutexError.invalidCredentials(userMessage: nil)
         XCTAssertFalse(YaxiService.isConnectionResetError(err))
     }
 
     func test_serviceBlocked_isNotConnectionReset() {
-        let err = RoutexClientError.ServiceBlocked(userMessage: nil, code: nil)
+        let err = RoutexError.serviceBlocked(code: nil, userMessage: nil)
         XCTAssertFalse(YaxiService.isConnectionResetError(err))
     }
 
     func test_requestError_isNotConnectionReset() {
         // Netzwerkfehler: eigener Retry-Pfad (isRequestError), nicht Auth.
-        let err = RoutexClientError.RequestError(error: "timeout")
+        let err = HTTPError.transportFailure(underlying: URLError(.timedOut))
         XCTAssertFalse(YaxiService.isConnectionResetError(err))
     }
 
     func test_canceled_isNotConnectionReset() {
-        XCTAssertFalse(YaxiService.isConnectionResetError(RoutexClientError.Canceled))
+        XCTAssertFalse(YaxiService.isConnectionResetError(RoutexError.canceled))
     }
 
     func test_nonRoutexError_isNotConnectionReset() {

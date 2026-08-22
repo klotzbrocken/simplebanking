@@ -73,9 +73,19 @@ CLI and MCP read the **same SQLite DB** the app writes (`~/Library/Application S
 BalanceBar
   └─ YaxiService.swift           ← async API wrapper (fetchBalances, fetchTransactions, sendTransfer)
        └─ YaxiTicketMaker.swift  ← ticket signing (uses Transfer-Pair for licensed transfers)
-            └─ RoutexClient (routex-client-swift SPM dep)
+            └─ RoutexClient (routex-client-swift SPM dep, seit 22.08.2026 auf 0.5.x)
                  └─ YAXI Open Banking API → bank (PSD2)
 ```
+
+**SDK-Fehler kommen in vier Familien** (seit routex-client-swift 0.5): `RoutexError`
+meldet der Dienst, `RoutexClientError` der Client, `HTTPError` der Transport,
+`KeySettlementError` die Attestierung. Wer nur auf einen Typ prüft, übersieht die
+anderen — und zwar **ohne Compilerfehler**, weil alle vier `Error` sind. Alle
+Entscheidungsstellen liegen in `YaxiService` (`darfZustimmungVerwerfen`,
+`erstMitConnectionDataWiederholen`, `isConnectionResetError`,
+`captureUnexpectedErrorIfNeeded`) und in `RoutexErrorMapper`; `SDKFehlerfamilienTests`
+hält sie fest. Beim Ergänzen eines `catch` oder `as?` dort immer prüfen, welche Familie
+gemeint ist.
 
 **HBCI mutex:** banks like Volksbank reject parallel calls on the same connection with "Fehlender Dialogkontext". Every refresh path checks `isHBCICallInFlight` / goes through `BankRequestQueue`. When adding any new bank-call site, **do not** start a `Task { fetch… }` without going through the queue or guarding against in-flight calls.
 

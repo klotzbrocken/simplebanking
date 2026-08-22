@@ -1,5 +1,5 @@
 import XCTest
-import Routex
+import RoutexClient
 @testable import simplebanking
 
 /// Tests für die pure Validierungs-/Hint-Logik des SCA-`.field`-Inputs.
@@ -9,8 +9,8 @@ final class SCAFieldInputTests: XCTestCase {
     private func spec(
         type: InputType = .number,
         secrecy: SecrecyLevel = .otp,
-        min: UInt32? = 6,
-        max: UInt32? = 8
+        min: Int? = 6,
+        max: Int? = 8
     ) -> SCAFieldInput.Spec {
         .init(
             type: type, secrecyLevel: secrecy,

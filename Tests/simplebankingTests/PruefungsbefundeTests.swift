@@ -126,19 +126,18 @@ final class RedirectCoordinatorTests: XCTestCase {
 
     /// Der Vorgangsschlüssel darf das Ticket nicht im Klartext enthalten — es ist ein
     /// signiertes Token.
-    func test_vorgangsschluessel_enthaeltDasTicketNichtImKlartext() {
-        let ticket = "eyJhbGciOiJIUzI1NiJ9.geheim.signatur"
+    func test_vorgangsschluessel_enthaeltDasTicketNichtImKlartext() throws {
+        let ticket = try XCTUnwrap(YaxiTicketMaker.accountsTicket())
         let key = YaxiService.redirectVorgang(slotId: "legacy", ticket: ticket)
-        XCTAssertFalse(key.contains("geheim"))
-        XCTAssertFalse(key.contains(ticket))
+        XCTAssertFalse(key.contains(ticket.raw))
         XCTAssertTrue(key.hasPrefix("legacy|"))
     }
 
     /// Verschiedene Tickets müssen verschiedene Schlüssel ergeben, sonst wäre die
     /// Unterscheidung wertlos.
-    func test_verschiedeneTickets_ergebenVerschiedeneSchluessel() {
-        let a = YaxiService.redirectVorgang(slotId: "s", ticket: "ticket-a")
-        let b = YaxiService.redirectVorgang(slotId: "s", ticket: "ticket-b")
+    func test_verschiedeneTickets_ergebenVerschiedeneSchluessel() throws {
+        let a = YaxiService.redirectVorgang(slotId: "s", ticket: try YaxiTicketMaker.accountsTicket())
+        let b = YaxiService.redirectVorgang(slotId: "s", ticket: try YaxiTicketMaker.accountsTicket())
         XCTAssertNotEqual(a, b)
     }
 }

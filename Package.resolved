@@ -1,5 +1,5 @@
 {
-  "originHash" : "94b2e1260c5d71aae79b3154ff5907db6397fd4052baa62a6736d8e35d35e795",
+  "originHash" : "e113056fdbcce5d880740e6b7fb267c8df1d516198ca6f996eb73352221c9c47",
   "pins" : [
     {
       "identity" : "grdb.swift",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/yaxitech/routex-client-swift",
       "state" : {
-        "revision" : "c44e570eb11352e226a61c3d020aff3fb7277634",
-        "version" : "0.4.1"
+        "revision" : "2280087e9dd6a26a7f03fd451cc4d6b213b83ca3",
+        "version" : "0.5.0"
       }
     },
     {
@@ -35,6 +35,24 @@
       "state" : {
         "revision" : "626b5b7b2f45e1b0b1c6f4a309296d1d21d7311b",
         "version" : "1.7.1"
+      }
+    },
+    {
+      "identity" : "swift-asn1",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-asn1",
+      "state" : {
+        "revision" : "a9a5efd40eaf558a2bcd48d64b1d1646be686008",
+        "version" : "1.7.1"
+      }
+    },
+    {
+      "identity" : "swift-crypto",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-crypto",
+      "state" : {
+        "revision" : "47d3869a7291f085c1fb9fb1e6d3b97a793f45c6",
+        "version" : "4.5.1"
       }
     }
   ],

@@ -1,7 +1,7 @@
 import Foundation
-import Routex
+import RoutexClient
 
-// MARK: - RoutexClientError → User-facing message
+// MARK: - Fehler der Routex-Bibliothek → Text für den Nutzer
 //
 // Vorher zeigte die UI rohen `error.localizedDescription`-Output von RoutexClient
 // — das landete als "UnexpectedError" oder generischer Englisch-String beim User.
@@ -33,7 +33,38 @@ enum RoutexErrorMapper {
     /// Wandelt einen Error in eine User-Message. Nicht-Routex-Errors bekommen
     /// einen generischen Fallback-Text.
     static func userMessage(for error: Error) -> UserMessage {
-        guard let re = error as? RoutexClientError else {
+        // Seit SDK 0.5 gibt es VIER Fehlerfamilien statt einer: `RoutexError` (Bank bzw.
+        // Dienst), `RoutexClientError` (Fehler im Client selbst), `HTTPError` (Transport)
+        // und `KeySettlementError` (Attestierung). Eine Abfrage nur auf
+        // `RoutexClientError` — wie bis 0.4.1 — ginge an ALLEN Bankfehlern vorbei, und
+        // jeder davon bekäme den generischen Text.
+        if let http = error as? HTTPError {
+            return UserMessage(
+                title: L10n.t("Keine Verbindung", "No connection"),
+                detail: "\(http)",
+                suggestion: L10n.t("Internetverbindung prüfen und erneut versuchen.",
+                                   "Check your connection and retry."),
+                isRetryable: true
+            )
+        }
+        if let client = error as? RoutexClientError {
+            return UserMessage(
+                title: L10n.t("Antwort nicht lesbar", "Malformed response"),
+                detail: "\(client)",
+                suggestion: L10n.t("Bitte erneut versuchen.", "Please retry."),
+                isRetryable: true
+            )
+        }
+        if let settlement = error as? KeySettlementError {
+            return UserMessage(
+                title: L10n.t("Sichere Verbindung nicht bestätigt", "Secure channel unverified"),
+                detail: "\(settlement)",
+                suggestion: L10n.t("Bitte erneut versuchen. Bleibt es dabei, ist der Dienst gestört.",
+                                   "Please retry. If it persists, the service is disrupted."),
+                isRetryable: true
+            )
+        }
+        guard let re = error as? RoutexError else {
             return UserMessage(
                 title: L10n.t("Unbekannter Fehler", "Unknown error"),
                 detail: error.localizedDescription,
@@ -43,23 +74,18 @@ enum RoutexErrorMapper {
         }
 
         switch re {
-        case .InvalidRedirectUri:
+        // `InvalidRedirectUri` und `RequestError` gibt es seit 0.5 nicht mehr:
+        // `setRedirectURI` prüft nicht mehr, und Transportfehler sind `HTTPError`
+        // (oben abgefangen). Geblieben ist die unlesbare Antwort.
+        case .unrecognizedResponse(let status, let text):
             return UserMessage(
-                title: L10n.t("Banking-Konfiguration fehlerhaft", "Banking configuration error"),
-                detail: nil,
-                suggestion: L10n.t("Setup neu starten.", "Restart setup."),
-                isRetryable: false
-            )
-
-        case .RequestError(let err):
-            return UserMessage(
-                title: L10n.t("Netzwerkfehler", "Network error"),
-                detail: err,
-                suggestion: L10n.t("Internet prüfen, dann erneut versuchen.", "Check connection and retry."),
+                title: L10n.t("Unerwartete Antwort", "Unexpected response"),
+                detail: "HTTP \(status): \(text)",
+                suggestion: L10n.t("Bitte erneut versuchen.", "Please retry."),
                 isRetryable: true
             )
 
-        case .UnexpectedError(let msg):
+        case .unexpectedError(let msg):
             return UserMessage(
                 title: L10n.t("Unerwarteter Bankfehler", "Unexpected bank error"),
                 detail: msg,
@@ -67,7 +93,7 @@ enum RoutexErrorMapper {
                 isRetryable: true
             )
 
-        case .Canceled:
+        case .canceled:
             return UserMessage(
                 title: L10n.t("Vorgang abgebrochen", "Cancelled"),
                 detail: nil,
@@ -75,7 +101,7 @@ enum RoutexErrorMapper {
                 isRetryable: true
             )
 
-        case .InvalidCredentials(let msg):
+        case .invalidCredentials(let msg):
             return UserMessage(
                 title: L10n.t("Zugangsdaten ungültig", "Invalid credentials"),
                 detail: msg,
@@ -84,7 +110,7 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .ServiceBlocked(let msg, _):
+        case .serviceBlocked(_, let msg):
             return UserMessage(
                 title: L10n.t("Bank-Zugang gesperrt", "Bank access blocked"),
                 detail: msg,
@@ -93,24 +119,20 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .Unauthorized(let msg):
+        // `ConsentExpired` ist seit 0.5 in `unauthorized` aufgegangen. Der Vorschlag
+        // deckt deshalb beides ab: eine abgelaufene Sitzung löst sich durch erneutes
+        // Verbinden, eine abgelaufene Einwilligung braucht die Einrichtung. Am Fehler
+        // allein sind die Fälle nicht mehr zu unterscheiden.
+        case .unauthorized(let msg):
             return UserMessage(
-                title: L10n.t("Sitzung abgelaufen", "Session expired"),
+                title: L10n.t("Zugriff abgelaufen", "Access expired"),
                 detail: msg,
-                suggestion: L10n.t("Erneut verbinden.", "Reconnect."),
+                suggestion: L10n.t("Erneut verbinden. Hilft das nicht, im Banking-Setup neu autorisieren.",
+                                   "Reconnect. If that does not help, re-authorize in banking setup."),
                 isRetryable: true
             )
 
-        case .ConsentExpired(let msg):
-            return UserMessage(
-                title: L10n.t("Banking-Einwilligung abgelaufen", "Banking consent expired"),
-                detail: msg,
-                suggestion: L10n.t("Im Banking-Setup neu autorisieren.",
-                                   "Re-authorize in banking setup."),
-                isRetryable: true
-            )
-
-        case .AccessExceeded(let msg):
+        case .accessExceeded(let msg):
             return UserMessage(
                 title: L10n.t("Tageslimit erreicht", "Daily limit reached"),
                 detail: msg,
@@ -118,7 +140,7 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .PeriodOutOfBounds(let msg):
+        case .periodOutOfBounds(let msg):
             return UserMessage(
                 title: L10n.t("Zeitraum nicht abrufbar", "Period out of range"),
                 detail: msg,
@@ -126,7 +148,7 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .UnsupportedProduct(_, let msg):
+        case .unsupportedProduct(_, let msg):
             return UserMessage(
                 title: L10n.t("Konto wird nicht unterstützt", "Account type unsupported"),
                 detail: msg,
@@ -134,7 +156,7 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .PaymentFailed(_, let msg):
+        case .paymentFailed(_, let msg):
             return UserMessage(
                 title: L10n.t("Zahlung fehlgeschlagen", "Payment failed"),
                 detail: msg,
@@ -142,7 +164,7 @@ enum RoutexErrorMapper {
                 isRetryable: true
             )
 
-        case .UnexpectedValue(let err):
+        case .unexpectedValue(let err):
             return UserMessage(
                 title: L10n.t("Datenfehler", "Data error"),
                 detail: err,
@@ -150,7 +172,7 @@ enum RoutexErrorMapper {
                 isRetryable: true
             )
 
-        case .TicketError(let err, _):
+        case .ticketError(let err, _):
             return UserMessage(
                 title: L10n.t("Setup-Fehler", "Setup error"),
                 detail: err,
@@ -158,7 +180,7 @@ enum RoutexErrorMapper {
                 isRetryable: true
             )
 
-        case .ProviderError(_, let msg):
+        case .providerError(_, let msg):
             return UserMessage(
                 title: L10n.t("Bankfehler", "Bank error"),
                 detail: msg,
@@ -166,15 +188,7 @@ enum RoutexErrorMapper {
                 isRetryable: true
             )
 
-        case .ResponseError(let response):
-            return UserMessage(
-                title: L10n.t("Unerwartete Antwort", "Unexpected response"),
-                detail: response,
-                suggestion: L10n.t("Bitte erneut versuchen.", "Please retry."),
-                isRetryable: true
-            )
-
-        case .NotFound:
+        case .notFound:
             return UserMessage(
                 title: L10n.t("Nicht gefunden", "Not found"),
                 detail: nil,
@@ -182,11 +196,22 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .InterruptError:
+        case .interruptError:
             return UserMessage(
                 title: L10n.t("Vorgang unterbrochen", "Interrupted"),
                 detail: nil,
                 suggestion: L10n.t("Erneut versuchen.", "Retry."),
+                isRetryable: true
+            )
+
+        // Pflicht, kein Versehen: `RoutexError` kann in einer künftigen SDK-Fassung
+        // Fälle dazubekommen. Ein erschöpfendes `switch` bricht dann beim Aktualisieren —
+        // die Migrationsanleitung zu 0.5 nennt das ausdrücklich.
+        default:
+            return UserMessage(
+                title: L10n.t("Bankfehler", "Bank error"),
+                detail: "\(re)",
+                suggestion: L10n.t("Bitte erneut versuchen.", "Please retry."),
                 isRetryable: true
             )
         }

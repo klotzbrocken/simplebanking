@@ -1,5 +1,5 @@
 import XCTest
-import Routex
+import RoutexClient
 @testable import simplebanking
 
 // MARK: - Eine frische Zustimmung ist nicht abgelaufen
@@ -18,7 +18,7 @@ import Routex
 
 final class FrischeZustimmungTests: XCTestCase {
 
-    private let mehrdeutig = RoutexClientError.UnexpectedError(userMessage: nil)
+    private let mehrdeutig = RoutexError.unexpectedError(userMessage: nil)
 
     // MARK: Der Fall, um den es geht
 
@@ -57,7 +57,7 @@ final class FrischeZustimmungTests: XCTestCase {
     /// Sagt die Bank ausdrücklich, dass die Zustimmung weg ist, wird ihr geglaubt —
     /// unabhängig vom Alter. Nur die Faustregel wird ausgesetzt, nicht die Aussage.
     func test_ausdrucklicheAussageDerBank_giltImmer() {
-        for fehler: RoutexClientError in [.Unauthorized(userMessage: nil), .ConsentExpired(userMessage: nil)] {
+        for fehler: RoutexError in [.unauthorized(userMessage: nil)] {
             XCTAssertTrue(
                 YaxiService.darfOhneConnectionDataWiederholen(error: fehler, connectionDataAge: 0.5),
                 "\(fehler) muss auch bei frischer Zustimmung greifen")
@@ -67,7 +67,7 @@ final class FrischeZustimmungTests: XCTestCase {
     /// Fehler, die gar nichts mit der Zustimmung zu tun haben, dürfen den Zweig nie
     /// auslösen — weder vorher noch nachher.
     func test_fremdeFehlerLoesenDenZweigNichtAus() {
-        let fremd = RoutexClientError.InvalidCredentials(userMessage: nil)
+        let fremd = RoutexError.invalidCredentials(userMessage: nil)
         for alter: TimeInterval? in [nil, 0.5, 1000] {
             XCTAssertFalse(
                 YaxiService.darfOhneConnectionDataWiederholen(error: fremd, connectionDataAge: alter))
@@ -77,7 +77,7 @@ final class FrischeZustimmungTests: XCTestCase {
     /// `UnexpectedError` MIT Nachricht war noch nie Teil der Faustregel (das sind die
     /// HBCI-Gateway-Fehler) — daran ändert sich nichts.
     func test_unexpectedErrorMitNachricht_bleibtAussenVor() {
-        let mitText = RoutexClientError.UnexpectedError(userMessage: "FGW Gatewaywechsel")
+        let mitText = RoutexError.unexpectedError(userMessage: "FGW Gatewaywechsel")
         XCTAssertFalse(
             YaxiService.darfOhneConnectionDataWiederholen(error: mitText, connectionDataAge: nil))
     }
@@ -111,7 +111,9 @@ final class FrischeZustimmungTests: XCTestCase {
     /// Die Zwischenstufe ist nur für Vermutungen da. Sagt die Bank selbst, dass die
     /// Zustimmung weg ist, wäre ein Versuch mit ihr verlorene Zeit.
     func test_ausdrucklicheAussage_brauchtKeineZwischenstufe() {
-        for fehler: RoutexClientError in [.Unauthorized(userMessage: nil), .ConsentExpired(userMessage: nil)] {
+        // `ConsentExpired` stand hier bis SDK 0.4.1 daneben; seit 0.5 ist es in
+        // `unauthorized` aufgegangen. Die Aussage des Tests bleibt dieselbe.
+        for fehler: RoutexError in [.unauthorized(userMessage: nil)] {
             XCTAssertFalse(
                 YaxiService.erstMitConnectionDataWiederholen(fehler),
                 "\(fehler) ist eindeutig — da gibt es nichts zu prüfen")
@@ -133,7 +135,7 @@ final class FrischeZustimmungTests: XCTestCase {
     /// aus — die Zwischenstufe ist dort ohne Bedeutung, aber sie darf auch nicht
     /// stören, falls die Reihenfolge der Zweige je umgestellt wird.
     func test_gatewayFehler_bleibtUnberuehrt() {
-        let mitText = RoutexClientError.UnexpectedError(userMessage: "Fehlender Dialogkontext")
+        let mitText = RoutexError.unexpectedError(userMessage: "Fehlender Dialogkontext")
         XCTAssertFalse(
             YaxiService.darfOhneConnectionDataWiederholen(error: mitText, connectionDataAge: 3600))
     }
@@ -160,7 +162,7 @@ final class FrischeZustimmungTests: XCTestCase {
     /// Sagt die Bank es selbst, wird trotzdem verworfen: Dann ist die Zustimmung ohnehin
     /// hin, und sie zu behalten hülfe niemandem.
     func test_redirectBank_verwirftBeiAusdruecklicherAussage() {
-        for fehler: RoutexClientError in [.Unauthorized(userMessage: nil), .ConsentExpired(userMessage: nil)] {
+        for fehler: RoutexError in [.unauthorized(userMessage: nil)] {
             XCTAssertTrue(
                 YaxiService.darfZustimmungVerwerfen(error: fehler, istRedirectBank: true),
                 "\(fehler) ist eindeutig")
@@ -182,7 +184,7 @@ final class FrischeZustimmungTests: XCTestCase {
 
     func test_fremderFehler_hatKeineZwischenstufe() {
         XCTAssertFalse(
-            YaxiService.erstMitConnectionDataWiederholen(RoutexClientError.InvalidCredentials(userMessage: nil)))
+            YaxiService.erstMitConnectionDataWiederholen(RoutexError.invalidCredentials(userMessage: nil)))
         XCTAssertFalse(
             YaxiService.erstMitConnectionDataWiederholen(URLError(.timedOut)))
     }

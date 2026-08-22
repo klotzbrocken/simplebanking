@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 import Foundation
-import Routex
+import RoutexClient
 import SwiftUI
 import UserNotifications
 import ServiceManagement
@@ -3377,23 +3377,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     
     // MARK: - YAXI error helpers
 
-    /// Extracts the bank-provided userMessage from a RoutexClientError, if present.
+    /// Die Meldung der Bank aus einem Dienstfehler, falls vorhanden.
+    ///
+    /// Seit SDK 0.5 ist `RoutexClientError` **nicht** mehr der Typ der Dienstfehler —
+    /// der heißt `RoutexError`, `RoutexClientError` steht nur noch für Fehler im Client
+    /// selbst. Eine Abfrage auf den alten Typ ginge hier still daneben und jede
+    /// Bankmeldung wäre verloren.
     private static func yaxiUserMessage(_ error: Error) -> String? {
-        guard let re = error as? RoutexClientError else { return nil }
+        guard let re = error as? RoutexError else { return nil }
         switch re {
-        case .UnexpectedError(let msg): return msg
-        case .InvalidCredentials(let msg): return msg
-        case .ServiceBlocked(let msg, _): return msg
-        case .Unauthorized(let msg): return msg
-        case .ConsentExpired(let msg): return msg
-        case .ProviderError(_, let msg): return msg
+        case .unexpectedError(let msg): return msg
+        case .invalidCredentials(let msg): return msg
+        case .serviceBlocked(_, let msg): return msg
+        case .unauthorized(let msg): return msg
+        case .accessExceeded(let msg): return msg
+        case .providerError(_, let msg): return msg
         default: return nil
         }
     }
 
     private static func isCanceledError(_ error: Error) -> Bool {
-        guard let re = error as? RoutexClientError else { return false }
-        if case .Canceled = re { return true }
+        guard let re = error as? RoutexError else { return false }
+        if case .canceled = re { return true }
         return false
     }
 
@@ -6322,7 +6327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let newSlot = BankSlot.makeNew(iban: "", displayName: "", logoId: nil)
         SlotContext.activate(slotId: newSlot.id)
 
-        final class AdditionalAccountsBox: @unchecked Sendable { var value: [Routex.Account] = [] }
+        final class AdditionalAccountsBox: @unchecked Sendable { var value: [RoutexModels.Account] = [] }
         let additionalAccountsBox = AdditionalAccountsBox()
 
         let wizard = SetupWizardPanel(
@@ -6458,7 +6463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // hold the old slot ID — causing all setup data to be written under the wrong keys.
         SlotContext.activate(slotId: "legacy")
 
-        final class AdditionalAccountsBox2: @unchecked Sendable { var value: [Routex.Account] = [] }
+        final class AdditionalAccountsBox2: @unchecked Sendable { var value: [RoutexModels.Account] = [] }
         let additionalAccountsBox2 = AdditionalAccountsBox2()
 
         let wizard = SetupWizardPanel(connectAction: { payload, selectedBankName, options, masterPassword in
@@ -6696,7 +6701,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let bank: DiscoveredBank
         let normalizedIBAN: String
         let apiKey: String?
-        let additionalAccounts: [Routex.Account]
+        let additionalAccounts: [RoutexModels.Account]
     }
 
 
@@ -6956,7 +6961,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     L10n.t("Kein Konto gefunden. Bitte Bank erneut verbinden.", "No account found. Please reconnect.")
                 )
             }
-            let selectedAccounts: [Routex.Account]
+            let selectedAccounts: [RoutexModels.Account]
             if selectableAccounts.count == 1 {
                 selectedAccounts = [selectableAccounts[0]]
             } else if let picker = options.onPickAccount {

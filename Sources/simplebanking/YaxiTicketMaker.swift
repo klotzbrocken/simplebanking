@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import RoutexClient
 
 // MARK: - JWT ticket signing for the YAXI API
 // Format mirrors the Node.js jsonwebtoken-based issueTicket() in backend/server.js.
@@ -11,6 +12,26 @@ enum YaxiTicketMaker {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+    }
+
+    // MARK: - Typisierte Tickets (SDK 0.5)
+    //
+    // Bis 0.4.1 war ein Ticket eine undurchsichtige `Ticket`-Struktur, die aus dem
+    // JWT-String gebaut wurde. 0.5 hat je Dienst einen eigenen Typ, und dessen
+    // Initialisierer prüft die `data.service`-Angabe im Token. Ein für „Balances"
+    // ausgestelltes Ticket lässt sich damit nicht mehr versehentlich an den
+    // Konten-Dienst geben — vorher fiel so etwas erst der Bank auf.
+    //
+    // Die Initialisierer werfen, weil sie den JWT zerlegen. Hier kann das nur bei einem
+    // Fehler in `issueTicket` passieren; die Fehler werden trotzdem durchgereicht statt
+    // geschluckt, damit ein kaputtes Token nicht als Netzwerkfehler erscheint.
+
+    static func accountsTicket() throws -> AccountsTicket {
+        try AccountsTicket(issueTicket(service: "Accounts"))
+    }
+
+    static func balancesTicket() throws -> BalancesTicket {
+        try BalancesTicket(issueTicket(service: "Balances"))
     }
 
     /// Issues a signed JWT ticket for the given YAXI service.
@@ -71,13 +92,13 @@ enum YaxiTicketMaker {
     /// seitig für `Transfer` ablehnt und damit eine zweite Schutzschicht
     /// neben dem UI-Gate bildet.
     @MainActor
-    static func issueTransferTicket() -> String {
+    static func issueTransferTicket() throws -> TransferTicket {
         let licensed = LicenseManager.shared.isLicensedOrDemo
-        return issueTicket(service: "Transfer", data: nil, useTransferKey: licensed)
+        return try TransferTicket(issueTicket(service: "Transfer", data: nil, useTransferKey: licensed))
     }
 
     /// Convenience: Transactions ticket including account and date range in the payload.
-    static func issueTransactionsTicket(iban: String, currency: String = "EUR", from: String? = nil, to: String? = nil) -> String {
+    static func issueTransactionsTicket(iban: String, currency: String = "EUR", from: String? = nil, to: String? = nil) throws -> TransactionsTicket {
         var range: [String: Any] = [:]
         if let from { range["from"] = from }
         if let to { range["to"] = to }
@@ -86,6 +107,6 @@ enum YaxiTicketMaker {
             "account": ["iban": iban, "currency": currency] as [String: Any],
             "range": range as [String: Any]
         ]
-        return issueTicket(service: "Transactions", data: data as Any)
+        return try TransactionsTicket(issueTicket(service: "Transactions", data: data as Any))
     }
 }

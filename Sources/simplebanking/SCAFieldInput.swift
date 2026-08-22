@@ -1,5 +1,5 @@
 import Foundation
-import Routex
+import RoutexClient
 
 // MARK: - SCAFieldInput
 //
@@ -19,8 +19,10 @@ enum SCAFieldInput {
     struct Spec: Sendable, Equatable {
         let type: InputType
         let secrecyLevel: SecrecyLevel
-        let minLength: UInt32?
-        let maxLength: UInt32?
+        // SDK 0.5 begrenzt die Antwort mit `Int?` statt `UInt32?` — die Standard-
+        // bibliothek zählt in `Int`, und der Vergleich unten wird dadurch einfacher.
+        let minLength: Int?
+        let maxLength: Int?
         /// Anzeige im Sheet-Header (z.B. „Sparkasse Siegen") — kommt vom
         /// Aufrufer aus dem aktiven Slot, nicht aus dem SDK.
         let bankDisplayName: String

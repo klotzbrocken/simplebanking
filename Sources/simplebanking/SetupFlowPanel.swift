@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import Routex
+import RoutexClient
 
 enum SetupProgress: Sendable {
     case discoveringBank
@@ -63,7 +63,7 @@ enum SCAMethodHint: Sendable {
 struct SetupConnectOptions: Sendable {
     var diagnosticsEnabled: Bool = false
     var onProgress: (@Sendable (SetupProgress) -> Void)?
-    var onPickAccount: (@Sendable ([Routex.Account]) async -> [Routex.Account]?)?
+    var onPickAccount: (@Sendable ([RoutexModels.Account]) async -> [RoutexModels.Account]?)?
 }
 
 struct SetupConnectActionError: LocalizedError {
@@ -179,8 +179,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let ibanNotFoundMailButton = NSButton(title: "", target: nil, action: nil)
 
     // Account picker step
-    private var accountPickerAccounts: [Routex.Account] = []
-    private var accountPickerContinuation: CheckedContinuation<[Routex.Account]?, Never>?
+    private var accountPickerAccounts: [RoutexModels.Account] = []
+    private var accountPickerContinuation: CheckedContinuation<[RoutexModels.Account]?, Never>?
     private var accountPickerCheckboxes: [NSButton] = []
 
     init(connectAction: @escaping ConnectAction, existingMasterPassword: String? = nil) {
@@ -1005,7 +1005,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         // Sort: Girokonto (current) first — that's what this app is designed for.
         // Others follow in a sensible order; within each type keep original API order.
-        let typePriority: (Routex.AccountType?) -> Int = { type in
+        let typePriority: (RoutexModels.AccountType?) -> Int = { type in
             switch type {
             case .current:   return 0
             case .savings:   return 1
@@ -1789,15 +1789,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         // Build DiscoveredBank from the already-selected ConnectionInfo
         discoverResult = DiscoveredBank(
-            id: conn.id,
+            id: conn.id.description,
             displayName: conn.displayName,
-            logoId: conn.logoId,
+            logoId: conn.logoID,
             credentials: DiscoveredBankCredentials(
                 full: conn.credentials.full,
-                userId: conn.credentials.userId,
+                userId: conn.credentials.userID,
                 none: conn.credentials.none
             ),
-            userIdLabel: conn.userId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+            userIdLabel: conn.userIDLabel?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
             advice: conn.advice?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         )
 
@@ -1964,7 +1964,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             }
         }
         optionsWithProgress.onPickAccount = { [weak self] accounts in
-            return await withCheckedContinuation { (cont: CheckedContinuation<[Routex.Account]?, Never>) in
+            return await withCheckedContinuation { (cont: CheckedContinuation<[RoutexModels.Account]?, Never>) in
                 Self.enqueueOnMainRunLoop { [weak self] in
                     guard let self else {
                         cont.resume(returning: nil)
