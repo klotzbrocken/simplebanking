@@ -514,7 +514,7 @@ enum YaxiService {
             .map { String($0) }
             .filter { $0.count >= 2 }
         guard !terms.isEmpty else { return [] }
-        let client = RoutexClient()
+        let client = YaxiTransport.client()
         do {
             // Wirft seit SDK 0.5: Der Ticket-Typ prüft die Dienstangabe im Token.
             let ticket = try YaxiTicketMaker.accountsTicket()
@@ -570,7 +570,7 @@ enum YaxiService {
             return nil
         }
 
-        let client = RoutexClient()
+        let client = YaxiTransport.client()
         do {
             // Wirft seit SDK 0.5: Der Ticket-Typ prüft die Dienstangabe im Token.
             let ticket = try YaxiTicketMaker.accountsTicket()
@@ -613,7 +613,7 @@ enum YaxiService {
     /// Searches for bank by display name/term and persists the connection ID.
     /// Used in accounts() flow where IBAN is not known upfront.
     static func discoverBankByTerm(_ term: String) async -> DiscoveredBank? {
-        let client = RoutexClient()
+        let client = YaxiTransport.client()
         do {
             // Wirft seit SDK 0.5: Der Ticket-Typ prüft die Dienstangabe im Token.
             let ticket = try YaxiTicketMaker.accountsTicket()
@@ -687,7 +687,7 @@ enum YaxiService {
             connectionData: storedCD, userId: userId, password: password
         )
 
-        let client = RoutexClient()
+        let client = YaxiTransport.client()
         // `var` so the retry can issue a fresh ticket — after UnexpectedError the old
         // ticket's server-side state is undefined and reusing it risks another failure.
         var ticket = try YaxiTicketMaker.accountsTicket()
@@ -845,7 +845,20 @@ enum YaxiService {
             connectionData: storedCD, userId: userId, password: password
         )
 
-        let client = RoutexClient()
+        // Erst der nicht-interaktive Weg. Er braucht nur die gespeicherte Zustimmung und
+        // kennt keine Freigabe-Zweige; klappt er, ist der Abruf hier zu Ende. Klappt er
+        // nicht, läuft unverändert alles Bisherige — inklusive Wiederholungen,
+        // Zustimmungsregeln und Fehlerbericht.
+        if let cd = storedCD,
+           let schnell = await schnellSalden(slotSnapshot: slotSnapshot,
+                                             connectionData: cd,
+                                             accountRefs: accountRefs,
+                                             iban: iban,
+                                             session: storedSession) {
+            return schnell
+        }
+
+        let client = YaxiTransport.client()
         // Mutable — wird im retry-Pfad bei Bedarf neu ausgestellt (Yaxi-Doku:
         // nach non-RequestError frischer Ticket). Der finale Wert nach dem
         // inner-catch wird in `scaTicket` eingefroren für die SCA-Closures.
@@ -1131,11 +1144,21 @@ enum YaxiService {
             connectionData: storedCD, userId: userId, password: password
         )
 
-        let client = RoutexClient()
+        AppLogger.log("fetchTransactions from=\(from)", category: "YaxiService")
+
+        // Erst der nicht-interaktive Weg — siehe `schnellSalden` für die Begründung.
+        if let cd = storedCD,
+           let schnell = await schnellUmsaetze(
+               slotSnapshot: slotSnapshot,
+               connectionData: cd,
+               ticket: try YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from),
+               session: storedSession) {
+            return schnell
+        }
+
+        let client = YaxiTransport.client()
         // Mutable — retry-Pfade ziehen neuen Ticket (Yaxi-Doku).
         var ticket = try YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
-
-        AppLogger.log("fetchTransactions from=\(from)", category: "YaxiService")
 
         do {
             var resp: Response<TransactionsResult>
@@ -1335,7 +1358,7 @@ enum YaxiService {
             ? String(normalized.dropFirst(4).prefix(8))
             : nil
 
-        let client = RoutexClient()
+        let client = YaxiTransport.client()
 
         func searchWith(term: String, ibanDetection: Bool) async -> DiscoveredBank? {
             guard let ticket = try? YaxiTicketMaker.accountsTicket() else { return nil }
@@ -1684,7 +1707,7 @@ enum YaxiService {
             connectionData: storedCD, userId: userId, password: password
         )
 
-        let client = RoutexClient()
+        let client = YaxiTransport.client()
         // Mutable, damit retry-Pfade einen frischen Ticket ziehen können
         // (Yaxi-Doku: nach non-RequestError neuer Ticket nötig). Der finale
         // Wert nach dem inner-catch wird in `scaTicket` eingefroren und an die
@@ -1832,6 +1855,101 @@ enum YaxiService {
         }
     }
 
+    // MARK: - Nicht-interaktiver Abruf (RoutexRefresh)
+
+    /// Ist der Schnellabruf eingeschaltet? Standard: ja.
+    ///
+    /// Der Schalter ist bewusst da. Der Weg ist neu, er spricht mit echten Banken, und
+    /// wenn eine sich dabei anders verhält als erwartet, soll man ihn abschalten können,
+    /// ohne eine neue Fassung auszuliefern.
+    static var schnellabrufAktiv: Bool {
+        UserDefaults.standard.object(forKey: "yaxiNonInteractiveRefreshEnabled") as? Bool ?? true
+    }
+
+    /// Saldenabruf ohne jede Freigabe-Maschinerie.
+    ///
+    /// **Warum das ein eigener Weg ist.** Der interaktive Dienst kann jederzeit mit einem
+    /// Dialog, einer Weiterleitung oder einem Freigabe-Handle antworten; die halbe
+    /// SCA-Schleife existiert nur, um das aufzufangen. Für eine Verbindung, die den
+    /// interaktiven Teil längst hinter sich hat, ist das der falsche Dienst — YAXI hat
+    /// dafür seit SDK 0.5 `RoutexRefresh`. Dort gibt es diese Zweige gar nicht: entweder
+    /// kommen Daten, oder es kommt ein Fehler.
+    ///
+    /// Für Redirect-Banken ist das der eigentliche Gewinn. bunq, N26 und Revolut liefern
+    /// nie eine frische Zustimmung nach; alles, was sie brauchen, ist die gespeicherte.
+    /// Genau die reicht dieser Weg durch.
+    ///
+    /// - Returns: `nil`, wenn der Weg nicht gangbar ist — dann übernimmt der interaktive.
+    ///   Ein `nil` ist ausdrücklich kein Fehler, sondern die Aufforderung weiterzumachen.
+    private static func schnellSalden(slotSnapshot: String,
+                                      connectionData: Data,
+                                      accountRefs: [AccountReference],
+                                      iban: String,
+                                      session: Data?) async -> BalancesResponse? {
+        guard schnellabrufAktiv else { return nil }
+        do {
+            let ticket = try YaxiTicketMaker.balancesTicket()
+            let antwort = try await YaxiTransport.refreshClient().balances(
+                ticket: ticket,
+                connectionData: ConnectionData(connectionData),
+                accounts: accountRefs,
+                session: session.map(Session.init)
+            )
+            AppLogger.log("fetchBalances: Schnellabruf ok slot=\(slotSnapshot.prefix(8))",
+                          category: "YaxiService")
+            // Erste Einrichtung ohne gespeicherte IBAN: aus der Antwort übernehmen —
+            // dieselbe Regel wie im interaktiven Weg.
+            if iban.isEmpty, case .iban(let gefunden)? = antwort.result.balances.first?.account.id {
+                AppLogger.log("fetchBalances: auto-stored IBAN prefix=\(String(gefunden.prefix(8)))",
+                              category: "YaxiService")
+                storeDiscoveredIBAN(gefunden)
+            }
+            await sessionStore.update(scope: .balances,
+                                      session: antwort.session?.bytes,
+                                      connectionData: antwort.connectionData?.bytes,
+                                      slotId: slotSnapshot)
+            return try makeBalancesResponse(antwort.result,
+                                            session: antwort.session?.bytes,
+                                            connectionData: antwort.connectionData?.bytes,
+                                            requestedIban: iban)
+        } catch {
+            // Bewusst still herabgestuft: Der interaktive Weg läuft gleich und meldet
+            // den Fehler dann selbst — mit Trace und Fehlerbericht. Ihn hier schon als
+            // Fehler zu behandeln, hieße einen zu zählen, der noch gar nicht feststeht.
+            AppLogger.log("fetchBalances: Schnellabruf nicht möglich (\(error)) — interaktiv weiter",
+                          category: "YaxiService", level: "WARN")
+            return nil
+        }
+    }
+
+    /// Gegenstück für die Umsätze. Konto und Zeitraum stecken im Ticket.
+    private static func schnellUmsaetze(slotSnapshot: String,
+                                        connectionData: Data,
+                                        ticket: TransactionsTicket,
+                                        session: Data?) async -> TransactionsResponse? {
+        guard schnellabrufAktiv else { return nil }
+        do {
+            let antwort = try await YaxiTransport.refreshClient().transactions(
+                ticket: ticket,
+                connectionData: ConnectionData(connectionData),
+                session: session.map(Session.init)
+            )
+            AppLogger.log("fetchTransactions: Schnellabruf ok slot=\(slotSnapshot.prefix(8)) n=\(antwort.result?.count ?? 0)",
+                          category: "YaxiService")
+            await sessionStore.update(scope: .transactions,
+                                      session: antwort.session?.bytes,
+                                      connectionData: antwort.connectionData?.bytes,
+                                      slotId: slotSnapshot)
+            return makeTransactionsResponse(antwort.result,
+                                            session: antwort.session?.bytes,
+                                            connectionData: antwort.connectionData?.bytes)
+        } catch {
+            AppLogger.log("fetchTransactions: Schnellabruf nicht möglich (\(error)) — interaktiv weiter",
+                          category: "YaxiService", level: "WARN")
+            return nil
+        }
+    }
+
     // MARK: - Response mapping
 
     private static func makeBalancesResponse(
@@ -1840,11 +1958,26 @@ enum YaxiService {
         connectionData: Data?,
         requestedIban: String = ""
     ) throws -> BalancesResponse {
+        try makeBalancesResponse(try result.decodeUnverified().data,
+                                 session: session, connectionData: connectionData,
+                                 requestedIban: requestedIban)
+    }
+
+    /// Dieselbe Übersetzung für die reine Nutzlast — der nicht-interaktive Weg liefert
+    /// sie ohne JWT-Umschlag, der interaktive packt sie vorher aus. Beide sollen zu
+    /// demselben Ergebnis kommen; zwei Kopien dieser IBAN-Auswahl wären eine Einladung,
+    /// dass sie auseinanderlaufen.
+    private static func makeBalancesResponse(
+        _ nutzlast: Balances,
+        session: Data?,
+        connectionData: Data?,
+        requestedIban: String = ""
+    ) throws -> BalancesResponse {
         // YAXI liefert für Banken wie 1822direkt mehrere Account-Einträge zurück
         // (Girokonto + Tagesgeld + Visa-Karten-Subkonto). `first` ist russisches
         // Roulette — kann ein Subaccount ohne Booked-Balance treffen.
         // Per IBAN matchen, Fallback auf first wie bisher.
-        let allEntries = try result.decodeUnverified().data.balances
+        let allEntries = nutzlast.balances
         let target = requestedIban
             .replacingOccurrences(of: " ", with: "")
             .uppercased()
@@ -1914,7 +2047,17 @@ enum YaxiService {
         session: Data?,
         connectionData: Data?
     ) throws -> TransactionsResponse {
-        let transactions = try result.decodeUnverified().data ?? []
+        makeTransactionsResponse(try result.decodeUnverified().data,
+                                 session: session, connectionData: connectionData)
+    }
+
+    /// Gegenstück zu `makeBalancesResponse` für die reine Nutzlast.
+    private static func makeTransactionsResponse(
+        _ nutzlast: [RoutexModels.Transaction]?,
+        session: Data?,
+        connectionData: Data?
+    ) -> TransactionsResponse {
+        let transactions = nutzlast ?? []
 
         let mapped = transactions.map { tx -> TransactionsResponse.Transaction in
             let amountVal = (tx.amount.amount as NSDecimalNumber).doubleValue

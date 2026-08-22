@@ -29,7 +29,8 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "RoutexClient", package: "routex-client-swift")
+                .product(name: "RoutexClient", package: "routex-client-swift"),
+                .product(name: "RoutexRefresh", package: "routex-client-swift")
             ],
             exclude: [
                 // Entitlements-Dateien werden von build-app.sh zur Signing-Zeit verwendet,

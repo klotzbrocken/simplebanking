@@ -77,6 +77,18 @@ BalanceBar
                  └─ YAXI Open Banking API → bank (PSD2)
 ```
 
+**Bankaufrufe laufen über `YaxiTransport`** — `client()` für den interaktiven Weg,
+`refreshClient()` für den nicht-interaktiven. Beide ziehen ihren HTTP-Transport aus
+`YaxiTransport.fabrik`; im Test lässt sich der ersetzen (`YaxiTransportTests`). Nie
+direkt `RoutexClient()` bauen, sonst hängt die Stelle wieder am echten Netz.
+
+**Salden und Umsätze versuchen zuerst den Schnellabruf** (`RoutexRefresh`,
+`schnellSalden` / `schnellUmsaetze` in `YaxiService`). Er braucht nur die gespeicherte
+`connectionData` und kennt keine Freigabe-Zweige. Scheitert er, läuft unverändert der
+interaktive Weg — ein `nil` von dort ist kein Fehler, sondern die Aufforderung
+weiterzumachen. Notbremse: `defaults write tech.yaxi.simplebanking
+yaxiNonInteractiveRefreshEnabled -bool NO`.
+
 **SDK-Fehler kommen in vier Familien** (seit routex-client-swift 0.5): `RoutexError`
 meldet der Dienst, `RoutexClientError` der Client, `HTTPError` der Transport,
 `KeySettlementError` die Attestierung. Wer nur auf einen Typ prüft, übersieht die
