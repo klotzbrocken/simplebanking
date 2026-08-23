@@ -82,12 +82,20 @@ BalanceBar
 `YaxiTransport.fabrik`; im Test lässt sich der ersetzen (`YaxiTransportTests`). Nie
 direkt `RoutexClient()` bauen, sonst hängt die Stelle wieder am echten Netz.
 
+**Bei Redirect-Banken (`model.none`) wird die Zustimmung NIE automatisch verworfen** —
+weder bei `unauthorized` noch sonst. `darfZustimmungVerwerfen` ist die einzige Stelle,
+die das entscheidet, und beide Folgeschritte (Abruf ohne connectionData, `clearAll`)
+hängen daran. Neue Zustimmung entsteht dort ausschließlich bei der Einrichtung; jedes
+automatische Wegwerfen kostet sicher einen QR-Scan und heilt nichts. Wer hier eine
+Ausnahme einbauen will: Genau die gab es schon einmal, sie hat am 23.08.2026 eine
+Dauerschleife erzeugt.
+
 **Salden und Umsätze versuchen zuerst den Schnellabruf** (`RoutexRefresh`,
 `schnellSalden` / `schnellUmsaetze` in `YaxiService`). Er braucht nur die gespeicherte
 `connectionData` und kennt keine Freigabe-Zweige. Scheitert er, läuft unverändert der
 interaktive Weg — ein `nil` von dort ist kein Fehler, sondern die Aufforderung
-weiterzumachen. Notbremse: `defaults write tech.yaxi.simplebanking
-yaxiNonInteractiveRefreshEnabled -bool NO`.
+weiterzumachen. **Standardmäßig aus** seit dem 23.08.2026; zum Erproben:
+`defaults write tech.yaxi.simplebanking yaxiNonInteractiveRefreshEnabled -bool YES`.
 
 **SDK-Fehler kommen in vier Familien** (seit routex-client-swift 0.5): `RoutexError`
 meldet der Dienst, `RoutexClientError` der Client, `HTTPError` der Transport,

@@ -853,8 +853,7 @@ enum YaxiService {
            let schnell = await schnellSalden(slotSnapshot: slotSnapshot,
                                              connectionData: cd,
                                              accountRefs: accountRefs,
-                                             iban: iban,
-                                             session: storedSession) {
+                                             iban: iban) {
             return schnell
         }
 
@@ -964,6 +963,20 @@ enum YaxiService {
                             resp = try await ohneCD(ticket)
                         }
                     } else {
+                        // **Auch hier die Redirect-Regel.** Dieser Zweig greift, wenn der
+                        // Fehler KEIN unklarer Serverfehler ist — also gerade bei
+                        // `unauthorized`. Er ging bisher ungeprüft auf `ohneCD`, und das
+                        // heißt: Zustimmung beiseite, neue Freigabe anfordern. Genau
+                        // diese Zeile stand am 23.08.2026 im Protokoll der gemeldeten
+                        // bunq-Dauerschleife, unmittelbar vor „clearing ALL state".
+                        //
+                        // Dass es vorher nicht auffiel, lag daran, dass dieselbe Bank
+                        // zuvor `UnexpectedError` lieferte und damit im oberen,
+                        // geschützten Zweig landete.
+                        guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
+                            AppLogger.log("fetchBalances: Redirect-Bank — kein Abruf ohne Zustimmung, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                            throw error
+                        }
                         AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
                         resp = try await ohneCD(ticket)
                     }
@@ -1151,8 +1164,7 @@ enum YaxiService {
            let schnell = await schnellUmsaetze(
                slotSnapshot: slotSnapshot,
                connectionData: cd,
-               ticket: try YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from),
-               session: storedSession) {
+               ticket: try YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)) {
             return schnell
         }
 
@@ -1240,6 +1252,20 @@ enum YaxiService {
                             resp = try await ohneCD(ticket)
                         }
                     } else {
+                        // **Auch hier die Redirect-Regel.** Dieser Zweig greift, wenn der
+                        // Fehler KEIN unklarer Serverfehler ist — also gerade bei
+                        // `unauthorized`. Er ging bisher ungeprüft auf `ohneCD`, und das
+                        // heißt: Zustimmung beiseite, neue Freigabe anfordern. Genau
+                        // diese Zeile stand am 23.08.2026 im Protokoll der gemeldeten
+                        // bunq-Dauerschleife, unmittelbar vor „clearing ALL state".
+                        //
+                        // Dass es vorher nicht auffiel, lag daran, dass dieselbe Bank
+                        // zuvor `UnexpectedError` lieferte und damit im oberen,
+                        // geschützten Zweig landete.
+                        guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
+                            AppLogger.log("fetchTransactions: Redirect-Bank — kein Abruf ohne Zustimmung, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                            throw error
+                        }
                         AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
                         resp = try await ohneCD(ticket)
                     }
@@ -1549,18 +1575,29 @@ enum YaxiService {
     /// der Ersteinrichtung — einmal weggeworfen, verlangt jeder Abruf für immer einen
     /// neuen QR-Scan. Genau das war der Fehler.
     ///
-    /// Sagt die Bank ausdrücklich `unauthorized`, wird trotzdem verworfen: Dann ist die
-    /// Zustimmung ohnehin hin, und Behalten hilft niemandem.
+    /// **Bei einer Redirect-Bank wird nie automatisch verworfen — auch nicht bei
+    /// `unauthorized`.**
     ///
-    /// - Note: `ConsentExpired` ist mit SDK 0.5 in `unauthorized` aufgegangen. An der
-    ///   Entscheidung ändert das nichts — beide führten schon vorher zum selben Zweig.
+    /// Bis zum 23.08.2026 war hier eine Ausnahme: Sagt die Bank ausdrücklich
+    /// `unauthorized`, sei die Zustimmung ohnehin hin, also könne man sie wegwerfen und
+    /// neu holen. Das Feld hat diese Annahme widerlegt. Gemeldet wurde eine Dauerschleife
+    /// bei bunq: zweimal QR bestätigt, danach beim nächsten Umsatzabruf wieder von vorn.
+    /// Verwerfen war also nicht die Heilung, sondern die Schleife.
+    ///
+    /// Der Denkfehler steckte im „ohnehin hin". Eine Zustimmung, die die Bank in einem
+    /// Aufruf als ungültig meldet, kann im nächsten wieder tragen — sei es, weil die
+    /// Sitzung das Problem war und nicht die Zustimmung, sei es, weil ein
+    /// vorangegangener Aufruf sie verbrannt hat. Wegwerfen kostet dagegen sicher einen
+    /// Scan, und bei Redirect-Banken wächst nichts nach: Neue Zustimmung entsteht dort
+    /// ausschließlich bei der Einrichtung.
+    ///
+    /// Der Preis dieser Entscheidung ist ehrlich zu nennen: Ist die Zustimmung
+    /// tatsächlich abgelaufen — nach PSD2 spätestens nach 90 Tagen —, kommt der Abruf
+    /// nicht mehr von selbst in Gang, und der Nutzer muss die Bank neu einrichten. Ein
+    /// wiederkehrender Fehler mit klarer Ansage ist aber besser als ein QR-Scan, der
+    /// nichts ändert und beim nächsten Abruf erneut verlangt wird.
     static func darfZustimmungVerwerfen(error: Error, istRedirectBank: Bool) -> Bool {
-        guard istRedirectBank else { return true }
-        guard let re = error as? RoutexError else { return false }
-        switch re {
-        case .unauthorized: return true
-        default: return false
-        }
+        !istRedirectBank
     }
 
     static func darfOhneConnectionDataWiederholen(error: Error,
@@ -1857,13 +1894,27 @@ enum YaxiService {
 
     // MARK: - Nicht-interaktiver Abruf (RoutexRefresh)
 
-    /// Ist der Schnellabruf eingeschaltet? Standard: ja.
+    /// Ist der Schnellabruf eingeschaltet? **Standard: nein.**
     ///
-    /// Der Schalter ist bewusst da. Der Weg ist neu, er spricht mit echten Banken, und
-    /// wenn eine sich dabei anders verhält als erwartet, soll man ihn abschalten können,
-    /// ohne eine neue Fassung auszuliefern.
+    /// War einen Tag lang an und ist es nicht mehr. Gemeldet am 23.08.2026: bunq in
+    /// Dauerschleife, zwei bestätigte QR-Scans, danach wieder von vorn. Im Protokoll
+    /// steht die Ursachenkette:
+    ///
+    ///     Schnellabruf nicht möglich (unauthorized) — interaktiv weiter
+    ///     Rohfehler vor Einordnung: unauthorized
+    ///     consent expired, retrying without connectionData
+    ///     clearing ALL state after auth reset      ← Zustimmung weg
+    ///
+    /// `unauthorized` als Rohfehler gab es in der gesamten Protokollhistorie **nur an
+    /// diesem Tag** — davor meldete dieselbe Bank `UnexpectedError`. Der zeitliche
+    /// Zusammenhang mit dem neuen Weg ist zu deutlich, um ihn eingeschaltet zu lassen,
+    /// solange nicht geklärt ist, ob der Schnellabruf die Sitzung verbrennt, auf der der
+    /// interaktive Aufruf unmittelbar danach aufsetzt.
+    ///
+    /// Einschalten zum Erproben:
+    /// `defaults write tech.yaxi.simplebanking yaxiNonInteractiveRefreshEnabled -bool YES`
     static var schnellabrufAktiv: Bool {
-        UserDefaults.standard.object(forKey: "yaxiNonInteractiveRefreshEnabled") as? Bool ?? true
+        UserDefaults.standard.object(forKey: "yaxiNonInteractiveRefreshEnabled") as? Bool ?? false
     }
 
     /// Saldenabruf ohne jede Freigabe-Maschinerie.
@@ -1881,19 +1932,23 @@ enum YaxiService {
     ///
     /// - Returns: `nil`, wenn der Weg nicht gangbar ist — dann übernimmt der interaktive.
     ///   Ein `nil` ist ausdrücklich kein Fehler, sondern die Aufforderung weiterzumachen.
+    /// - Parameter session: **wird nicht mehr durchgereicht.** Der Schnellabruf lief
+    ///   zuvor auf derselben Sitzung, auf der unmittelbar danach der interaktive Aufruf
+    ///   aufsetzt. Scheitert der erste und macht die Bank die Sitzung dabei ungültig,
+    ///   erbt der zweite ein `unauthorized` — und das deutete simplebanking als
+    ///   abgelaufene Zustimmung und warf sie weg. Ein neuer Weg darf dem alten nichts
+    ///   unter den Füßen wegziehen; er beginnt jetzt mit leerer Sitzung.
     private static func schnellSalden(slotSnapshot: String,
                                       connectionData: Data,
                                       accountRefs: [AccountReference],
-                                      iban: String,
-                                      session: Data?) async -> BalancesResponse? {
+                                      iban: String) async -> BalancesResponse? {
         guard schnellabrufAktiv else { return nil }
         do {
             let ticket = try YaxiTicketMaker.balancesTicket()
             let antwort = try await YaxiTransport.refreshClient().balances(
                 ticket: ticket,
                 connectionData: ConnectionData(connectionData),
-                accounts: accountRefs,
-                session: session.map(Session.init)
+                accounts: accountRefs
             )
             AppLogger.log("fetchBalances: Schnellabruf ok slot=\(slotSnapshot.prefix(8))",
                           category: "YaxiService")
@@ -1923,16 +1978,16 @@ enum YaxiService {
     }
 
     /// Gegenstück für die Umsätze. Konto und Zeitraum stecken im Ticket.
+    /// Gegenstück für die Umsätze. Konto und Zeitraum stecken im Ticket. Auch hier ohne
+    /// Sitzung — siehe `schnellSalden`.
     private static func schnellUmsaetze(slotSnapshot: String,
                                         connectionData: Data,
-                                        ticket: TransactionsTicket,
-                                        session: Data?) async -> TransactionsResponse? {
+                                        ticket: TransactionsTicket) async -> TransactionsResponse? {
         guard schnellabrufAktiv else { return nil }
         do {
             let antwort = try await YaxiTransport.refreshClient().transactions(
                 ticket: ticket,
-                connectionData: ConnectionData(connectionData),
-                session: session.map(Session.init)
+                connectionData: ConnectionData(connectionData)
             )
             AppLogger.log("fetchTransactions: Schnellabruf ok slot=\(slotSnapshot.prefix(8)) n=\(antwort.result?.count ?? 0)",
                           category: "YaxiService")

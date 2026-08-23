@@ -39,10 +39,11 @@ final class SDKFehlerfamilienTests: XCTestCase {
             "Bei bunq wächst eine verworfene Zustimmung nicht nach — jeder Abruf verlangte wieder einen QR-Scan")
     }
 
-    /// Sagt die Bank es selbst, wird verworfen. `ConsentExpired` ist seit 0.5 in
-    /// `unauthorized` aufgegangen; die Entscheidung bleibt dieselbe.
-    func test_redirectBank_verwirftBeiAusdruecklicherAussage() {
-        XCTAssertTrue(
+    /// Auch bei ausdrücklichem `unauthorized` wird bei einer Redirect-Bank nicht
+    /// verworfen — seit dem gemeldeten bunq-Dauerlauf am 23.08.2026. Siehe
+    /// `darfZustimmungVerwerfen` für die Begründung.
+    func test_redirectBank_verwirftAuchBeiUnauthorizedNicht() {
+        XCTAssertFalse(
             YaxiService.darfZustimmungVerwerfen(
                 error: RoutexError.unauthorized(userMessage: nil),
                 istRedirectBank: true))
@@ -72,6 +73,47 @@ final class SDKFehlerfamilienTests: XCTestCase {
         XCTAssertFalse(YaxiService.erstMitConnectionDataWiederholen(netz))
         XCTAssertFalse(YaxiService.isConnectionResetError(netz))
         XCTAssertFalse(YaxiService.darfZustimmungVerwerfen(error: netz, istRedirectBank: true))
+    }
+
+    /// **Der gemeldete Dauerlauf, als Regel festgehalten.** Am 23.08.2026 hing bunq in
+    /// einer Freigabe-Schleife: zwei bestätigte QR-Scans, danach beim nächsten
+    /// Umsatzabruf wieder von vorn. Die Kette im Protokoll war
+    ///
+    ///     Rohfehler: unauthorized
+    ///     consent expired, retrying without connectionData
+    ///     clearing ALL state after auth reset
+    ///
+    /// Beide Schritte hängen an dieser einen Entscheidung. Solange sie für Redirect-
+    /// Banken `false` liefert, kann die Kette nicht anlaufen — unabhängig davon, welchen
+    /// Fehler die Bank meldet.
+    func test_keinFehlerDarfDieZustimmungEinerRedirectBankKosten() {
+        let alleFehler: [RoutexError] = [
+            .unauthorized(userMessage: nil),
+            .unauthorized(userMessage: "consent invalid"),
+            .unexpectedError(userMessage: nil),
+            .unexpectedError(userMessage: "irgendwas"),
+            .interruptError,
+            .invalidCredentials(userMessage: nil),
+            .accessExceeded(userMessage: nil),
+            .notFound,
+        ]
+        for fehler in alleFehler {
+            XCTAssertFalse(
+                YaxiService.darfZustimmungVerwerfen(error: fehler, istRedirectBank: true),
+                "\(fehler) darf bei bunq/N26/Revolut keinen QR-Scan auslösen")
+        }
+    }
+
+    /// Die Gegenprobe: Bei Zugangsdaten-Banken bleibt der Weg offen. Dort liefert die
+    /// nächste Antwort eine frische Zustimmung nach — der Sparkassen-Fall, für den die
+    /// Regel ursprünglich gebaut wurde, darf nicht mitgesperrt werden.
+    func test_zugangsdatenBankBleibtUnberuehrt() {
+        for fehler: RoutexError in [.unauthorized(userMessage: nil),
+                                    .unexpectedError(userMessage: nil)] {
+            XCTAssertTrue(
+                YaxiService.darfZustimmungVerwerfen(error: fehler, istRedirectBank: false),
+                "\(fehler)")
+        }
     }
 
     // MARK: Der Nutzertext

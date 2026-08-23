@@ -159,13 +159,18 @@ final class FrischeZustimmungTests: XCTestCase {
             + "aufgrund unserer eigenen Deutung verworfen werden")
     }
 
-    /// Sagt die Bank es selbst, wird trotzdem verworfen: Dann ist die Zustimmung ohnehin
-    /// hin, und sie zu behalten hülfe niemandem.
-    func test_redirectBank_verwirftBeiAusdruecklicherAussage() {
-        for fehler: RoutexError in [.unauthorized(userMessage: nil)] {
-            XCTAssertTrue(
+    /// **Umgekehrt seit dem 23.08.2026.** Hier stand: „Sagt die Bank es selbst, wird
+    /// trotzdem verworfen — dann ist die Zustimmung ohnehin hin." Das Feld hat das
+    /// widerlegt. Gemeldet wurde eine Dauerschleife bei bunq: zweimal QR bestätigt,
+    /// beim nächsten Umsatzabruf wieder von vorn. Verwerfen war nicht die Heilung,
+    /// sondern die Schleife.
+    func test_redirectBank_verwirftNie() {
+        for fehler: RoutexError in [.unauthorized(userMessage: nil),
+                                    .unexpectedError(userMessage: nil),
+                                    .interruptError] {
+            XCTAssertFalse(
                 YaxiService.darfZustimmungVerwerfen(error: fehler, istRedirectBank: true),
-                "\(fehler) ist eindeutig")
+                "\(fehler): bei einer Redirect-Bank wächst nichts nach — Wegwerfen kostet sicher einen Scan")
         }
     }
 

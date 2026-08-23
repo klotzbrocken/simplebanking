@@ -106,16 +106,19 @@ final class YaxiTransportTests: XCTestCase {
 
     // MARK: Der Schalter des Schnellabrufs
 
-    func test_schnellabruf_istStandardmaessigAn() {
+    /// **Standardmäßig aus.** War einen Tag lang an; am 23.08.2026 kam die Meldung, dass
+    /// bunq in einer Freigabe-Dauerschleife hängt. `unauthorized` als Rohfehler gab es in
+    /// der gesamten Protokollhistorie nur an diesem Tag. Solange der Zusammenhang nicht
+    /// geklärt ist, bleibt der Weg aus.
+    func test_schnellabruf_istStandardmaessigAus() {
         UserDefaults.standard.removeObject(forKey: "yaxiNonInteractiveRefreshEnabled")
-        XCTAssertTrue(YaxiService.schnellabrufAktiv,
-                      "ohne Eintrag soll der neue Weg gelten")
+        XCTAssertFalse(YaxiService.schnellabrufAktiv,
+                       "ohne Eintrag gilt der bewährte Weg")
     }
 
-    /// Der Schalter ist die Notbremse: Verhält sich eine Bank anders als erwartet, muss
-    /// der alte Weg ohne neue Programmfassung erreichbar bleiben.
-    func test_schnellabruf_laesstSichAbschalten() {
-        UserDefaults.standard.set(false, forKey: "yaxiNonInteractiveRefreshEnabled")
-        XCTAssertFalse(YaxiService.schnellabrufAktiv)
+    /// Zum Erproben lässt er sich einschalten, ohne eine neue Fassung auszuliefern.
+    func test_schnellabruf_laesstSichEinschalten() {
+        UserDefaults.standard.set(true, forKey: "yaxiNonInteractiveRefreshEnabled")
+        XCTAssertTrue(YaxiService.schnellabrufAktiv)
     }
 }
