@@ -534,7 +534,12 @@ enum YaxiService {
     /// Called from the setup wizard immediately after the user selects a bank.
     static func storeConnectionInfo(_ info: ConnectionInfo) {
         let d = UserDefaults.standard
-        d.set(info.id, forKey: connectionIdKey)
+        // `.description` ist die Drahtform („connection-<uuid>"). Seit SDK 0.5 ist `id`
+        // ein `ConnectionID`-Werttyp; ihn direkt abzulegen ließ die App abstürzen —
+        // UserDefaults nimmt nur Property-List-Typen und wirft sonst eine
+        // Objective-C-Ausnahme, die den Prozess beendet. Der Compiler warnt nicht, weil
+        // `set` ein `Any?` entgegennimmt. Gemeldet als Absturz beim Einrichten (23.08.).
+        d.set(info.id.description, forKey: connectionIdKey)
         d.set(info.credentials.full,   forKey: credModelFullKey)
         d.set(info.credentials.userID, forKey: credModelUserIdKey)
         d.set(info.credentials.none,   forKey: credModelNoneKey)
@@ -586,7 +591,7 @@ enum YaxiService {
             }
 
             let d = UserDefaults.standard
-            d.set(pick.id, forKey: connectionIdKey)
+            d.set(pick.id.description, forKey: connectionIdKey)
             d.set(pick.credentials.full, forKey: credModelFullKey)
             d.set(pick.credentials.userID, forKey: credModelUserIdKey)
             d.set(pick.credentials.none, forKey: credModelNoneKey)
@@ -628,7 +633,7 @@ enum YaxiService {
                 return nil
             }
             let d = UserDefaults.standard
-            d.set(pick.id, forKey: connectionIdKey)
+            d.set(pick.id.description, forKey: connectionIdKey)
             d.set(pick.credentials.full, forKey: credModelFullKey)
             d.set(pick.credentials.userID, forKey: credModelUserIdKey)
             d.set(pick.credentials.none, forKey: credModelNoneKey)
@@ -1040,11 +1045,54 @@ enum YaxiService {
                                        connectionData: nil, error: "unexpected result type",
                                        userMessage: nil, scaRequired: nil)
             }
+            let entschluesselt = try result.decodeUnverified().data
+
             // When called without IBAN (first setup), extract and persist IBAN from response
             if iban.isEmpty {
-                if case .iban(let discovered) = try result.decodeUnverified().data.balances.first?.account.id {
+                if case .iban(let discovered) = entschluesselt.balances.first?.account.id {
                     AppLogger.log("fetchBalances: auto-stored IBAN prefix=\(String(discovered.prefix(8)))", category: "YaxiService")
                     storeDiscoveredIBAN(discovered)
+                }
+            }
+
+            // **Die Bank kennt das angefragte Konto nicht.** Kein Fehler, kein leerer
+            // Fehlertext — nur `entries=0` und das Konto in `missingAccounts`. Genau so
+            // sah es bei bunq am 23.08.2026 aus: Der Abruf lief sauber durch und lieferte
+            // trotzdem weder Saldo noch Umsätze, weil die erteilte Zustimmung ein anderes
+            // Konto abdeckt als das, welches der Slot gespeichert hat.
+            //
+            // Dann ist die naheliegende Frage nicht „warum nicht dieses", sondern „welche
+            // denn". Ein zweiter Aufruf ohne Kontoangabe holt alles, was die Zustimmung
+            // hergibt. Er kostet keine weitere Freigabe — dieselbe Zustimmung, dieselbe
+            // Sitzung — und nennt im Protokoll, was die Bank tatsächlich anbietet.
+            if entschluesselt.balances.isEmpty, !entschluesselt.missingAccounts.isEmpty, !iban.isEmpty {
+                AppLogger.log("fetchBalances: Bank kennt \(iban.prefix(8))… nicht — frage ohne Kontoangabe nach",
+                              category: "YaxiService", level: "WARN")
+                if let alle = try? await client.balances(
+                    ticket: ticket,
+                    credentials: creds,
+                    accounts: [],
+                    session: outcome.session,
+                    recurringConsents: true
+                ), case .result(let alleRes) = alle {
+                    let angeboten = try alleRes.authenticated.decodeUnverified().data
+                    let ibans = angeboten.balances.compactMap { eintrag -> String? in
+                        if case .iban(let i) = eintrag.account.id { return String(i.prefix(12)) }
+                        return nil
+                    }
+                    AppLogger.log("fetchBalances: Bank bietet \(angeboten.balances.count) Konto(en): \(ibans.joined(separator: ", "))",
+                                  category: "YaxiService", level: "WARN")
+                    if !angeboten.balances.isEmpty {
+                        // Bewusst OHNE die gespeicherte IBAN zu überschreiben: Welches
+                        // Konto der Slot zeigen soll, hat der Nutzer bei der Einrichtung
+                        // gewählt. Das hinter seinem Rücken umzustellen wäre schlimmer als
+                        // ein leerer Kontostand. Angezeigt wird, was die Bank liefert;
+                        // die Warnung oben nennt die Abweichung.
+                        return try makeBalancesResponse(angeboten,
+                                                        session: outcome.session?.bytes,
+                                                        connectionData: outcome.connectionData?.bytes,
+                                                        requestedIban: "")
+                    }
                 }
             }
             if alwaysTrace {
@@ -2033,6 +2081,14 @@ enum YaxiService {
         // Roulette — kann ein Subaccount ohne Booked-Balance treffen.
         // Per IBAN matchen, Fallback auf first wie bisher.
         let allEntries = nutzlast.balances
+        // Was die Bank tatsächlich geschickt hat. Ohne diese Zeile war ein leerer
+        // Saldenabruf von einem erfolgreichen nicht zu unterscheiden: kein Fehler, keine
+        // Warnung, nur kein Kontostand. `missingAccounts` ist dabei die eigentliche
+        // Auskunft — sie nennt die angefragten Konten, die die Bank nicht liefern wollte
+        // oder konnte. Aufgefallen bei bunq am 23.08.2026.
+        AppLogger.log("makeBalancesResponse: entries=\(allEntries.count) missing=\(nutzlast.missingAccounts.count) requested=\(requestedIban.isEmpty ? "(alle)" : String(requestedIban.prefix(8)))",
+                      category: "YaxiService",
+                      level: allEntries.isEmpty ? "WARN" : "INFO")
         let target = requestedIban
             .replacingOccurrences(of: " ", with: "")
             .uppercased()

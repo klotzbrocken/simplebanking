@@ -136,6 +136,43 @@ final class SDKFehlerfamilienTests: XCTestCase {
         }
     }
 
+    // MARK: Werttypen dürfen nicht in die Einstellungen
+
+    /// **Der Absturz vom 23.08.2026.** Beim Einrichten einer neuen Bank beendete sich die
+    /// App. Im Bericht: `storeConnectionInfo` → `NSUserDefaults setObject:forKey:` →
+    /// Objective-C-Ausnahme → SIGABRT.
+    ///
+    /// Ursache: `ConnectionInfo.id` war bis SDK 0.4.1 ein `String` und ist seit 0.5 ein
+    /// `ConnectionID`-Werttyp. `UserDefaults.set` nimmt `Any?` entgegen — der Compiler
+    /// merkt also nichts — und wirft zur Laufzeit, sobald der Wert kein
+    /// Property-List-Typ ist. Eine geworfene ObjC-Ausnahme beendet einen Swift-Prozess.
+    ///
+    /// Dieser Test hält beide Hälften fest: Der Werttyp ist nicht ablagefähig, seine
+    /// Drahtform schon.
+    func test_connectionIDGehoertNichtRohInDieEinstellungen() throws {
+        let kennung = try ConnectionID(UUID().uuidString)
+
+        XCTAssertFalse(PropertyListSerialization.propertyList(kennung, isValidFor: .binary),
+                       "Direkt abgelegt beendet dieser Wert den Prozess — siehe storeConnectionInfo")
+        XCTAssertTrue(PropertyListSerialization.propertyList(kennung.description, isValidFor: .binary))
+    }
+
+    /// Die Drahtform muss zurückgelesen werden können, sonst hätten wir den Absturz gegen
+    /// eine kaputte Verbindung getauscht.
+    func test_drahtformIstWiederEinlesbar() throws {
+        let original = try ConnectionID(UUID().uuidString)
+        let zurueck = try ConnectionID(original.description)
+        XCTAssertEqual(zurueck, original)
+    }
+
+    /// Dieselbe Falle für die übrigen Werttypen aus 0.5: Sitzung, Zustimmung und
+    /// Trace-Kennung werden als `Data` abgelegt, nie als Umschlag.
+    func test_opakeWerttypenNurAlsBytes() {
+        let sitzung = Session(Data([1, 2, 3]))
+        XCTAssertFalse(PropertyListSerialization.propertyList(sitzung, isValidFor: .binary))
+        XCTAssertTrue(PropertyListSerialization.propertyList(sitzung.bytes, isValidFor: .binary))
+    }
+
     // MARK: Typisierte Tickets
 
     /// Der Ticket-Typ prüft die Dienstangabe im Token. Ein für „Balances" ausgestelltes
