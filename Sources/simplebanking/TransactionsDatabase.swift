@@ -451,8 +451,87 @@ enum TransactionsDatabase {
 
     static func migrate(bankId: String = "primary") throws {
         let queue = try makeQueue(bankId: bankId)
+        // Vor einer NEUEN Migration eine Kopie beiseitelegen. Siehe
+        // `sicherungVorMigration` — Migrationen gehen nur vorwärts.
+        if bankId == "primary" {
+            sicherungVorMigration(queue: queue, bankId: bankId)
+        }
         try migrator.migrate(queue)
     }
+
+    // MARK: - Sicherheitsnetz vor Migrationen
+
+    /// Wie viele Stände aufbewahrt werden.
+    static let migrationsSicherungen = 3
+
+    /// Legt eine Kopie der Datenbank an, **bevor** eine neue Migration läuft.
+    ///
+    /// Migrationen sind append-only und laufen bei jedem Start durch; ein Zurück gibt es
+    /// nicht. Baut eine neue Fassung eine Spalte um oder schreibt Daten neu — wie zuletzt
+    /// bei den Händlernamen — und hat dabei einen Fehler, ist die Historie beschädigt, und
+    /// gemerkt wird es erst danach. Genau dafür ist das hier: kein Ersatz für eine
+    /// Nutzersicherung, sondern ein Netz für den Moment, in dem es gefährlich wird.
+    ///
+    /// Time Machine kann das nicht leisten — sie sichert nach der Uhr und trifft den
+    /// Moment vor dem Update nur mit Glück. Die App weiß, wann er da ist.
+    ///
+    /// Fehler hier dürfen den Start **nicht** aufhalten: Eine fehlende Sicherung ist
+    /// ärgerlich, eine App, die deswegen nicht startet, ist schlimmer.
+    private static func sicherungVorMigration(queue: DatabaseQueue, bankId: String) {
+        do {
+            let offen = try queue.read { db in
+                try migrator.hasCompletedMigrations(db) == false
+            }
+            guard offen else { return }
+
+            let quelle = try databaseURL(bankId: bankId)
+            let groesse = (try? FileManager.default.attributesOfItem(atPath: quelle.path)[.size] as? Int) ?? 0
+            // Eine frisch angelegte, leere Datenbank ist nichts wert — beim Erststart
+            // liefe das sonst jedes Mal.
+            guard (groesse ?? 0) > 32_768 else { return }
+
+            let ordner = quelle.deletingLastPathComponent()
+                .appendingPathComponent("db-sicherungen", isDirectory: true)
+            try FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+
+            let stempel = dateiStempel.string(from: Date())
+            let ziel = ordner.appendingPathComponent("transactions-vor-migration-\(stempel).db")
+            guard !FileManager.default.fileExists(atPath: ziel.path) else { return }
+
+            // Ohne Transaktion — SQLite lehnt VACUUM darin ab.
+            try queue.writeWithoutTransaction { db in
+                try db.execute(sql: "VACUUM INTO ?", arguments: [ziel.path])
+            }
+            AppLogger.log("Migrations-Sicherung angelegt: \(ziel.lastPathComponent)", category: "DB")
+            alteSicherungenAufraeumen(in: ordner)
+        } catch {
+            AppLogger.log("Migrations-Sicherung fehlgeschlagen (Start läuft weiter): \(error)",
+                          category: "DB", level: "WARN")
+        }
+    }
+
+    private static func alteSicherungenAufraeumen(in ordner: URL) {
+        guard let dateien = try? FileManager.default.contentsOfDirectory(
+            at: ordner, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let sortiert = dateien
+            .filter { $0.lastPathComponent.hasPrefix("transactions-vor-migration-") }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return da > db
+            }
+        for alt in sortiert.dropFirst(migrationsSicherungen) {
+            try? FileManager.default.removeItem(at: alt)
+            AppLogger.log("Alte Migrations-Sicherung entfernt: \(alt.lastPathComponent)", category: "DB")
+        }
+    }
+
+    nonisolated(unsafe) private static let dateiStempel: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        return f
+    }()
 
     // MARK: - Demo DB
 
