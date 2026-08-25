@@ -3480,6 +3480,33 @@ struct SettingsView: View {
         }
     }
 
+    /// Bietet den Neustart an.
+    ///
+    /// Das Nachladen der Kontoliste macht die Konten sofort sichtbar, aber nicht alles
+    /// hängt daran: Ansichtsmodelle, der aktive Kontokontext und die Datenbank-Migrationen
+    /// werden beim Start aufgebaut. Nach einer Wiederherstellung ist ein sauberer Neustart
+    /// der einzige Zustand, für den ich geradestehen kann — deshalb steht er als Angebot
+    /// da und nicht als Fußnote.
+    @MainActor
+    private func neustartAnbieten() {
+        let alert = NSAlert()
+        alert.messageText = t("Wiederherstellung abgeschlossen", "Restore complete")
+        alert.informativeText = t(
+            "Die Konten sind sofort sichtbar. Für einen vollständig sauberen Zustand — Umsatzlisten, Kontokontext, Datenbank — sollte simplebanking einmal neu starten.",
+            "Your accounts are visible right away. For a fully clean state — transaction lists, account context, database — simplebanking should restart once."
+        )
+        alert.addButton(withTitle: t("Jetzt neu starten", "Restart now"))
+        alert.addButton(withTitle: t("Später", "Later"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let konfiguration = NSWorkspace.OpenConfiguration()
+        konfiguration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL,
+                                           configuration: konfiguration) { _, _ in
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
+
     /// - Note: Fehler kommen zusätzlich als Hinweisfenster. Der Text hier unten steht am
     ///   Ende eines langen Reiters und ist oft nicht im Bild — gemeldet als „keine
     ///   Meldung", während in Wahrheit eine dastand, die niemand sehen konnte. Ein
@@ -3566,10 +3593,19 @@ struct SettingsView: View {
                     return
                 }
                 let bericht = try BackupArchive.einspielen(try Data(contentsOf: quelle), passphrase: passphrase)
+
+                // Die Kontoliste lebt im Speicher und wurde beim Start geladen — ohne
+                // dieses Nachladen zeigt die laufende Sitzung den alten Stand. Gemeldet
+                // am 25.08.2026: Nach dem Einspielen war nur das erste Konto zu sehen,
+                // der Rest erst nach einem Neustart.
+                MultibankingStore.shared.reloadFromDisk()
+                availableThemes = ThemeManager.shared.availableThemes()
+
                 sicherungMelden(t(
                     "Eingespielt: \(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.anhaenge) Beleg(e), \(bericht.einstellungen) Einstellungen, \(bericht.themes) Theme-Datei(en). Bitte simplebanking neu starten und die Banken einmal neu freigeben.",
                     "Restored: \(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.anhaenge) receipt(s), \(bericht.einstellungen) settings, \(bericht.themes) theme file(s). Restart simplebanking and re-approve your banks once."
                 ), fehler: false)
+                neustartAnbieten()
             }
         } catch {
             sicherungMelden(error.localizedDescription, fehler: true)
