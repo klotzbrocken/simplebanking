@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import GRDB
 @testable import simplebanking
 
 // MARK: - Sicherung und Wiederherstellung
@@ -125,6 +126,33 @@ final class BackupArchiveTests: XCTestCase {
         let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
                                                   domain: testDomain)
         XCTAssertNil(BackupArchive.merkhilfe(aus: daten))
+    }
+
+    /// **Der Zweig, den der Rundlauf-Test nicht betrat.**
+    ///
+    /// Im Testsandkasten liegt keine Umsatzdatenbank, also stieg der Export vorher aus
+    /// und die Kopie wurde nie versucht. In der echten App scheiterte sie jedes Mal:
+    /// GRDBs `write` legt eine Transaktion an, und SQLite lehnt VACUUM darin ab. Ergebnis
+    /// war eine Sicherung, die nie entstand.
+    ///
+    /// Dieser Test legt deshalb ausdrücklich eine Datenbank an, bevor er exportiert.
+    func test_datenbankKommtInDieSicherung() throws {
+        let ziel = try TransactionsDatabase.databaseURL()
+        try FileManager.default.createDirectory(at: ziel.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        // Eine kleine, echte Datenbank — es geht um den VACUUM-Weg, nicht um Inhalte.
+        let queue = try DatabaseQueue(path: ziel.path)
+        try queue.write { db in
+            try db.execute(sql: "CREATE TABLE IF NOT EXISTS transactions (tx_id TEXT PRIMARY KEY)")
+            try db.execute(sql: "INSERT OR REPLACE INTO transactions (tx_id) VALUES ('a'), ('b')")
+        }
+        defer { try? FileManager.default.removeItem(at: ziel) }
+
+        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+                                                  domain: testDomain)
+        let bericht = try BackupArchive.einspielen(daten, passphrase: "geheim")
+        XCTAssertEqual(bericht.buchungen, 2,
+                       "die Datenbank muss mitgewandert und wieder lesbar sein")
     }
 
     // MARK: Der Umschlag

@@ -137,8 +137,12 @@ enum BackupArchive {
             .appendingPathComponent("sb-sicherung-\(UUID().uuidString).db")
         defer { try? FileManager.default.removeItem(at: ziel) }
 
+        // `writeWithoutTransaction` ist hier Pflicht, nicht Geschmackssache: `write`
+        // legt eine Transaktion drumherum, und SQLite lehnt VACUUM darin ab
+        // („cannot VACUUM from within a transaction"). Der Export scheiterte deshalb
+        // bei jedem Versuch — gemeldet am 25.08.2026 als „Datei wird nicht angelegt".
         let queue = try DatabaseQueue(path: quelle.path)
-        try queue.write { db in
+        try queue.writeWithoutTransaction { db in
             try db.execute(sql: "VACUUM INTO ?", arguments: [ziel.path])
         }
         return try Data(contentsOf: ziel)

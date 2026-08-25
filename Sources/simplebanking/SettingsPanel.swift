@@ -3475,9 +3475,21 @@ struct SettingsView: View {
         }
     }
 
+    /// - Note: Fehler kommen zusätzlich als Hinweisfenster. Der Text hier unten steht am
+    ///   Ende eines langen Reiters und ist oft nicht im Bild — gemeldet als „keine
+    ///   Meldung", während in Wahrheit eine dastand, die niemand sehen konnte. Ein
+    ///   Fehlschlag, den man übersieht, ist schlimmer als einer, der stört.
+    @MainActor
     private func sicherungMelden(_ text: String, fehler: Bool) {
         sicherungHinweis = text
         sicherungFehler = fehler
+        guard fehler else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = t("Sicherung fehlgeschlagen", "Backup failed")
+        alert.informativeText = text
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     /// Legt das Ziel fest und öffnet dann die Passphrase-Eingabe.
