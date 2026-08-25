@@ -3465,8 +3465,11 @@ struct SettingsView: View {
         .sheet(item: $sicherungZweck) { zweck in
             PassphraseSheet(zweck: zweck,
                             fertig: { pass, hilfe in
+                                // Zweck festhalten, BEVOR das Blatt ihn beim Schließen
+                                // auf nil setzt.
+                                let gewaehlt = zweck
                                 sicherungZweck = nil
-                                sicherungAusfuehren(passphrase: pass, merkhilfe: hilfe)
+                                sicherungAusfuehren(zweck: gewaehlt, passphrase: pass, merkhilfe: hilfe)
                             },
                             abbrechen: { sicherungZweck = nil })
         }
@@ -3520,10 +3523,17 @@ struct SettingsView: View {
         sicherungZweck = .einspielen(merkhilfe: hilfe)
     }
 
+    /// - Parameter zweck: ausdrücklich übergeben, nicht aus dem Zustand gelesen.
+    ///   Das Blatt schließt sich, indem es `sicherungZweck` auf nil setzt — eine Prüfung
+    ///   darauf lief deshalb ins Leere und legte kommentarlos keine Datei an.
     @MainActor
-    private func sicherungAusfuehren(passphrase: String, merkhilfe: String?) {
-        guard let ziel = sicherungZiel, let zweck = sicherungZweck else { return }
-        sicherungZweck = nil
+    private func sicherungAusfuehren(zweck: PassphraseSheet.Zweck,
+                                     passphrase: String,
+                                     merkhilfe: String?) {
+        guard let ziel = sicherungZiel else {
+            sicherungMelden(t("Kein Ziel gewählt.", "No destination chosen."), fehler: true)
+            return
+        }
         do {
             switch zweck {
             case .erstellen:

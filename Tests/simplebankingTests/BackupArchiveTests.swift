@@ -77,6 +77,56 @@ final class BackupArchiveTests: XCTestCase {
         XCTAssertTrue(BackupArchive.istAuszuschliessen("simplebanking.yaxi.connectionData.legacy"))
     }
 
+    // MARK: Der vollständige Rundlauf
+
+    /// **Export in eine Datei, Datei zurücklesen, einspielen, Ergebnis prüfen.**
+    ///
+    /// Diesen Test gab es zuerst nicht — geprüft wurde nur, dass die falsche Passphrase
+    /// scheitert. Deshalb fiel nicht auf, dass die Bedienoberfläche gar nichts anlegte:
+    /// Das Blatt setzte den Zweck auf nil, bevor es die Ausführung rief, und die stieg an
+    /// genau dieser Prüfung wieder aus. Ein Rundlauf über eine echte Datei hätte das
+    /// nicht gefunden, aber er hält jetzt wenigstens die Kette selbst fest.
+    func test_rundlaufUeberEineDatei() throws {
+        let ordner = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: ordner) }
+        let datei = ordner.appendingPathComponent("probe.\(BackupArchive.dateiendung)")
+
+        let daten = try BackupArchive.exportieren(passphrase: "korrekt-pferd-batterie",
+                                                  merkhilfe: "wie beim alten Router",
+                                                  mitThemes: false, domain: testDomain)
+        try daten.write(to: datei)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: datei.path),
+                      "die Sicherungsdatei muss auf der Platte liegen")
+        let groesse = try FileManager.default.attributesOfItem(atPath: datei.path)[.size] as? Int ?? 0
+        XCTAssertGreaterThan(groesse, 100, "eine leere Datei wäre keine Sicherung")
+
+        let zurueck = try Data(contentsOf: datei)
+        let bericht = try BackupArchive.einspielen(zurueck, passphrase: "korrekt-pferd-batterie")
+
+        XCTAssertGreaterThan(bericht.einstellungen, 0, "es müssen Einstellungen angekommen sein")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "simplebanking.yaxi.connectionId.legacy"),
+                       "connection-abc", "die Verbindung muss zurückkommen")
+        XCTAssertNil(UserDefaults.standard.string(forKey: "simplebanking.yaxi.connectionData.legacy"),
+                     "die Zustimmung darf NICHT zurückkommen — das ist die Zusage im Dialog")
+    }
+
+    /// Die Merkhilfe muss ohne Passphrase lesbar sein, sonst hilft sie nicht.
+    func test_merkhilfeIstOhnePassphraseLesbar() throws {
+        let daten = try BackupArchive.exportieren(passphrase: "geheim",
+                                                  merkhilfe: "wie beim alten Router",
+                                                  mitThemes: false, domain: testDomain)
+        XCTAssertEqual(BackupArchive.merkhilfe(aus: daten), "wie beim alten Router")
+    }
+
+    func test_ohneMerkhilfeKeineMerkhilfe() throws {
+        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+                                                  domain: testDomain)
+        XCTAssertNil(BackupArchive.merkhilfe(aus: daten))
+    }
+
     // MARK: Der Umschlag
 
     /// Rundlauf: Was hineingeht, kommt heraus.
