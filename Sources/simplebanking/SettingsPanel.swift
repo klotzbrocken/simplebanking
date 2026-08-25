@@ -297,6 +297,8 @@ struct SettingsView: View {
     @State private var themeImportHinweis: (text: String, istFehler: Bool)?
     @State private var logStatusMessage: String = ""
     @State private var logoTapCount: Int = 0
+    @State private var sicherungHinweis: String = ""
+    @State private var sicherungFehler: Bool = false
     @State private var logoCacheClearStatus: String = ""
     @State private var mcpConfigCopied: Bool = false
     @State private var mcpSetupState: MCPSetupState = .idle
@@ -3409,8 +3411,164 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.bordered)
             }
+
+            Divider()
+
+            sicherungSettings
         }
         .animation(.easeInOut(duration: 0.15), value: brandfetchEnabled)
+    }
+
+    // MARK: - Sicherung
+
+    private var sicherungSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsSectionHeader(title: t("Sicherung", "Backup"), icon: "externaldrive")
+
+            Text(t(
+                "Legt Konten, Umsätze, Einstellungen und Themes in einer verschlüsselten Datei ab — für den Umzug auf einen neuen Mac oder nach einer Neuinstallation.",
+                "Stores accounts, transactions, settings and themes in one encrypted file — for moving to a new Mac or after a fresh install."
+            ))
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            // Die Zusage steht hier, damit niemand nach dem Einspielen überrascht ist.
+            // Bank-Freigaben sind an Maschine und Zustimmung gebunden; sie mitzunehmen
+            // ergäbe einen Abruf, der durchläuft und nichts liefert.
+            Label(t(
+                "Die Bank-Freigaben wandern bewusst nicht mit — die gibst du nach dem Einspielen einmal neu. Dein Master-Passwort ist ebenfalls nicht enthalten; du tippst es wie bisher.",
+                "Bank approvals deliberately do not travel — you grant those once after restoring. Your master password is not included either; you enter it as before."
+            ), systemImage: "info.circle")
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button(t("Sicherung erstellen …", "Create backup …")) { sicherungErstellen() }
+                    .buttonStyle(.borderedProminent)
+                Button(t("Sicherung einspielen …", "Restore backup …")) { sicherungEinspielen() }
+                    .buttonStyle(.bordered)
+                Spacer()
+            }
+
+            if !sicherungHinweis.isEmpty {
+                Text(sicherungHinweis)
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(sicherungFehler ? .sbRedStrong : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    /// Fragt eine Passphrase ab. Bei `bestaetigen` zweimal — eine vertippte Passphrase
+    /// merkt man sonst erst, wenn man die Sicherung braucht, und dann ist sie wertlos.
+    @MainActor
+    private func passphraseAbfragen(titel: String, hinweis: String, bestaetigen: Bool) -> String? {
+        let alert = NSAlert()
+        alert.messageText = titel
+        alert.informativeText = hinweis
+        alert.addButton(withTitle: t("Weiter", "Continue"))
+        alert.addButton(withTitle: t("Abbrechen", "Cancel"))
+
+        let feld = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        feld.placeholderString = t("Passphrase", "Passphrase")
+        if bestaetigen {
+            let zweit = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+            zweit.placeholderString = t("Passphrase wiederholen", "Repeat passphrase")
+            let stapel = NSStackView(views: [feld, zweit])
+            stapel.orientation = .vertical
+            stapel.spacing = 8
+            stapel.frame = NSRect(x: 0, y: 0, width: 280, height: 56)
+            alert.accessoryView = stapel
+            alert.window.initialFirstResponder = feld
+            guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+            guard !feld.stringValue.isEmpty else { return nil }
+            guard feld.stringValue == zweit.stringValue else {
+                sicherungMelden(t("Die beiden Eingaben stimmen nicht überein.",
+                                  "The two entries do not match."), fehler: true)
+                return nil
+            }
+            return feld.stringValue
+        }
+        alert.accessoryView = feld
+        alert.window.initialFirstResponder = feld
+        guard alert.runModal() == .alertFirstButtonReturn, !feld.stringValue.isEmpty else { return nil }
+        return feld.stringValue
+    }
+
+    private func sicherungMelden(_ text: String, fehler: Bool) {
+        sicherungHinweis = text
+        sicherungFehler = fehler
+    }
+
+    @MainActor
+    private func sicherungErstellen() {
+        guard let passphrase = passphraseAbfragen(
+            titel: t("Passphrase für die Sicherung", "Passphrase for the backup"),
+            hinweis: t("Ohne diese Passphrase lässt sich die Sicherung nicht wiederherstellen — auch von dir nicht. Bewahre sie an einem sicheren Ort auf.",
+                       "Without this passphrase the backup cannot be restored — not even by you. Keep it somewhere safe."),
+            bestaetigen: true) else { return }
+
+        let panel = NSSavePanel()
+        let stempel = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        panel.nameFieldStringValue = "simplebanking-\(stempel).\(BackupArchive.dateiendung)"
+        panel.message = t("Sicherung ablegen", "Save backup")
+        guard panel.runModal() == .OK, let ziel = panel.url else { return }
+
+        do {
+            let daten = try BackupArchive.exportieren(passphrase: passphrase)
+            try daten.write(to: ziel, options: [.atomic])
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600],
+                                                   ofItemAtPath: ziel.path)
+            let mb = String(format: "%.1f", Double(daten.count) / 1_048_576)
+            sicherungMelden(t("Sicherung abgelegt (\(mb) MB).", "Backup saved (\(mb) MB)."), fehler: false)
+        } catch {
+            sicherungMelden(t("Sicherung fehlgeschlagen: \(error.localizedDescription)",
+                              "Backup failed: \(error.localizedDescription)"), fehler: true)
+        }
+    }
+
+    @MainActor
+    private func sicherungEinspielen() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [BackupArchive.dateiendung].compactMap { .init(filenameExtension: $0) }
+        panel.message = t("Sicherung wählen", "Choose backup")
+        guard panel.runModal() == .OK, let quelle = panel.url else { return }
+
+        // Ausdrücklich warnen: Einspielen ersetzt den aktuellen Stand. Die vorhandene
+        // Datenbank wird zwar beiseitegelegt, aber die Einstellungen werden überschrieben.
+        let warnung = NSAlert()
+        warnung.alertStyle = .warning
+        warnung.messageText = t("Aktuellen Stand ersetzen?", "Replace current data?")
+        warnung.informativeText = t(
+            "Konten, Einstellungen und Umsätze aus der Sicherung ersetzen den aktuellen Stand. Die vorhandene Umsatzdatenbank wird daneben aufbewahrt und nicht gelöscht. Danach solltest du simplebanking neu starten.",
+            "Accounts, settings and transactions from the backup replace the current data. Your existing transaction database is kept alongside, not deleted. Restart simplebanking afterwards."
+        )
+        warnung.addButton(withTitle: t("Einspielen", "Restore"))
+        warnung.addButton(withTitle: t("Abbrechen", "Cancel"))
+        guard warnung.runModal() == .alertFirstButtonReturn else { return }
+
+        guard let passphrase = passphraseAbfragen(
+            titel: t("Passphrase der Sicherung", "Backup passphrase"),
+            hinweis: t("Die Passphrase, die beim Erstellen vergeben wurde.",
+                       "The passphrase you set when creating the backup."),
+            bestaetigen: false) else { return }
+
+        do {
+            let daten = try Data(contentsOf: quelle)
+            let bericht = try BackupArchive.einspielen(daten, passphrase: passphrase)
+            sicherungMelden(t(
+                "Eingespielt: \(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.einstellungen) Einstellungen, \(bericht.themes) Theme-Datei(en). Bitte simplebanking neu starten und die Banken einmal neu freigeben.",
+                "Restored: \(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.einstellungen) settings, \(bericht.themes) theme file(s). Restart simplebanking and re-approve your banks once."
+            ), fehler: false)
+        } catch {
+            sicherungMelden(t("Einspielen fehlgeschlagen: \(error.localizedDescription)",
+                              "Restore failed: \(error.localizedDescription)"), fehler: true)
+        }
     }
 
     // MARK: - MCP Settings
