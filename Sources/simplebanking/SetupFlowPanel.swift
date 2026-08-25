@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Foundation
 import RoutexClient
 
@@ -162,6 +163,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private weak var searchContinueButton: NSButton?
     private let discoverSpinner = NSProgressIndicator()
     private var autocompletePanel: NSPanel?
+    private var passphraseFenster: NSWindow?
     private var autocompleteTable: NSTableView?
 
     // IBAN live-detection UI
@@ -642,6 +644,22 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let demoButton = outlineButton(title: t("Demo-Modus starten", "Start demo mode"), action: #selector(onWelcomeDemo))
         demoButton.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
+        // Dritter Weg, bewusst unauffällig: Wer eine Sicherung hat, will hier nicht
+        // durch die ganze Einrichtung. Wer keine hat, soll davon nicht abgelenkt werden.
+        //
+        // **Nur beim echten Erststart.** „Konto hinzufügen" benutzt denselben
+        // Assistenten und landet ebenfalls hier — dort wäre das Angebot falsch bis
+        // gefährlich: Einspielen ersetzt den vorhandenen Bestand, und wer gerade ein
+        // zweites Konto anlegen will, erwartet das Gegenteil.
+        let erststart = !CredentialsStore.anyExists()
+        let restoreButton = NSButton(title: t("Sicherung einspielen …", "Restore backup …"),
+                                     target: self, action: #selector(onWelcomeRestore))
+        restoreButton.bezelStyle = .inline
+        restoreButton.isBordered = false
+        restoreButton.contentTintColor = .controlAccentColor
+        restoreButton.font = .systemFont(ofSize: 12)
+        restoreButton.isHidden = !erststart
+
         rootStack.addArrangedSubview(iconBox)
         rootStack.addArrangedSubview(title)
         rootStack.addArrangedSubview(tagline)
@@ -649,8 +667,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(connectButton)
         rootStack.addArrangedSubview(demoButton)
+        if erststart { rootStack.addArrangedSubview(restoreButton) }
 
         rootStack.setCustomSpacing(16, after: iconBox)
+        rootStack.setCustomSpacing(10, after: demoButton)
         rootStack.setCustomSpacing(4, after: title)
         rootStack.setCustomSpacing(6, after: tagline)
         rootStack.setCustomSpacing(24, after: body)
@@ -1535,6 +1555,70 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     @objc private func onWelcomeDemo() {
         outcome = .demoMode
         NSApp.stopModal(withCode: .stop)
+    }
+
+    /// Sicherung einspielen statt neu einrichten.
+    ///
+    /// Der Weg gehört hierher, weil man nach einer Neuinstallation genau hier landet —
+    /// und weil die Alternative ist, erst eine Bank zu verbinden und die Sicherung
+    /// danach zu suchen. Nach dem Einspielen wird die App neu gestartet: Der Assistent
+    /// läuft gerade modal, und die Konten, die gleich da sind, gehören nicht mehr zu
+    /// seinem Ablauf.
+    @objc private func onWelcomeRestore() {
+        let auswahl = NSOpenPanel()
+        auswahl.allowsMultipleSelection = false
+        auswahl.canChooseDirectories = false
+        auswahl.allowedContentTypes = [BackupArchive.dateiendung].compactMap { .init(filenameExtension: $0) }
+        auswahl.message = t("Sicherung wählen", "Choose backup")
+        guard auswahl.runModal() == .OK, let quelle = auswahl.url else { return }
+
+        let hilfe = (try? Data(contentsOf: quelle)).flatMap { BackupArchive.merkhilfe(aus: $0) }
+        let blatt = PassphraseSheet(
+            zweck: .einspielen(merkhilfe: hilfe),
+            fertig: { [weak self] passphrase, _ in
+                guard let self else { return }
+                self.panel.endSheet(self.passphraseFenster ?? NSWindow())
+                self.passphraseFenster = nil
+                self.sicherungEinspielen(quelle: quelle, passphrase: passphrase)
+            },
+            abbrechen: { [weak self] in
+                guard let self, let fenster = self.passphraseFenster else { return }
+                self.panel.endSheet(fenster)
+                self.passphraseFenster = nil
+            })
+
+        let host = NSHostingController(rootView: blatt)
+        let fenster = NSWindow(contentViewController: host)
+        fenster.styleMask = [.titled]
+        passphraseFenster = fenster
+        panel.beginSheet(fenster)
+    }
+
+    private func sicherungEinspielen(quelle: URL, passphrase: String) {
+        let ergebnis = NSAlert()
+        do {
+            let bericht = try BackupArchive.einspielen(try Data(contentsOf: quelle), passphrase: passphrase)
+            ergebnis.messageText = t("Sicherung eingespielt", "Backup restored")
+            ergebnis.informativeText = t(
+                "\(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.anhaenge) Beleg(e). simplebanking startet jetzt neu; die Banken gibst du danach einmal neu frei.",
+                "\(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.anhaenge) receipt(s). simplebanking will restart now; you grant your bank approvals once afterwards."
+            )
+            ergebnis.addButton(withTitle: t("Neu starten", "Restart"))
+            ergebnis.runModal()
+
+            let konfiguration = NSWorkspace.OpenConfiguration()
+            konfiguration.createsNewApplicationInstance = true
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL,
+                                               configuration: konfiguration) { _, _ in
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+            }
+        } catch {
+            ergebnis.alertStyle = .warning
+            ergebnis.messageText = t("Einspielen fehlgeschlagen", "Restore failed")
+            ergebnis.informativeText = error.localizedDescription
+            ergebnis.addButton(withTitle: "OK")
+            ergebnis.runModal()
+        }
     }
 
     // MARK: - Actions: Master Password
