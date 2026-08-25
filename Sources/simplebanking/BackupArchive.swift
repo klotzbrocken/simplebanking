@@ -53,6 +53,13 @@ enum BackupArchive {
         var zugangsdaten: [String: String]
         var datenbankB64: String?
         var themes: [String: String]
+        /// Belege an Buchungen (`attachments/…`) und Überweisungsentwürfe.
+        ///
+        /// **Optional, damit ältere Sicherungen weiterhin lesbar bleiben.** Wären sie
+        /// Pflichtfelder, ließe sich eine Datei aus der ersten Fassung nicht mehr
+        /// einspielen — und ausgerechnet die hat jemand angelegt, bevor das hier dazukam.
+        var anhaenge: [String: String]?
+        var entwuerfe: [String: String]?
     }
 
     struct Bericht {
@@ -60,6 +67,7 @@ enum BackupArchive {
         var konten: Int
         var buchungen: Int
         var themes: Int
+        var anhaenge: Int = 0
     }
 
     enum Fehler: LocalizedError {
@@ -105,7 +113,9 @@ enum BackupArchive {
             einstellungenPlistB64: plist.base64EncodedString(),
             zugangsdaten: try zugangsdatenSammeln(),
             datenbankB64: try datenbankKopieren()?.base64EncodedString(),
-            themes: mitThemes ? themesSammeln() : [:]
+            themes: mitThemes ? themesSammeln() : [:],
+            anhaenge: ordnerSammeln("attachments"),
+            entwuerfe: ordnerSammeln("transfer-drafts")
         )
 
         return try verschluesseln(try JSONEncoder().encode(inhalt),
@@ -146,6 +156,49 @@ enum BackupArchive {
             try db.execute(sql: "VACUUM INTO ?", arguments: [ziel.path])
         }
         return try Data(contentsOf: ziel)
+    }
+
+    /// Sammelt einen Unterordner des Datenverzeichnisses rekursiv ein.
+    ///
+    /// Für Belege: Die Datenbank kennt sie als Zeile, die Datei liegt daneben. Ohne diese
+    /// Dateien käme nach dem Einspielen eine Buchung zurück, die auf einen Beleg zeigt,
+    /// den es nicht mehr gibt — schlimmer als gar kein Beleg, weil es wie ein Fehler
+    /// aussieht.
+    ///
+    /// Bewusst NICHT dabei: `logo-cache` (baut sich von selbst wieder auf) und
+    /// `transactions-demo.db` (Vorführdaten, keine Nutzerdaten).
+    private static func ordnerSammeln(_ unterordner: String) -> [String: String] {
+        guard let basis = try? CredentialsStore.appSupportURL()
+                .appendingPathComponent(unterordner) else { return [:] }
+        guard let lauf = FileManager.default.enumerator(at: basis,
+                                                        includingPropertiesForKeys: [.isRegularFileKey])
+        else { return [:] }
+
+        var aus: [String: String] = [:]
+        for fall in lauf {
+            guard let url = fall as? URL,
+                  (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+                  let daten = try? Data(contentsOf: url) else { continue }
+            // Einzelne sehr große Dateien bleiben draußen, damit eine Sicherung nicht an
+            // einem versehentlich abgelegten Video scheitert. Wird protokolliert, statt
+            // stillschweigend zu fehlen.
+            guard daten.count <= 20_000_000 else {
+                AppLogger.log("Sicherung: \(url.lastPathComponent) übersprungen (\(daten.count / 1_048_576) MB)",
+                              category: "Backup", level: "WARN")
+                continue
+            }
+            // Beide Seiten auflösen, bevor verglichen wird: `enumerator` liefert den
+            // aufgelösten Pfad (/private/var/…), die Basis ist der Symlink (/var/…).
+            // Ohne das griff der Abgleich nicht, der „relative" Pfad blieb absolut, und
+            // die Datei landete beim Einspielen irgendwo tief in einem Fantasieordner —
+            // der Zähler stimmte trotzdem, der Beleg fehlte.
+            let basisAufgeloest = basis.resolvingSymlinksInPath().path
+            let dateiAufgeloest = url.resolvingSymlinksInPath().path
+            guard dateiAufgeloest.hasPrefix(basisAufgeloest + "/") else { continue }
+            let relativ = String(dateiAufgeloest.dropFirst(basisAufgeloest.count + 1))
+            aus[relativ] = daten.base64EncodedString()
+        }
+        return aus
     }
 
     private static func themesSammeln() -> [String: String] {
@@ -214,6 +267,28 @@ enum BackupArchive {
             buchungen = (try? zaehleBuchungen(ziel)) ?? 0
         }
 
+        // Belege und Entwürfe — mit den Unterordnern, die im Pfad stecken.
+        var anhangAnzahl = 0
+        for (unterordner, dateien) in [("attachments", inhalt.anhaenge ?? [:]),
+                                       ("transfer-drafts", inhalt.entwuerfe ?? [:])] {
+            let basis = credOrdner.appendingPathComponent(unterordner)
+            for (relativ, b64) in dateien {
+                guard let daten = Data(base64Encoded: b64) else { continue }
+                // Eine Sicherung kann manipuliert sein. Ein Pfad, der ausbricht, würde
+                // sonst irgendwohin ins Dateisystem schreiben — dieselbe Klasse wie die
+                // Zip-Slip-Abwehr beim Theme-Import.
+                guard !relativ.hasPrefix("/"), !relativ.contains("..") else {
+                    AppLogger.log("Sicherung: Pfad abgelehnt: \(relativ)",
+                                  category: "Backup", level: "WARN")
+                    continue
+                }
+                let ziel = basis.appendingPathComponent(relativ)
+                try? FileManager.default.createDirectory(at: ziel.deletingLastPathComponent(),
+                                                         withIntermediateDirectories: true)
+                if (try? daten.write(to: ziel, options: [.atomic])) != nil { anhangAnzahl += 1 }
+            }
+        }
+
         // Themes
         let themeOrdner = ThemeManager.shared.themesDirectoryURL
         try? FileManager.default.createDirectory(at: themeOrdner, withIntermediateDirectories: true)
@@ -227,7 +302,8 @@ enum BackupArchive {
         return Bericht(einstellungen: gesetzt,
                        konten: inhalt.zugangsdaten.count,
                        buchungen: buchungen,
-                       themes: themeAnzahl)
+                       themes: themeAnzahl,
+                       anhaenge: anhangAnzahl)
     }
 
     private static func zaehleBuchungen(_ url: URL) throws -> Int {

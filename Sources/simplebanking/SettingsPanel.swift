@@ -3567,8 +3567,8 @@ struct SettingsView: View {
                 }
                 let bericht = try BackupArchive.einspielen(try Data(contentsOf: quelle), passphrase: passphrase)
                 sicherungMelden(t(
-                    "Eingespielt: \(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.einstellungen) Einstellungen, \(bericht.themes) Theme-Datei(en). Bitte simplebanking neu starten und die Banken einmal neu freigeben.",
-                    "Restored: \(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.einstellungen) settings, \(bericht.themes) theme file(s). Restart simplebanking and re-approve your banks once."
+                    "Eingespielt: \(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.anhaenge) Beleg(e), \(bericht.einstellungen) Einstellungen, \(bericht.themes) Theme-Datei(en). Bitte simplebanking neu starten und die Banken einmal neu freigeben.",
+                    "Restored: \(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.anhaenge) receipt(s), \(bericht.einstellungen) settings, \(bericht.themes) theme file(s). Restart simplebanking and re-approve your banks once."
                 ), fehler: false)
             }
         } catch {

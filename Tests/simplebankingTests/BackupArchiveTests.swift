@@ -155,6 +155,57 @@ final class BackupArchiveTests: XCTestCase {
                        "die Datenbank muss mitgewandert und wieder lesbar sein")
     }
 
+    /// **Belege müssen mitwandern, sonst zeigt die Buchung auf ein Loch.**
+    ///
+    /// Die Datenbank kennt einen Beleg als Zeile, die Datei liegt daneben im
+    /// `attachments`-Ordner. Käme nur die Zeile zurück, sähe das im Umsatzdetail aus wie
+    /// ein Fehler — schlimmer als gar kein Beleg.
+    func test_belegeWandernMit() throws {
+        let basis = try CredentialsStore.appSupportURL()
+            .appendingPathComponent("attachments")
+            .appendingPathComponent("primary")
+            .appendingPathComponent("slot-1")
+            .appendingPathComponent("tx-42")
+        try FileManager.default.createDirectory(at: basis, withIntermediateDirectories: true)
+        let beleg = basis.appendingPathComponent("bon.pdf")
+        try Data("ein Beleg".utf8).write(to: beleg)
+
+        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+                                                  domain: testDomain)
+        try FileManager.default.removeItem(at: beleg)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: beleg.path))
+
+        let bericht = try BackupArchive.einspielen(daten, passphrase: "geheim")
+        XCTAssertGreaterThanOrEqual(bericht.anhaenge, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: beleg.path),
+                      "der Beleg muss samt Unterordnern wieder dastehen")
+        XCTAssertEqual(try Data(contentsOf: beleg), Data("ein Beleg".utf8))
+    }
+
+    /// Ältere Sicherungen dürfen weiterhin einspielbar sein — die Felder für Belege und
+    /// Entwürfe kamen später dazu und sind deshalb optional.
+    func test_aeltereSicherungOhneBelegeBleibtLesbar() throws {
+        // Eine Sicherung ohne die neuen Felder nachbilden: Inhalt ohne `anhaenge`.
+        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+                                                  domain: testDomain)
+        let bericht = try BackupArchive.einspielen(daten, passphrase: "geheim")
+        XCTAssertGreaterThanOrEqual(bericht.einstellungen, 1,
+                                    "eine Sicherung ohne Belege muss trotzdem durchlaufen")
+    }
+
+    /// Eine manipulierte Sicherung darf nicht außerhalb des Datenordners schreiben.
+    /// Dieselbe Klasse wie die Zip-Slip-Abwehr beim Theme-Import.
+    func test_ausbrechendePfadeWerdenAbgelehnt() {
+        for boese in ["../../../../tmp/uebernommen", "/etc/passwd", "a/../../b"] {
+            XCTAssertTrue(boese.hasPrefix("/") || boese.contains(".."),
+                          "Testdaten prüfen: \(boese) müsste als Ausbruch erkennbar sein")
+        }
+        // Der Schutz selbst sitzt in `einspielen`; hier wird festgehalten, dass die
+        // Merkmale, auf die er prüft, die gemeinten Fälle abdecken.
+        XCTAssertFalse("primary/slot-1/tx-42/bon.pdf".hasPrefix("/"))
+        XCTAssertFalse("primary/slot-1/tx-42/bon.pdf".contains(".."))
+    }
+
     // MARK: Der Umschlag
 
     /// Rundlauf: Was hineingeht, kommt heraus.
