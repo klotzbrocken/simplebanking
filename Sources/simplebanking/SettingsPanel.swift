@@ -3469,7 +3469,12 @@ struct SettingsView: View {
                                 // auf nil setzt.
                                 let gewaehlt = zweck
                                 sicherungZweck = nil
-                                sicherungAusfuehren(zweck: gewaehlt, passphrase: pass, merkhilfe: hilfe)
+                                // Erst das Blatt schließen lassen, dann den
+                                // Speicherdialog öffnen — zwei modale Fenster
+                                // gleichzeitig vertragen sich nicht.
+                                DispatchQueue.main.async {
+                                    sicherungAusfuehren(zweck: gewaehlt, passphrase: pass, merkhilfe: hilfe)
+                                }
                             },
                             abbrechen: { sicherungZweck = nil })
         }
@@ -3492,19 +3497,15 @@ struct SettingsView: View {
         alert.runModal()
     }
 
-    /// Legt das Ziel fest und öffnet dann die Passphrase-Eingabe.
+    /// Erst die Passphrase, dann der Speicherort.
     ///
-    /// Reihenfolge mit Absicht: Erst den Speicherort wählen, dann die Passphrase. Wer
-    /// zuerst eine Passphrase tippt und danach den Dateidialog abbricht, hat sie umsonst
-    /// eingegeben.
+    /// Die Passphrase ist die Entscheidung, der Dateiname die Formalie — und wer die
+    /// Stärkeanzeige sieht und es sich anders überlegt, soll nicht schon einen Ort
+    /// gewählt haben. macOS hält es beim verschlüsselten PDF-Export genauso: Kennwort im
+    /// Optionen-Blatt, „Sichern" zuletzt.
     @MainActor
     private func sicherungErstellen() {
-        let panel = NSSavePanel()
-        let stempel = ISO8601DateFormatter().string(from: Date()).prefix(10)
-        panel.nameFieldStringValue = "simplebanking-\(stempel).\(BackupArchive.dateiendung)"
-        panel.message = t("Sicherung ablegen", "Save backup")
-        guard panel.runModal() == .OK, let ziel = panel.url else { return }
-        sicherungZiel = ziel
+        sicherungZiel = nil
         sicherungZweck = .erstellen
     }
 
@@ -3542,13 +3543,17 @@ struct SettingsView: View {
     private func sicherungAusfuehren(zweck: PassphraseSheet.Zweck,
                                      passphrase: String,
                                      merkhilfe: String?) {
-        guard let ziel = sicherungZiel else {
-            sicherungMelden(t("Kein Ziel gewählt.", "No destination chosen."), fehler: true)
-            return
-        }
         do {
             switch zweck {
             case .erstellen:
+                // Speicherort erst jetzt — nach der Passphrase.
+                let panel = NSSavePanel()
+                let stempel = ISO8601DateFormatter().string(from: Date()).prefix(10)
+                panel.nameFieldStringValue = "simplebanking-\(stempel).\(BackupArchive.dateiendung)"
+                panel.message = t("Sicherung ablegen", "Save backup")
+                // Abbruch hier ist eine Entscheidung des Nutzers, kein Fehler.
+                guard panel.runModal() == .OK, let ziel = panel.url else { return }
+
                 let daten = try BackupArchive.exportieren(passphrase: passphrase, merkhilfe: merkhilfe)
                 try daten.write(to: ziel, options: [.atomic])
                 try? FileManager.default.setAttributes([.posixPermissions: 0o600],
@@ -3556,7 +3561,11 @@ struct SettingsView: View {
                 let mb = String(format: "%.1f", Double(daten.count) / 1_048_576)
                 sicherungMelden(t("Sicherung abgelegt (\(mb) MB).", "Backup saved (\(mb) MB)."), fehler: false)
             case .einspielen:
-                let bericht = try BackupArchive.einspielen(try Data(contentsOf: ziel), passphrase: passphrase)
+                guard let quelle = sicherungZiel else {
+                    sicherungMelden(t("Keine Sicherung gewählt.", "No backup chosen."), fehler: true)
+                    return
+                }
+                let bericht = try BackupArchive.einspielen(try Data(contentsOf: quelle), passphrase: passphrase)
                 sicherungMelden(t(
                     "Eingespielt: \(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.einstellungen) Einstellungen, \(bericht.themes) Theme-Datei(en). Bitte simplebanking neu starten und die Banken einmal neu freigeben.",
                     "Restored: \(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.einstellungen) settings, \(bericht.themes) theme file(s). Restart simplebanking and re-approve your banks once."
