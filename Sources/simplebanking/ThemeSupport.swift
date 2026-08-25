@@ -400,7 +400,8 @@ final class ThemeManager: @unchecked Sendable {
     /// dort liegen. Dieselbe Erkennung wie bei `CredentialsStore` und
     /// `MultibankingStore.defaults`: `XCTestCase` existiert genau dann, wenn das
     /// Test-Bundle geladen ist — vom Linker garantiert, keine Heuristik.
-    private var themesDirectoryURL: URL {
+    /// `internal` statt `private`: Die Sicherung liest und schreibt diesen Ordner.
+    var themesDirectoryURL: URL {
         if NSClassFromString("XCTestCase") != nil {
             return URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("simplebanking-tests-themes", isDirectory: true)
