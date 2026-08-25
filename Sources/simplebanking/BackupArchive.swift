@@ -89,6 +89,7 @@ enum BackupArchive {
     ///   einsammelt. (`UserDefaults.standard` ist unter XCTest ohnehin eine andere — die
     ///   Domäne hier wird aber ausdrücklich beim Namen genannt und träfe sonst die echte.)
     static func exportieren(passphrase: String,
+                            merkhilfe: String? = nil,
                             mitThemes: Bool = true,
                             domain: String = "tech.yaxi.simplebanking") throws -> Data {
         let d = UserDefaults.standard.persistentDomain(forName: domain) ?? [:]
@@ -107,7 +108,8 @@ enum BackupArchive {
             themes: mitThemes ? themesSammeln() : [:]
         )
 
-        return try verschluesseln(try JSONEncoder().encode(inhalt), passphrase: passphrase)
+        return try verschluesseln(try JSONEncoder().encode(inhalt),
+                                  passphrase: passphrase, merkhilfe: merkhilfe)
     }
 
     /// Die Umschläge liegen bereits verschlüsselt vor — wir reichen sie unverändert durch.
@@ -241,9 +243,25 @@ enum BackupArchive {
         let tagB64: String
         let kdf: String
         let iterations: Int
+        /// Merkhilfe — **unverschlüsselt und mit Absicht.**
+        ///
+        /// Eine Erinnerungshilfe, die man erst nach Eingabe der Passphrase lesen könnte,
+        /// wäre sinnlos. Sie steht deshalb im Dateikopf. Der Nutzer wird im Dialog
+        /// gewarnt, dass sie mitlesbar ist — sie darf die Passphrase nicht verraten.
+        var hinweis: String?
     }
 
-    private static func verschluesseln(_ klartext: Data, passphrase: String) throws -> Data {
+    /// Liest die Merkhilfe, ohne die Sicherung zu entschlüsseln. Für den Einspiel-Dialog:
+    /// Er zeigt sie an, bevor nach der Passphrase gefragt wird — genau dann braucht man
+    /// sie.
+    static func merkhilfe(aus archiv: Data) -> String? {
+        guard let u = try? JSONDecoder().decode(Umschlag.self, from: archiv) else { return nil }
+        guard let h = u.hinweis, !h.isEmpty else { return nil }
+        return h
+    }
+
+    private static func verschluesseln(_ klartext: Data, passphrase: String,
+                                       merkhilfe: String?) throws -> Data {
         var salt = [UInt8](repeating: 0, count: 16)
         guard SecRandomCopyBytes(kSecRandomDefault, salt.count, &salt) == errSecSuccess else {
             throw Fehler.beschaedigt("Zufallsquelle")
@@ -257,7 +275,8 @@ enum BackupArchive {
                          ciphertextB64: versiegelt.ciphertext.base64EncodedString(),
                          tagB64: versiegelt.tag.base64EncodedString(),
                          kdf: "pbkdf2-sha256",
-                         iterations: pbkdf2Runden)
+                         iterations: pbkdf2Runden,
+                         hinweis: merkhilfe?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty)
         return try JSONEncoder().encode(u)
     }
 
