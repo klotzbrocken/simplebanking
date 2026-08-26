@@ -110,13 +110,40 @@ func handleMessage(_ msg: [String: Any]) -> [String: Any]? {
             "serverInfo": ["name": "simplebanking-mcp", "version": "1.3.4"]
         ])
     case "tools/list":
-        return response(id: id, result: ["tools": BankingTools.toolList()])
+        // Gefiltert, nicht nur gesperrt: Was ein Client nicht darf, soll er gar nicht
+        // erst angeboten bekommen. Ein Werkzeug, das sichtbar ist und dann ablehnt,
+        // lädt ein Sprachmodell zum Nachbohren ein.
+        let erlaubt = Zugang.befund()
+        let werkzeuge = BankingTools.toolList().filter { werkzeug in
+            guard let name = werkzeug["name"] as? String,
+                  let noetig = Zugang.bereich(fuerWerkzeug: name) else { return false }
+            return erlaubt.bereiche.contains(noetig)
+        }
+        return response(id: id, result: ["tools": werkzeuge])
     case "tools/call":
         let name = params["name"] as? String ?? ""
         let args = params["arguments"] as? [String: Any] ?? [:]
+
+        // Zweite Prüfung, obwohl die Liste schon gefiltert ist: Ein Client kann ein
+        // Werkzeug aufrufen, das er nie angeboten bekam — die Liste ist eine Auskunft,
+        // keine Sperre.
+        let befund = Zugang.befund()
+        guard let noetig = Zugang.bereich(fuerWerkzeug: name) else {
+            return errorResponse(id: id, code: -32601, message: "Unknown tool: \(name)")
+        }
+        guard befund.bereiche.contains(noetig) else {
+            let grund = befund.bereiche.isEmpty
+                ? "Access token missing, revoked or expired. Manage clients in simplebanking → Settings."
+                : "This client has no '\(noetig.rawValue)' scope. Grant it in simplebanking → Settings."
+            return response(id: id, result: [
+                "content": [["type": "text", "text": grund]],
+                "isError": true
+            ])
+        }
+
         let (text, isError) = BankingTools.call(name: name, args: args)
         return response(id: id, result: [
-            "content": [["type": "text", "text": text]],
+            "content": [["type": "text", "text": isError ? text : BankingTools.alsDaten(text)]],
             "isError": isError
         ])
     case "ping":
