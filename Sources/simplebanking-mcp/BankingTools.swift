@@ -617,6 +617,11 @@ struct BankingTools {
             throw QueryError.open(openRC, msg)
         }
         defer { sqlite3_close(db) }
+        // Warten statt scheitern — dasselbe Problem wie im CLI: Schreibt die App gerade
+        // einen Abruf weg oder räumt das WAL-Journal auf, meldet SQLite sofort
+        // „database is locked". Ein Agent, der daraufhin einen Fehler zurückbekommt,
+        // deutet ihn als „keine Daten vorhanden".
+        sqlite3_busy_timeout(db, 3000)
 
         try ensureTransactionsTable(db)
 

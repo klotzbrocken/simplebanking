@@ -157,6 +157,12 @@ enum DataReader {
            FileManager.default.fileExists(atPath: dbURL.path) {
             var config = Configuration()
             config.readonly = true
+            // Warten statt scheitern. Nur lesend zu öffnen genügt nicht: Schreibt die App
+            // gerade einen Abruf weg oder räumt sie das WAL-Journal auf, meldet SQLite
+            // sofort „database is locked" (Fehler 5). Gemeldet aus der Raycast-Erweiterung
+            // am 26.08.2026. Für ein Werkzeug, das jemand nebenbei aufruft, ist kurzes
+            // Warten die richtige Antwort.
+            config.busyMode = .timeout(3)
             if let queue = try? DatabaseQueue(path: dbURL.path, configuration: config) {
                 dbMax = (try? queue.read { db in
                     try String.fetchOne(db, sql: "SELECT MAX(updated_at) FROM transactions")
@@ -203,6 +209,8 @@ enum DataReader {
 
         var config = Configuration()
         config.readonly = true
+        // Siehe oben: warten statt sofort scheitern.
+        config.busyMode = .timeout(3)
         let queue = try DatabaseQueue(path: dbURL.path, configuration: config)
 
         // Cutoff als YYYY-MM-DD im Local-TZ
