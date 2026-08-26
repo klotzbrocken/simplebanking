@@ -265,6 +265,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.0.3":
+            return v203
         case "2.0.2":
             return v202
         case "2.0.1":
@@ -275,6 +277,51 @@ enum WhatsNewContent {
             return nil
         }
     }
+
+    /// 2.0.3. Auswahlregel unverändert: nur, was jemand auch merkt. Der Umstieg auf die
+    /// neue Banking-Bibliothek steht deshalb nicht drin — er ist die größte Änderung
+    /// dieser Runde und für den Nutzer vollständig unsichtbar.
+    private static let v203: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "externaldrive",
+            tint: .sbBlueStrong,
+            title: L10n.t("Sicherung: Umzug ohne Neuaufbau",
+                          "Backup: move without starting over"),
+            description: L10n.t(
+                "Einstellungen → Konten → Sicherung legt Konten, Umsätze, Belege, Einstellungen und Themes in einer Datei ab — verschlüsselt mit einer Passphrase, die du vergibst. Nach einer Neuinstallation ist alles wieder da; die Banken gibst du einmal neu frei. Einspielen geht auch direkt im Einrichtungs-Assistenten.",
+                "Settings → Accounts → Backup stores accounts, transactions, receipts, settings and themes in one file — encrypted with a passphrase you choose. After a fresh install everything is back; you re-approve your banks once. Restoring also works right from the setup assistant."
+            )
+        ),
+        WhatsNewItem(
+            icon: "magnifyingglass",
+            tint: .sbOrangeStrong,
+            title: L10n.t("simplebanking in Raycast", "simplebanking in Raycast"),
+            description: L10n.t(
+                "Kontostand, Umsätze und Monatsübersicht ohne die App zu öffnen. Die Erweiterung liest denselben lokalen Bestand wie die Kommandozeile und fragt dabei keine Bank — es kostet also keine Freigabe.",
+                "Balance, transactions and monthly overview without opening the app. The extension reads the same local data as the command line and never contacts a bank — so it costs no approval."
+            )
+        ),
+        WhatsNewItem(
+            icon: "lock.shield",
+            tint: .sbGreenStrong,
+            title: L10n.t("Der Claude-Zugang ist jetzt ausschließlich lesend",
+                          "The Claude connection is now read-only"),
+            description: L10n.t(
+                "Das Werkzeug, mit dem ein Agent einen Überweisungsentwurf anlegen konnte, ist entfernt. Ausgelöst wurde damit nie etwas ohne deine Bestätigung — aber ein Entwurf entstand, ohne dass du gefragt wurdest, und in einem Verwendungszweck kann jede beliebige Anweisung stehen. Neu unter Einstellungen → Extras: Zugänge einzeln vergeben und widerrufen.",
+                "The tool that let an agent create a transfer draft has been removed. Nothing was ever executed without your confirmation — but a draft appeared without asking you, and a payment reference can contain any instruction at all. New under Settings → Extras: grant and revoke access individually."
+            )
+        ),
+        WhatsNewItem(
+            icon: "qrcode",
+            tint: .sbRedStrong,
+            title: L10n.t("bunq hängt nicht mehr in der Freigabe-Schleife",
+                          "bunq no longer loops through approvals"),
+            description: L10n.t(
+                "Meldete die Bank einen Zugriffsfehler, warf simplebanking die erteilte Zustimmung weg und holte eine neue — was bei Banken mit Freigabe im Browser nichts heilte, sondern die Schleife war. Bei bunq, N26 und Revolut wird jetzt in keinem Fall mehr automatisch verworfen.",
+                "When the bank reported an access error, simplebanking discarded your consent and fetched a new one — which for browser-approved banks cured nothing and was the loop itself. For bunq, N26 and Revolut nothing is discarded automatically any more."
+            )
+        ),
+    ]
 
     /// 2.0.2. Dieselbe Auswahlregel wie bei 2.0.1: nur, was jemand auch merkt. Die
     /// beiden neuen Theme-Schlüssel stehen deshalb zusammen in einem Punkt — für einen

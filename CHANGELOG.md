@@ -1,8 +1,17 @@
 # Changelog — simplebanking
 
-## [Unreleased] (2.0.2)
+## [2.0.3]
 
 ### Neu
+
+- **Sicherung und Wiederherstellung** — Einstellungen → Konten → Sicherung. Legt Konten, Umsätze, Belege, Einstellungen und Themes in einer Datei ab, verschlüsselt mit einer Passphrase, die du vergibst. Für den Umzug auf einen neuen Mac oder nach einer Neuinstallation. Beim Erstellen wird die Passphrase zweimal abgefragt und ihre Stärke bewertet; eine optionale Merkhilfe steht unverschlüsselt im Dateikopf, weil eine Erinnerung, die man erst nach der Eingabe lesen könnte, niemandem hilft. **Die Bank-Freigaben wandern bewusst nicht mit** — die gibst du nach dem Einspielen einmal neu. Eine tote Zustimmung einzuspielen ergäbe einen Abruf, der sauber durchläuft und trotzdem nichts liefert.
+- **Sicherung einspielen schon im Einrichtungs-Assistenten** — nach einer Neuinstallation landet man dort, und bisher musste man erst eine Bank verbinden, um die Sicherung danach in den Einstellungen zu suchen. Erscheint nur beim echten Erststart, nie beim Anlegen eines weiteren Kontos.
+- **Theme-Auswahl am Ende der Einrichtung** — die vier mitgelieferten Themes mit einer Vorschau, die aus den Werten des Themes gezeichnet wird statt aus einem Screenshot. Mehr Themes in der Galerie auf simplebanking.de.
+- **Raycast-Erweiterung** — Kontostand, Umsätze und Monatsübersicht direkt in Raycast. Sie ruft dasselbe Kommandozeilenwerkzeug auf wie das Terminal und kennt weder Zugangsdaten noch Banken.
+- **Neuer Einstellungsbereich „Extras"** — Zugänge, Claude Desktop, Kommandozeile, Raycast und simplesend an einer Stelle. MCP und CLI sind damit aus „Labs" heraus: Was dort steht, ist nicht mehr experimentell.
+- **Sicherheitsnetz vor Datenbank-Migrationen** — steht beim Start eine neue Migration an, legt die App vorher eine Kopie der Umsatzdatenbank an und bewahrt drei Stände auf. Migrationen gehen nur vorwärts; geht eine schief, ist die Historie ohne diese Kopie verloren.
+
+### Geändert
 
 - **Diagnose der Ersteinrichtung** — Support → Bank-Diagnose → „Neue Einrichtung aufzeichnen …" startet den Assistenten und legt am Ende von selbst einen Bericht vor, auch wenn der Versuch scheitert oder abgebrochen wird. Der Bericht enthält: Schrittfolge mit Dauer und Fehlertext, die Freigabe-Phasen (Browser geöffnet, wie lange gewartet, ob eine Zustimmung zurückkam) und **die YAXI-Traces**. Die schreibt die Einrichtung jetzt bei jedem Schritt mit, auch wenn er gelingt — bisher entstand ein Trace nur, wenn ein Aufruf mit einem Fehler abbrach. Lief die Einrichtung durch und die Bank lieferte trotzdem Unsinn, gab es hinterher nur Schrittnamen und Millisekunden. Ebenso wird das Einrichtungsprotokoll jetzt immer geschrieben statt nur bei gesetztem Schalter: Eine gescheiterte Einrichtung lässt sich nicht nachspielen, jeder Versuch kostet echte Freigaben — wer den Schalter erst danach findet, müsste die Bank ein zweites Mal um eine TAN bitten. Ein bereits gelaufener Versuch lässt sich über „Letzte auswerten" nachträglich zusammenfassen.
 - **Bank-Diagnose: Banken einzeln wählbar** — vor dem Start lässt sich anhaken, welche Konten geprüft werden. Wer einer einzelnen Bank nachgeht, ruft nicht mehr alle an. Dazu ein Abbrechen-Knopf während des Laufs und, nach fünfzehn Sekunden, der Hinweis, dass eine Freigabe in der App der Bank aussteht.
@@ -19,6 +28,10 @@
 - **Der Schnellabruf ist wieder aus.** Er war einen Tag lang der Standardweg. `unauthorized` als Rohfehler gab es in der gesamten Protokollhistorie nur an diesem einen Tag — der zeitliche Zusammenhang ist zu deutlich, um ihn eingeschaltet zu lassen, solange nicht geklärt ist, ob er die Sitzung verbrennt, auf der der nachfolgende Aufruf aufsetzt. Er reicht die Sitzung jetzt nicht mehr weiter und lässt sich zum Erproben einschalten.
 - **Abruf ohne Freigabe-Maschinerie** — Salden und Umsätze gehen jetzt zuerst über den nicht-interaktiven Dienst von YAXI. Er braucht nur die bei der Einrichtung erteilte Zustimmung und kennt gar keine Zweige für TAN, Browser oder Freigabe-Handle. Für Banken mit Freigabe im Browser — bunq, N26, Revolut — ist das der vorgesehene Weg, dort Daten zu holen. Klappt er nicht, läuft unverändert alles Bisherige weiter, einschließlich Wiederholungen und Fehlerbericht. Abschaltbar über `yaxiNonInteractiveRefreshEnabled`.
 - **Banking-Bibliothek auf routex-client-swift 0.5** — YAXI hat das SDK von einem Rust-Kern hinter UniFFI auf reines Swift umgestellt. Für Nutzer ändert sich nichts; die App spricht dieselbe Schnittstelle mit denselben Banken. Intern ist es ein vollständiger Umbau: getrennte Ticket-Typen je Dienst, eine gemeinsame Antwortform statt vier, Werttypen für Sitzung, Zustimmung und Kalendertage — und vier Fehlerfamilien statt einer. Der letzte Punkt ist der heikelste: Bankfehler heißen jetzt `RoutexError` statt `RoutexClientError`, und eine Abfrage auf den alten Namen hätte weiter übersetzt, aber nie wieder zugetroffen. Betroffen waren zehn Entscheidungsstellen, darunter der bunq-Schutz, die Zwei-Stufen-Wiederholung und der Fehlerbericht — sie hätten stillschweigend aufgehört zu arbeiten. Neun Tests halten das jetzt fest.
+
+## [2.0.2] — 2026-08-06
+
+### Neu
 
 - **Themes: Bedien-Icons und Rasterschrift sind jetzt zwei Schalter** — `glyphControls=off` ersetzte bisher nicht nur die Bedien-Icons durch Textkommandos, sondern stellte zugleich Schriftgrade, Ringe und Metriken auf die Lo-Fi-Gestaltung um. Wer nur Textkommandos wollte, konnte den Rest nicht abwählen. Die Gestaltung hängt jetzt am neuen Schlüssel `lofiTypography` (Standard: aus). Das mitgelieferte BTX-Theme setzt beide und sieht unverändert aus; ein eigenes Theme mit `glyphControls=off`, das die großen Grade behalten will, ergänzt `lofiTypography=on`. Dokumentiert in THEMES.md §4.3.
 
