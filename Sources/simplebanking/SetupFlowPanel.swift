@@ -164,6 +164,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let discoverSpinner = NSProgressIndicator()
     private var autocompletePanel: NSPanel?
     private var passphraseFenster: NSWindow?
+    private var themeVorschauen: [String: ThemeVorschauView] = [:]
     private var autocompleteTable: NSTableView?
 
     // IBAN live-detection UI
@@ -569,9 +570,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         case .accountPicker: fraction = 0.57
         case .onboarding(let page):
             switch page {
-            case 0: fraction = existingMasterPassword != nil ? 1.0 : 0.71
-            case 1: fraction = 0.85
-            case 2: fraction = 1.0
+            case 0: fraction = existingMasterPassword != nil ? 1.0 : 0.68
+            case 1: fraction = 0.79
+            case 2: fraction = 0.89
+            case 3: fraction = 1.0
             default: fraction = 0
             }
         }
@@ -1150,7 +1152,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private func renderOnboardingPage(_ page: Int) {
         approvalSpinner.stopAnimation(nil)
 
-        let totalPages = 3
+        let totalPages = 4
         guard page >= 0 && page < totalPages else { return }
 
         switch page {
@@ -1160,8 +1162,111 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             renderOnboardingPage1()
         case 2:
             renderOnboardingPage2()
+        case 3:
+            renderThemeAuswahl()
         default:
             break
+        }
+    }
+
+    // MARK: - Theme-Auswahl
+
+    /// Zur Wahl stehen nur die vier mitgelieferten Themes.
+    ///
+    /// Mehr wäre eine Bibliothek im Programm, und die gehört auf die Website: Dort steht
+    /// die Galerie, dort lassen sich Themes hochladen, und dort wächst die Auswahl, ohne
+    /// dass jemand die App aktualisieren muss. Der Verweis darunter führt genau dorthin.
+    private func renderThemeAuswahl() {
+        rootStack.alignment = .centerX
+        rootStack.spacing = 12
+
+        let titel = NSTextField(labelWithString: t("Wie soll es aussehen?", "How should it look?"))
+        titel.font = .systemFont(ofSize: 19, weight: .semibold)
+        titel.alignment = .center
+
+        let text = NSTextField(wrappingLabelWithString: t(
+            "Das lässt sich jederzeit in den Einstellungen ändern.",
+            "You can change this any time in Settings."))
+        text.font = .systemFont(ofSize: 13)
+        text.textColor = .secondaryLabelColor
+        text.alignment = .center
+
+        let alle = ThemeManager.shared.availableThemes()
+        let ausgeliefert = ["default", "sunrise", "gameboy", "btx"]
+        let auswahl = ausgeliefert.compactMap { id in alle.first { $0.id == id } }
+
+        let aktuell = UserDefaults.standard.string(forKey: "themeId") ?? "default"
+        themeVorschauen.removeAll()
+
+        let reihe1 = NSStackView()
+        reihe1.orientation = .horizontal
+        reihe1.spacing = 10
+        let reihe2 = NSStackView()
+        reihe2.orientation = .horizontal
+        reihe2.spacing = 10
+
+        for (i, theme) in auswahl.enumerated() {
+            let kachel = NSStackView()
+            kachel.orientation = .vertical
+            kachel.alignment = .centerX
+            kachel.spacing = 4
+
+            let vorschau = ThemeVorschauView(theme: theme, ausgewaehlt: theme.id == aktuell)
+            themeVorschauen[theme.id] = vorschau
+
+            let knopf = NSButton(title: "", target: self, action: #selector(onThemeGewaehlt(_:)))
+            knopf.isBordered = false
+            knopf.title = ""
+            knopf.identifier = NSUserInterfaceItemIdentifier(theme.id)
+            knopf.translatesAutoresizingMaskIntoConstraints = false
+            knopf.addSubview(vorschau)
+            NSLayoutConstraint.activate([
+                knopf.widthAnchor.constraint(equalToConstant: 132),
+                knopf.heightAnchor.constraint(equalToConstant: 84),
+                vorschau.leadingAnchor.constraint(equalTo: knopf.leadingAnchor),
+                vorschau.topAnchor.constraint(equalTo: knopf.topAnchor)
+            ])
+
+            let name = NSTextField(labelWithString: theme.name)
+            name.font = .systemFont(ofSize: 11)
+            name.textColor = .secondaryLabelColor
+            name.alignment = .center
+
+            kachel.addArrangedSubview(knopf)
+            kachel.addArrangedSubview(name)
+            (i < 2 ? reihe1 : reihe2).addArrangedSubview(kachel)
+        }
+
+        let galerie = NSButton(title: t("Mehr Themes in der Galerie", "More themes in the gallery"),
+                               target: self, action: #selector(onThemeGalerie))
+        galerie.isBordered = false
+        galerie.contentTintColor = .controlAccentColor
+        galerie.font = .systemFont(ofSize: 12)
+
+        rootStack.addArrangedSubview(titel)
+        rootStack.addArrangedSubview(text)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(reihe1)
+        rootStack.addArrangedSubview(reihe2)
+        rootStack.addArrangedSubview(galerie)
+
+        rootStack.setCustomSpacing(4, after: titel)
+        rootStack.setCustomSpacing(16, after: text)
+        rootStack.setCustomSpacing(10, after: reihe2)
+    }
+
+    @objc private func onThemeGewaehlt(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        UserDefaults.standard.set(id, forKey: "themeId")
+        ThemeManager.shared.reloadThemes()
+        for (themeId, ansicht) in themeVorschauen {
+            ansicht.setzeAuswahl(themeId == id)
+        }
+    }
+
+    @objc private func onThemeGalerie() {
+        if let url = URL(string: "https://simplebanking.de/theme-galerie") {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -2118,8 +2223,9 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             let text = nicknameTextField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             collectedNickname = text.isEmpty ? nil : text
         }
-        // Second-account flow: only page 0, then done
-        let totalPages = existingMasterPassword != nil ? 1 : 3
+        // Zweitkonto: nur Seite 0, dann fertig — die Theme-Auswahl gehört nicht dazu,
+        // wer ein zweites Konto anlegt, hat sein Aussehen längst gewählt.
+        let totalPages = existingMasterPassword != nil ? 1 : 4
         if page < totalPages - 1 {
             render(step: .onboarding(page: page + 1))
         } else {
