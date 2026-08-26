@@ -297,6 +297,7 @@ struct SettingsView: View {
     @State private var themeImportHinweis: (text: String, istFehler: Bool)?
     @State private var logStatusMessage: String = ""
     @State private var logoTapCount: Int = 0
+    @State private var mcpClients: [MCPClientStore.Client] = []
     @State private var sicherungHinweis: String = ""
     @State private var sicherungFehler: Bool = false
     @State private var sicherungZiel: URL? = nil
@@ -842,6 +843,10 @@ struct SettingsView: View {
                 TabButton(title: t("Über", "About"), icon: "info.circle", isSelected: selectedTab == 5) {
                     selectedTab = 5
                 }
+                TabButton(title: t("Erweiterungen", "Extensions"), icon: "puzzlepiece.extension",
+                          isSelected: selectedTab == 7) {
+                    selectedTab = 7
+                }
                 TabButton(title: "Labs", icon: "flask", isSelected: selectedTab == 6) {
                     selectedTab = 6
                 }
@@ -871,6 +876,8 @@ struct SettingsView: View {
                             aboutSection
                         case 6:
                             labsSettings
+                        case 7:
+                            erweiterungenSettings
                         default:
                             EmptyView()
                         }
@@ -3273,6 +3280,200 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Erweiterungen
+    //
+    // Vorher lagen MCP und CLI unter „Labs". Der Umzug ist keine Kosmetik, sondern eine
+    // Zusage: Was hier steht, ist nicht mehr experimentell. Deshalb kam zuerst die
+    // Härtung des MCP-Servers — benannte Bereiche, widerrufbare Zugänge, ausschließlich
+    // lesend — und erst danach dieser Bereich.
+
+    private var erweiterungenSettings: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 8) {
+                Image(systemName: "puzzlepiece.extension")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.accentColor)
+                Text(t(
+                    "Zugriff auf deine Daten von außen — für Agenten, Terminal und Raycast. Alles davon ist ausschließlich lesend.",
+                    "Access to your data from outside — for agents, terminal and Raycast. All of it is read-only."
+                ))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.08)))
+
+            mcpZugaengeSettings
+
+            Divider()
+
+            DisclosureGroup {
+                mcpSettings.padding(.top, 8)
+            } label: {
+                Label(t("Claude Desktop einrichten", "Set up Claude Desktop"), systemImage: "server.rack")
+                    .font(ThemeFonts.body(size: 13, weight: .medium))
+            }
+
+            DisclosureGroup {
+                cliSettings.padding(.top, 8)
+            } label: {
+                Label(t("Kommandozeile (CLI)", "Command line (CLI)"), systemImage: "terminal")
+                    .font(ThemeFonts.body(size: 13, weight: .medium))
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsSectionHeader(title: "Raycast", icon: "magnifyingglass")
+                Text(t(
+                    "Kontostand, Umsätze und Monatsübersicht in Raycast. Die Erweiterung ruft dasselbe Kommandozeilenwerkzeug auf und kennt weder Zugangsdaten noch Banken.",
+                    "Balance, transactions and monthly overview in Raycast. The extension calls the same command-line tool and knows neither credentials nor banks."
+                ))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                Button(t("Im Raycast Store öffnen", "Open in Raycast Store")) {
+                    if let url = URL(string: "https://www.raycast.com/klotzbrocken/simplebanking") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - MCP-Zugänge
+
+    private var mcpZugaengeSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: t("Zugänge", "Access"), icon: "key")
+
+            Text(t(
+                "Jeder Agent bekommt ein eigenes Merkmal mit eigenen Bereichen. Widerrufen wirkt sofort — der nächste Aufruf bekommt nichts mehr.",
+                "Each agent gets its own token with its own scopes. Revoking takes effect immediately — the next call gets nothing."
+            ))
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if mcpClients.isEmpty {
+                // Der Zustand nach dem Update: Ohne Zugang läuft alles weiter, weil der
+                // Server nur liest. Das gehört gesagt — sonst hält man die leere Liste
+                // für einen Fehler.
+                Label(t(
+                    "Noch kein Zugang vergeben. Claude Desktop und die Kommandozeile arbeiten trotzdem — der Server ist ausschließlich lesend. Ein Zugang lohnt sich, wenn du einem Agenten weniger geben willst als alles.",
+                    "No access granted yet. Claude Desktop and the command line still work — the server is read-only. Grant one when you want to give an agent less than everything."
+                ), systemImage: "info.circle")
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            ForEach(mcpClients) { client in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: client.aktiv ? "key.fill" : "key.slash")
+                        .foregroundColor(client.aktiv ? .sbGreenStrong : .secondary)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(client.name)
+                            .font(ThemeFonts.body(size: 13, weight: .medium))
+                        Text(mcpClientBeschreibung(client))
+                            .font(ThemeFonts.body(size: 10.5))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if client.aktiv {
+                        Button(t("Widerrufen", "Revoke")) {
+                            try? MCPClientStore.widerrufen(id: client.id)
+                            mcpClients = MCPClientStore.laden()
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button(t("Entfernen", "Remove")) {
+                            try? MCPClientStore.loeschen(id: client.id)
+                            mcpClients = MCPClientStore.laden()
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            Button(t("Zugang anlegen …", "Grant access …")) { mcpZugangAnlegen() }
+                .buttonStyle(.bordered)
+        }
+        .onAppear { mcpClients = MCPClientStore.laden() }
+    }
+
+    private func mcpClientBeschreibung(_ c: MCPClientStore.Client) -> String {
+        if c.widerrufen { return t("widerrufen", "revoked") }
+        if c.abgelaufen { return t("abgelaufen", "expired") }
+        let bereiche = MCPClientStore.Zugangsbereich.allCases
+            .filter { c.bereiche.contains($0) }
+            .map(\.titel)
+            .joined(separator: ", ")
+        guard let ablauf = c.laeuftAbAm else { return bereiche }
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        return bereiche + " · " + t("bis \(f.string(from: ablauf))", "until \(f.string(from: ablauf))")
+    }
+
+    /// Legt einen Zugang an und zeigt das Merkmal **einmal**.
+    ///
+    /// Danach steht nur noch sein Hash in der Registrierung — wiederherstellen kann es
+    /// niemand, auch die App nicht. Deshalb landet es beim Anlegen direkt in der
+    /// Zwischenablage: Wer es abtippt, vertippt sich.
+    @MainActor
+    private func mcpZugangAnlegen() {
+        let frage = NSAlert()
+        frage.messageText = t("Zugang anlegen", "Grant access")
+        frage.informativeText = t(
+            "Ein Name hilft dir später beim Widerrufen — etwa \u{201E}Claude Desktop\u{201C} oder \u{201E}Laptop\u{201C}.",
+            "A name helps you revoke it later — e.g. \u{201E}Claude Desktop\u{201C} or \u{201E}Laptop\u{201C}."
+        )
+        let feld = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        feld.stringValue = "Claude Desktop"
+        frage.accessoryView = feld
+        frage.addButton(withTitle: t("Anlegen", "Grant"))
+        frage.addButton(withTitle: t("Abbrechen", "Cancel"))
+        frage.window.initialFirstResponder = feld
+        guard frage.runModal() == .alertFirstButtonReturn else { return }
+
+        do {
+            let (_, token) = try MCPClientStore.anlegen(
+                name: feld.stringValue,
+                bereiche: Set(MCPClientStore.Zugangsbereich.allCases.filter(\.standardmaessigAn)),
+                gueltigTage: nil)
+            mcpClients = MCPClientStore.laden()
+
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(token, forType: .string)
+
+            let fertig = NSAlert()
+            fertig.messageText = t("Zugang angelegt", "Access granted")
+            fertig.informativeText = t(
+                "Das Merkmal liegt in der Zwischenablage und wird jetzt nicht wieder angezeigt — es ist nirgends gespeichert, nur seine Prüfsumme. Trage es in der Claude-Konfiguration unter \u{201E}env\u{201C} als SIMPLEBANKING_MCP_TOKEN ein.",
+                "The token is on your clipboard and will not be shown again — it is stored nowhere, only its checksum. Add it to the Claude configuration under \u{201E}env\u{201C} as SIMPLEBANKING_MCP_TOKEN."
+            )
+            fertig.addButton(withTitle: "OK")
+            fertig.runModal()
+        } catch {
+            let fehler = NSAlert()
+            fehler.alertStyle = .warning
+            fehler.messageText = t("Zugang konnte nicht angelegt werden", "Could not grant access")
+            fehler.informativeText = error.localizedDescription
+            fehler.addButton(withTitle: "OK")
+            fehler.runModal()
+        }
+    }
+
     // MARK: - Labs Settings
 
     private var labsSettings: some View {
@@ -3350,38 +3551,6 @@ struct SettingsView: View {
                 ),
                 isOn: $balanceChangeBadgeEnabled
             )
-
-            Divider()
-
-            // Agenten & Automatisierung — Lese-only-Zugriff über externe Tools.
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsSectionHeader(
-                    title: t("Agenten & Automatisierung", "Agents & Automation"),
-                    icon: "command.square"
-                )
-                Text(t(
-                    "Lese-only-Zugriff auf die App-Daten über externe Tools — Claude Desktop (MCP) und Kommandozeile.",
-                    "Read-only access to app data via external tools — Claude Desktop (MCP) and command line."
-                ))
-                .font(ThemeFonts.body(size: 11))
-                .foregroundColor(.secondary)
-
-                DisclosureGroup {
-                    mcpSettings
-                        .padding(.top, 8)
-                } label: {
-                    Label(t("Claude (MCP)", "Claude (MCP)"), systemImage: "server.rack")
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                }
-
-                DisclosureGroup {
-                    cliSettings
-                        .padding(.top, 8)
-                } label: {
-                    Label(t("Kommandozeile (CLI)", "Command line (CLI)"), systemImage: "terminal")
-                        .font(ThemeFonts.body(size: 13, weight: .medium))
-                }
-            }
 
             Divider()
 
