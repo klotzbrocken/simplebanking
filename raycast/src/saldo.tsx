@@ -1,6 +1,11 @@
-import { List, Icon, Color } from "@raycast/api";
+import { List, Icon, Color, ActionPanel, Action } from "@raycast/api";
 import { useEffect, useState } from "react";
 import { Konto, konten, euro, SbFehlt } from "./sb";
+
+/** Eine Zeile zum Weitergeben: Konto, IBAN, Saldo — in dieser Reihenfolge lesbar. */
+function alsText(k: Konto): string {
+  return `${k.name} · ${k.iban} · ${euro(k.balance, k.currency)}`;
+}
 
 export default function Saldo() {
   const [daten, setDaten] = useState<Konto[]>([]);
@@ -28,7 +33,17 @@ export default function Saldo() {
     <List isLoading={laedt} searchBarPlaceholder="Konto suchen">
       {daten.length > 1 && (
         <List.Section title="Gesamt">
-          <List.Item icon={Icon.BankNote} title="Alle Konten" accessories={[{ text: euro(summe) }]} />
+          <List.Item
+            icon={Icon.BankNote}
+            title="Alle Konten"
+            accessories={[{ text: euro(summe) }]}
+            actions={
+              <ActionPanel>
+                <Action.CopyToClipboard title="Übersicht Kopieren" content={daten.map(alsText).join("\n")} />
+                <Action.CopyToClipboard title="Summe Kopieren" content={euro(summe)} />
+              </ActionPanel>
+            }
+          />
         </List.Section>
       )}
       <List.Section title="Konten">
@@ -42,6 +57,22 @@ export default function Saldo() {
             title={k.name}
             subtitle={k.iban.slice(0, 8) + "…"}
             accessories={[{ text: euro(k.balance, k.currency) }]}
+            actions={
+              <ActionPanel>
+                {/* Return kopiert die ganze Zeile — das ist, was man weitergibt. */}
+                <Action.CopyToClipboard title="Kontodaten Kopieren" content={alsText(k)} />
+                <Action.CopyToClipboard
+                  title="IBAN Kopieren"
+                  content={k.iban}
+                  shortcut={{ modifiers: ["cmd"], key: "i" }}
+                />
+                <Action.CopyToClipboard
+                  title="Nur Saldo Kopieren"
+                  content={euro(k.balance, k.currency)}
+                  shortcut={{ modifiers: ["cmd"], key: "b" }}
+                />
+              </ActionPanel>
+            }
           />
         ))}
       </List.Section>
