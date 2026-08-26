@@ -535,20 +535,33 @@ enum TransactionsDatabase {
 
     // MARK: - Demo DB
 
-    /// Generates fake transactions for all 3 demo slots and writes them to transactions-demo.db.
-    /// Called whenever demo mode is activated or the seed is changed.
-    static func writeDemoDB(seed: Int) {
+    /// Schreibt Demo-Buchungen für die übergebenen Slots nach `transactions-demo.db`.
+    ///
+    /// Die App selbst braucht diese Datei nicht — sie erzeugt ihre Demo-Umsätze bei jedem
+    /// Aufruf frisch aus `FakeData`. CLI, MCP und die Raycast-Erweiterung lesen dagegen
+    /// ausschließlich die Datei. Fehlt der Aufruf, zeigt `sb balance` im Demo-Modus zwar
+    /// Salden — die stehen in den Preferences —, `sb tx` aber nichts.
+    ///
+    /// `slotIds` müssen die injizierten Slots sein (`demo-slot-0…2`): Die CLI leitet ihre
+    /// Kontenliste aus den `cachedBalance.demo-slot-N`-Schlüsseln ab und filtert Umsätze
+    /// über `slot_id`. Die früher hier verwendeten Namen (`demo-main/daily/bills`) passten
+    /// zu keinem davon — dieselbe Unstimmigkeit war im MCP schon einmal zu beheben.
+    static func writeDemoDB(seed: Int, slotIds: [String]) {
+        guard !slotIds.isEmpty else { return }
         guard let queue = try? makeQueue(bankId: "demo") else { return }
         guard (try? migrator.migrate(queue)) != nil else { return }
 
-        let slotConfigs: [(id: String, profile: Int)] = [
-            ("demo-main",  0),
-            ("demo-daily", 1),
-            ("demo-bills", 2)
-        ]
+        // Slots aus einem früheren Demo-Stil müssen weg, sonst listet `sb tx` Buchungen
+        // von Konten, die `sb balance` gar nicht kennt.
+        let platzhalter = slotIds.map { _ in "?" }.joined(separator: ",")
+        try? queue.write { db in
+            try db.execute(sql: "DELETE FROM transactions WHERE slot_id NOT IN (\(platzhalter))",
+                           arguments: StatementArguments(slotIds))
+        }
+
         let now = currentTimestamp()
 
-        for (slotId, profile) in slotConfigs {
+        for (profile, slotId) in slotIds.enumerated() {
             var s = UInt64(bitPattern: Int64(truncatingIfNeeded: seed)) &+ UInt64(profile)
             let txs = FakeData.generateDemoTransactions(seed: &s, days: 365, slotId: slotId, slotProfile: profile)
 

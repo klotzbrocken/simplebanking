@@ -2367,6 +2367,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// gibt das Streifen-/Karten-Design vor (BankTintProvider liest die Slot-`logoId`).
     /// Ohne echten Brand am aktiven Slot bliebe der Streifen im Demo unsichtbar,
     /// weil `BankTintProvider.hex(for:)` ohne logoId/customColor `nil` liefert.
+    /// Spiegelt die Demo-Buchungen in `transactions-demo.db`.
+    ///
+    /// Nur für die Werkzeuge außerhalb der App: CLI, MCP und Raycast lesen die Datei,
+    /// die App erzeugt ihre Demo-Umsätze im Speicher. Im Hintergrund, weil pro Slot ein
+    /// Jahr Buchungen entsteht — das soll den Menüklick nicht aufhalten.
+    private func spiegleDemoUmsaetze(slotIds: [String]) {
+        let seedSnapshot = demoSeed
+        Task.detached(priority: .utility) {
+            TransactionsDatabase.writeDemoDB(seed: seedSnapshot, slotIds: slotIds)
+        }
+    }
+
     private func activateSingleDemo() {
         backupSlotsForDemo()
         // Bankmarke aus einem ABGELEITETEN Seed ziehen, damit der Saldo unten direkt aus
@@ -2389,6 +2401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         var seed = UInt64(truncatingIfNeeded: demoSeed)
         let fake = FakeData.demoBalance(seed: &seed)
         UserDefaults.standard.set(fake, forKey: "simplebanking.cachedBalance.\(demoSlot.id)")
+        spiegleDemoUmsaetze(slotIds: [demoSlot.id])
         lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
         lastBalance = fake
         txVM.currentBalance = formatEURWithCents(fake)
@@ -2520,6 +2533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             settings.dispoLimit = FakeData.demoDispoLimit(slotProfile: i)
             BankSlotSettingsStore.save(settings, slotId: slot.id)
         }
+        spiegleDemoUmsaetze(slotIds: demoSlots.map(\.id))
 
         lastBalance = total
         lastShownTitle = formatEURNoDecimals(String(format: "%.2f", total))
