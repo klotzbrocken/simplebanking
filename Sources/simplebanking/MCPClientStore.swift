@@ -33,7 +33,6 @@ enum MCPClientStore {
         case konten       = "accounts"
         case umsaetze     = "transactions"
         case auswertung   = "analysis"
-        case ueberweisung = "transfer"
 
         var id: String { rawValue }
 
@@ -42,7 +41,6 @@ enum MCPClientStore {
             case .konten:       return L10n.t("Konten und Salden", "Accounts and balances")
             case .umsaetze:     return L10n.t("Umsätze", "Transactions")
             case .auswertung:   return L10n.t("Auswertungen", "Analysis")
-            case .ueberweisung: return L10n.t("Überweisungsentwürfe", "Transfer drafts")
             }
         }
 
@@ -55,14 +53,12 @@ enum MCPClientStore {
                               "Individual bookings with recipient and reference.")
             case .auswertung:
                 return L10n.t("Summen je Kategorie und Monat.", "Totals per category and month.")
-            case .ueberweisung:
-                return L10n.t("Darf Überweisungsentwürfe anlegen. Ausgelöst wird nichts ohne deine Bestätigung und Freigabe — aber ein Entwurf entsteht, ohne dass du gefragt wirst.",
-                              "May create transfer drafts. Nothing is executed without your confirmation and approval — but a draft appears without asking you.")
             }
         }
 
-        /// Voreinstellung für einen neuen Client: lesen ja, Überweisung nein.
-        var standardmaessigAn: Bool { self != .ueberweisung }
+        /// Voreinstellung für einen neuen Client. Alle Bereiche sind lesend; wer
+        /// einzelne abwählt, gibt einem Client bewusst weniger.
+        var standardmaessigAn: Bool { true }
     }
 
     // MARK: - Ablage

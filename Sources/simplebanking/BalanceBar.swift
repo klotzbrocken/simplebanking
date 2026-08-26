@@ -1714,8 +1714,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             MainActor.assumeIsolated { self?.refresh() }
         }
 
-        // Externe Transfer-Drafts (MCP-Tool prepare_transfer) entgegennehmen.
-        TransferDraftWatcher.shared.start()
+        // Der Entwurfs-Wächter läuft NICHT mehr.
+        //
+        // Sein einziger Erzeuger war das MCP-Werkzeug `prepare_transfer`, und das ist
+        // entfernt — Überweisungen über einen Agenten sind ausdrücklich nicht gewollt.
+        // Ohne Erzeuger wäre der Wächter nicht nur totes Gewicht, sondern eine offene
+        // Tür: Jeder lokale Prozess, der eine JSON-Datei in `transfer-drafts/` legt,
+        // hätte damit einen vorausgefüllten Überweisungsdialog aufpoppen lassen können.
+        // Bestätigung und Freigabe hätte es weiterhin gebraucht — aber der erste Schritt
+        // wäre fremdbestimmt gewesen.
+        //
+        // TransferDraftStore und TransferDraftWatcher bleiben als Dateien liegen, falls
+        // je eine Quelle unter eigener Kontrolle dazukommt (etwa die Rechnungserkennung).
+        // Gestartet wird nichts.
 
         // Live-Update: simplesendVisible-Toggle (Einstellungen → Verhalten oder
         // Checkbox im UpsellSheet) blendet den Statusbar-Menüeintrag sofort

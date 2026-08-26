@@ -3,10 +3,9 @@ import CryptoKit
 
 // MARK: - Wer darf was
 //
-// Bis hierher war der Server Alles-oder-nichts: Wer ihn starten konnte, konnte jedes
-// Werkzeug aufrufen — einschließlich `prepare_transfer`, das einen Überweisungsentwurf
-// anlegt. Für einen Agenten, der Kontotexte liest, ist das die falsche Voreinstellung:
-// In einem Verwendungszweck kann alles stehen, auch eine Anweisung.
+// Der Server ist ausschließlich lesend — `prepare_transfer` wurde mit dieser Änderung
+// entfernt. Die Bereiche schränken darüber hinaus ein, WAS ein einzelner Client lesen
+// darf: Wer nur Summen auswerten soll, braucht keine Verwendungszwecke mit Klarnamen.
 //
 // **Der Zugang wird über Merkmale entschieden, die die App vergibt.** Sie legt eine
 // Registrierung an, der Server liest sie. Der Token selbst steht dort NICHT — nur sein
@@ -23,7 +22,6 @@ enum Zugang {
         case konten        = "accounts"
         case umsaetze      = "transactions"
         case auswertung    = "analysis"
-        case ueberweisung  = "transfer"
     }
 
     /// Welches Werkzeug welchen Bereich braucht.
@@ -32,7 +30,6 @@ enum Zugang {
         case "get_accounts", "get_balance":                     return .konten
         case "get_transactions":                                return .umsaetze
         case "get_spending_summary", "get_monthly_overview":    return .auswertung
-        case "prepare_transfer":                                return .ueberweisung
         default:                                                return nil
         }
     }
@@ -51,17 +48,16 @@ enum Zugang {
 
     /// Was der aufrufende Client darf.
     ///
-    /// **Ohne Token gibt es die lesenden Bereiche, aber keine Überweisung.** Das ist
-    /// bewusst kein Komplettverbot: Bestehende Einrichtungen sollen nach einem Update
-    /// nicht wortlos aufhören zu funktionieren. Die eine Fähigkeit, mit der sich Schaden
-    /// anrichten ließe, fällt trotzdem sofort weg — Lesen ist wiederherstellbar, ein
-    /// Überweisungsentwurf, den niemand wollte, nicht.
+    /// **Ohne Token gibt es alle Bereiche.** Das ist vertretbar, seit der Server
+    /// ausschließlich liest: Bestehende Einrichtungen sollen nach einem Update nicht
+    /// wortlos aufhören zu funktionieren, und mehr als Lesen kann hier niemand.
+    /// Die Bereiche sind dafür da, einem einzelnen Client *weniger* zu geben — nicht
+    /// dafür, eine Schranke gegen den Rechner selbst zu bauen, der den Server startet.
     static func befund(umgebung: [String: String] = ProcessInfo.processInfo.environment,
                        jetzt: Date = Date()) -> Befund {
         guard let token = umgebung[tokenVariable]?.trimmingCharacters(in: .whitespacesAndNewlines),
               !token.isEmpty else {
-            return Befund(bereiche: [.konten, .umsaetze, .auswertung],
-                          altbestand: true, clientName: nil)
+            return Befund(bereiche: Set(Bereich.allCases), altbestand: true, clientName: nil)
         }
         guard let eintrag = eintrag(fuerToken: token) else {
             return Befund(bereiche: [], altbestand: false, clientName: nil)

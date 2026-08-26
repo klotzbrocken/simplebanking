@@ -3862,14 +3862,13 @@ struct SettingsView: View {
 
             Divider().padding(.vertical, 4)
 
-            SettingsToggleRow(
-                title: t("`prepare_transfer`-Drafts annehmen", "Accept `prepare_transfer` drafts"),
-                subtitle: t(
-                    "MCP-Clients (z.B. Claude) können einen Überweisungs-Draft schreiben — die App öffnet dann automatisch TransferSheet mit Prefill. Aus = Drafts werden verworfen.",
-                    "MCP clients (e.g. Claude) can write a transfer draft — the app then auto-opens TransferSheet with prefill. Off = drafts are discarded."
-                ),
-                isOn: $mcpDraftsEnabled
-            )
+            Label(t(
+                "Der Zugang ist ausschließlich lesend. Überweisungen lassen sich über MCP weder auslösen noch vorbereiten.",
+                "Access is read-only. Transfers can neither be initiated nor prepared via MCP."
+            ), systemImage: "lock.shield")
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
         // Stabilen Symlink-Pfad anlegen, sobald der Nutzer den MCP-Bereich öffnet —
         // so zeigt die angezeigte/kopierte Config direkt auf den beständigen Pfad.

@@ -35,12 +35,22 @@ final class MCPZugangTests: XCTestCase {
 
     // MARK: Voreinstellungen
 
-    /// Überweisungsentwürfe sind der einzige Bereich, mit dem sich Schaden anrichten
-    /// lässt. Er darf nicht versehentlich mitkommen.
-    func test_ueberweisungIstNichtStandard() {
+    /// **Der Server ist ausschließlich lesend.** Es darf keinen Bereich geben, der etwas
+    /// schreibt oder vorbereitet — `prepare_transfer` wurde bewusst entfernt, weil
+    /// Überweisungen über einen Agenten nicht gewollt sind. Kommt je wieder ein
+    /// schreibender Bereich dazu, muss das eine bewusste Entscheidung sein und dieser
+    /// Test fallen.
+    func test_esGibtKeinenSchreibendenBereich() {
+        let namen = Set(MCPClientStore.Zugangsbereich.allCases.map(\.rawValue))
+        XCTAssertEqual(namen, ["accounts", "transactions", "analysis"])
+        XCTAssertFalse(namen.contains("transfer"))
+    }
+
+    /// Alle Bereiche sind lesend, also standardmäßig an. Wer einzelne abwählt, gibt
+    /// einem Client bewusst weniger.
+    func test_alleBereicheSindStandardmaessigAn() {
         for bereich in MCPClientStore.Zugangsbereich.allCases {
-            XCTAssertEqual(bereich.standardmaessigAn, bereich != .ueberweisung,
-                           "\(bereich.rawValue)")
+            XCTAssertTrue(bereich.standardmaessigAn, bereich.rawValue)
         }
     }
 
@@ -53,15 +63,12 @@ final class MCPZugangTests: XCTestCase {
         }
     }
 
-    /// Beim gefährlichsten Bereich muss der Hinweis benennen, was ohne Rückfrage
-    /// passiert — nicht nur, was mit Rückfrage passiert.
-    func test_hinweisZurUeberweisungIstEhrlich() {
-        let text = MCPClientStore.Zugangsbereich.ueberweisung.hinweis
-        XCTAssertTrue(text.localizedCaseInsensitiveContains("Entwurf")
-                      || text.localizedCaseInsensitiveContains("draft"), text)
-        XCTAssertTrue(text.localizedCaseInsensitiveContains("ohne dass du gefragt")
-                      || text.localizedCaseInsensitiveContains("without asking"),
-                      "der Hinweis verschweigt, dass ein Entwurf ungefragt entsteht: \(text)")
+    /// Der Umsatz-Bereich ist der heikelste der drei: Dort stehen Klarnamen und
+    /// Verwendungszwecke. Der Hinweis muss das sagen, damit man ihn bewusst abwählen kann.
+    func test_hinweisZuUmsaetzenNenntDenInhalt() {
+        let text = MCPClientStore.Zugangsbereich.umsaetze.hinweis
+        XCTAssertTrue(text.localizedCaseInsensitiveContains("Verwendungszweck")
+                      || text.localizedCaseInsensitiveContains("reference"), text)
     }
 
     // MARK: Anlegen und Widerrufen

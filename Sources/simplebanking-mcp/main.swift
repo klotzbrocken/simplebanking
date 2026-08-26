@@ -1,9 +1,14 @@
 // simplebanking-mcp — MCP server for simplebanking (stdio transport)
-// Read access plus optional draft writes: it reads directly from
-// ~/Library/Application Support/simplebanking/transactions.db, and `prepare_transfer`
-// writes a transfer draft to Application Support for the app to pick up — gated behind
-// the app's opt-in toggle and always requires the user to confirm + SCA in-app.
-// The simplebanking app does NOT need to be running for reads.
+//
+// **Ausschließlich lesend.** Der Server liest
+// ~/Library/Application Support/simplebanking/transactions.db und kann nichts schreiben,
+// nichts vorbereiten und nichts auslösen. `prepare_transfer` gab es bis 08/2026 und ist
+// bewusst entfernt: Überweisungen über einen Agenten sind nicht gewollt — bei einem
+// Werkzeug, das Kontotexte liest, in denen jede Anweisung stehen kann, ist das Risiko
+// den Nutzen nicht wert.
+//
+// Was ein einzelner Client lesen darf, steuern die Bereiche in `Zugang.swift`.
+// Die simplebanking-App muss dafür nicht laufen.
 
 import Foundation
 
