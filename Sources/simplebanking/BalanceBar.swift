@@ -1704,6 +1704,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.sendMoney(draft: draft)
         }
 
+        // Aktualisieren per App Intent (Kurzbefehle, Spotlight, Raycast).
+        // Der Intent holt die App nach vorn — verlangt die Bank eine TAN oder eine
+        // Freigabe im Browser, muss jemand davorsitzen.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.refreshRequested"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+
         // Externe Transfer-Drafts (MCP-Tool prepare_transfer) entgegennehmen.
         TransferDraftWatcher.shared.start()
 
