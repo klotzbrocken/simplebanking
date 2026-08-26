@@ -54,6 +54,15 @@ if [[ ! -d "$APP" ]]; then
     exit 1
 fi
 
+# App Intents sind für einen Release Pflicht. build-app.sh baut ohne vollen Xcode zwar
+# weiter (nur mit Warnung), damit Entwicklungsbauten nicht scheitern — ein Release ohne
+# Kurzbefehle und Spotlight-Aktionen soll aber nicht unbemerkt hinausgehen.
+if [[ ! -f "$APP/Contents/Resources/Metadata.appintents/extract.actionsdata" ]]; then
+    echo "Error: Metadata.appintents fehlt — die App böte weder Kurzbefehle noch Spotlight-Aktionen." >&2
+    echo "       Mit vollem Xcode neu bauen (BUILD_FIRST=1)." >&2
+    exit 1
+fi
+
 echo "[2/10] Prepare app bundle"
 xattr -cr "$APP"
 

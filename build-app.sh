@@ -19,9 +19,71 @@ fi
 #  YAXI-Catalog `Resources/yaxi-bank-catalog.json`. Kein `generate-bank-colors`-
 #  Script-Aufruf mehr nötig.)
 
-# Universal binary: separat bauen, dann mit lipo zusammenführen
-swift build -c release --arch arm64
-swift build -c release --arch x86_64
+# App-Intents-Metadaten: Kurzbefehle und Spotlight finden die Intents nur über ein
+# `Metadata.appintents`-Bundle in Contents/Resources. Erzeugt wird es unten von
+# `appintentsmetadataprocessor`, der die Const-Value-Metadaten des Compilers braucht.
+#
+# Zwei Schalter sind nötig, und der zweite steht nirgends geschrieben: Ohne die Liste der
+# Protokolle, nach denen gesammelt werden soll, bleibt `-emit-const-values-path` stumm.
+# Xcode hält die Liste vor, aber in einem eigenen Format — das Frontend will ein flaches
+# Array und lehnt die Originaldatei sonst als „malformed" ab.
+INTENTS_WORK="$ROOT/.build/appintents"
+INTENTS_CONSTVALS="$INTENTS_WORK/simplebanking.swiftconstvalues"
+INTENTS_PROTOCOLS="$INTENTS_WORK/protocols.json"
+TOOLCHAIN_DIR="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain"
+INTENTS_PROCESSOR="$TOOLCHAIN_DIR/usr/bin/appintentsmetadataprocessor"
+INTENTS_PROTOCOL_SRC="$TOOLCHAIN_DIR/usr/share/swift/SwiftConstantValues/AppIntents.json"
+
+# Nicht leeren: Bei einem inkrementellen Bau läuft der Compiler nicht, und die
+# Const-Values entstehen nicht neu. Ändert sich an den Intents etwas, wird das Modul
+# ohnehin neu übersetzt und die Datei überschrieben.
+mkdir -p "$INTENTS_WORK"
+INTENTS_FLAGS=()
+if [[ -x "$INTENTS_PROCESSOR" && -f "$INTENTS_PROTOCOL_SRC" ]]; then
+    if python3 -c "
+import json, sys
+d = json.load(open('$INTENTS_PROTOCOL_SRC'))
+json.dump(d['constValueProtocols'], open('$INTENTS_PROTOCOLS','w'))
+" 2>/dev/null; then
+        INTENTS_FLAGS=(
+            -Xswiftc -Xfrontend -Xswiftc -const-gather-protocols-file
+            -Xswiftc -Xfrontend -Xswiftc "$INTENTS_PROTOCOLS"
+            -Xswiftc -emit-const-values-path -Xswiftc "$INTENTS_CONSTVALS"
+        )
+    else
+        echo "Warning: Protokoll-Liste für App Intents nicht lesbar — Kurzbefehle fehlen."
+    fi
+else
+    echo "Warning: appintentsmetadataprocessor nicht gefunden (voller Xcode nötig) — Kurzbefehle fehlen."
+fi
+
+# Universal binary: separat bauen, dann mit lipo zusammenführen.
+#
+# `--product simplebanking` ist hier nicht kosmetisch: Ohne die Einschränkung baut SwiftPM
+# alle Produkte in einem Rutsch, und weil `-Xswiftc` für jedes Modul gilt, schreiben CLI,
+# MCP und rewe-poc in dieselbe Const-Values-Datei. Wer zuletzt fertig wird, gewinnt — und
+# das Metadaten-Bundle wäre mal vollständig, mal leer. CLI und MCP baut das Skript ohnehin
+# weiter unten einzeln.
+swift build -c release --arch arm64 --product simplebanking "${INTENTS_FLAGS[@]}"
+swift build -c release --arch x86_64 --product simplebanking
+
+# Sofort prüfen: Sind es wirklich die Typen der App? Eine leere oder fremde Datei würde
+# unten ein wohlgeformtes, aber leeres Metadaten-Bundle ergeben — in Kurzbefehlen wäre
+# dann einfach nichts, ohne dass der Build etwas gemeldet hätte.
+if [[ ${#INTENTS_FLAGS[@]} -gt 0 ]]; then
+    if ! grep -q '"simplebanking\.' "$INTENTS_CONSTVALS" 2>/dev/null; then
+        # Fehlt die Datei, war der Bau inkrementell fertig — dann hilft nur, das Modul
+        # einmal zur Übersetzung zu zwingen. Kostet gut zwei Minuten, aber nur in diesem
+        # Fall; der Normalfall ist der Bau, bei dem sich ohnehin etwas geändert hat.
+        echo "Const-Values fehlen (inkrementeller Bau) — App-Modul wird einmal neu übersetzt."
+        touch "$ROOT/Sources/simplebanking/BankingIntents.swift"
+        swift build -c release --arch arm64 --product simplebanking "${INTENTS_FLAGS[@]}"
+    fi
+    if ! grep -q '"simplebanking\.' "$INTENTS_CONSTVALS" 2>/dev/null; then
+        echo "FATAL: Const-Values enthalten keine simplebanking-Typen — App Intents wären leer." >&2
+        exit 1
+    fi
+fi
 
 BIN_ARM64="$ROOT/.build/arm64-apple-macosx/release/simplebanking"
 BIN_X86="$ROOT/.build/x86_64-apple-macosx/release/simplebanking"
@@ -262,6 +324,36 @@ if [[ -n "$SPARKLE_FW_SRC" && -d "$SPARKLE_FW_SRC" ]]; then
 else
     echo "Warning: Sparkle.framework not found in build output — update checking will not work."
     echo "Run 'swift package resolve' to download Sparkle, then rebuild."
+fi
+
+# App-Intents-Metadaten ins Bundle. Muss vor dem Signieren passieren — die Signatur
+# versiegelt Contents/Resources, ein späteres Nachlegen bräche sie.
+if [[ ${#INTENTS_FLAGS[@]} -gt 0 ]]; then
+    find "$ROOT/Sources/simplebanking" -name "*.swift" > "$INTENTS_WORK/sources.txt"
+    printf "%s\n" "$INTENTS_CONSTVALS" > "$INTENTS_WORK/constvals.txt"
+    XCODE_BUILD_VERSION="$(xcodebuild -version 2>/dev/null | awk '/Build version/ { print $3 }')"
+    "$INTENTS_PROCESSOR" \
+        --output "$APP/Contents/Resources" \
+        --toolchain-dir "$TOOLCHAIN_DIR" \
+        --module-name simplebanking \
+        --sdk-root "$(xcrun --show-sdk-path)" \
+        --xcode-version "${XCODE_BUILD_VERSION:-unknown}" \
+        --platform-family macOS \
+        --deployment-target 14.0 \
+        --target-triple arm64-apple-macos14.0 \
+        --source-file-list "$INTENTS_WORK/sources.txt" \
+        --swift-const-vals-list "$INTENTS_WORK/constvals.txt" \
+        --force >/dev/null 2>&1
+    if [[ -f "$APP/Contents/Resources/Metadata.appintents/extract.actionsdata" ]]; then
+        AKTIONEN="$(python3 -c "
+import json
+print(len(json.load(open('$APP/Contents/Resources/Metadata.appintents/extract.actionsdata'))['actions']))
+" 2>/dev/null || echo "?")"
+        echo "App Intents bundled: ${AKTIONEN} Aktionen (Kurzbefehle, Spotlight)"
+    else
+        echo "FATAL: Metadata.appintents wurde nicht erzeugt." >&2
+        exit 1
+    fi
 fi
 
 # ad-hoc sign — use dev entitlements (no sandbox; sandbox requires Developer ID)
