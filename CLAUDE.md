@@ -217,6 +217,23 @@ uploaded — it is stamped as `YYYYMMDD<seq>` at build time and rises with **eve
 build, so re-check it after any rebuild. CFBundleVersion is monotonic across
 release+delta — never reset `.build-number` after a public release.
 
+## Raycast-Erweiterung (`raycast/`)
+
+Eigenes TypeScript-Projekt im selben Repo, eigener Veröffentlichungszyklus über den
+Raycast-Store. Sie ruft **ausschließlich** `sb --json` auf und kennt weder Zugangsdaten
+noch Banken — jede neue Ansicht gehört deshalb erst ins CLI, dann hierher.
+
+```bash
+cd raycast && npm install
+npx ray lint          # Store-Prüfung vorab
+npx ray build -e dist
+npm run dev           # lädt die Erweiterung live in Raycast
+```
+
+Vor der ersten Einreichung MUSS `author` in `package.json` auf einen existierenden
+Raycast-Benutzernamen gesetzt werden — `ray lint` fragt die Store-API und schlägt sonst
+mit 404 fehl.
+
 ## Code style (from CONTRIBUTING.md)
 
 - Swift API Design Guidelines.
