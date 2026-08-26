@@ -840,15 +840,18 @@ struct SettingsView: View {
                 TabButton(title: t("Sicherheit", "Security"), icon: "lock.shield", isSelected: selectedTab == 4) {
                     selectedTab = 4
                 }
-                TabButton(title: t("Über", "About"), icon: "info.circle", isSelected: selectedTab == 5) {
-                    selectedTab = 5
-                }
-                TabButton(title: t("Erweiterungen", "Extensions"), icon: "puzzlepiece.extension",
+                // „Erweiterungen" passt nicht in die Reiterbreite und wurde abgeschnitten.
+                // Kürzen statt die Leiste zu sprengen: Der Begriff steht als Überschrift
+                // im Bereich selbst noch einmal vollständig da.
+                TabButton(title: t("Extras", "Extras"), icon: "puzzlepiece.extension",
                           isSelected: selectedTab == 7) {
                     selectedTab = 7
                 }
                 TabButton(title: "Labs", icon: "flask", isSelected: selectedTab == 6) {
                     selectedTab = 6
+                }
+                TabButton(title: t("Über", "About"), icon: "info.circle", isSelected: selectedTab == 5) {
+                    selectedTab = 5
                 }
             }
             .padding(.horizontal, 16)
@@ -1203,6 +1206,12 @@ struct SettingsView: View {
             } else {
                 accountsGeneralSection
             }
+
+            // Die Sicherung gehört hierher, nicht ins Labor: Sie sichert Konten und
+            // Historie, und wer sie sucht, sucht sie bei den Konten.
+            Divider()
+
+            sicherungSettings
         }
         .onAppear { loadSlotSettings() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
@@ -2189,24 +2198,6 @@ struct SettingsView: View {
                 isOn: $attentionInboxEnabled
             )
 
-            if FeatureFlags.transferMoneyEnabled {
-                Divider()
-                SettingsToggleRow(
-                    title: t("simplesend anzeigen", "Show simplesend"),
-                    subtitle: t(
-                        "Eigener Paperplane-Button im Footer der Umsatzliste und Eintrag im Statusbar-Kontextmenü. Aus = überall versteckt, kein Hotkey.",
-                        "Dedicated paperplane button in the transactions footer and entry in the status bar context menu. Off = hidden everywhere, no hotkey."
-                    ),
-                    isOn: $simplesendVisible
-                )
-                .onChange(of: simplesendVisible) { _ in
-                    NotificationCenter.default.post(
-                        name: Notification.Name("simplebanking.simplesendVisibilityChanged"),
-                        object: nil
-                    )
-                }
-                transferDelaySection
-            }
 
             VStack(alignment: .leading, spacing: 8) {
                 SettingsSectionHeader(title: t("Dock", "Dock"), icon: "dock.rectangle")
@@ -3289,8 +3280,11 @@ struct SettingsView: View {
 
     private var erweiterungenSettings: some View {
         VStack(alignment: .leading, spacing: 18) {
+            SettingsSectionHeader(title: t("Erweiterungen", "Extensions"),
+                                  icon: "puzzlepiece.extension")
+
             HStack(spacing: 8) {
-                Image(systemName: "puzzlepiece.extension")
+                Image(systemName: "info.circle")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.accentColor)
                 Text(t(
@@ -3322,6 +3316,32 @@ struct SettingsView: View {
             } label: {
                 Label(t("Kommandozeile (CLI)", "Command line (CLI)"), systemImage: "terminal")
                     .font(ThemeFonts.body(size: 13, weight: .medium))
+            }
+
+            if FeatureFlags.transferMoneyEnabled {
+                Divider()
+
+                // simplesend ist die einzige Erweiterung, die schreibt — deshalb steht
+                // sie hier neben den lesenden und nicht mehr unter „Verhalten“, wo sie
+                // zwischen Anzeigeoptionen stand.
+                VStack(alignment: .leading, spacing: 8) {
+                    SettingsSectionHeader(title: "simplesend", icon: "paperplane.fill")
+                    SettingsToggleRow(
+                        title: t("simplesend anzeigen", "Show simplesend"),
+                        subtitle: t(
+                            "Eigener Paperplane-Button im Footer der Umsatzliste und Eintrag im Statusbar-Kontextmenü. Aus = überall versteckt, kein Hotkey.",
+                            "Dedicated paperplane button in the transactions footer and entry in the status bar context menu. Off = hidden everywhere, no hotkey."
+                        ),
+                        isOn: $simplesendVisible
+                    )
+                    .onChange(of: simplesendVisible) { _ in
+                        NotificationCenter.default.post(
+                            name: Notification.Name("simplebanking.simplesendVisibilityChanged"),
+                            object: nil
+                        )
+                    }
+                    transferDelaySection
+                }
             }
 
             Divider()
@@ -3583,9 +3603,6 @@ struct SettingsView: View {
                 .buttonStyle(.bordered)
             }
 
-            Divider()
-
-            sicherungSettings
         }
         .animation(.easeInOut(duration: 0.15), value: brandfetchEnabled)
     }
