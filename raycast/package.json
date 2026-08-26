@@ -1,10 +1,10 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "simplebanking",
-  "title": "simplebanking",
+  "title": "Simplebanking",
   "description": "Kontostand, Umsätze und Monatsübersicht aus simplebanking — liest den lokalen Bestand, ohne Bankabruf.",
   "icon": "icon.png",
-  "author": "REPLACE_WITH_RAYCAST_USERNAME",
+  "author": "klotzbrocken",
   "categories": [
     "Finance"
   ],
@@ -33,7 +33,7 @@
     },
     {
       "name": "aktualisieren",
-      "title": "Konten aktualisieren",
+      "title": "Konten Aktualisieren",
       "subtitle": "simplebanking",
       "description": "Ruft die Banken ab. Kann eine Freigabe verlangen.",
       "mode": "no-view"
