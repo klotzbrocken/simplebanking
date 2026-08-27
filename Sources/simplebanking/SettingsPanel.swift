@@ -3374,9 +3374,15 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsSectionHeader(title: t("Zugänge", "Access"), icon: "key")
 
+            // Die frühere Zusage („Widerrufen wirkt sofort — der nächste Aufruf bekommt
+            // nichts mehr") hielt der Server nicht: Ohne Token vergibt er alle Bereiche,
+            // ein Client kann den widerrufenen Token also einfach weglassen. Das ist so
+            // gewollt — die Bereiche schränken einen Agenten ein, sie sind keine Schranke
+            // gegen den Rechner, der den Server startet. Dann muss hier aber stehen, was
+            // der Widerruf wirklich bewirkt.
             Text(t(
-                "Jeder Agent bekommt ein eigenes Merkmal mit eigenen Bereichen. Widerrufen wirkt sofort — der nächste Aufruf bekommt nichts mehr.",
-                "Each agent gets its own token with its own scopes. Revoking takes effect immediately — the next call gets nothing."
+                "Jeder Agent bekommt ein eigenes Merkmal mit eigenen Bereichen. Ein widerrufener Zugang macht den Token ungültig; ein Programm auf diesem Rechner kann die Daten aber weiterhin direkt lesen.",
+                "Each agent gets its own token with its own scopes. Revoking makes that token invalid; a program on this Mac can still read the data directly."
             ))
             .font(ThemeFonts.body(size: 11))
             .foregroundColor(.secondary)

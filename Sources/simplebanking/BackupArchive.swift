@@ -74,6 +74,7 @@ enum BackupArchive {
         case falschePassphrase
         case unbekanntesFormat(Int)
         case beschaedigt(String)
+        case abgelehnterPfad(String)
 
         var errorDescription: String? {
             switch self {
@@ -86,6 +87,9 @@ enum BackupArchive {
             case .beschaedigt(let was):
                 return L10n.t("Die Sicherung ist unvollständig: \(was)",
                               "The backup is incomplete: \(was)")
+            case .abgelehnterPfad(let name):
+                return L10n.t("Die Sicherung enthält einen unzulässigen Dateinamen und wurde nicht eingespielt: \(name)",
+                              "The backup contains an invalid file name and was not restored: \(name)")
             }
         }
     }
@@ -214,7 +218,124 @@ enum BackupArchive {
         return aus
     }
 
+    // MARK: - Zielpfade
+
+    /// Prüft einen Namen aus einer Sicherung und liefert den Zielpfad — oder wirft.
+    ///
+    /// Eine Sicherung ist eine Datei von außen: Wer sie erstellt, bestimmt die Namen darin,
+    /// und die Verschlüsselung schützt davor nicht — die Passphrase liefert er ja mit. Ein
+    /// Name wie `../../../.zshrc` schriebe sonst aus dem Zielordner heraus, und was in der
+    /// `.zshrc` steht, führt die nächste Shell aus.
+    ///
+    /// - Parameter unterordner: Für Belege und Entwürfe erlaubt — ihre Pfade enthalten
+    ///   Ordner. Für Zugangsdaten und Themes nicht; dort sind es reine Dateinamen.
+    static func sichererZielpfad(basis: URL, name: String, unterordner: Bool = false) throws -> URL {
+        guard !name.isEmpty, name.utf8.count <= 1024 else { throw Fehler.abgelehnterPfad(name) }
+        guard !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+              !name.contains("\\"), !name.hasPrefix("~")
+        else { throw Fehler.abgelehnterPfad(name) }
+
+        let teile = name.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard unterordner || teile.count == 1 else { throw Fehler.abgelehnterPfad(name) }
+        for teil in teile {
+            // Leere Teile fangen führende, doppelte und abschließende Trenner mit ab.
+            guard !teil.isEmpty, teil != ".", teil != ".." else { throw Fehler.abgelehnterPfad(name) }
+        }
+
+        var ziel = basis
+        for teil in teile { ziel = ziel.appendingPathComponent(teil) }
+
+        // Der Zielordner kann selbst ein Symlink sein — dann läge die Datei außerhalb,
+        // ohne dass im Namen etwas Verdächtiges stünde. Deshalb beide Seiten auflösen,
+        // wie `ordnerSammeln` es beim Einsammeln schon tut.
+        let basisAufgeloest = basis.resolvingSymlinksInPath().standardized.path
+        let eltern = ziel.deletingLastPathComponent().resolvingSymlinksInPath().standardized.path
+        guard eltern == basisAufgeloest || eltern.hasPrefix(basisAufgeloest + "/") else {
+            throw Fehler.abgelehnterPfad(name)
+        }
+        return ziel
+    }
+
     // MARK: - Einspielen
+
+    /// Alles, was geschrieben werden soll — dekodiert, geprüft, mit fertigen Zielpfaden.
+    private struct Vorbereitet {
+        var einstellungen: [String: Any]
+        var zugangsdaten: [(ziel: URL, daten: Data)]
+        var datenbank: (daten: Data, buchungen: Int)?
+        var dateien: [(ziel: URL, daten: Data)]
+        var themes: [(ziel: URL, daten: Data)]
+    }
+
+    /// Der Vorabdurchgang: dekodiert alles, prüft jeden Zielpfad und öffnet die
+    /// mitgelieferte Datenbank probeweise — **bevor** das erste Byte geschrieben wird.
+    ///
+    /// Ein vollständiger Rückweg wäre teurer und brächte kaum mehr: Woran ein Einspielen
+    /// scheitert, entscheidet sich fast immer hier. Vorher schrieb es Einstellungen und
+    /// Zugangsdaten und stolperte erst danach — mit einer halb umgebauten Installation als
+    /// Ergebnis, aus der man von Hand wieder herausfinden musste.
+    private static func vorbereiten(_ inhalt: Inhalt) throws -> Vorbereitet {
+        guard let plist = Data(base64Encoded: inhalt.einstellungenPlistB64),
+              let woerterbuch = (try? PropertyListSerialization.propertyList(
+                    from: plist, options: [], format: nil)) as? [String: Any]
+        else { throw Fehler.beschaedigt("Einstellungen") }
+
+        let credOrdner = try CredentialsStore.appSupportURL()
+        var zugangsdaten: [(ziel: URL, daten: Data)] = []
+        for (name, b64) in inhalt.zugangsdaten {
+            guard let daten = Data(base64Encoded: b64) else {
+                throw Fehler.beschaedigt("Zugangsdaten (\(name))")
+            }
+            zugangsdaten.append((try sichererZielpfad(basis: credOrdner, name: name), daten))
+        }
+
+        var datenbank: (daten: Data, buchungen: Int)?
+        if let b64 = inhalt.datenbankB64 {
+            guard let daten = Data(base64Encoded: b64) else { throw Fehler.beschaedigt("Datenbank") }
+            datenbank = (daten, try buchungenPruefen(daten))
+        }
+
+        var dateien: [(ziel: URL, daten: Data)] = []
+        for (unterordner, liste) in [("attachments", inhalt.anhaenge ?? [:]),
+                                     ("transfer-drafts", inhalt.entwuerfe ?? [:])] {
+            let basis = credOrdner.appendingPathComponent(unterordner)
+            for (relativ, b64) in liste {
+                guard let daten = Data(base64Encoded: b64) else {
+                    throw Fehler.beschaedigt("Beleg (\(relativ))")
+                }
+                dateien.append((try sichererZielpfad(basis: basis, name: relativ, unterordner: true),
+                                daten))
+            }
+        }
+
+        let themeOrdner = ThemeManager.shared.themesDirectoryURL
+        var themes: [(ziel: URL, daten: Data)] = []
+        for (name, b64) in inhalt.themes {
+            guard let daten = Data(base64Encoded: b64) else {
+                throw Fehler.beschaedigt("Theme (\(name))")
+            }
+            themes.append((try sichererZielpfad(basis: themeOrdner, name: name), daten))
+        }
+
+        return Vorbereitet(einstellungen: woerterbuch, zugangsdaten: zugangsdaten,
+                           datenbank: datenbank, dateien: dateien, themes: themes)
+    }
+
+    /// Öffnet die mitgelieferte Datenbank in einer Kopie und zählt die Buchungen.
+    ///
+    /// Vorher verschluckte ein `try?` diesen Fehler: Eine unlesbare Datei wurde eingespielt
+    /// und als „0 Buchungen" gemeldet — eine Erfolgsmeldung über einen Datenverlust.
+    static func buchungenPruefen(_ daten: Data) throws -> Int {
+        let probe = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-probe-\(UUID().uuidString).db")
+        defer { try? FileManager.default.removeItem(at: probe) }
+        do {
+            try daten.write(to: probe, options: [.atomic])
+            return try zaehleBuchungen(probe)
+        } catch {
+            throw Fehler.beschaedigt("Datenbank")
+        }
+    }
 
     @discardableResult
     static func einspielen(_ archiv: Data, passphrase: String) throws -> Bericht {
@@ -222,14 +343,11 @@ enum BackupArchive {
         let inhalt = try JSONDecoder().decode(Inhalt.self, from: roh)
         guard inhalt.version <= formatVersion else { throw Fehler.unbekanntesFormat(inhalt.version) }
 
-        // Einstellungen
-        guard let plist = Data(base64Encoded: inhalt.einstellungenPlistB64),
-              let woerterbuch = try PropertyListSerialization.propertyList(
-                    from: plist, options: [], format: nil) as? [String: Any]
-        else { throw Fehler.beschaedigt("Einstellungen") }
+        let plan = try vorbereiten(inhalt)
 
+        // Ab hier wird geschrieben. Alles davor ist geprüft.
         var gesetzt = 0
-        for (k, v) in woerterbuch where !istAuszuschliessen(k) {
+        for (k, v) in plan.einstellungen where !istAuszuschliessen(k) {
             UserDefaults.standard.set(v, forKey: k)
             gesetzt += 1
         }
@@ -237,25 +355,22 @@ enum BackupArchive {
         // Zugangsdaten — unverändert zurückschreiben, 0600 wie beim Original.
         let credOrdner = try CredentialsStore.appSupportURL()
         try FileManager.default.createDirectory(at: credOrdner, withIntermediateDirectories: true)
-        for (name, b64) in inhalt.zugangsdaten {
-            guard let daten = Data(base64Encoded: b64) else { continue }
-            let ziel = credOrdner.appendingPathComponent(name)
+        var konten = 0
+        for (ziel, daten) in plan.zugangsdaten {
             try daten.write(to: ziel, options: [.atomic])
             try? FileManager.default.setAttributes([.posixPermissions: 0o600],
                                                    ofItemAtPath: ziel.path)
+            konten += 1
         }
 
         // Datenbank — die vorhandene wird beiseitegelegt, nicht überschrieben. Wer eine
         // Sicherung einspielt, hat oft schon etwas in der neuen Installation; das
         // kommentarlos zu löschen wäre der zweite Datenverlust nach dem ersten.
         var buchungen = 0
-        if let b64 = inhalt.datenbankB64, let daten = Data(base64Encoded: b64) {
+        if let db = plan.datenbank {
             let ziel = try TransactionsDatabase.databaseURL()
             if FileManager.default.fileExists(atPath: ziel.path) {
-                let beiseite = ziel.deletingLastPathComponent()
-                    .appendingPathComponent("transactions-vor-wiederherstellung.db")
-                try? FileManager.default.removeItem(at: beiseite)
-                try? FileManager.default.moveItem(at: ziel, to: beiseite)
+                try beiseiteLegen(ziel)
             }
             // Nebendateien des WAL-Betriebs müssen weg, sonst mischt SQLite den alten
             // Journalstand in die frisch eingespielte Datei.
@@ -263,48 +378,75 @@ enum BackupArchive {
                 try? FileManager.default.removeItem(
                     at: URL(fileURLWithPath: ziel.path + anhang))
             }
-            try daten.write(to: ziel, options: [.atomic])
-            buchungen = (try? zaehleBuchungen(ziel)) ?? 0
+            try db.daten.write(to: ziel, options: [.atomic])
+            buchungen = db.buchungen
         }
 
         // Belege und Entwürfe — mit den Unterordnern, die im Pfad stecken.
         var anhangAnzahl = 0
-        for (unterordner, dateien) in [("attachments", inhalt.anhaenge ?? [:]),
-                                       ("transfer-drafts", inhalt.entwuerfe ?? [:])] {
-            let basis = credOrdner.appendingPathComponent(unterordner)
-            for (relativ, b64) in dateien {
-                guard let daten = Data(base64Encoded: b64) else { continue }
-                // Eine Sicherung kann manipuliert sein. Ein Pfad, der ausbricht, würde
-                // sonst irgendwohin ins Dateisystem schreiben — dieselbe Klasse wie die
-                // Zip-Slip-Abwehr beim Theme-Import.
-                guard !relativ.hasPrefix("/"), !relativ.contains("..") else {
-                    AppLogger.log("Sicherung: Pfad abgelehnt: \(relativ)",
-                                  category: "Backup", level: "WARN")
-                    continue
-                }
-                let ziel = basis.appendingPathComponent(relativ)
-                try? FileManager.default.createDirectory(at: ziel.deletingLastPathComponent(),
-                                                         withIntermediateDirectories: true)
-                if (try? daten.write(to: ziel, options: [.atomic])) != nil { anhangAnzahl += 1 }
-            }
+        for (ziel, daten) in plan.dateien {
+            try? FileManager.default.createDirectory(at: ziel.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
+            if (try? daten.write(to: ziel, options: [.atomic])) != nil { anhangAnzahl += 1 }
         }
 
         // Themes
         let themeOrdner = ThemeManager.shared.themesDirectoryURL
         try? FileManager.default.createDirectory(at: themeOrdner, withIntermediateDirectories: true)
         var themeAnzahl = 0
-        for (name, b64) in inhalt.themes {
-            guard let daten = Data(base64Encoded: b64) else { continue }
-            try? daten.write(to: themeOrdner.appendingPathComponent(name), options: [.atomic])
-            themeAnzahl += 1
+        for (ziel, daten) in plan.themes {
+            // Gezählt wird, was geschrieben wurde. Vorher stand das Hochzählen hinter einem
+            // `try?` und zählte die Fehlschläge mit.
+            if (try? daten.write(to: ziel, options: [.atomic])) != nil { themeAnzahl += 1 }
         }
 
         return Bericht(einstellungen: gesetzt,
-                       konten: inhalt.zugangsdaten.count,
+                       konten: konten,
                        buchungen: buchungen,
                        themes: themeAnzahl,
                        anhaenge: anhangAnzahl)
     }
+
+    /// Wie viele beiseitegelegte Datenbanken aufgehoben werden.
+    static let rueckfallebenen = 3
+
+    /// Legt die vorhandene Datenbank datiert beiseite und behält die letzten drei.
+    ///
+    /// Vorher hieß die Datei fest `transactions-vor-wiederherstellung.db` und wurde vor
+    /// jedem Versuch gelöscht — **zwei fehlgeschlagene Einspielversuche hintereinander
+    /// hätten die letzte funktionierende Datenbank vernichtet.**
+    private static func beiseiteLegen(_ ziel: URL) throws {
+        let ordner = ziel.deletingLastPathComponent()
+            .appendingPathComponent("db-sicherungen", isDirectory: true)
+        try FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)
+        let beiseite = ordner.appendingPathComponent(
+            "transactions-vor-wiederherstellung-\(dateiStempel.string(from: Date())).db")
+        try FileManager.default.moveItem(at: ziel, to: beiseite)
+        AppLogger.log("Datenbank beiseitegelegt: \(beiseite.lastPathComponent)", category: "Backup")
+
+        let vorhanden = (try? FileManager.default.contentsOfDirectory(
+            at: ordner, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        let sortiert = vorhanden
+            .filter { $0.lastPathComponent.hasPrefix("transactions-vor-wiederherstellung-") }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                return da > db
+            }
+        for alt in sortiert.dropFirst(rueckfallebenen) {
+            try? FileManager.default.removeItem(at: alt)
+            AppLogger.log("Alte Rückfallebene entfernt: \(alt.lastPathComponent)", category: "Backup")
+        }
+    }
+
+    nonisolated(unsafe) private static let dateiStempel: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        return f
+    }()
 
     private static func zaehleBuchungen(_ url: URL) throws -> Int {
         let queue = try DatabaseQueue(path: url.path)
@@ -368,7 +510,13 @@ enum BackupArchive {
               let tag = Data(base64Encoded: u.tagB64)
         else { throw Fehler.beschaedigt("Dateikopf") }
 
-        let key = try schluessel(passphrase: passphrase, salt: [UInt8](salt), runden: u.iterations)
+        guard u.v <= formatVersion else { throw Fehler.unbekanntesFormat(u.v) }
+        guard u.kdf == "pbkdf2-sha256" else {
+            throw Fehler.beschaedigt("Schlüsselableitung (\(u.kdf))")
+        }
+
+        let key = try schluessel(passphrase: passphrase, salt: [UInt8](salt),
+                                 runden: try gepruefteRunden(u.iterations))
         do {
             let box = try AES.GCM.SealedBox(nonce: try AES.GCM.Nonce(data: nonceData),
                                             ciphertext: ciphertext, tag: tag)
@@ -379,6 +527,21 @@ enum BackupArchive {
             // falsche Passphrase der weitaus wahrscheinlichere Fall.
             throw Fehler.falschePassphrase
         }
+    }
+
+    /// Zulässige Rundenzahlen aus dem Dateikopf.
+    ///
+    /// Der Kopf liegt **außerhalb** der Verschlüsselung — er muss ohne Passphrase lesbar
+    /// sein, sonst wäre die Merkhilfe nutzlos. Damit ist er auch nicht authentifiziert, und
+    /// ein präparierter Wert lief bis hier ungeprüft durch. `UInt32(runden)` ist bei einem
+    /// negativen oder zu großen Wert kein langsamer Lauf, sondern ein sofortiger Absturz:
+    /// Eine untergeschobene Datei beendete die App, noch bevor eine Passphrase geprüft war.
+    /// Die Obergrenze deckelt zusätzlich die Rechenzeit.
+    static let rundenGrenzen = 10_000...5_000_000
+
+    static func gepruefteRunden(_ roh: Int) throws -> Int {
+        guard rundenGrenzen.contains(roh) else { throw Fehler.beschaedigt("Rundenzahl (\(roh))") }
+        return roh
     }
 
     private static func schluessel(passphrase: String, salt: [UInt8], runden: Int) throws -> SymmetricKey {
