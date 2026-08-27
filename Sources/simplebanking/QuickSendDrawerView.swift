@@ -42,6 +42,8 @@ struct QuickSendDrawerView: View {
     @State private var amountInput: String = ""
     @State private var purpose: String = ""
     @State private var phase: Phase = .idle
+    /// Der laufende Sendevorgang — nur dafür da, ihn beenden zu können.
+    @State private var sendeTask: Task<Void, Never>?
     /// Der in der Confirm-Stufe geprüfte, fertig gebaute Request (rebuild-frei beim Senden).
     @State private var pendingRequest: TransferRequest? = nil
     /// Beim Review eingefrorenes Quellkonto — verhindert Versand von Konto B nach Wechsel.
@@ -429,8 +431,23 @@ struct QuickSendDrawerView: View {
             .background(fieldBackground())
             Spacer(minLength: 0)
             HStack(spacing: 8) {
-                Button { phase = .idle; confirmedSourceSlotId = nil } label: {
-                    Text(L10n.t("Zurück", "Back"))
+                // Während des Sendens wird aus „Zurück" das Beenden des Wartens. Vorher
+                // war der Knopf gesperrt, und wer die Freigabe nicht erteilte, saß bis zu
+                // eine Viertelstunde fest — mit gesperrter Bankverbindung.
+                Button {
+                    if isSending {
+                        sendeTask?.cancel()
+                        isSending = false
+                        phase = .failed(L10n.t(
+                            "Warten beendet. Der Auftrag liegt bei deiner Bank — gibst du ihn dort frei, wird er ausgeführt. Verwerfen kannst du ihn nur in der Banking-App.",
+                            "Stopped waiting. The order is with your bank — if you approve it there it will be executed. You can only discard it in your banking app."))
+                    } else {
+                        phase = .idle
+                        confirmedSourceSlotId = nil
+                    }
+                } label: {
+                    Text(isSending ? L10n.t("Warten beenden", "Stop waiting")
+                                   : L10n.t("Zurück", "Back"))
                         .font(.system(size: 12, weight: .medium))
                         .frame(height: 30).padding(.horizontal, 14)
                         .background(
@@ -440,7 +457,6 @@ struct QuickSendDrawerView: View {
                         .foregroundColor(.sbTextPrimary)
                 }
                 .buttonStyle(.plain)
-                .disabled(isSending)
                 Spacer(minLength: 0)
                 Button { performConfirmedSend() } label: {
                     HStack(spacing: 5) {
@@ -603,11 +619,16 @@ struct QuickSendDrawerView: View {
         let recipient = request.creditorName
         let frozenSlot = confirmedSourceSlotId ?? sourceSlotId
         isSending = true
-        Task { @MainActor in
+        // Festhalten, damit „Warten beenden" den Vorgang erreicht. Ohne den Griff lief er
+        // bis zu 180 Abfragerunden weiter und hielt die Bankverbindung besetzt.
+        sendeTask = Task { @MainActor in
             let outcome = await performSend?(request, frozenSlot)
                 ?? TransferOutcome(ok: false, scaRequired: false, error: "no-handler",
                                    userMessage: nil, mayHaveBeenExecuted: false)
             isSending = false
+            // Wurde das Warten beendet, meldet der Dienst einen Fehlschlag — er hat ja
+            // keine Bestätigung bekommen. Der Zustand steht schon und ist der ehrlichere.
+            if Task.isCancelled { return }
             if outcome.ok {
                 phase = .sent(amount: amountDisplay, name: recipient)
                 try? await Task.sleep(nanoseconds: 1_500_000_000)

@@ -72,3 +72,41 @@ final class BankRequestQueueTests: XCTestCase {
         XCTAssertEqual(rb, "B")
     }
 }
+
+// MARK: - Beendetes Warten gibt die Leitung frei
+//
+// Gemeldet am 27.08.2026: Wird eine Überweisung an die Freigabe geschickt und der Nutzer
+// erteilt sie nicht, wartete die App bis zu 180 Abfragerunden — und hielt dabei den Slot.
+// Jeder Abruf für dieselbe Bank lief in dieser Zeit ins Leere („bleibt in der
+// Warteschlange"). Seit „Warten beenden" wird die Aufgabe abgebrochen; dieser Test hält
+// fest, dass der Abbruch die Leitung tatsächlich wieder hergibt.
+
+final class WarteAbbruchTests: XCTestCase {
+
+    func test_abgebrochenerVorgangGibtDenSlotFrei() async throws {
+        let slot = "test-abbruch"
+        let vorher = await BankRequestQueue.shared.isBusy(slotId: slot)
+        XCTAssertFalse(vorher)
+
+        let vorgang = Task {
+            await BankRequestQueue.shared.withSlot(slot) {
+                // Steht für das Warten auf die Freigabe.
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+            }
+        }
+
+        // Warten, bis der Slot wirklich belegt ist — sonst prüft der Test nichts.
+        var belegt = false
+        for _ in 0..<100 where !belegt {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+            belegt = await BankRequestQueue.shared.isBusy(slotId: slot)
+        }
+        XCTAssertTrue(belegt, "der Vorgang hätte den Slot belegen müssen")
+
+        vorgang.cancel()
+        _ = await vorgang.value
+
+        let nachher = await BankRequestQueue.shared.isBusy(slotId: slot)
+        XCTAssertFalse(nachher, "nach dem Abbruch muss die Bankverbindung wieder frei sein")
+    }
+}
