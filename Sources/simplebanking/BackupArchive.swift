@@ -509,8 +509,11 @@ enum BackupArchive {
         return h
     }
 
-    private static func verschluesseln(_ klartext: Data, passphrase: String,
-                                       merkhilfe: String?) throws -> Data {
+    /// Intern statt privat, damit die Tests eine **feindlich präparierte** Sicherung bauen
+    /// können. Ohne das ließe sich der Angriffsweg nur in Einzelteilen prüfen — und genau
+    /// das war der Mangel des alten Ausbruchs-Tests.
+    static func verschluesseln(_ klartext: Data, passphrase: String,
+                               merkhilfe: String?) throws -> Data {
         var salt = [UInt8](repeating: 0, count: 16)
         guard SecRandomCopyBytes(kSecRandomDefault, salt.count, &salt) == errSecSuccess else {
             throw Fehler.beschaedigt("Zufallsquelle")
