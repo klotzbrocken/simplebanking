@@ -27,6 +27,14 @@ enum BackupArchive {
     static let formatVersion = 1
     private static let pbkdf2Runden = 210_000
 
+    /// Obergrenze für alles, was aus Ordnern eingesammelt wird (Belege, Entwürfe, Themes).
+    ///
+    /// Die Grenze je Datei allein reicht nicht: Der Export hält die Daten mehrfach im
+    /// Speicher — Rohdatei, Base64, JSON, Ciphertext, äußeres Base64. Viele Dateien knapp
+    /// unter der Einzelgrenze summieren sich damit zu einem Vielfachen. Was nicht mehr
+    /// hineinpasst, wird protokolliert statt stillschweigend zu fehlen.
+    static let sammelGrenze = 400_000_000
+
     // MARK: - Was nicht mitwandert
 
     /// Schlüssel, die bewusst draußen bleiben.
@@ -110,6 +118,13 @@ enum BackupArchive {
         let plist = try PropertyListSerialization.data(fromPropertyList: gefiltert,
                                                        format: .binary, options: 0)
 
+        // Ein gemeinsames Budget für alle drei Sammler — nacheinander, weil zwei
+        // gleichzeitige `inout`-Zugriffe in einer Argumentliste nicht erlaubt sind.
+        var budget = sammelGrenze
+        let themes = mitThemes ? themesSammeln(budget: &budget) : [:]
+        let anhaenge = ordnerSammeln("attachments", budget: &budget)
+        let entwuerfe = ordnerSammeln("transfer-drafts", budget: &budget)
+
         let inhalt = Inhalt(
             version: formatVersion,
             erstelltAm: Date(),
@@ -117,9 +132,9 @@ enum BackupArchive {
             einstellungenPlistB64: plist.base64EncodedString(),
             zugangsdaten: try zugangsdatenSammeln(),
             datenbankB64: try datenbankKopieren()?.base64EncodedString(),
-            themes: mitThemes ? themesSammeln() : [:],
-            anhaenge: ordnerSammeln("attachments"),
-            entwuerfe: ordnerSammeln("transfer-drafts")
+            themes: themes,
+            anhaenge: anhaenge,
+            entwuerfe: entwuerfe
         )
 
         return try verschluesseln(try JSONEncoder().encode(inhalt),
@@ -171,7 +186,7 @@ enum BackupArchive {
     ///
     /// Bewusst NICHT dabei: `logo-cache` (baut sich von selbst wieder auf) und
     /// `transactions-demo.db` (Vorführdaten, keine Nutzerdaten).
-    private static func ordnerSammeln(_ unterordner: String) -> [String: String] {
+    private static func ordnerSammeln(_ unterordner: String, budget: inout Int) -> [String: String] {
         guard let basis = try? CredentialsStore.appSupportURL()
                 .appendingPathComponent(unterordner) else { return [:] }
         guard let lauf = FileManager.default.enumerator(at: basis,
@@ -191,6 +206,12 @@ enum BackupArchive {
                               category: "Backup", level: "WARN")
                 continue
             }
+            guard daten.count <= budget else {
+                AppLogger.log("Sicherung: \(url.lastPathComponent) übersprungen — Gesamtgrenze erreicht",
+                              category: "Backup", level: "WARN")
+                continue
+            }
+            budget -= daten.count
             // Beide Seiten auflösen, bevor verglichen wird: `enumerator` liefert den
             // aufgelösten Pfad (/private/var/…), die Basis ist der Symlink (/var/…).
             // Ohne das griff der Abgleich nicht, der „relative" Pfad blieb absolut, und
@@ -205,13 +226,19 @@ enum BackupArchive {
         return aus
     }
 
-    private static func themesSammeln() -> [String: String] {
+    private static func themesSammeln(budget: inout Int) -> [String: String] {
         let ordner = ThemeManager.shared.themesDirectoryURL
         let dateien = (try? FileManager.default.contentsOfDirectory(atPath: ordner.path)) ?? []
         var aus: [String: String] = [:]
         for name in dateien {
             if let daten = try? Data(contentsOf: ordner.appendingPathComponent(name)),
                daten.count < 5_000_000 {
+                guard daten.count <= budget else {
+                    AppLogger.log("Sicherung: Theme \(name) übersprungen — Gesamtgrenze erreicht",
+                                  category: "Backup", level: "WARN")
+                    continue
+                }
+                budget -= daten.count
                 aus[name] = daten.base64EncodedString()
             }
         }

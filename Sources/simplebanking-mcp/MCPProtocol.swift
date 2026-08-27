@@ -33,6 +33,15 @@ private func posixWrite(_ data: Data) {
 
 // MARK: - MCP framing
 
+/// Obergrenze für eine eingehende Nachricht.
+///
+/// Der Server läuft lokal über `stdio`, der Client ist der eigene Elternprozess — ein
+/// Angreifer ist hier nicht die naheliegende Sorge. Ein fehlerhafter Client aber schon:
+/// Ohne Grenze wächst die erste Zeile Byte für Byte weiter, und ein `Content-Length` von
+/// einigen Gigabyte fordert `posixReadExact` in einem Stück an. Eingehende Nachrichten
+/// sind Aufrufe, keine Nutzdaten; acht Mebibyte sind großzügig.
+private let maxNachrichtenGroesse = 8 * 1024 * 1024
+
 func readMessage() -> [String: Any]? {
     // Read the first line
     var line = ""
@@ -43,6 +52,10 @@ func readMessage() -> [String: Any]? {
             break
         }
         line.append(Character(UnicodeScalar(byte)))
+        guard line.utf8.count <= maxNachrichtenGroesse else {
+            FileHandle.standardError.write(Data("mcp: Zeile über \(maxNachrichtenGroesse) Bytes — abgebrochen\n".utf8))
+            return nil
+        }
     }
 
     // NDJSON mode: line starts with '{' — no Content-Length framing
@@ -58,6 +71,10 @@ func readMessage() -> [String: Any]? {
     if line.lowercased().hasPrefix("content-length:") {
         let val = String(line.dropFirst("content-length:".count)).trimmingCharacters(in: .whitespaces)
         contentLength = Int(val) ?? 0
+    }
+    guard contentLength >= 0, contentLength <= maxNachrichtenGroesse else {
+        FileHandle.standardError.write(Data("mcp: Content-Length \(contentLength) abgelehnt\n".utf8))
+        return nil
     }
     // Read remaining headers until blank line
     while true {
