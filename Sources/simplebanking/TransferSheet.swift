@@ -75,6 +75,8 @@ struct TransferSheet: View {
     // Sendeverzögerung
     @State private var delayRemaining: Int = 0
     @State private var delayTask: Task<Void, Never>? = nil
+    /// Der laufende Sendevorgang — nur dafür da, ihn beenden zu können.
+    @State private var sendTask: Task<Void, Never>?
 
     // Empfänger informieren (Mail-Quittung)
     @State private var informRecipient: Bool = false
@@ -130,6 +132,12 @@ struct TransferSheet: View {
         case sending
         case sent
         case mayHaveBeenExecuted(String)
+        /// Der Nutzer hat das Warten auf die Freigabe beendet.
+        ///
+        /// Bewusst ein eigener Zustand und nicht `.failed`: Nichts ist fehlgeschlagen. Der
+        /// Auftrag liegt bei der Bank und wartet; wer ihn später in der Banking-App
+        /// freigibt, löst ihn aus. Ein „Abgebrochen" wäre an dieser Stelle eine Lüge.
+        case warteBeendet
         case failed(String)
     }
 
@@ -339,6 +347,17 @@ struct TransferSheet: View {
                 ),
                 detail: detail
             )
+        case .warteBeendet:
+            terminalView(
+                icon: "clock.badge.exclamationmark.fill",
+                tint: .sbOrangeStrong,
+                title: L10n.t("Warten beendet", "Stopped waiting"),
+                message: L10n.t(
+                    "Die App wartet nicht mehr auf die Freigabe. Zurückgeholt ist die Überweisung damit nicht: Der Auftrag liegt bei deiner Bank. Gibst du ihn dort frei, wird er ausgeführt — verwerfen kannst du ihn nur in der Banking-App.",
+                    "The app has stopped waiting for approval. That does not withdraw the transfer: the order is with your bank. If you approve it there, it will be executed — you can only discard it in your banking app."
+                ),
+                detail: nil
+            )
         case .failed(let message):
             terminalView(
                 icon: "xmark.octagon.fill",
@@ -414,8 +433,19 @@ struct TransferSheet: View {
             guard let url, TransferDocumentScanner.isSupported(url) else { return }
             Task { @MainActor in
                 isScanningDocument = true
+                // Erst der SEPA-QR-Code: Was dort steht, hat der Rechnungssteller
+                // eingetragen — der Fließtext daneben muss geraten werden. Fehlen im Code
+                // Betrag oder Verwendungszweck (häufig), ergänzt sie der Text.
+                let ausCode = await TransferDocumentScanner.giroCode(from: url)
+                    .map(GiroCode.alsParsed)
                 let text = await TransferDocumentScanner.extractText(from: url)
-                let parsed = text.map(TransferClipboardParser.parse)
+                let ausText = text.map(TransferClipboardParser.parse)
+                let parsed: TransferClipboardParser.Parsed?
+                if let ausCode {
+                    parsed = ausText.map { GiroCode.ergaenzt(ausCode, mit: $0) } ?? ausCode
+                } else {
+                    parsed = ausText
+                }
                 isScanningDocument = false
                 if let parsed, parsed.isUseful {
                     // Gleicher Bestätigungsschritt wie bei der Zwischenablage —
@@ -1341,6 +1371,7 @@ struct TransferSheet: View {
         case .sending:                  footerSending
         case .sent:                     footerSent
         case .mayHaveBeenExecuted,
+             .warteBeendet,
              .failed:                   footerTerminal
         }
     }
@@ -1410,7 +1441,10 @@ struct TransferSheet: View {
                         startSendDelay()
                     } else {
                         phase = .sending
-                        Task { await performSend() }
+                        // Festhalten, damit „Warten beenden" sie erreichen kann. Ohne den
+                        // Griff lief der Sendevorgang bis zu 180 Abfragerunden weiter und
+                        // hielt dabei die Bankverbindung besetzt.
+                        sendTask = Task { await performSend() }
                     }
                 }) {
                     HStack(spacing: 6) {
@@ -1531,6 +1565,15 @@ struct TransferSheet: View {
                 .font(.system(size: 12))
                 .foregroundColor(.sbTextSecondary)
             Spacer()
+            // Ohne diesen Knopf blieb nur Warten: Wer die Freigabe in der Banking-App
+            // nicht erteilt, sah bis zu einer Viertelstunde „Übertrage an Bank…", und
+            // solange war die Bankverbindung für Abrufe gesperrt.
+            Button(L10n.t("Warten beenden", "Stop waiting")) {
+                delayTask?.cancel()
+                sendTask?.cancel()
+                phase = .warteBeendet
+            }
+            .buttonStyle(SecondaryActionStyle())
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -1805,6 +1848,11 @@ struct TransferSheet: View {
                 requestedExecutionDate: scheduledDate
             )
             await MainActor.run {
+                // Hat der Nutzer das Warten beendet, meldet der Dienst einen Fehlschlag —
+                // er hat ja keine Bestätigung bekommen. Das ist aber kein Fehler, und
+                // „fehlgeschlagen" wäre hier die falsche Auskunft: Der Auftrag liegt bei
+                // der Bank. Der Zustand steht schon, er darf nur nicht überschrieben werden.
+                if Task.isCancelled { phase = .warteBeendet; return }
                 if outcome.ok {
                     phase = .sent
                     triggerRecipientEmailIfRequested(request: request)

@@ -83,6 +83,54 @@ enum TransferDocumentScanner {
         return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
     }
 
+    // MARK: - GiroCode
+
+    /// Sucht den SEPA-QR-Code (GiroCode) im Dokument.
+    ///
+    /// Hat Vorrang vor der Texterkennung, und zwar aus einem einfachen Grund: Was im
+    /// QR-Code steht, hat der Rechnungssteller selbst eingetragen. Alles andere auf einer
+    /// Rechnung muss geraten werden — und geraten wurde bisher gelegentlich die
+    /// Tabellenüberschrift als Empfänger.
+    ///
+    /// Auf deutschen Rechnungen sitzt der Code fast immer auf der **letzten** Seite,
+    /// deshalb wird die zuerst betrachtet.
+    static func giroCode(from url: URL, maxPages: Int = 3) async -> GiroCode.Daten? {
+        if url.pathExtension.lowercased() == "pdf" {
+            guard let doc = PDFDocument(url: url), doc.pageCount > 0 else { return nil }
+            let letzte = doc.pageCount - 1
+            let reihenfolge = [letzte] + (0..<min(doc.pageCount, maxPages)).filter { $0 != letzte }
+            for i in reihenfolge {
+                guard let page = doc.page(at: i), let cg = render(page) else { continue }
+                if let daten = await giroCode(in: cg) { return daten }
+            }
+            return nil
+        }
+        guard let image = NSImage(contentsOf: url), let cg = cgImage(from: image) else { return nil }
+        return await giroCode(in: cg)
+    }
+
+    /// Ein QR-Code auf einer Rechnung muss keiner sein — Web-Adressen und
+    /// Sendungsnummern kommen genauso vor. `GiroCode.parse` sortiert das aus.
+    static func giroCode(in cgImage: CGImage) async -> GiroCode.Daten? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let request = VNDetectBarcodesRequest()
+                request.symbologies = [.qr]
+                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                do {
+                    try handler.perform([request])
+                } catch {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let treffer = (request.results ?? [])
+                    .compactMap(\.payloadStringValue)
+                    .compactMap(GiroCode.parse)
+                continuation.resume(returning: treffer.first)
+            }
+        }
+    }
+
     // MARK: - Vision OCR
 
     /// On-device Texterkennung (deutsch + englisch, `.accurate`).

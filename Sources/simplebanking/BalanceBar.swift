@@ -7716,8 +7716,17 @@ private struct StatusBalanceFlyoutCardView: View {
             guard let url, TransferDocumentScanner.isSupported(url) else { return }
             Task { @MainActor in
                 isScanningDroppedDocument = true
+                // Siehe TransferSheet: erst der SEPA-QR-Code, der Text ergänzt nur.
+                let ausCode = await TransferDocumentScanner.giroCode(from: url)
+                    .map(GiroCode.alsParsed)
                 let text = await TransferDocumentScanner.extractText(from: url)
-                let parsed = text.map(TransferClipboardParser.parse)
+                let ausText = text.map(TransferClipboardParser.parse)
+                let parsed: TransferClipboardParser.Parsed?
+                if let ausCode {
+                    parsed = ausText.map { GiroCode.ergaenzt(ausCode, mit: $0) } ?? ausCode
+                } else {
+                    parsed = ausText
+                }
                 isScanningDroppedDocument = false
                 if let parsed, parsed.isUseful {
                     droppedPrefill = parsed

@@ -46,11 +46,21 @@ enum TransferClipboardParser {
         "rechnungsbetrag", "gesamtbetrag", "zahlbetrag", "endbetrag",
         "gesamtsumme", "zu zahlen", "total", "summe"
     ]
+    /// Wörter, aus denen Tabellenüberschriften bestehen.
+    private static let spaltenwoerter: Set<String> = [
+        "pos", "pos.", "position", "menge", "anzahl", "einheit", "bezeichnung",
+        "beschreibung", "artikel", "artikelnr", "mwst", "mwst.", "ust", "steuer",
+        "einheitspreis", "einzelpreis", "preis", "gesamt", "gesamtpreis", "summe",
+        "netto", "brutto", "rabatt", "stk", "stück", "nr", "nr."
+    ]
     /// Zeilen, die trotz „viel Text" kein Name sind (Grußformeln, Bank-/Meta-Zeilen).
     private static let nameStopwords = [
         "grüß", "gruss", "dank", "rechnung", "betrag", "konto", "bank", "iban", "bic",
         "datum", "seite", "steuernummer", "ust", "e-mail", "email", "telefon", "tel.",
-        "sparkasse", "volksbank", "überweisung", "ueberweisung", "zahlung", "auftrag"
+        "sparkasse", "volksbank", "überweisung", "ueberweisung", "zahlung", "auftrag",
+        // Registerangaben stehen in Rechnungsfüßen oft als eigener Abschnitt neben dem
+        // Firmennamen („HRB | USt-IdNr.: …"). Als Name gewann sonst „HRB".
+        "hrb", "hra", "handelsregister", "amtsgericht"
     ]
 
     // MARK: - Entry point
@@ -153,7 +163,11 @@ enum TransferClipboardParser {
         let window = 4
         for distance in 1...window {
             for candidate in [index + distance, index - distance] where lines.indices.contains(candidate) {
-                if isLikelyName(lines[candidate], iban: iban) { return lines[candidate] }
+                let zeile = lines[candidate]
+                if isLikelyName(zeile, iban: iban) { return zeile }
+                // Fußzeilen mit „|" als Ganzes verwerfen, aber ihren ersten Abschnitt
+                // prüfen — dort steht der Kontoinhaber.
+                if let ausSegment = nameAusSegmenten(zeile, iban: iban) { return ausSegment }
             }
         }
         return nil
@@ -225,6 +239,37 @@ enum TransferClipboardParser {
         return result
     }
 
+    /// Ist die Zeile eine Tabellenüberschrift?
+    ///
+    /// Sie sieht wie ein Name aus — keine Ziffern, kein Doppelpunkt, wenige Wörter — und
+    /// stand bei einer Handwerkerrechnung direkt unter der IBAN-Zeile. Übernommen wurde
+    /// deshalb „Pos Menge Bezeichnung MwSt. Einheitspreis Gesamt" als Empfänger.
+    ///
+    /// Zwei Spaltenwörter allein genügen nicht: „Preis GmbH" wäre sonst keine Firma mehr.
+    /// Erst wenn die Hälfte der Zeile aus ihnen besteht, ist es eine Überschrift.
+    static func istTabellenkopf(_ line: String) -> Bool {
+        let woerter = line.lowercased()
+            .split(whereSeparator: { !$0.isLetter && $0 != "." })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard woerter.count >= 2 else { return false }
+        let treffer = woerter.filter { spaltenwoerter.contains($0) }.count
+        return treffer >= 2 && Double(treffer) / Double(woerter.count) >= 0.5
+    }
+
+    /// Zerlegt eine Fußzeile an „|" und gibt den ersten Teil zurück, der ein Name sein
+    /// kann.
+    ///
+    /// Rechnungsfüße stehen oft als eine Zeile: „Firma GmbH | Straße 1 | 12345 Ort |
+    /// Geschäftsführer: …". Als Ganzes scheitert sie an Ziffern und Doppelpunkt — der
+    /// erste Abschnitt ist aber genau der gesuchte Name.
+    private static func nameAusSegmenten(_ line: String, iban: String?) -> String? {
+        guard line.contains("|") else { return nil }
+        return line.split(separator: "|")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { isLikelyName($0, iban: iban) }
+    }
+
     /// Sieht die Zeile nach einem Personen-/Firmennamen aus?
     private static func isLikelyName(_ line: String, iban: String?) -> Bool {
         let compact = line.replacingOccurrences(of: " ", with: "").uppercased()
@@ -238,6 +283,7 @@ enum TransferClipboardParser {
         if ["bank", "sparkasse", "iban", "bic", "swift"].contains(where: { lower.contains($0) }) { return false }
         // Betrags-/Summenzeilen ("Gesamtbetrag 479,52") sind keine Namen.
         if totalMarkers.contains(where: { lower.contains($0) }) { return false }
+        if istTabellenkopf(line) { return false }
         // Formular-/Tabellenzeilen: Doppelpunkt, Klammern oder viele Ziffern.
         if line.contains(":") || line.contains("(") || line.contains(")") { return false }
         if line.filter(\.isNumber).count >= 4 { return false }
