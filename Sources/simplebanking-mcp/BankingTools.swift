@@ -157,6 +157,12 @@ struct BankingTools {
     /// Sprechender Name für einen Demo-Slot (App-Demo-Namen sind zufällig + nur
     /// in-memory, daher hier stabile Ersatznamen).
     private static func demoAccountName(_ id: String) -> String {
+        // Bevorzugt der Name, den die App beim Aktivieren des Demo-Modus abgelegt hat —
+        // sonst stimmen Menü und Werkzeuge nicht überein.
+        if let gemerkt = UserDefaults(suiteName: appDomain)?
+            .string(forKey: "simplebanking.demoSlotName.\(id)"), !gemerkt.isEmpty {
+            return gemerkt
+        }
         switch id {
         case "demo-slot-0":    return "Demokonto — Hauptkonto"
         case "demo-slot-1":    return "Demokonto — Alltag"

@@ -2367,6 +2367,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// gibt das Streifen-/Karten-Design vor (BankTintProvider liest die Slot-`logoId`).
     /// Ohne echten Brand am aktiven Slot bliebe der Streifen im Demo unsichtbar,
     /// weil `BankTintProvider.hex(for:)` ohne logoId/customColor `nil` liefert.
+    /// Hält den Anzeigenamen eines Demo-Slots fest, damit ihn auch CLI, MCP und Raycast
+    /// sehen.
+    ///
+    /// `injectDemoSlots` schreibt nichts auf die Platte — die Werkzeuge außerhalb der App
+    /// kannten deshalb nur „Demo 1", während im Menü eine echte Bankmarke stand. Der Name
+    /// ist erfundenes Demo-Material, kein Nutzerdatum; er verschwindet mit
+    /// `tearDownDemoSlots`.
+    private func merkeDemoName(_ slot: BankSlot) {
+        UserDefaults.standard.set(slot.displayName,
+                                  forKey: "simplebanking.demoSlotName.\(slot.id)")
+    }
+
     /// Spiegelt die Demo-Buchungen in `transactions-demo.db`.
     ///
     /// Nur für die Werkzeuge außerhalb der App: CLI, MCP und Raycast lesen die Datei,
@@ -2401,6 +2413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         var seed = UInt64(truncatingIfNeeded: demoSeed)
         let fake = FakeData.demoBalance(seed: &seed)
         UserDefaults.standard.set(fake, forKey: "simplebanking.cachedBalance.\(demoSlot.id)")
+        merkeDemoName(demoSlot)
         spiegleDemoUmsaetze(slotIds: [demoSlot.id])
         lastShownTitle = formatEURNoDecimals(String(format: "%.2f", fake))
         lastBalance = fake
@@ -2527,6 +2540,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         for (i, slot) in demoSlots.enumerated() {
             let b = FakeData.demoBalance(seed: &seed, slotProfile: i)
             UserDefaults.standard.set(b, forKey: "simplebanking.cachedBalance.\(slot.id)")
+            merkeDemoName(slot)
             total += b
             var settings = BankSlotSettingsStore.load(slotId: slot.id)
             settings.salaryDay  = FakeData.demoSalaryDay(slotProfile: i)
@@ -2579,6 +2593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let slot = BankSlot(id: "demo-slot-rewe", iban: "", displayName: "REWE",
                             logoId: "rewe", currency: "EUR", source: .rewe)
         MultibankingStore.shared.injectDemoSlots([slot])
+        merkeDemoName(slot)
         // Fake-Bons in den Receipt-Store schreiben — die eBon-UI liest daraus.
         let receipts = FakeData.demoReweReceipts(slotId: slot.id, seed: UInt64(truncatingIfNeeded: demoSeed))
         try? ReweReceiptStore.deleteAll(slotId: slot.id)
@@ -2595,10 +2610,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func tearDownDemoSlots() {
         for i in 0..<3 {
             UserDefaults.standard.removeObject(forKey: "simplebanking.cachedBalance.demo-slot-\(i)")
+            UserDefaults.standard.removeObject(forKey: "simplebanking.demoSlotName.demo-slot-\(i)")
             BankSlotSettingsStore.delete(slotId: "demo-slot-\(i)")
         }
         // REWE-eBon-Demo: Cache + Fake-Bons löschen.
         UserDefaults.standard.removeObject(forKey: "simplebanking.cachedBalance.demo-slot-rewe")
+        UserDefaults.standard.removeObject(forKey: "simplebanking.demoSlotName.demo-slot-rewe")
         try? ReweReceiptStore.deleteAll(slotId: "demo-slot-rewe")
         // Wenn das in-memory Backup leer/korrupt ist, fällt restoreDemoSlots
         // intern auf reloadFromDisk() zurück. UserDefaults bleibt die

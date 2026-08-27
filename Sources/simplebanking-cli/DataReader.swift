@@ -115,7 +115,10 @@ enum DataReader {
                 slots.append(Slot(
                     id: id,
                     iban: "DE\(String(format: "%020d", i))",
-                    displayName: "Demo \(i + 1)",
+                    // Die App legt beim Aktivieren den Namen der ausgewürfelten Bankmarke
+                    // ab. Ohne ihn stünde hier „Demo 1", während im Menü eine echte Marke
+                    // steht — derselbe Bestand, zwei Namen.
+                    displayName: prefString("simplebanking.demoSlotName.\(id)") ?? "Demo \(i + 1)",
                     nickname: nil,
                     currency: "EUR"
                 ))
