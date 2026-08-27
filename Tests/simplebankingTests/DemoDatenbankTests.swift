@@ -82,3 +82,19 @@ final class DemoDatenbankTests: XCTestCase {
                        "zweimal derselbe Seed darf den Bestand nicht verdoppeln oder verändern")
     }
 }
+
+// MARK: - Intents und der Demo-Bestand
+
+final class IntentDemoQuelleTests: XCTestCase {
+
+    /// Im Demo-Modus muss ein Kurzbefehl aus der Demo-Datenbank lesen. Sonst kämen die
+    /// Salden aus den Demo-Konten und die Umsätze aus dem echten Bestand — eine Auskunft
+    /// aus zwei Quellen, die niemand auseinanderhalten kann.
+    func test_demoModusLiestDenDemoBestand() {
+        XCTAssertEqual(IntentDaten.datenbank(demo: true), "demo")
+    }
+
+    func test_ohneDemoModusDerEchteBestand() {
+        XCTAssertEqual(IntentDaten.datenbank(demo: false), "primary")
+    }
+}

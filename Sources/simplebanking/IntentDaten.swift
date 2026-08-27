@@ -15,6 +15,17 @@ import Foundation
 // Code.
 enum IntentDaten {
 
+    /// Welchen Bestand ein Intent liest.
+    ///
+    /// Der Demo-Modus hat eine eigene Datenbank. Ohne diese Unterscheidung antwortete ein
+    /// Kurzbefehl im Demo-Modus zwiespältig: Salden aus den Demo-Konten, Umsätze aus dem
+    /// echten Bestand — zwei Quellen in einer Auskunft.
+    static func datenbank(demo: Bool) -> String { demo ? "demo" : "primary" }
+
+    private static var aktuelleDatenbank: String {
+        datenbank(demo: UserDefaults.standard.bool(forKey: "demoMode"))
+    }
+
     struct KontoStand {
         let name: String
         let saldo: Double
@@ -52,7 +63,7 @@ enum IntentDaten {
     /// meint das Geld, das weg ist — nicht das, was die Bank schon verbucht hat.
     static func ausgaben(tage: Int, slots: [String]?) -> Double {
         let buchungen = (try? TransactionsDatabase.loadUnifiedTransactions(
-            slots: slots, days: tage)) ?? []
+            slots: slots, days: tage, bankId: aktuelleDatenbank)) ?? []
         return buchungen
             .map(\.parsedAmount)
             .filter { $0 < 0 }
@@ -63,7 +74,7 @@ enum IntentDaten {
     static func letzteBuchungen(anzahl: Int, tage: Int, slots: [String]?)
         -> [TransactionsResponse.Transaction] {
         let buchungen = (try? TransactionsDatabase.loadUnifiedTransactions(
-            slots: slots, days: tage)) ?? []
+            slots: slots, days: tage, bankId: aktuelleDatenbank)) ?? []
         return Array(buchungen.prefix(max(1, anzahl)))
     }
 
