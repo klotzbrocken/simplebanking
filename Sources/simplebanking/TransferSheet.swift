@@ -352,10 +352,10 @@ struct TransferSheet: View {
                 icon: "clock.badge.exclamationmark.fill",
                 tint: .sbOrangeStrong,
                 title: L10n.t("Warten beendet", "Stopped waiting"),
-                message: L10n.t(
-                    "Die App wartet nicht mehr auf die Freigabe. Zurückgeholt ist die Überweisung damit nicht: Der Auftrag liegt bei deiner Bank. Gibst du ihn dort frei, wird er ausgeführt — verwerfen kannst du ihn nur in der Banking-App.",
-                    "The app has stopped waiting for approval. That does not withdraw the transfer: the order is with your bank. If you approve it there, it will be executed — you can only discard it in your banking app."
-                ),
+                // Kurz halten. Der eine Satz, der zählt: Der Auftrag ist damit nicht weg,
+                // und weggeräumt wird er woanders.
+                message: L10n.t("Abbrechen in der Banking-App",
+                                "Cancel in your banking app"),
                 detail: nil
             )
         case .failed(let message):

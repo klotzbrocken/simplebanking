@@ -64,6 +64,9 @@ struct QuickSendDrawerView: View {
         case confirm(amount: String, name: String, iban: String)
         case sent(amount: String, name: String)
         case failed(String)
+        /// Der Nutzer hat das Warten auf die Freigabe beendet. Kein Fehler — der Auftrag
+        /// liegt bei der Bank und wird dort verworfen, nicht hier.
+        case warteBeendet
     }
 
     // MARK: Derived
@@ -99,6 +102,8 @@ struct QuickSendDrawerView: View {
                     sentRow(amount: amt, name: nm)
                 case .failed(let msg):
                     failedRow(msg)
+                case .warteBeendet:
+                    warteBeendetRow
                 default:
                     form
                 }
@@ -438,9 +443,7 @@ struct QuickSendDrawerView: View {
                     if isSending {
                         sendeTask?.cancel()
                         isSending = false
-                        phase = .failed(L10n.t(
-                            "Warten beendet. Der Auftrag liegt bei deiner Bank — gibst du ihn dort frei, wird er ausgeführt. Verwerfen kannst du ihn nur in der Banking-App.",
-                            "Stopped waiting. The order is with your bank — if you approve it there it will be executed. You can only discard it in your banking app."))
+                        phase = .warteBeendet
                     } else {
                         phase = .idle
                         confirmedSourceSlotId = nil
@@ -504,6 +507,35 @@ struct QuickSendDrawerView: View {
              + Text(L10n.t(" an \(name) gesendet", " sent to \(name)")).font(.system(size: 12.5)))
                 .foregroundColor(.sbTextPrimary)
             Spacer(minLength: 0)
+        }
+    }
+
+    /// Bewusst nicht rot: Es ist nichts schiefgegangen, es wartet nur woanders weiter.
+    private var warteBeendetRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(Color.sbOrangeStrong.opacity(0.15)).frame(width: 30, height: 30)
+                    Image(systemName: "clock")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.sbOrangeStrong)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.t("Warten beendet", "Stopped waiting"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.sbTextPrimary)
+                    Text(L10n.t("Abbrechen in der Banking-App", "Cancel in your banking app"))
+                        .font(.system(size: 11))
+                        .foregroundColor(.sbTextSecondary)
+                }
+                Spacer(minLength: 0)
+            }
+            Button { phase = .idle } label: {
+                Text(L10n.t("Zurück", "Back"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.sbBlueStrong)
+            }
+            .buttonStyle(.plain)
         }
     }
 
