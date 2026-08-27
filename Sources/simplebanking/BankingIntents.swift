@@ -41,13 +41,13 @@ struct SaldoIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<Double> {
         let staende = IntentDaten.kontostaende()
-        guard let summe = IntentDaten.gesamtsaldo() else {
-            return .result(value: 0, dialog: IntentDialog(stringLiteral:
-                IntentDaten.satz(fuer: nil, konten: 0)))
-        }
-        return .result(value: summe,
+        let betraege = IntentDaten.gesamtsaldo()
+        // Der Rückgabewert ist eine einzelne Zahl — bei mehreren Währungen kann er nur die
+        // größte Gruppe tragen. Der gesprochene Satz nennt alle; wer in einem Kurzbefehl
+        // weiterrechnet, bekommt keine stillschweigend zusammengeworfene Summe.
+        return .result(value: betraege.first?.summe ?? 0,
                        dialog: IntentDialog(stringLiteral:
-                        IntentDaten.satz(fuer: summe, konten: staende.count)))
+                        IntentDaten.satz(fuer: betraege, konten: staende.count)))
     }
 }
 
@@ -63,7 +63,7 @@ struct KontenIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<[String]> {
         let zeilen = IntentDaten.kontostaende().map { konto in
-            "\(konto.name): \(IntentDaten.waehrung.string(from: NSNumber(value: konto.saldo)) ?? "")"
+            "\(konto.name): \(IntentDaten.formatiert(konto.saldo, waehrung: konto.waehrung))"
         }
         let text = zeilen.isEmpty
             ? L10n.t("Keine Konten verbunden.", "No accounts connected.")
@@ -86,9 +86,11 @@ struct AusgabenIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<Double> {
-        let summe = IntentDaten.ausgaben(tage: tage, slots: nil)
-        let betrag = IntentDaten.waehrung.string(from: NSNumber(value: summe)) ?? "\(summe)"
-        return .result(value: summe, dialog: IntentDialog(stringLiteral:
+        let betraege = IntentDaten.ausgaben(tage: tage, slots: nil)
+        let betrag = betraege.isEmpty
+            ? IntentDaten.formatiert(0, waehrung: "EUR")
+            : betraege.map(IntentDaten.formatiert).joined(separator: L10n.t(" und ", " and "))
+        return .result(value: betraege.first?.summe ?? 0, dialog: IntentDialog(stringLiteral:
             L10n.t("\(betrag) in den letzten \(tage) Tagen",
                    "\(betrag) over the last \(tage) days")))
     }
@@ -108,7 +110,7 @@ struct UmsaetzeIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog & ReturnsValue<[String]> {
         let buchungen = IntentDaten.letzteBuchungen(anzahl: anzahl, tage: 90, slots: nil)
         let zeilen = buchungen.map { tx -> String in
-            let betrag = IntentDaten.waehrung.string(from: NSNumber(value: tx.parsedAmount)) ?? ""
+            let betrag = IntentDaten.formatiert(tx.parsedAmount, waehrung: tx.amount?.currency ?? "EUR")
             let wer = tx.creditor?.name ?? tx.debtor?.name ?? "—"
             return "\(wer): \(betrag)"
         }

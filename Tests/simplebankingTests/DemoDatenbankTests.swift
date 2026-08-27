@@ -98,3 +98,63 @@ final class IntentDemoQuelleTests: XCTestCase {
         XCTAssertEqual(IntentDaten.datenbank(demo: false), "primary")
     }
 }
+
+// MARK: - Währungen dürfen nicht zusammenfallen
+//
+// 1.000 EUR + 1.000 USD sind nicht 2.000 EUR. Die Anwendung holt bewusst keine
+// Umrechnungskurse — dann gibt es keine einzelne Zahl, die stimmt, und der einzige
+// ehrliche Weg ist, die Währungen nebeneinanderzustellen. Vorher setzte `kontostaende()`
+// für jedes Konto fest „EUR" und summierte quer durch.
+
+final class WaehrungTrennungTests: XCTestCase {
+
+    private func b(_ summe: Double, _ waehrung: String) -> IntentDaten.Betrag {
+        IntentDaten.Betrag(summe: summe, waehrung: waehrung)
+    }
+
+    func test_gleicheWaehrungWirdSummiert() {
+        let aus = IntentDaten.jeWaehrung([b(1000, "EUR"), b(234.50, "EUR")])
+        XCTAssertEqual(aus.count, 1)
+        XCTAssertEqual(aus.first?.summe, 1234.50)
+        XCTAssertEqual(aus.first?.waehrung, "EUR")
+    }
+
+    func test_verschiedeneWaehrungenBleibenGetrennt() {
+        let aus = IntentDaten.jeWaehrung([b(1000, "EUR"), b(1000, "USD")])
+        XCTAssertEqual(aus.count, 2, "zwei Währungen dürfen nicht zu einer Zahl werden")
+        XCTAssertEqual(Set(aus.map(\.waehrung)), ["EUR", "USD"])
+        XCTAssertFalse(aus.contains { $0.summe == 2000 })
+    }
+
+    /// Die größte Gruppe zuerst — der Rückgabewert eines Intents ist eine einzelne Zahl
+    /// und kann nur eine tragen. Dann soll es die gewichtigste sein.
+    func test_groessteGruppeStehtVorn() {
+        let aus = IntentDaten.jeWaehrung([b(10, "USD"), b(-5000, "EUR"), b(100, "CHF")])
+        XCTAssertEqual(aus.first?.waehrung, "EUR")
+    }
+
+    func test_ohnePostenKommtNichts() {
+        XCTAssertTrue(IntentDaten.jeWaehrung([]).isEmpty)
+    }
+
+    func test_satzNenntBeideWaehrungenUndErfindetKeineSumme() {
+        let satz = IntentDaten.satz(fuer: [b(1000, "EUR"), b(1000, "USD")], konten: 2)
+        XCTAssertTrue(satz.contains("1.000"), satz)
+        XCTAssertTrue(satz.contains("$") || satz.uppercased().contains("USD"), satz)
+        XCTAssertFalse(satz.contains("2.000"), "eine Gesamtsumme darf es hier nicht geben")
+    }
+
+    func test_ohneKontostandSagtDerSatzDas() {
+        XCTAssertFalse(IntentDaten.satz(fuer: [], konten: 0).isEmpty)
+        XCTAssertFalse(IntentDaten.satz(fuer: [], konten: 0).contains("0,00"))
+    }
+
+    /// Ein Dollarbetrag darf nicht als Eurobetrag erscheinen — genau das tat der eine,
+    /// fest auf Euro gestellte Formatierer.
+    func test_dollarSiehtNichtWieEuroAus() {
+        let eur = IntentDaten.formatiert(1000, waehrung: "EUR")
+        let usd = IntentDaten.formatiert(1000, waehrung: "USD")
+        XCTAssertNotEqual(eur, usd)
+        XCTAssertFalse(usd.contains("€"), usd)
+    }
+}

@@ -15,23 +15,23 @@ final class IntentDatenTests: XCTestCase {
     /// „0,00 €" erscheinen: In einem Kurzbefehl, der Salden summiert, wäre das eine
     /// stillschweigend falsche Zahl.
     func test_ohneStandKeineNull() {
-        XCTAssertEqual(IntentDaten.satz(fuer: nil, konten: 0),
+        XCTAssertEqual(IntentDaten.satz(fuer: [], konten: 0),
                        L10n.t("Noch kein Kontostand abgerufen.", "No balance fetched yet."))
     }
 
     /// Bei einem Konto steht der Betrag allein, bei mehreren die Zahl dazu — sonst weiß
     /// niemand, worüber summiert wurde.
     func test_satzNenntDieAnzahlNurBeiMehrerenKonten() {
-        let einzeln = IntentDaten.satz(fuer: 1234.56, konten: 1)
+        let einzeln = IntentDaten.satz(fuer: [.init(summe: 1234.56, waehrung: "EUR")], konten: 1)
         XCTAssertFalse(einzeln.contains("1 "), einzeln)
 
-        let mehrere = IntentDaten.satz(fuer: 1234.56, konten: 3)
+        let mehrere = IntentDaten.satz(fuer: [.init(summe: 1234.56, waehrung: "EUR")], konten: 3)
         XCTAssertTrue(mehrere.contains("3"), mehrere)
     }
 
     /// Der Betrag wird als Währung ausgegeben, nicht als nackte Zahl.
     func test_betragWirdAlsWaehrungFormatiert() {
-        let text = IntentDaten.satz(fuer: 1234.5, konten: 1)
+        let text = IntentDaten.satz(fuer: [.init(summe: 1234.5, waehrung: "EUR")], konten: 1)
         XCTAssertTrue(text.contains("€"), text)
         XCTAssertFalse(text.contains("1234.5"), "roher Double-Wert im Text: \(text)")
     }
@@ -39,14 +39,15 @@ final class IntentDatenTests: XCTestCase {
     /// Ausgaben sind ein positiver Betrag, obwohl Buchungen negativ sind. „−340 €
     /// ausgegeben" liest sich falsch herum.
     func test_ausgabenSindPositiv() {
-        let summe = IntentDaten.ausgaben(tage: 30, slots: [])
-        XCTAssertGreaterThanOrEqual(summe, 0)
+        for posten in IntentDaten.ausgaben(tage: 30, slots: []) {
+            XCTAssertGreaterThanOrEqual(posten.summe, 0)
+        }
     }
 
     /// Leere Kontoauswahl heißt leere Antwort, nicht „alle Konten". Sonst lieferte ein
     /// Intent mit versehentlich leerem Filter plötzlich alles.
     func test_leereAuswahlLiefertNichts() {
-        XCTAssertEqual(IntentDaten.ausgaben(tage: 30, slots: []), 0)
+        XCTAssertTrue(IntentDaten.ausgaben(tage: 30, slots: []).isEmpty)
         XCTAssertTrue(IntentDaten.letzteBuchungen(anzahl: 5, tage: 30, slots: []).isEmpty)
     }
 

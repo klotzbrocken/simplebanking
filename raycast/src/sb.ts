@@ -81,6 +81,26 @@ export async function aktualisieren(): Promise<void> {
   await run(pfad(), ["refresh"], { timeout: 120_000 });
 }
 
+/**
+ * Summiert Beträge **je Währung** und stellt sie nebeneinander.
+ *
+ * Der Grund in einem Satz: 1.000 € + 1.000 $ sind nicht 2.000 €. Ohne Umrechnungskurs —
+ * und den holt diese Erweiterung bewusst nicht — gibt es keine einzelne Zahl, die stimmt.
+ * Im Normalfall (alles Euro) kommt genau ein Betrag heraus, es ändert sich also nichts.
+ */
+export function summeJeWaehrung(posten: { amount: number; currency: string }[]): string {
+  const summen = new Map<string, number>();
+  for (const p of posten) {
+    const w = p.currency || "EUR";
+    summen.set(w, (summen.get(w) ?? 0) + p.amount);
+  }
+  if (summen.size === 0) return euro(0);
+  return [...summen.entries()]
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .map(([w, betrag]) => euro(betrag, w))
+    .join(" · ");
+}
+
 /** Beträge einheitlich formatieren, damit Listen nicht zappeln. */
 export function euro(betrag: number, waehrung = "EUR"): string {
   return new Intl.NumberFormat("de-DE", {

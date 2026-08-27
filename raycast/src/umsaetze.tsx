@@ -1,6 +1,6 @@
 import { List, Icon, Color, ActionPanel, Action } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
-import { Buchung, buchungen, Konto, konten, euro, SbFehlt } from "./sb";
+import { Buchung, buchungen, Konto, konten, euro, summeJeWaehrung, SbFehlt } from "./sb";
 
 /** Eine Buchung als Zeile zum Weitergeben. Konto hinten, weil vorne das Wichtige steht. */
 function alsText(b: Buchung, kontoName: string): string {
@@ -13,14 +13,11 @@ function alsText(b: Buchung, kontoName: string): string {
 /** Die Buchungen eines Kontos — oder aller, wenn `konto` fehlt. */
 function Liste({ daten, namen, konto }: { daten: Buchung[]; namen: Map<string, string>; konto?: Konto }) {
   const sichtbar = konto ? daten.filter((b) => b.slotId === konto.slotId) : daten;
-  const summe = sichtbar.reduce((s, b) => s + b.amount, 0);
+  const summe = summeJeWaehrung(sichtbar);
 
   return (
     <List navigationTitle={konto ? konto.name : "Alle Konten"} searchBarPlaceholder="Händler, Kategorie …">
-      <List.Section
-        title={konto ? konto.name : "Alle Konten"}
-        subtitle={`${sichtbar.length} · ${euro(summe)}`}
-      >
+      <List.Section title={konto ? konto.name : "Alle Konten"} subtitle={`${sichtbar.length} · ${summe}`}>
         {sichtbar.map((b, i) => {
           const kontoName = namen.get(b.slotId) ?? "";
           return (

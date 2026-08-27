@@ -1,6 +1,6 @@
 import { List, Icon, Color, ActionPanel, Action } from "@raycast/api";
 import { useEffect, useState } from "react";
-import { Konto, konten, euro, SbFehlt } from "./sb";
+import { Konto, konten, euro, summeJeWaehrung, SbFehlt } from "./sb";
 
 /** Eine Zeile zum Weitergeben: Konto, IBAN, Saldo — in dieser Reihenfolge lesbar. */
 function alsText(k: Konto): string {
@@ -27,7 +27,7 @@ export default function Saldo() {
     );
   }
 
-  const summe = daten.reduce((s, k) => s + k.balance, 0);
+  const summe = summeJeWaehrung(daten.map((k) => ({ amount: k.balance, currency: k.currency })));
 
   return (
     <List isLoading={laedt} searchBarPlaceholder="Konto suchen">
@@ -36,11 +36,11 @@ export default function Saldo() {
           <List.Item
             icon={Icon.BankNote}
             title="Alle Konten"
-            accessories={[{ text: euro(summe) }]}
+            accessories={[{ text: summe }]}
             actions={
               <ActionPanel>
                 <Action.CopyToClipboard title="Übersicht Kopieren" content={daten.map(alsText).join("\n")} />
-                <Action.CopyToClipboard title="Summe Kopieren" content={euro(summe)} />
+                <Action.CopyToClipboard title="Summe Kopieren" content={summe} />
               </ActionPanel>
             }
           />
