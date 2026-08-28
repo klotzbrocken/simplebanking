@@ -64,6 +64,10 @@ enum PaymentCategory: String, CaseIterable {
     case utilities = "Versorger"
     case membership = "Mitgliedschaft"
     case finance = "Finanzen"
+    /// Was die kontoführende Bank selbst abbucht — Kontoführung, Buchungsposten,
+    /// Rechnungsabschluss. Eigene Kategorie und nicht `.finance`, weil es das Einzige
+    /// ist, das man durch einen Kontowechsel loswird.
+    case bankFees = "Bankgebühren"
     case transport = "Mobilität"
     case other = "Sonstiges"
     
@@ -76,6 +80,7 @@ enum PaymentCategory: String, CaseIterable {
         case .utilities: return "bolt.fill"
         case .membership: return "person.crop.circle.badge.checkmark"
         case .finance: return "creditcard.fill"
+        case .bankFees: return "building.columns.fill"
         case .transport: return "car.fill"
         case .other: return "tag.fill"
         }
@@ -90,6 +95,7 @@ enum PaymentCategory: String, CaseIterable {
         case .utilities:   return .sbOrangeStrong
         case .membership:  return .sbRedStrong
         case .finance:     return .sbBlueStrong
+        case .bankFees:    return .sbOrangeMid
         case .transport:   return .sbGreenStrong
         case .other:       return .sbNeutralMid
         }
@@ -100,7 +106,11 @@ enum FixedCostsAnalyzer {
     
     // MARK: - Main Analysis
     
-    static func analyze(transactions: [TransactionsResponse.Transaction]) -> [RecurringPayment] {
+    /// - Parameter bankname: Anzeigename des Kontos. Nur nötig, wenn eine Entgeltbuchung
+    ///   doch einen Empfänger trägt — dann muss er zur Bank passen. Ohne Angabe bleiben
+    ///   solche Buchungen draußen, was die vorsichtigere Annahme ist.
+    static func analyze(transactions: [TransactionsResponse.Transaction],
+                        bankname: String? = nil) -> [RecurringPayment] {
         // Only analyze expenses (negative amounts)
         let expenses = transactions.filter { amt($0) < 0 }
         
@@ -108,6 +118,13 @@ enum FixedCostsAnalyzer {
         var grouped: [String: [TransactionsResponse.Transaction]] = [:]
         
         for tx in expenses {
+            // Entgelte der eigenen Bank tragen keinen Empfänger — der Händler-Auflöser
+            // liefert dafür nichts Stabiles, und drei Monatsbuchungen landeten in drei
+            // Gruppen. Deshalb ein fester Schlüssel, bevor überhaupt aufgelöst wird.
+            if Bankgebuehren.istGebuehr(tx, bankname: bankname) {
+                grouped[Bankgebuehren.bezeichnung, default: []].append(tx)
+                continue
+            }
             let merchant = extractEffectiveMerchant(tx)
             let iban = tx.creditor?.iban ?? tx.debtor?.iban ?? ""
             // For known services (Netflix, Telekom, etc.) the merchant name is the
@@ -138,6 +155,10 @@ enum FixedCostsAnalyzer {
 
         return recurring
             .filter { excluded.isEmpty || !excluded.contains(RecurringAssignments.canonicalKey($0.groupKey)) }
+            // Gebühren erst ab drei gleichartigen Belastungen. Zwei können ein Zufall
+            // sein, und eine erfundene Monatsgebühr unter dem Saldo wäre schlimmer als
+            // gar keine Angabe.
+            .filter { $0.merchant != Bankgebuehren.bezeichnung || $0.occurrences >= Bankgebuehren.mindestens }
             .sorted { $0.averageAmount > $1.averageAmount }
     }
     
@@ -445,6 +466,7 @@ enum FixedCostsAnalyzer {
     }
     
     static func categoryForMerchant(_ merchant: String) -> PaymentCategory {
+        if merchant == Bankgebuehren.bezeichnung { return .bankFees }
         let lower = merchant.lowercased()
         for (pattern, _, category) in knownServices {
             if lower.contains(pattern) {

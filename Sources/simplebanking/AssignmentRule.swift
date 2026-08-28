@@ -502,6 +502,10 @@ extension PaymentCategory {
         case .utilities:                      return .wohnenKredit
         case .membership:                     return .freizeit
         case .finance:                        return .sparen
+        // Bewusst `.sonstiges` und nicht `.sparen`: Eine Kontoführungsgebühr ist das
+        // Gegenteil von Sparen. Eine eigene Buchungskategorie dafür wäre ein größerer
+        // Eingriff (Kategorisierer, Farben, Bestandsdaten) und ist es nicht wert.
+        case .bankFees:                       return .sonstiges
         case .transport:                      return .mobilitaet
         case .other:                          return .sonstiges
         }
