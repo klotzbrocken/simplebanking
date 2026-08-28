@@ -7520,8 +7520,7 @@ private struct FlyoutSlotSegmentedControl: View {
                     activePill(item)
                 } else if !soloActiveOnly {
                     iconPill(item)
-                        .contentShape(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius,
-                                                        style: .continuous))
+                        .contentShape(Capsule())
                         .onTapGesture { onSwitch(idx) }
                         .help(item.nickname?.isEmpty == false ? item.nickname! : item.name)
                 }
@@ -7531,9 +7530,9 @@ private struct FlyoutSlotSegmentedControl: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(isUnifiedMode ? activeTint : Color(NSColor.secondaryLabelColor))
                     .frame(width: KontoKachel.inaktivKante, height: KontoKachel.inaktivKante)
-                    .background(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius, style: .continuous)
+                    .background(Capsule(style: .continuous)
                         .fill(isUnifiedMode ? activeFill : inactiveFill))
-                    .contentShape(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius, style: .continuous))
+                    .contentShape(Capsule())
                     .onTapGesture { if !isUnifiedMode { onActivateUnified?() } }
                     .help(L10n.t("Alle Konten", "All accounts"))
             }
@@ -7548,15 +7547,9 @@ private struct FlyoutSlotSegmentedControl: View {
         logoTile(item, size: KontoKachel.aktivLogo)
             .frame(width: KontoKachel.aktivKante, height: KontoKachel.aktivKante)
             .background(
-                RoundedRectangle(cornerRadius: KontoKachel.aktivRadius, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(activeFill)
                     .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1)
-            )
-            // Der Ring sitzt nicht auf dem Logo: Zwischen Kachel (20) und Rand (30) liegen
-            // fünf Punkte Fläche, sonst liefe die Akzentfarbe in die Bankfarbe.
-            .overlay(
-                RoundedRectangle(cornerRadius: KontoKachel.aktivRadius, style: .continuous)
-                    .strokeBorder(activeTint, lineWidth: 1.5)
             )
             .help(item.nickname?.isEmpty == false ? item.nickname! : item.name)
     }
@@ -7566,8 +7559,7 @@ private struct FlyoutSlotSegmentedControl: View {
         logoTile(item, size: KontoKachel.inaktivLogo)
             .opacity(KontoKachel.inaktivDeckkraft)
             .frame(width: KontoKachel.inaktivKante, height: KontoKachel.inaktivKante)
-            .background(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius, style: .continuous)
-                .fill(inactiveFill))
+            .background(Capsule(style: .continuous).fill(inactiveFill))
     }
 
     @ViewBuilder

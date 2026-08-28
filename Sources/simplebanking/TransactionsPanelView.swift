@@ -1532,6 +1532,11 @@ private struct TransactionsPanelView: View {
         .font(.system(size: 13, weight: .medium))
         .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
         .buttonStyle(.plain)
+        // Solange das Suchfeld dauerhaft im Kopf stand, nahm es den Tastaturfokus. Seit es
+        // eingeklappt ist, fällt der Fokus auf den ersten Knopf hier — und macOS zeichnet
+        // einen Ring um „Aktualisieren", der wie ein Rahmen aussieht. Die Knöpfe bleiben
+        // per Tastatur erreichbar, sie zeigen es nur nicht mehr an.
+        .focusEffectDisabled()
     }
 
     @ViewBuilder
@@ -1584,6 +1589,160 @@ private struct TransactionsPanelView: View {
         if neu.schliesstDieSuche(gegenueber: vorher), !vm.query.isEmpty { vm.query = "" }
     }
 
+    /// Suche als eigene Zeile unter der Kontoauswahl.
+    ///
+    /// Sie sitzt dort, wo sonst die Filterpillen stehen, und ist genauso hoch — beide
+    /// wechseln sich an derselben Stelle ab. Im Kopf selbst steht nur noch die Lupe.
+    private var sucheZeile: some View {
+        HStack(spacing: 8) {
+            // Search field — flexible. Bei BTX eckig (keine Rundung) und ohne
+            // Lupen-/Löschen-Icon; das Feld selbst trägt VT323 und einen
+            // Großbuchstaben-Platzhalter.
+            HStack(spacing: 6) {
+                if ThemeChrome.glyphControls {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13))
+                        .foregroundColor(themed ? Color.themedControlInk : Color(NSColor.placeholderTextColor))
+                }
+                // System-Platzhalter folgt dem (ggf. dunklen) Appearance-Modus und
+                // wäre auf dem hellen BTX-Feld weiß = unlesbar. Prompt-Farben
+                // ignoriert das Plain-TextField auf macOS — daher bei Theme den
+                // Prompt leeren und einen eigenen Platzhalter überlegen.
+                TextField(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"),
+                          text: $vm.query,
+                          prompt: themed ? Text("") : nil)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
+                    .foregroundColor(themed ? .themedInk : .primary)
+                    .overlay(alignment: .leading) {
+                        // Galt bis 2.0.2 nur für `lofi`. Der System-Platzhalter folgt
+                        // aber der macOS-Darstellung, nicht dem Theme — bei einem
+                        // dunklen Theme mit hellem Erscheinungsbild wurde er schwarz
+                        // auf dunkel. Jetzt für JEDES Theme ein eigener.
+                        if themed && vm.query.isEmpty {
+                            Text(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"))
+                                .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
+                                .foregroundColor(Color.themedControlInk)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                if !vm.query.isEmpty {
+                    Button(action: { vm.query = "" }) {
+                        if ThemeChrome.glyphControls {
+                            Image(systemName: ThemeChrome.symbol(for: .clear))
+                                .foregroundColor(themed ? Color.themedControlInk : Color(NSColor.placeholderTextColor))
+                        } else {
+                            BTXTextControl(text: "X")
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(.horizontal, 8)
+            // Senkrecht wie `FilterPill` (4), damit Suchzeile und Pillenzeile dieselbe
+            // Höhe haben — sie wechseln sich an derselben Stelle ab.
+            .padding(.vertical, 4)
+            .background(
+                // BTX-Lo-Fi: heller Block + harter 2-px-Tintenrahmen (wie der
+                // Eingabebereich einer BTX-Seite). Sonstige Themes: eine leichte
+                // Aufhellung der Ink-Farbe statt der System-Kartenfarbe — die stand
+                // vorher als heller Kasten auf jeder dunklen Theme-Fläche.
+                RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
+                    .fill(lofi ? Color.white.opacity(0.65)
+                          : (themed ? Color.themedInk.opacity(0.10) : Color.cardBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
+                            .stroke(themed ? Color.themedInk.opacity(lofi ? 1 : 0.30)
+                                           : Color.clear,
+                                    lineWidth: lofi ? 2 : 1)
+                    )
+            )
+            Button(action: { sucheOeffnenOderSchliessen() }) {
+                if ThemeChrome.glyphControls {
+                    Text(L10n.t("Fertig", "Done"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(themed ? Color.themedAccent : Color.accentColor)
+                } else {
+                    BTXTextControl(text: L10n.t("Fertig", "Done"))
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            .keyboardShortcut(.cancelAction)
+        }
+    }
+
+    /// Lupe, Filter, Kategorien, Sparen — rechts in der Zeile der Kontoauswahl.
+    private var steuerIcons: some View {
+        HStack(spacing: 8) {
+            // Icons
+            if vm.isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.8)
+            }
+            Button(action: { sucheOeffnenOderSchliessen() }) {
+                if ThemeChrome.glyphControls {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15))
+                        .foregroundColor(sucheOffen || vm.isSearchActive
+                                         ? (themed ? Color.themedAccent : Color.accentColor)
+                                         : (themed ? Color.themedControlInk : Color.secondary))
+                } else {
+                    BTXTextControl(text: L10n.t("Suche", "Search"),
+                                   active: sucheOffen || vm.isSearchActive)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help(sucheOffen
+                  ? L10n.t("Suche schließen", "Close search")
+                  : L10n.t("Suchen", "Search"))
+            // Suche und Filter sind zwei Schichten am selben Platz — die eine zu
+            // öffnen schließt die andere (siehe `KopfSchichten`).
+            Button(action: { filterOeffnenOderSchliessen() }) {
+                if ThemeChrome.glyphControls {
+                    Image(systemName: ThemeChrome.symbol(for: .filter, active: showFilterPills))
+                        .font(.system(size: 15))
+                        .foregroundColor(showFilterPills || vm.activeFilter != .all
+                                         ? (themed ? Color.themedAccent : Color.accentColor) : (themed ? Color.themedControlInk : Color.secondary))
+                } else {
+                    BTXTextControl(text: L10n.t("Filter", "Filter"),
+                                   active: showFilterPills || vm.activeFilter != .all)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help(showFilterPills
+                  ? L10n.t("Filter ausblenden", "Hide filters")
+                  : L10n.t("Filter einblenden", "Show filters"))
+            Button(action: { showCategories.toggle() }) {
+                if ThemeChrome.glyphControls {
+                    Image(systemName: ThemeChrome.symbol(for: .categories, active: showCategories))
+                        .font(.system(size: 14))
+                        .foregroundColor(showCategories ? (themed ? Color.themedAccent : Color.accentColor) : (themed ? Color.themedControlInk : Color.secondary))
+                } else {
+                    BTXTextControl(text: L10n.t("Kat.", "Cat."), active: showCategories)
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help(showCategories
+                  ? L10n.t("Kategorien ausblenden", "Hide categories")
+                  : L10n.t("Kategorien anzeigen", "Show categories"))
+            if !vm.isUnifiedMode && !receiptActive && multibankingStore.activeSlot?.isPayPal != true {
+                Button(action: { toggleRoundupView() }) {
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: ThemeChrome.symbol(for: .savings, active: roundupView.isActive))
+                            .font(.system(size: 15))
+                            .foregroundColor(roundupView.isActive ? (themed ? Color.themedAccent : Color.roundupAccent) : (themed ? Color.themedControlInk : Color.secondary))
+                    } else {
+                        BTXTextControl(text: L10n.t("Sparen", "Save"), active: roundupView.isActive)
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
+                             "Round-up view — show amounts rounded up (enables round-up for this account)"))
+            }
+        }
+    }
+
     private var accountDotsBar: some View {
         // Bei aktivem Theme folgen Pillen + Text der Theme-Fläche (statt Weiß, das auf
         // der flachen Theme-Farbe fremd wirkt) — analog zum Flyout.
@@ -1629,9 +1788,7 @@ private struct TransactionsPanelView: View {
         // Maße wie im Flyout (`FlyoutSlotSegmentedControl`) — dieselbe Bedienung, zwei
         // Flächen. Der **Bankname entfällt** auch hier; er steht darüber neben der Uhrzeit.
         let aktivKante = KontoKachel.aktivKante
-        let aktivRadius = KontoKachel.aktivRadius
         let inaktivKante = KontoKachel.inaktivKante
-        let inaktivRadius = KontoKachel.inaktivRadius
 
         return AnyView(HStack(spacing: KontoKachel.abstand) {
             ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
@@ -1640,19 +1797,16 @@ private struct TransactionsPanelView: View {
                 if isActive {
                     slotLogoTile(slot, size: KontoKachel.aktivLogo)
                         .frame(width: aktivKante, height: aktivKante)
-                        .background(RoundedRectangle(cornerRadius: aktivRadius, style: .continuous)
+                        .background(Capsule(style: .continuous)
                             .fill(activeFill)
                             .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1))
-                        .overlay(RoundedRectangle(cornerRadius: aktivRadius, style: .continuous)
-                            .strokeBorder(tint, lineWidth: 1.5))
                         .help(beschriftung)
                 } else {
                     slotLogoTile(slot, size: KontoKachel.inaktivLogo)
                         .opacity(KontoKachel.inaktivDeckkraft)
                         .frame(width: inaktivKante, height: inaktivKante)
-                        .background(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous)
-                            .fill(inactiveFill))
-                        .contentShape(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous))
+                        .background(Capsule(style: .continuous).fill(inactiveFill))
+                        .contentShape(Capsule())
                         .onTapGesture {
                             if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
                             accountNav.onSwitchToIndex?(idx)
@@ -1666,9 +1820,9 @@ private struct TransactionsPanelView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(unifiedActive ? tint : (themed ? Color.themedControlInk : Color(NSColor.secondaryLabelColor)))
                     .frame(width: inaktivKante, height: inaktivKante)
-                    .background(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous)
+                    .background(Capsule(style: .continuous)
                         .fill(unifiedActive ? activeFill : inactiveFill))
-                    .contentShape(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous))
+                    .contentShape(Capsule())
                     .onTapGesture { if !unifiedActive { vm.unifiedModeEnabled = true } }
                     .help(L10n.t("Alle Konten", "All accounts"))
             }
@@ -1703,166 +1857,34 @@ private struct TransactionsPanelView: View {
             .padding(.top, !roundupView.isActive ? 0 : -9)
             .padding(.bottom, multibankingStore.slots.count > 1 ? 4 : 6)
 
-            // Account dot indicators — slot dots + "Alle Konten" dot. Eigene Zeile in
-            // beiden Modi (im Sparmode darüber der Steuerzeile, damit die Step-Pills
-            // nicht beschnitten werden).
-            if multibankingStore.slots.count > 1 {
-                accountDotsBar
+            // Kontoauswahl und Steuer-Icons teilen sich eine Zeile: die Konten links, die
+            // Symbole rechts. Vorher standen sie untereinander — zwei Zeilen für zwei
+            // Handvoll Punkte Inhalt. Im Sparmode und auf eBon-Slots entfallen die
+            // Symbole (bank-spezifische Suche/Filter/Kategorien sind dort ohne Sinn).
+            if multibankingStore.slots.count > 1 || (!roundupView.isActive && !receiptActive) {
+                HStack(spacing: 8) {
+                    if multibankingStore.slots.count > 1 {
+                        accountDotsBar
+                    } else {
+                        Spacer(minLength: 0)
+                    }
+                    if !roundupView.isActive && !receiptActive {
+                        steuerIcons
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
+            }
+
+            // Die Suche klappt darunter auf — dieselbe Stelle und dieselbe Höhe wie die
+            // Filterpillen, mit denen sie sich abwechselt.
+            if sucheOffen && !roundupView.isActive && !receiptActive {
+                sucheZeile
                     .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 8)
             }
 
-            // Search + Icons — same row. Im Sparmode + REWE-Slot ausgeblendet
-            // (bank-spezifische Suche/Filter/Kategorien dort nicht sinnvoll).
-            if !roundupView.isActive && !receiptActive {
-            HStack(spacing: 8) {
-                if sucheOffen {
-                // Search field — flexible. Bei BTX eckig (keine Rundung) und ohne
-                // Lupen-/Löschen-Icon; das Feld selbst trägt VT323 und einen
-                // Großbuchstaben-Platzhalter.
-                HStack(spacing: 6) {
-                    if ThemeChrome.glyphControls {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 13))
-                            .foregroundColor(themed ? Color.themedControlInk : Color(NSColor.placeholderTextColor))
-                    }
-                    // System-Platzhalter folgt dem (ggf. dunklen) Appearance-Modus und
-                    // wäre auf dem hellen BTX-Feld weiß = unlesbar. Prompt-Farben
-                    // ignoriert das Plain-TextField auf macOS — daher bei Theme den
-                    // Prompt leeren und einen eigenen Platzhalter überlegen.
-                    TextField(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"),
-                              text: $vm.query,
-                              prompt: themed ? Text("") : nil)
-                        .textFieldStyle(PlainTextFieldStyle())
-                        .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
-                        .foregroundColor(themed ? .themedInk : .primary)
-                        .overlay(alignment: .leading) {
-                            // Galt bis 2.0.2 nur für `lofi`. Der System-Platzhalter folgt
-                            // aber der macOS-Darstellung, nicht dem Theme — bei einem
-                            // dunklen Theme mit hellem Erscheinungsbild wurde er schwarz
-                            // auf dunkel. Jetzt für JEDES Theme ein eigener.
-                            if themed && vm.query.isEmpty {
-                                Text(L10n.t("Händler, Betrag, Monat …", "Merchant, amount, month …"))
-                                    .font(ThemeFonts.rowBody(size: 13, lofiSize: 14))
-                                    .foregroundColor(Color.themedControlInk)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                    if !vm.query.isEmpty {
-                        Button(action: { vm.query = "" }) {
-                            if ThemeChrome.glyphControls {
-                                Image(systemName: ThemeChrome.symbol(for: .clear))
-                                    .foregroundColor(themed ? Color.themedControlInk : Color(NSColor.placeholderTextColor))
-                            } else {
-                                BTXTextControl(text: "X")
-                            }
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(
-                    // BTX-Lo-Fi: heller Block + harter 2-px-Tintenrahmen (wie der
-                    // Eingabebereich einer BTX-Seite). Sonstige Themes: eine leichte
-                    // Aufhellung der Ink-Farbe statt der System-Kartenfarbe — die stand
-                    // vorher als heller Kasten auf jeder dunklen Theme-Fläche.
-                    RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
-                        .fill(lofi ? Color.white.opacity(0.65)
-                              : (themed ? Color.themedInk.opacity(0.10) : Color.cardBackground))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: ThemeChrome.cornerRadius(8))
-                                .stroke(themed ? Color.themedInk.opacity(lofi ? 1 : 0.30)
-                                               : Color.clear,
-                                        lineWidth: lofi ? 2 : 1)
-                        )
-                )
-                Button(action: { sucheOeffnenOderSchliessen() }) {
-                    if ThemeChrome.glyphControls {
-                        Text(L10n.t("Fertig", "Done"))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(themed ? Color.themedAccent : Color.accentColor)
-                    } else {
-                        BTXTextControl(text: L10n.t("Fertig", "Done"))
-                    }
-                }
-                .buttonStyle(PlainButtonStyle())
-                .keyboardShortcut(.cancelAction)
-                } else {
-                    Spacer(minLength: 0)
-                }
-
-                // Icons
-                if vm.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .scaleEffect(0.8)
-                }
-                Button(action: { sucheOeffnenOderSchliessen() }) {
-                    if ThemeChrome.glyphControls {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 15))
-                            .foregroundColor(sucheOffen || vm.isSearchActive
-                                             ? (themed ? Color.themedAccent : Color.accentColor)
-                                             : (themed ? Color.themedControlInk : Color.secondary))
-                    } else {
-                        BTXTextControl(text: L10n.t("Suche", "Search"),
-                                       active: sucheOffen || vm.isSearchActive)
-                    }
-                }
-                .buttonStyle(PlainButtonStyle())
-                .help(sucheOffen
-                      ? L10n.t("Suche schließen", "Close search")
-                      : L10n.t("Suchen", "Search"))
-                // Suche und Filter sind zwei Schichten am selben Platz — die eine zu
-                // öffnen schließt die andere (siehe `KopfSchichten`).
-                Button(action: { filterOeffnenOderSchliessen() }) {
-                    if ThemeChrome.glyphControls {
-                        Image(systemName: ThemeChrome.symbol(for: .filter, active: showFilterPills))
-                            .font(.system(size: 15))
-                            .foregroundColor(showFilterPills || vm.activeFilter != .all
-                                             ? (themed ? Color.themedAccent : Color.accentColor) : (themed ? Color.themedControlInk : Color.secondary))
-                    } else {
-                        BTXTextControl(text: L10n.t("Filter", "Filter"),
-                                       active: showFilterPills || vm.activeFilter != .all)
-                    }
-                }
-                .buttonStyle(PlainButtonStyle())
-                .help(showFilterPills
-                      ? L10n.t("Filter ausblenden", "Hide filters")
-                      : L10n.t("Filter einblenden", "Show filters"))
-                Button(action: { showCategories.toggle() }) {
-                    if ThemeChrome.glyphControls {
-                        Image(systemName: ThemeChrome.symbol(for: .categories, active: showCategories))
-                            .font(.system(size: 14))
-                            .foregroundColor(showCategories ? (themed ? Color.themedAccent : Color.accentColor) : (themed ? Color.themedControlInk : Color.secondary))
-                    } else {
-                        BTXTextControl(text: L10n.t("Kat.", "Cat."), active: showCategories)
-                    }
-                }
-                .buttonStyle(PlainButtonStyle())
-                .help(showCategories
-                      ? L10n.t("Kategorien ausblenden", "Hide categories")
-                      : L10n.t("Kategorien anzeigen", "Show categories"))
-                if !vm.isUnifiedMode && !receiptActive && multibankingStore.activeSlot?.isPayPal != true {
-                    Button(action: { toggleRoundupView() }) {
-                        if ThemeChrome.glyphControls {
-                            Image(systemName: ThemeChrome.symbol(for: .savings, active: roundupView.isActive))
-                                .font(.system(size: 15))
-                                .foregroundColor(roundupView.isActive ? (themed ? Color.themedAccent : Color.roundupAccent) : (themed ? Color.themedControlInk : Color.secondary))
-                        } else {
-                            BTXTextControl(text: L10n.t("Sparen", "Save"), active: roundupView.isActive)
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
-                                 "Round-up view — show amounts rounded up (enables round-up for this account)"))
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            }
 
             // Filter-Pills — direkte Schnellfilter unter der Suche (toggelbar via Filter-Button).
             // `.all` wird nicht als Pill gerendert: Klick auf einen aktiven Pill setzt zurück

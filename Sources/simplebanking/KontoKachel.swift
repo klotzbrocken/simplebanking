@@ -13,16 +13,15 @@ import CoreGraphics
 // an der Kachel kostete er nur Platz, der bei mehreren Konten fehlt. Erkennbar bleibt das
 // aktive Konto an Größe, voller Sättigung und Ring.
 enum KontoKachel {
-    /// Aktives Konto — größer, voll gesättigt, mit Ring.
+    /// Aktives Konto — größer und voll gesättigt.
+    ///
+    /// **Kein Rahmen.** Ein Ring um die Kachel trennt die Marke von der Fläche und wirkt
+    /// wie ein Bedienelement; Größe und Sättigung genügen zur Unterscheidung.
     static let aktivKante: CGFloat = 30
-    static let aktivRadius: CGFloat = 9
-    /// Das Logo sitzt kleiner in der Kachel: Die freie Fläche ringsum trennt den Ring vom
-    /// Bankfarbton, sonst liefe die Akzentfarbe direkt in die Marke.
     static let aktivLogo: CGFloat = 20
 
     /// Weitere Konten — kleiner und gedämpft.
     static let inaktivKante: CGFloat = 26
-    static let inaktivRadius: CGFloat = 8
     static let inaktivLogo: CGFloat = 16
     static let inaktivDeckkraft: Double = 0.42
 
