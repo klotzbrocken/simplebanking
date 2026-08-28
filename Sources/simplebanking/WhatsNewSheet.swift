@@ -132,7 +132,9 @@ struct WhatsNewSheet: View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.5)
-            ScrollView(.vertical, showsIndicators: false) {
+            // Mit sichtbarer Leiste: Bei acht Einträgen sieht man drei auf einmal, und
+            // ohne Leiste ist nicht erkennbar, dass darunter noch etwas kommt.
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(highlights) { item in
                         highlightCard(item)
@@ -282,6 +284,44 @@ enum WhatsNewContent {
     /// neue Banking-Bibliothek steht deshalb nicht drin — er ist die größte Änderung
     /// dieser Runde und für den Nutzer vollständig unsichtbar.
     private static let v203: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "sparkles",
+            tint: .sbBlueStrong,
+            title: L10n.t("Kurzbefehle und Spotlight", "Shortcuts and Spotlight"),
+            description: L10n.t(
+                "\u{201E}Kontostand abfragen\u{201C}, \u{201E}Letzte Umsätze\u{201C}, \u{201E}Ausgaben abfragen\u{201C} — als Kurzbefehl, per Spotlight oder in einer Automatisierung, ohne die App zu öffnen. Gelesen wird der lokale Bestand: keine Bankabfrage, keine Freigabe.",
+                "“Check balance\u{201D}, “Recent transactions\u{201D}, “Spending\u{201D} — as a shortcut, from Spotlight or inside an automation, without opening the app. It reads local data only: no bank request, no approval."
+            )
+        ),
+        WhatsNewItem(
+            icon: "doc.viewfinder",
+            tint: .sbGreenStrong,
+            title: L10n.t("Rechnung aufs Fenster ziehen", "Drop an invoice on the window"),
+            description: L10n.t(
+                "Trägt die Rechnung einen SEPA-QR-Code, kommen Empfänger und IBAN direkt daraus — dort hat sie der Rechnungssteller selbst eingetragen. Betrag und Rechnungsnummer ergänzt der Text. Vorher wurde geraten, und gelegentlich gewann die Tabellenüberschrift.",
+                "If the invoice carries a SEPA QR code, payee and IBAN come straight from it — the issuer put them there. Amount and invoice number are filled in from the text. Before this it was guesswork, and now and then the table header won."
+            )
+        ),
+        WhatsNewItem(
+            icon: "clock.badge.exclamationmark",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Warten auf die Freigabe lässt sich beenden",
+                          "You can stop waiting for approval"),
+            description: L10n.t(
+                "Wer eine Überweisung anstößt und die Freigabe nicht erteilt, wartete bis zu eine Viertelstunde — und solange war die Bankverbindung für Abrufe gesperrt. Jetzt gibt es \u{201E}Warten beenden\u{201C}. Zurückgeholt ist die Überweisung damit nicht: Der Auftrag liegt bei deiner Bank, verwerfen kannst du ihn nur dort.",
+                "Starting a transfer and not approving it meant waiting up to fifteen minutes — and the bank connection was blocked for refreshes all that time. There is now “Stop waiting\u{201D}. That does not withdraw the transfer: the order sits with your bank, and only there can you discard it."
+            )
+        ),
+        WhatsNewItem(
+            icon: "building.columns",
+            tint: .sbRedStrong,
+            title: L10n.t("Was die Bank kostet — und was sich zurückholen lässt",
+                          "What the bank costs — and what you can claw back"),
+            description: L10n.t(
+                "Kontoführungsentgelte erkennt die App jetzt selbst und weist sie unter Verbindlichkeiten aus; die Zeile unter dem Kontostand zeigt sie auf Klick. Und wer eine Lastschrift anklickt, sieht, wie lange sie sich noch zurückholen lässt — acht Wochen nach der Belastung, ohne Angabe von Gründen.",
+                "The app now recognises account fees and lists them under obligations; the line below the balance shows them on click. And selecting a direct debit tells you how long it can still be reclaimed — eight weeks from the debit, no reason required."
+            )
+        ),
         WhatsNewItem(
             icon: "externaldrive",
             tint: .sbBlueStrong,
