@@ -4,6 +4,9 @@ import SwiftUI
 /// • `0` = Classic: „Fixkosten offen: X €" / „Alle Fixkosten gebucht"
 /// • `1` = Sub-Metrics: „€ 847 bis zum 1. verfügbar"
 /// • `2` = Day-only: „€ 34/Tag verfügbar"
+/// • `3` = Bankgebühren: „Bankgebühren 10,99 €" — **nur vorhanden, wenn welche erkannt
+///   wurden.** Ohne Gebühren wird die Position übersprungen; „Bankgebühren 0,00 €" wäre
+///   keine Auskunft, sondern eine Behauptung.
 ///
 /// Der Toggle-Style wird außen via `@Binding` gehalten, damit Caller
 /// (Flyout vs. Umsatzpanel) eigene `@AppStorage`-Keys nutzen können und
@@ -31,6 +34,8 @@ struct BalanceSubtitleSwitch: View {
     /// Temperaturabhängige Detailfarbe (Prototyp §4: #5f8974 / #8a7d5f / #9a6060) für die
     /// „Fixkosten offen"-Zeile + Toggle-Icon auf der Money-Heat. Nil → Standard-Sekundärgrau.
     var detailColor: Color? = nil
+    /// Wiederkehrende Bankgebühr, falls erkannt. `nil` blendet die Position aus.
+    var bankgebuehr: Double? = nil
 
     private static let classicFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -50,14 +55,24 @@ struct BalanceSubtitleSwitch: View {
     }
 
     private func toggle() {
-        // Cycle: Classic (0) → Sub-Metrics (1) → Day-only (2) → Classic
-        style = (style + 1) % 3
+        // Classic (0) → Sub-Metrics (1) → Day-only (2) → Bankgebühren (3) → Classic.
+        // Die vierte Position wird übersprungen, wenn keine Gebühr erkannt wurde —
+        // sonst landete man auf einer leeren Zeile.
+        let anzahl = bankgebuehr == nil ? 3 : 4
+        style = (style + 1) % anzahl
+    }
+
+    /// Auf eine Position, die es gerade nicht gibt, darf die Anzeige nicht stehenbleiben:
+    /// Beim Kontowechsel kann die Gebühr verschwinden, der gespeicherte Modus bleibt.
+    private var wirksamerStil: Int {
+        (style == 3 && bankgebuehr == nil) ? 0 : style
     }
 
     private var currentModeLabel: String {
         switch style {
         case 1: return L10n.t("Sub-Metrics", "Sub-metrics")
         case 2: return L10n.t("Tagesbudget", "Daily budget")
+        case 3: return L10n.t("Bankgebühren", "Bank fees")
         default: return L10n.t("Klassisch", "Classic")
         }
     }
@@ -66,6 +81,7 @@ struct BalanceSubtitleSwitch: View {
         switch (style + 1) % 3 {
         case 1: return L10n.t("Sub-Metrics", "Sub-metrics")
         case 2: return L10n.t("Tagesbudget", "Daily budget")
+        case 3: return L10n.t("Bankgebühren", "Bank fees")
         default: return L10n.t("Klassisch", "Classic")
         }
     }
@@ -74,6 +90,7 @@ struct BalanceSubtitleSwitch: View {
         switch style {
         case 1: return "chart.bar.fill"
         case 2: return "sun.max.fill"
+        case 3: return "building.columns.fill"
         default: return "text.alignleft"
         }
     }
@@ -117,14 +134,29 @@ struct BalanceSubtitleSwitch: View {
         if forceClassic {
             classicContent
         } else {
-            switch style {
+            switch wirksamerStil {
             case 1:
                 subMetricsWithFallback(dayOnly: false)
             case 2:
                 subMetricsWithFallback(dayOnly: true)
+            case 3:
+                gebuehrenContent
             default:
                 classicContent
             }
+        }
+    }
+
+    /// Bewusst ohne Zeitraum im Text: Die meisten Banken buchen monatlich, manche aber
+    /// zum Quartalsabschluss. „im Monat" wäre dann falsch, und die Zahl allein stimmt.
+    @ViewBuilder
+    private var gebuehrenContent: some View {
+        if let betrag = bankgebuehr {
+            Text(L10n.t("Bankgebühren \(Self.classicFormatter.string(from: NSNumber(value: betrag)) ?? "")",
+                        "Bank fees \(Self.classicFormatter.string(from: NSNumber(value: betrag)) ?? "")"))
+                .font(ThemeFonts.flyoutBody(size: 12))
+                .foregroundColor(detailColor ?? .secondary)
+                .lineLimit(1)
         }
     }
 

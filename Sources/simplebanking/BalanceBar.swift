@@ -3560,6 +3560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         Task.detached(priority: .utility) {
             var total: Double = 0
             var sawAny = false
+            var gebuehr: Double? = nil
             var cycleEndForDisplay: Date? = nil   // gleicher Zyklus für die Untertitel-Anzeige
             var balanceChange: BalanceChange.Anzeige = .nichts
             var balanceChangeEuro: Double = 0
@@ -3614,6 +3615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         let payments = FixedCostsAnalyzer.analyze(transactions: history)
                         total = LeftToPayCalculator.compute(payments: payments, salaryDay: salaryDay)
                         sawAny = total > 0
+                        gebuehr = Bankgebuehren.betrag(aus: history)
 
                         // Auch im Demo-Modus rechnen — sonst ließe sich ein
                         // Anzeige-Feature ausgerechnet dort nicht zeigen, wo die App
@@ -3628,6 +3630,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     let history = (try? TransactionsDatabase.loadUnifiedTransactions(
                         slots: [slot], days: 90, bankId: "primary")) ?? []
                     guard !history.isEmpty else { continue }
+                    // Gebühr aus derselben Historie — sie liegt hier ohnehin vor, und der
+                    // Untertitel soll dafür nicht ein zweites Mal die Datenbank lesen.
+                    // Im Aggregat summieren sich die Gebühren aller Konten.
+                    if let g = Bankgebuehren.betrag(aus: history) {
+                        gebuehr = (gebuehr ?? 0) + g
+                    }
                     sawAny = true
                     let payments = FixedCostsAnalyzer.analyze(transactions: history)
                     let cfg = BankSlotSettingsStore.load(slotId: slot)
@@ -3698,6 +3706,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
             await MainActor.run { [weak self] in
                 self?.txVM.leftToPayAmount = sawAny ? total : nil
+                self?.txVM.bankgebuehr = gebuehr
                 self?.txVM.leftToPayCycleEnd = cycleEndForDisplay
                 self?.txVM.balanceChange = balanceChange
                 self?.txVM.balanceChangeEuro = balanceChangeEuro
@@ -4466,6 +4475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             forcedColorScheme: configuredColorScheme()
         )
         rootView.leftToPayAmount = txVM.leftToPayAmount
+        rootView.bankgebuehr = txVM.bankgebuehr
         rootView.leftToPayCycleEnd = txVM.leftToPayCycleEnd
         let subMetricsSettings = BankSlotSettingsStore.load(
             slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy"
@@ -4850,6 +4860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             forcedColorScheme: configuredColorScheme()
         )
         rootView.leftToPayAmount = txVM.leftToPayAmount
+        rootView.bankgebuehr = txVM.bankgebuehr
         rootView.leftToPayCycleEnd = txVM.leftToPayCycleEnd
         let subMetricsSettings = BankSlotSettingsStore.load(
             slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy"
@@ -7639,6 +7650,7 @@ private struct StatusBalanceFlyoutCardView: View {
     var onSwitchToIndex: ((Int) -> Void)? = nil
     var onActivateUnified: (() -> Void)? = nil
     var leftToPayAmount: Double? = nil
+    var bankgebuehr: Double? = nil
     /// Zyklusende (nächster Gehaltseingang) aus derselben Berechnung wie leftToPay —
     /// überschreibt das vom Toleranz-Default abweichende "bis zum …"-Datum im Untertitel.
     var leftToPayCycleEnd: Date? = nil
@@ -7957,7 +7969,8 @@ private struct StatusBalanceFlyoutCardView: View {
             style: $flyoutSubtitleStyle,
             forceClassic: isUnifiedMode,
             compact: true,
-            detailColor: detail
+            detailColor: detail,
+            bankgebuehr: bankgebuehr
         )
     }
 

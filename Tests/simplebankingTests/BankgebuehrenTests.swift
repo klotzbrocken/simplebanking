@@ -144,6 +144,22 @@ final class BankgebuehrenTests: XCTestCase {
         XCTAssertFalse(Bankgebuehren.giltAlsWiederkehrend(gruppe(["2026-07-31"])))
     }
 
+    // MARK: Die Zeile unter dem Kontostand
+
+    func test_betragKommtAusZweiMonatsbuchungen() {
+        XCTAssertEqual(Bankgebuehren.betrag(aus: gruppe(["2026-06-30", "2026-07-31"])) ?? 0,
+                       10.99, accuracy: 0.001)
+    }
+
+    /// **Ohne Gebühr keine Zeile.** `nil` heißt für die Anzeige „Position weglassen" —
+    /// „Bankgebühren 0,00 €" wäre keine Auskunft, sondern eine Behauptung, und es gibt
+    /// Konten ohne Gebühren.
+    func test_ohneGebuehrKeinBetrag() {
+        XCTAssertNil(Bankgebuehren.betrag(aus: []))
+        XCTAssertNil(Bankgebuehren.betrag(aus: gruppe(["2026-07-31"])), "eine allein genügt nicht")
+        XCTAssertNil(Bankgebuehren.betrag(aus: gruppe(["2026-07-28", "2026-07-31"])), "kein Rhythmus")
+    }
+
     // MARK: In den Fixkosten
 
     /// Drei gleichartige Belastungen — genau die Mindestmenge. Sie erscheinen als **ein**

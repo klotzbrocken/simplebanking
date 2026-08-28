@@ -246,7 +246,8 @@ private struct TransactionsPanelView: View {
             cycleEndOverride: vm.leftToPayCycleEnd,
             style: $panelSubtitleStyle,
             forceClassic: vm.isUnifiedMode,
-            detailColor: detail
+            detailColor: detail,
+            bankgebuehr: vm.bankgebuehr
         )
     }
 

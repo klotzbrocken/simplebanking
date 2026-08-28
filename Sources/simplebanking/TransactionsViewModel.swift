@@ -128,6 +128,10 @@ final class TransactionsViewModel: ObservableObject {
     /// Ende des aktuellen Gehaltszyklus (= nächster erwarteter Gehaltseingang) — derselbe
     /// Zyklus, den `leftToPayAmount` nutzt. Treibt das "bis zum …"-Datum im Untertitel.
     @Published var leftToPayCycleEnd: Date? = nil
+
+    /// Wiederkehrende Bankgebühr des angezeigten Kontos — `nil`, wenn keine erkannt wurde.
+    /// Steuert die vierte Position unter dem Kontostand; ohne Wert entfällt sie ganz.
+    @Published var bankgebuehr: Double? = nil
     /// Veränderung des Kontostands für das kleine Abzeichen neben dem Saldo (Lab).
     /// Wird in `recomputeLeftToPay` aus derselben Historie mitberechnet.
     @Published var balanceChange: BalanceChange.Anzeige = .nichts

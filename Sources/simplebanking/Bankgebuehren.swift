@@ -121,6 +121,18 @@ enum Bankgebuehren {
         return true
     }
 
+    /// Der wiederkehrende Betrag der Bankgebühr — oder `nil`.
+    ///
+    /// `nil` heißt: **Zeile weglassen.** Es gibt Konten ohne Gebühren, und „Bankgebühren
+    /// 0,00 €" wäre dort keine Information, sondern eine Behauptung.
+    static func betrag(aus buchungen: [TransactionsResponse.Transaction],
+                       bankname: String? = nil) -> Double? {
+        let gebuehren = buchungen.filter { istGebuehr($0, bankname: bankname) }
+        guard giltAlsWiederkehrend(gebuehren) else { return nil }
+        let summe = gebuehren.map { abs($0.parsedAmount) }.reduce(0, +)
+        return summe / Double(gebuehren.count)
+    }
+
     nonisolated(unsafe) private static let parser: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
