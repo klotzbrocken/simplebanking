@@ -3459,6 +3459,38 @@ private struct TransactionRowNew: View {
     /// • soft        → Bank-Soft-Tint (Bestandsverhalten)
     /// • cardOnPanel → cardBackground (weiße Card schwebt auf Bank-getöntem Panel)
     /// • sidebar     → cardBackground (Bank-Akzent nur als 4 px Streifen am Panel)
+    /// Die Rückholfrist unter der ausgewählten Buchung.
+    ///
+    /// Zwei Stufen: gewöhnlich gedämpft, in der letzten Woche in Amber mit Randstreifen.
+    /// **Kein Rot** — es ist nichts kaputt, es läuft nur etwas ab. Die Farben kommen aus
+    /// `SpendSignal.heatColor`, damit sie zu den übrigen Warnstufen der App passen.
+    @ViewBuilder
+    private func fristZeile(_ frist: Rueckholfrist.Frist) -> some View {
+        let knapp = frist.istKnapp
+        let farbe = knapp ? SpendSignal.heatColor(.nearBudget)
+                          : (themed ? Color.themedInk.opacity(0.55) : Color.secondary)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(knapp ? farbe : farbe.opacity(0.5))
+                .frame(width: 5, height: 5)
+            Text(Rueckholfrist.text(frist))
+                .font(ThemeFonts.rowBody(size: 11))
+                .foregroundColor(farbe)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        // Auf die Höhe des Empfängernamens einrücken: Kachel (20) plus Abstand (10).
+        .padding(.leading, 30)
+        .padding(.vertical, knapp ? 3 : 0)
+        .background(alignment: .leading) {
+            if knapp {
+                // Randstreifen statt Fläche — die Zeile steht in einer bereits
+                // eingefärbten Auswahl, ein zweiter Farbblock darin wäre zu viel.
+                Rectangle().fill(farbe).frame(width: 3)
+            }
+        }
+    }
+
     private var rowFillColor: Color {
         // Prototyp „Ton in Ton": keine schwebende Card mehr — nur die Selektion wird
         // hervorgehoben, sonst scheint der Panel-/Listen-Hintergrund durch.
@@ -3626,6 +3658,16 @@ private struct TransactionRowNew: View {
                     }
                     Spacer(minLength: 0)
                 }
+            }
+
+            // Rückholfrist — nur an der ausgewählten Buchung.
+            //
+            // In einer Liste aus zwanzig Buchungen stünde sie zwanzigmal da und
+            // verdreifachte die Zeilenhöhe; die Liste zeigte dann drei statt neun
+            // Einträge. An der markierten Zeile steht sie dort, wo man ohnehin hinsieht,
+            // und kostet nichts.
+            if isSelected, let frist = Rueckholfrist.fuer(transaction) {
+                fristZeile(frist)
             }
         }
         .padding(.horizontal, 14)
