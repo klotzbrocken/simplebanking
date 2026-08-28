@@ -27,6 +27,13 @@ private struct TransactionsPanelView: View {
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
     @AppStorage("showTransactionCategories") private var showCategories: Bool = false
     @AppStorage("showFilterPills") private var showFilterPills: Bool = false
+    /// Ist das Suchfeld eingeblendet?
+    ///
+    /// **Nicht** `vm.isSearchActive` — das ist abgeleitet („es wird gerade gesucht", sobald
+    /// genug Zeichen getippt sind) und wäre beim leeren, frisch geöffneten Feld falsch.
+    /// Das Feld stand früher dauerhaft im Kopf und kostete dort rund 34 Punkte für eine
+    /// Funktion, die man selten braucht.
+    @State private var sucheOffen: Bool = false
     @AppStorage("attentionInboxEnabled") private var attentionInboxEnabled: Bool = true
     @AppStorage("simplesendVisible") private var simplesendVisible: Bool = true
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
@@ -1557,6 +1564,26 @@ private struct TransactionsPanelView: View {
         return !slot.isReceiptSlot && !slot.isPayPal
     }
 
+    /// Öffnet die Suche oder schließt sie wieder.
+    ///
+    /// Öffnen schließt die Filterpillen: Beide Schichten sitzen an derselben Stelle unter
+    /// der Kontoauswahl, und beide gleichzeitig einzublenden schöbe die Liste zu weit nach
+    /// unten.
+    private func sucheOeffnenOderSchliessen() {
+        anwenden(KopfSchichten(suche: sucheOffen, filter: showFilterPills).nachLupe())
+    }
+
+    private func filterOeffnenOderSchliessen() {
+        anwenden(KopfSchichten(suche: sucheOffen, filter: showFilterPills).nachFilter())
+    }
+
+    private func anwenden(_ neu: KopfSchichten) {
+        let vorher = KopfSchichten(suche: sucheOffen, filter: showFilterPills)
+        sucheOffen = neu.suche
+        showFilterPills = neu.filter
+        if neu.schliesstDieSuche(gegenueber: vorher), !vm.query.isEmpty { vm.query = "" }
+    }
+
     private var accountDotsBar: some View {
         // Bei aktivem Theme folgen Pillen + Text der Theme-Fläche (statt Weiß, das auf
         // der flachen Theme-Farbe fremd wirkt) — analog zum Flyout.
@@ -1599,31 +1626,38 @@ private struct TransactionsPanelView: View {
                 Spacer(minLength: 0)
             })
         }
-        return AnyView(HStack(spacing: 6) {
+        // Maße wie im Flyout (`FlyoutSlotSegmentedControl`) — dieselbe Bedienung, zwei
+        // Flächen. Der **Bankname entfällt** auch hier; er steht darüber neben der Uhrzeit.
+        let aktivKante = KontoKachel.aktivKante
+        let aktivRadius = KontoKachel.aktivRadius
+        let inaktivKante = KontoKachel.inaktivKante
+        let inaktivRadius = KontoKachel.inaktivRadius
+
+        return AnyView(HStack(spacing: KontoKachel.abstand) {
             ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
                 let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
+                let beschriftung = slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName
                 if isActive {
-                    // Aktive Pille ausgeschrieben (Logo + Name) — wie im Flyout.
-                    HStack(spacing: 5) {
-                        slotLogoTile(slot, size: 16)
-                        Text(slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .foregroundColor(tint)
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Capsule(style: .continuous).fill(activeFill)
-                        .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1))
+                    slotLogoTile(slot, size: KontoKachel.aktivLogo)
+                        .frame(width: aktivKante, height: aktivKante)
+                        .background(RoundedRectangle(cornerRadius: aktivRadius, style: .continuous)
+                            .fill(activeFill)
+                            .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1))
+                        .overlay(RoundedRectangle(cornerRadius: aktivRadius, style: .continuous)
+                            .strokeBorder(tint, lineWidth: 1.5))
+                        .help(beschriftung)
                 } else {
-                    slotLogoTile(slot, size: 15)
-                        .padding(5)
-                        .background(Capsule(style: .continuous).fill(inactiveFill))
-                        .contentShape(Capsule())
+                    slotLogoTile(slot, size: KontoKachel.inaktivLogo)
+                        .opacity(KontoKachel.inaktivDeckkraft)
+                        .frame(width: inaktivKante, height: inaktivKante)
+                        .background(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous)
+                            .fill(inactiveFill))
+                        .contentShape(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous))
                         .onTapGesture {
                             if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
                             accountNav.onSwitchToIndex?(idx)
                         }
+                        .help(beschriftung)
                 }
             }
             if multibankingStore.realSlotCount > 1 {
@@ -1631,10 +1665,12 @@ private struct TransactionsPanelView: View {
                 Image(systemName: "square.stack.3d.up.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(unifiedActive ? tint : (themed ? Color.themedControlInk : Color(NSColor.secondaryLabelColor)))
-                    .frame(width: 26, height: 26)
-                    .background(Capsule(style: .continuous).fill(unifiedActive ? activeFill : inactiveFill))
-                    .contentShape(Capsule())
+                    .frame(width: inaktivKante, height: inaktivKante)
+                    .background(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous)
+                        .fill(unifiedActive ? activeFill : inactiveFill))
+                    .contentShape(RoundedRectangle(cornerRadius: inaktivRadius, style: .continuous))
                     .onTapGesture { if !unifiedActive { vm.unifiedModeEnabled = true } }
+                    .help(L10n.t("Alle Konten", "All accounts"))
             }
             Spacer(minLength: 0)
         }
@@ -1681,6 +1717,7 @@ private struct TransactionsPanelView: View {
             // (bank-spezifische Suche/Filter/Kategorien dort nicht sinnvoll).
             if !roundupView.isActive && !receiptActive {
             HStack(spacing: 8) {
+                if sucheOffen {
                 // Search field — flexible. Bei BTX eckig (keine Rundung) und ohne
                 // Lupen-/Löschen-Icon; das Feld selbst trägt VT323 und einen
                 // Großbuchstaben-Platzhalter.
@@ -1741,6 +1778,20 @@ private struct TransactionsPanelView: View {
                                         lineWidth: lofi ? 2 : 1)
                         )
                 )
+                Button(action: { sucheOeffnenOderSchliessen() }) {
+                    if ThemeChrome.glyphControls {
+                        Text(L10n.t("Fertig", "Done"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(themed ? Color.themedAccent : Color.accentColor)
+                    } else {
+                        BTXTextControl(text: L10n.t("Fertig", "Done"))
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                .keyboardShortcut(.cancelAction)
+                } else {
+                    Spacer(minLength: 0)
+                }
 
                 // Icons
                 if vm.isLoading {
@@ -1748,7 +1799,25 @@ private struct TransactionsPanelView: View {
                         .controlSize(.small)
                         .scaleEffect(0.8)
                 }
-                Button(action: { showFilterPills.toggle() }) {
+                Button(action: { sucheOeffnenOderSchliessen() }) {
+                    if ThemeChrome.glyphControls {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 15))
+                            .foregroundColor(sucheOffen || vm.isSearchActive
+                                             ? (themed ? Color.themedAccent : Color.accentColor)
+                                             : (themed ? Color.themedControlInk : Color.secondary))
+                    } else {
+                        BTXTextControl(text: L10n.t("Suche", "Search"),
+                                       active: sucheOffen || vm.isSearchActive)
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
+                .help(sucheOffen
+                      ? L10n.t("Suche schließen", "Close search")
+                      : L10n.t("Suchen", "Search"))
+                // Suche und Filter sind zwei Schichten am selben Platz — die eine zu
+                // öffnen schließt die andere (siehe `KopfSchichten`).
+                Button(action: { filterOeffnenOderSchliessen() }) {
                     if ThemeChrome.glyphControls {
                         Image(systemName: ThemeChrome.symbol(for: .filter, active: showFilterPills))
                             .font(.system(size: 15))

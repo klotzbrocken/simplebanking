@@ -7513,24 +7513,27 @@ private struct FlyoutSlotSegmentedControl: View {
                 Spacer(minLength: 0)
             })
         }
-        return AnyView(HStack(spacing: 6) {
+        return AnyView(HStack(spacing: KontoKachel.abstand) {
             ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
                 let active = !isUnifiedMode && idx == activeIndex
                 if active {
                     activePill(item)
                 } else if !soloActiveOnly {
                     iconPill(item)
-                        .contentShape(Capsule())
+                        .contentShape(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius,
+                                                        style: .continuous))
                         .onTapGesture { onSwitch(idx) }
+                        .help(item.nickname?.isEmpty == false ? item.nickname! : item.name)
                 }
             }
             if showUnified && !soloActiveOnly {
                 Image(systemName: "square.stack.3d.up.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(isUnifiedMode ? activeTint : Color(NSColor.secondaryLabelColor))
-                    .frame(width: 26, height: 26)
-                    .background(Capsule(style: .continuous).fill(isUnifiedMode ? activeFill : inactiveFill))
-                    .contentShape(Capsule())
+                    .frame(width: KontoKachel.inaktivKante, height: KontoKachel.inaktivKante)
+                    .background(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius, style: .continuous)
+                        .fill(isUnifiedMode ? activeFill : inactiveFill))
+                    .contentShape(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius, style: .continuous))
                     .onTapGesture { if !isUnifiedMode { onActivateUnified?() } }
                     .help(L10n.t("Alle Konten", "All accounts"))
             }
@@ -7540,29 +7543,31 @@ private struct FlyoutSlotSegmentedControl: View {
         .animation(.easeInOut(duration: 0.2), value: isUnifiedMode))
     }
 
-    /// Aktive Pille: Logo + Name, gefüllt, Text in Temperaturfarbe.
+    /// Aktives Konto: größere Kachel, volle Sättigung, Ring in der Temperaturfarbe.
     private func activePill(_ item: FlyoutSlotItem) -> some View {
-        HStack(spacing: 5) {
-            logoTile(item, size: 16)
-            Text(item.nickname?.isEmpty == false ? item.nickname! : item.name)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundColor(activeTint)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(
-            Capsule(style: .continuous)
-                .fill(activeFill)
-                .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1)
-        )
+        logoTile(item, size: KontoKachel.aktivLogo)
+            .frame(width: KontoKachel.aktivKante, height: KontoKachel.aktivKante)
+            .background(
+                RoundedRectangle(cornerRadius: KontoKachel.aktivRadius, style: .continuous)
+                    .fill(activeFill)
+                    .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1)
+            )
+            // Der Ring sitzt nicht auf dem Logo: Zwischen Kachel (20) und Rand (30) liegen
+            // fünf Punkte Fläche, sonst liefe die Akzentfarbe in die Bankfarbe.
+            .overlay(
+                RoundedRectangle(cornerRadius: KontoKachel.aktivRadius, style: .continuous)
+                    .strokeBorder(activeTint, lineWidth: 1.5)
+            )
+            .help(item.nickname?.isEmpty == false ? item.nickname! : item.name)
     }
 
-    /// Kleinere Pille für weitere Konten: nur Logo.
+    /// Weitere Konten: kleinere Kachel, gedämpft.
     private func iconPill(_ item: FlyoutSlotItem) -> some View {
-        logoTile(item, size: 15)
-            .padding(5)
-            .background(Capsule(style: .continuous).fill(inactiveFill))
+        logoTile(item, size: KontoKachel.inaktivLogo)
+            .opacity(KontoKachel.inaktivDeckkraft)
+            .frame(width: KontoKachel.inaktivKante, height: KontoKachel.inaktivKante)
+            .background(RoundedRectangle(cornerRadius: KontoKachel.inaktivRadius, style: .continuous)
+                .fill(inactiveFill))
     }
 
     @ViewBuilder
