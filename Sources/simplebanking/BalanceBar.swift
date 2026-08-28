@@ -7480,14 +7480,12 @@ private struct FlyoutSlotSegmentedControl: View {
     /// (kein Konto-Wechsel mitten im Transfer, kein „Alle Konten").
     var soloActiveOnly: Bool = false
 
-    private var activeFill: Color {
-        // Bei aktivem Theme: gefüllte Pille in einer Ink-Tönung (statt Weiß, das auf der
-        // Theme-Fläche fremd wirkt).
-        if !ThemeManager.shared.currentTheme.isDefault {
-            return Color.themedInk.opacity(colorScheme == .dark ? 0.30 : 0.18)
-        }
-        return colorScheme == .dark ? Color.white.opacity(0.16) : .white
-    }
+    /// Das aktive Konto bekommt **keine** eigene Fläche: `clear` lässt exakt den
+    /// Hintergrund durch, auf dem die Pille sitzt — und das ist auf der Money-Heat wie
+    /// unter jedem Theme automatisch der richtige Ton. Eine weiße Pille lag darauf wie ein
+    /// aufgeklebtes Bedienelement. Unterschieden wird über Größe und volle Sättigung; die
+    /// übrigen Konten bleiben gedämpft.
+    private var activeFill: Color { .clear }
     private var inactiveFill: Color {
         if !ThemeManager.shared.currentTheme.isDefault {
             return Color.themedInk.opacity(0.08)
@@ -7557,11 +7555,7 @@ private struct FlyoutSlotSegmentedControl: View {
     private func activePill(_ item: FlyoutSlotItem) -> some View {
         logoTile(item, size: KontoKachel.aktivLogo)
             .frame(width: KontoKachel.aktivKante, height: KontoKachel.aktivKante)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(activeFill)
-                    .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1)
-            )
+            .background(Capsule(style: .continuous).fill(activeFill))
             .help(item.nickname?.isEmpty == false ? item.nickname! : item.name)
     }
 

@@ -1749,9 +1749,10 @@ private struct TransactionsPanelView: View {
         // der flachen Theme-Farbe fremd wirkt) — analog zum Flyout.
         let themed = !isDefaultTheme
         let tint = themed ? Color.themedInk : headerTint
-        let activeFill = themed
-            ? Color.themedInk.opacity(activeColorScheme == .dark ? 0.30 : 0.18)
-            : (activeColorScheme == .dark ? Color.white.opacity(0.16) : Color.white)
+        // Keine eigene Fläche für das aktive Konto: `clear` lässt den Hintergrund durch,
+        // auf dem die Pille sitzt. Eine weiße Pille lag darauf wie ein aufgeklebtes
+        // Bedienelement; unterschieden wird über Größe und volle Sättigung.
+        let activeFill = Color.clear
         let inactiveFill = themed
             ? Color.themedInk.opacity(0.08)
             : (activeColorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05))
@@ -1798,9 +1799,7 @@ private struct TransactionsPanelView: View {
                 if isActive {
                     slotLogoTile(slot, size: KontoKachel.aktivLogo)
                         .frame(width: aktivKante, height: aktivKante)
-                        .background(Capsule(style: .continuous)
-                            .fill(activeFill)
-                            .shadow(color: Color.black.opacity(0.10), radius: 1.5, x: 0, y: 1))
+                        .background(Capsule(style: .continuous).fill(activeFill))
                         .help(beschriftung)
                 } else {
                     slotLogoTile(slot, size: KontoKachel.inaktivLogo)
