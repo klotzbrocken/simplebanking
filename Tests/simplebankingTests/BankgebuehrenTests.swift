@@ -16,10 +16,10 @@ import XCTest
 
 final class BankgebuehrenTests: XCTestCase {
 
-    private func buchung(zweck: String, betrag: String = "-10.99",
+    private func buchung(zweck: String, betrag: String = "-10,99",
                          empfaenger: String? = nil,
                          buchungstext: String? = nil) -> TransactionsResponse.Transaction {
-        TransactionsResponse.Transaction(
+        var tx = TransactionsResponse.Transaction(
             bookingDate: "2026-07-31",
             valueDate: "2026-07-31",
             status: "booked",
@@ -31,9 +31,35 @@ final class BankgebuehrenTests: XCTestCase {
             additionalInformation: buchungstext,
             purposeCode: nil
         )
+        tx.bankTransactionCode = nil
+        return tx
     }
 
     // MARK: Erkennen
+
+    /// **Genau die Form aus dem echten Bestand.** Zwei Dinge daran haben die erste Fassung
+    /// zu Fall gebracht: Der Betrag steht mit **Komma** („-10,99") — `Double` liefert
+    /// darauf nil, und jede echte Buchung fiel schon an der ersten Prüfung durch, während
+    /// die Tests mit Punkt geschrieben grün blieben. Und die Bank liefert einen Code:
+    /// `SWIFT:CHG` heißt *Charges*, sie sagt es also selbst.
+    func test_echteFormMitKommaUndCode() {
+        var tx = buchung(zweck: "Entgeltabrechnung", betrag: "-10,99",
+                         buchungstext: "ENTGELTABSCHLUSS")
+        tx.bankTransactionCode = "SWIFT:CHG;GVC:809"
+        XCTAssertTrue(Bankgebuehren.istGebuehr(tx))
+    }
+
+    func test_buchungscodeAlleinGenuegt() {
+        var tx = buchung(zweck: "ohne verwertbaren Text", betrag: "-3,50")
+        tx.bankTransactionCode = "SWIFT:CHG;GVC:809"
+        XCTAssertTrue(Bankgebuehren.istGebuehr(tx), "der Code der Bank ist die beste Auskunft")
+    }
+
+    func test_fremderCodeGenuegtNicht() {
+        var tx = buchung(zweck: "Miete", betrag: "-800,00")
+        tx.bankTransactionCode = "SWIFT:TRF;GVC:166"
+        XCTAssertFalse(Bankgebuehren.istGebuehr(tx))
+    }
 
     /// Die Form, die im echten Bestand steht.
     func test_entgeltabrechnungOhneEmpfaengerWirdErkannt() {
@@ -72,11 +98,50 @@ final class BankgebuehrenTests: XCTestCase {
     }
 
     func test_gutschriftIstKeineGebuehr() {
-        XCTAssertFalse(Bankgebuehren.istGebuehr(buchung(zweck: "Entgeltabrechnung", betrag: "10.99")))
+        XCTAssertFalse(Bankgebuehren.istGebuehr(buchung(zweck: "Entgeltabrechnung", betrag: "10,99")))
     }
 
     func test_ohneTextKeineGebuehr() {
         XCTAssertFalse(Bankgebuehren.istGebuehr(buchung(zweck: "")))
+    }
+
+    private func gruppe(_ daten: [String], betrag: String = "-10,99")
+        -> [TransactionsResponse.Transaction] {
+        daten.map { datum in
+            TransactionsResponse.Transaction(
+                bookingDate: datum, valueDate: datum, status: "booked", endToEndId: nil,
+                amount: .init(currency: "EUR", amount: betrag),
+                creditor: nil, debtor: nil,
+                remittanceInformation: ["Entgeltabrechnung siehe Anlage"],
+                additionalInformation: nil, purposeCode: nil)
+        }
+    }
+
+    // MARK: Der Beleg
+
+    /// **Der Fall, an dem die erste Fassung scheiterte.** Die Listen zeigen 60 Tage; darin
+    /// liegen von einer Monatsgebühr höchstens zwei Buchungen. Eine Mindestzahl von drei
+    /// war damit in der Praxis nie erreichbar — die Erkennung lief, zeigte aber nie etwas.
+    func test_zweiMonatsbuchungenGenuegen() {
+        XCTAssertTrue(Bankgebuehren.giltAlsWiederkehrend(gruppe(["2026-06-30", "2026-07-31"])))
+    }
+
+    /// Der Beleg steckt nicht in der Anzahl, sondern in Betrag und Abstand.
+    func test_unterschiedlicheBetraegeSindKeinBeleg() {
+        let gemischt = gruppe(["2026-06-30"]) + gruppe(["2026-07-31"], betrag: "-3,50")
+        XCTAssertFalse(Bankgebuehren.giltAlsWiederkehrend(gemischt))
+    }
+
+    func test_zweiBuchungenDerselbenWocheSindKeinBeleg() {
+        XCTAssertFalse(Bankgebuehren.giltAlsWiederkehrend(gruppe(["2026-07-28", "2026-07-31"])))
+    }
+
+    func test_quartalsweiseGehtAuch() {
+        XCTAssertTrue(Bankgebuehren.giltAlsWiederkehrend(gruppe(["2026-03-31", "2026-06-30"])))
+    }
+
+    func test_eineEinzelneBuchungGenuegtNicht() {
+        XCTAssertFalse(Bankgebuehren.giltAlsWiederkehrend(gruppe(["2026-07-31"])))
     }
 
     // MARK: In den Fixkosten
@@ -88,7 +153,7 @@ final class BankgebuehrenTests: XCTestCase {
         let txs = monate.map { datum -> TransactionsResponse.Transaction in
             TransactionsResponse.Transaction(
                 bookingDate: datum, valueDate: datum, status: "booked", endToEndId: nil,
-                amount: .init(currency: "EUR", amount: "-10.99"),
+                amount: .init(currency: "EUR", amount: "-10,99"),
                 creditor: nil, debtor: nil,
                 remittanceInformation: ["Entgeltabrechnung siehe Anlage"],
                 additionalInformation: nil, purposeCode: nil)
@@ -111,7 +176,7 @@ final class BankgebuehrenTests: XCTestCase {
         let txs = monate.map { datum -> TransactionsResponse.Transaction in
             TransactionsResponse.Transaction(
                 bookingDate: datum, valueDate: datum, status: "booked", endToEndId: nil,
-                amount: .init(currency: "EUR", amount: "-10.99"),
+                amount: .init(currency: "EUR", amount: "-10,99"),
                 creditor: nil, debtor: nil,
                 remittanceInformation: ["Entgeltabrechnung siehe Anlage"],
                 additionalInformation: nil, purposeCode: nil)
@@ -127,17 +192,16 @@ final class BankgebuehrenTests: XCTestCase {
                        "eine Kontoführungsgebühr ist kein Abo")
     }
 
-    /// Zwei können ein Zufall sein.
-    func test_zweiBuchungenErgebenNochNichts() {
-        let txs = ["2026-06-30", "2026-07-31"].map { datum -> TransactionsResponse.Transaction in
-            TransactionsResponse.Transaction(
-                bookingDate: datum, valueDate: datum, status: "booked", endToEndId: nil,
-                amount: .init(currency: "EUR", amount: "-10.99"),
-                creditor: nil, debtor: nil,
-                remittanceInformation: ["Entgeltabrechnung siehe Anlage"],
-                additionalInformation: nil, purposeCode: nil)
-        }
-        XCTAssertTrue(FixedCostsAnalyzer.analyze(transactions: txs)
+    /// Zwei Monatsbuchungen reichen — das ist der reale Fall im 60-Tage-Fenster.
+    func test_zweiMonatsbuchungenErscheinenInDerAnsicht() throws {
+        let treffer = SubscriptionDetector.detect(in: gruppe(["2026-06-30", "2026-07-31"]))
+            .filter { $0.displayName == Bankgebuehren.bezeichnung }
+        XCTAssertEqual(treffer.count, 1, "im 60-Tage-Fenster gibt es nicht mehr")
+    }
+
+    /// Zwei Buchungen derselben Woche dagegen nicht — dort fehlt der Rhythmus.
+    func test_ohneRhythmusKeinEintrag() {
+        XCTAssertTrue(FixedCostsAnalyzer.analyze(transactions: gruppe(["2026-07-28", "2026-07-31"]))
             .filter { $0.merchant == Bankgebuehren.bezeichnung }.isEmpty)
     }
 }

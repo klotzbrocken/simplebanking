@@ -150,12 +150,16 @@ enum SubscriptionDetector {
             grouped[key, default: []].append(tx)
         }
 
+        // Die Gebührengruppe muss ihren Beleg tragen: gleicher Betrag, regelmäßiger
+        // Abstand. Sonst verschwindet sie hier, bevor irgendetwas sie auswertet.
+        if let gebuehren = grouped[Bankgebuehren.bezeichnung],
+           !Bankgebuehren.giltAlsWiederkehrend(gebuehren) {
+            grouped.removeValue(forKey: Bankgebuehren.bezeichnung)
+        }
+
         return grouped
             .compactMap { scoreGroup(merchantKey: $0.key, transactions: $0.value) }
             .filter { $0.confidence >= 7 }
-            // Gebühren erst ab drei gleichartigen Belastungen — zwei können ein Zufall sein.
-            .filter { $0.displayName != Bankgebuehren.bezeichnung
-                      || $0.occurrences >= Bankgebuehren.mindestens }
             .sorted { $0.averageAmount > $1.averageAmount }
     }
 

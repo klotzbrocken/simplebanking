@@ -30,18 +30,39 @@ enum Bankgebuehren {
     static let fremdeGebuehren = ["mahngebühr", "mahngebuehr", "stornogebühr", "stornogebuehr",
                                   "versandkosten", "bearbeitungsgebühr", "bearbeitungsgebuehr"]
 
+    /// Buchungscode der Bank für Entgelte. `SWIFT:CHG` steht für *Charges* — die Bank
+    /// sagt damit selbst, dass es eine Gebühr ist. Das ist die belastbarste Auskunft, die
+    /// es hier gibt; im echten Bestand steht `SWIFT:CHG;GVC:809`.
+    static let swiftGebuehr = "CHG"
+    static let germanGebuehrenGVCs: Set<String> = ["808", "809", "810", "888"]
+
+    static func istGebuehrLautCode(_ code: String?) -> Bool {
+        guard let code, !code.isEmpty else { return false }
+        for teil in code.uppercased().split(separator: ";") {
+            if teil.hasPrefix("SWIFT:"), String(teil.dropFirst(6)) == swiftGebuehr { return true }
+            if teil.hasPrefix("GVC:"), germanGebuehrenGVCs.contains(String(teil.dropFirst(4))) { return true }
+        }
+        return false
+    }
+
     /// Ist die Buchung ein Entgelt der kontoführenden Bank?
     ///
     /// - Parameter bankname: Anzeigename des Kontos. Steht ein Empfänger in der Buchung,
     ///   muss er dazu passen — sonst ist es die Rechnung eines Dritten.
     static func istGebuehr(_ tx: TransactionsResponse.Transaction, bankname: String? = nil) -> Bool {
-        guard let betrag = Double(tx.amount?.amount ?? ""), betrag < 0 else { return false }
+        // `AmountParser`, nicht `Double(...)`: Die Bank liefert „-10,99" mit Komma, und
+        // `Double` gibt darauf nil zurück. Daran fiel die erste Fassung durch — an jeder
+        // einzelnen echten Buchung, während die Tests mit Punkt geschrieben grün blieben.
+        guard tx.parsedAmount < 0 else { return false }
 
         let text = ((tx.remittanceInformation ?? []).joined(separator: " ") + " "
                     + (tx.additionalInformation ?? "")).lowercased()
         guard !text.isEmpty else { return false }
         guard !fremdeGebuehren.contains(where: { text.contains($0) }) else { return false }
-        guard marker.contains(where: { text.contains($0) }) else { return false }
+        // Code der Bank zuerst — er ist eindeutig. Der Text ist der Rückfall für Banken,
+        // die keinen liefern.
+        guard istGebuehrLautCode(tx.bankTransactionCode)
+                || marker.contains(where: { text.contains($0) }) else { return false }
 
         // Kein Empfänger: Die Bank bucht bei sich selbst — das ist der Normalfall.
         let empfaenger = (tx.creditor?.name ?? "").trimmingCharacters(in: .whitespaces)
@@ -68,7 +89,43 @@ enum Bankgebuehren {
 
     /// Wie viele gleichartige Belastungen es mindestens braucht.
     ///
-    /// Drei, nicht zwei: Zwei Buchungen können ein Zufall sein, und eine erfundene
-    /// Monatsgebühr unter dem Saldo wäre schlimmer als gar keine Angabe.
-    static let mindestens = 3
+    /// **Zwei, nicht drei.** Drei war der erste Entwurf und in der Praxis unerreichbar:
+    /// Die Listen zeigen 60 Tage, und darin liegen von einer Monatsgebühr höchstens zwei
+    /// Buchungen. Die Sicherung steckt stattdessen in `giltAlsWiederkehrend` — gleicher
+    /// Betrag und regelmäßiger Abstand sind ein stärkerer Beleg als drei beliebige Treffer.
+    static let mindestens = 2
+
+    /// Trägt die Gruppe genug Beleg, um als laufende Gebühr zu gelten?
+    ///
+    /// Verlangt wird: mindestens zwei Belastungen, **derselbe Betrag** auf den Cent, und
+    /// ein Abstand, der zu einem Rhythmus passt (monatlich bis quartalsweise). Zwei
+    /// zufällig gleich benannte Buchungen aus derselben Woche fallen damit heraus.
+    static func giltAlsWiederkehrend(_ buchungen: [TransactionsResponse.Transaction]) -> Bool {
+        guard buchungen.count >= mindestens else { return false }
+
+        let betraege = buchungen.map { abs($0.parsedAmount) }
+        guard let erster = betraege.first,
+              betraege.allSatisfy({ abs($0 - erster) < 0.01 }) else { return false }
+
+        let tage = buchungen
+            .compactMap { $0.bookingDate ?? $0.valueDate }
+            .compactMap { parser.date(from: String($0.prefix(10))) }
+            .sorted()
+        guard tage.count == buchungen.count else { return false }
+
+        let kalender = Calendar(identifier: .gregorian)
+        for (frueher, spaeter) in zip(tage, tage.dropFirst()) {
+            let abstand = kalender.dateComponents([.day], from: frueher, to: spaeter).day ?? 0
+            guard (20...100).contains(abstand) else { return false }
+        }
+        return true
+    }
+
+    nonisolated(unsafe) private static let parser: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 }

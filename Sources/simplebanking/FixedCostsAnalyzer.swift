@@ -137,6 +137,13 @@ enum FixedCostsAnalyzer {
             grouped[key, default: []].append(tx)
         }
         
+        // Die Gebührengruppe muss ihren Beleg tragen: gleicher Betrag, regelmäßiger
+        // Abstand. Sonst verschwindet sie hier, bevor irgendetwas sie auswertet.
+        if let gebuehren = grouped[Bankgebuehren.bezeichnung],
+           !Bankgebuehren.giltAlsWiederkehrend(gebuehren) {
+            grouped.removeValue(forKey: Bankgebuehren.bezeichnung)
+        }
+
         // Analyze each group for recurring patterns
         var recurring: [RecurringPayment] = []
         
@@ -155,10 +162,6 @@ enum FixedCostsAnalyzer {
 
         return recurring
             .filter { excluded.isEmpty || !excluded.contains(RecurringAssignments.canonicalKey($0.groupKey)) }
-            // Gebühren erst ab drei gleichartigen Belastungen. Zwei können ein Zufall
-            // sein, und eine erfundene Monatsgebühr unter dem Saldo wäre schlimmer als
-            // gar keine Angabe.
-            .filter { $0.merchant != Bankgebuehren.bezeichnung || $0.occurrences >= Bankgebuehren.mindestens }
             .sorted { $0.averageAmount > $1.averageAmount }
     }
     
