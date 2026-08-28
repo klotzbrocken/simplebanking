@@ -29,6 +29,10 @@ struct SubscriptionCandidate: Identifiable {
         switch category {
         case .finance:
             return .sparen
+        // Eine Kontoführungsgebühr ist kein Abo, sondern eine laufende Verpflichtung —
+        // und die einzige, die ein Kontowechsel beendet.
+        case .bankFees:
+            return .verbindlichkeiten
         case .streaming, .software:
             return .abos
         case .membership:
@@ -101,7 +105,10 @@ enum SubscriptionDetector {
         return nil
     }
 
-    static func detect(in transactions: [TransactionsResponse.Transaction]) -> [SubscriptionCandidate] {
+    /// - Parameter bankname: Anzeigename des Kontos — nur nötig, wenn eine Entgeltbuchung
+    ///   doch einen Empfänger trägt. Siehe `Bankgebuehren`.
+    static func detect(in transactions: [TransactionsResponse.Transaction],
+                       bankname: String? = nil) -> [SubscriptionCandidate] {
         let expenses = transactions.filter { tx in
             guard tx.parsedAmount < 0 else { return false }
             let rem = (tx.remittanceInformation ?? []).joined(separator: " ").lowercased()
@@ -114,6 +121,13 @@ enum SubscriptionDetector {
 
         var grouped: [String: [TransactionsResponse.Transaction]] = [:]
         for tx in expenses {
+            // Entgelte der eigenen Bank tragen keinen Empfänger; der Händler-Auflöser
+            // liefert dafür nichts Stabiles. Fester Schlüssel, bevor aufgelöst wird —
+            // dieselbe Gruppierung wie in `FixedCostsAnalyzer`.
+            if Bankgebuehren.istGebuehr(tx, bankname: bankname) {
+                grouped[Bankgebuehren.bezeichnung, default: []].append(tx)
+                continue
+            }
             let merchant = FixedCostsAnalyzer.merchantName(for: tx)
             let creditorLower = (tx.creditor?.name ?? "").lowercased()
             let isAggregator = creditorLower.contains("paypal") || creditorLower.contains("klarna")
@@ -139,6 +153,9 @@ enum SubscriptionDetector {
         return grouped
             .compactMap { scoreGroup(merchantKey: $0.key, transactions: $0.value) }
             .filter { $0.confidence >= 7 }
+            // Gebühren erst ab drei gleichartigen Belastungen — zwei können ein Zufall sein.
+            .filter { $0.displayName != Bankgebuehren.bezeichnung
+                      || $0.occurrences >= Bankgebuehren.mindestens }
             .sorted { $0.averageAmount > $1.averageAmount }
     }
 

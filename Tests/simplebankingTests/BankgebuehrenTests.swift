@@ -102,6 +102,31 @@ final class BankgebuehrenTests: XCTestCase {
         XCTAssertEqual(treffer.first?.averageAmount ?? 0, 10.99, accuracy: 0.01)
     }
 
+    /// **Der Test, der gefehlt hat.** Der Rechner allein macht nichts sichtbar: Die
+    /// Abo-/Fixkosten-Ansicht speist sich aus `SubscriptionDetector`, nicht aus
+    /// `FixedCostsAnalyzer`. Ohne diesen Weg wäre die Erkennung gebaut, geprüft — und
+    /// nirgends zu sehen.
+    func test_gebuehrErscheintInDerAbosAnsicht() throws {
+        let monate = ["2026-05-29", "2026-06-30", "2026-07-31"]
+        let txs = monate.map { datum -> TransactionsResponse.Transaction in
+            TransactionsResponse.Transaction(
+                bookingDate: datum, valueDate: datum, status: "booked", endToEndId: nil,
+                amount: .init(currency: "EUR", amount: "-10.99"),
+                creditor: nil, debtor: nil,
+                remittanceInformation: ["Entgeltabrechnung siehe Anlage"],
+                additionalInformation: nil, purposeCode: nil)
+        }
+
+        let treffer = SubscriptionDetector.detect(in: txs)
+            .filter { $0.displayName == Bankgebuehren.bezeichnung }
+        let eintrag = try XCTUnwrap(treffer.first, "die Gebühr fehlt in der Ansicht")
+        XCTAssertEqual(treffer.count, 1)
+        XCTAssertEqual(eintrag.category, .bankFees)
+        XCTAssertEqual(eintrag.occurrences, 3)
+        XCTAssertEqual(eintrag.defaultTab, .verbindlichkeiten,
+                       "eine Kontoführungsgebühr ist kein Abo")
+    }
+
     /// Zwei können ein Zufall sein.
     func test_zweiBuchungenErgebenNochNichts() {
         let txs = ["2026-06-30", "2026-07-31"].map { datum -> TransactionsResponse.Transaction in
