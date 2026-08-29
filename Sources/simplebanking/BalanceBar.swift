@@ -6222,8 +6222,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     // MARK: - Task 1: Slot switching
 
     private func switchToSlot(index: Int) async {
-        // Cancel any in-flight switch so only the last click wins
-        switchTask?.cancel()
+        // „Nur der letzte Klick gewinnt" ist für einen Datenabruf richtig — für eine
+        // laufende Bankfreigabe nicht. Sie kostet den Nutzer eine echte Handlung im
+        // Browser und ist abgebrochen verloren; der nächste Blick auf das Konto begänne
+        // von vorn. Genau so entstand die bunq-Dauerschleife vom 29.08.2026.
+        if await Freigabewache.shared.laeuftIrgendwo() {
+            AppLogger.log("Kontowechsel: laufende Bankfreigabe wird nicht abgebrochen",
+                          category: "YaxiService")
+        } else {
+            switchTask?.cancel()
+        }
         let task = Task { [weak self] in
             await self?.doSwitchToSlot(index: index) ?? ()
         }

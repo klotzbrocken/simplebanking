@@ -2483,12 +2483,27 @@ enum YaxiService {
             }
 
         case .redirect(let url, let context):
+            // Läuft für dieses Konto schon eine Freigabe, wird **keine zweite Seite**
+            // geöffnet. Siehe `Freigabewache`: Der Nutzer bestätigt gerade im Browser;
+            // eine weitere Seite macht die begonnene nur wertlos.
+            guard await Freigabewache.shared.beginnen(slotId) else {
+                AppLogger.log("SCA Redirect: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
+                              category: "YaxiService", level: "WARN")
+                return nil
+            }
+            defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA Redirect: opening browser", category: "YaxiService")
             await openRedirectURL(url, vorgang: redirectVorgang(slotId: slotId, ticket: ticket))
             return await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                       confirm: confirm, respond: respond)
 
         case .redirectHandle(let handle, let context):
+            guard await Freigabewache.shared.beginnen(slotId) else {
+                AppLogger.log("SCA RedirectHandle: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
+                              category: "YaxiService", level: "WARN")
+                return nil
+            }
+            defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA RedirectHandle: registering redirect URI", category: "YaxiService")
             let callbackServer = YaxiOAuthCallback()
             guard let port = try? await callbackServer.start(), port > 0 else {
