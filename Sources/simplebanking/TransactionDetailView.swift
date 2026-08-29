@@ -117,7 +117,9 @@ struct TransactionDetailView: View {
 
     private var counterpartyName: String {
         if effectiveMerchantPipelineEnabled {
-            let merchant = MerchantResolver.resolve(transaction: transaction).effectiveMerchant
+            let aufloesung = MerchantResolver.resolve(transaction: transaction)
+            let voll = transaction.creditor?.fullName ?? transaction.debtor?.fullName
+            let merchant = MerchantResolver.anzeigeName(fuer: aufloesung, vollerName: voll)
             if !merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return merchant
             }

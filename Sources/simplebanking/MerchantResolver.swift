@@ -921,6 +921,25 @@ enum MerchantResolver {
         }
     }
 
+    /// Der Name, der angezeigt werden soll.
+    ///
+    /// Hat die Auflösung nichts weiter getan, als den Empfängernamen zu nehmen und auf
+    /// zwei Wörter zu kürzen, gewinnt der volle Name aus der Bankantwort — dann stand in
+    /// der Liste bisher „Dornseifers Frischeb" statt „Dornseifers Frischeb. Siegen".
+    ///
+    /// Wurde dagegen ein Händler **erkannt** („REWE SAGT DANKE 1234" → „Rewe"), bleibt es
+    /// beim erkannten Namen: Der ist kürzer *und* besser, den vollen zu zeigen wäre ein
+    /// Rückschritt. Unterschieden wird daran, ob die Kürzung des vollen Namens wieder
+    /// genau das ergibt, was die Auflösung geliefert hat.
+    static func anzeigeName(fuer aufloesung: MerchantResolution, vollerName: String?) -> String {
+        guard let vollerName, !vollerName.isEmpty else { return aufloesung.effectiveMerchant }
+        let gekuerzt = cleanMerchantName(YaxiService.truncateName(vollerName) ?? "") ?? ""
+        guard gekuerzt.caseInsensitiveCompare(aufloesung.effectiveMerchant) == .orderedSame else {
+            return aufloesung.effectiveMerchant
+        }
+        return cleanMerchantName(vollerName) ?? aufloesung.effectiveMerchant
+    }
+
     private static func makeResolution(merchant: String, source: String, confidence: Double) -> MerchantResolution {
         let cleaned = cleanMerchantName(merchant) ?? unknownMerchant
         let canonical = canonicalMerchant(for: cleaned)

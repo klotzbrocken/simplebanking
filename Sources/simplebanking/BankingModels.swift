@@ -42,7 +42,14 @@ struct TransactionsResponse: Codable, Sendable {
     }
 
     struct Party: Codable, Hashable, Sendable {
+        /// Auf zwei Wörter gekürzt — **Gruppierungsschlüssel**. Daran hängen Fixkosten,
+        /// Abo-Erkennung, Zuordnungsregeln und die Ausschlüsse des Nutzers; ändert er
+        /// sich, zerfallen bestehende Gruppen.
         let name: String?
+        /// Wie die Bank ihn geliefert hat, ungekürzt — **nur zur Anzeige**.
+        /// `nil` bei Buchungen, die vor der Einführung gespeichert wurden; dort bleibt
+        /// nur der gekürzte Name, denn der volle war nie gespeichert.
+        var fullName: String? = nil
         let iban: String?
         let bic: String?
     }

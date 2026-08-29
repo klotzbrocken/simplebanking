@@ -2186,10 +2186,12 @@ enum YaxiService {
                 endToEndId:  tx.endToEndID,
                 amount: TransactionsResponse.Amount(currency: tx.amount.currency, amount: amountStr),
                 creditor: tx.creditor.map {
-                    TransactionsResponse.Party(name: truncateName($0.name), iban: $0.iban, bic: $0.bic)
+                    TransactionsResponse.Party(name: truncateName($0.name), fullName: $0.name,
+                                               iban: $0.iban, bic: $0.bic)
                 },
                 debtor: tx.debtor.map {
-                    TransactionsResponse.Party(name: truncateName($0.name), iban: $0.iban, bic: $0.bic)
+                    TransactionsResponse.Party(name: truncateName($0.name), fullName: $0.name,
+                                               iban: $0.iban, bic: $0.bic)
                 },
                 remittanceInformation: tx.remittanceInformation.isEmpty ? nil : tx.remittanceInformation,
                 additionalInformation: tx.additionalInformation,
@@ -2209,7 +2211,14 @@ enum YaxiService {
         )
     }
 
-    private static func truncateName(_ name: String?) -> String? {
+    /// Kürzt auf die ersten zwei Wörter.
+    ///
+    /// Das ist der **Gruppierungsschlüssel**, nicht die Anzeige: Fixkosten, Abo-Erkennung,
+    /// Zuordnungsregeln und die Ausschlüsse des Nutzers hängen daran, und ein geänderter
+    /// Schlüssel lässt bestehende Gruppen zerfallen. Der ungekürzte Name wandert seit dem
+    /// 29.08.2026 als `fullName` daneben mit — vorher ging er verloren, und in der Liste
+    /// stand „Dornseifers Frischeb" statt „Dornseifers Frischeb. Siegen".
+    static func truncateName(_ name: String?) -> String? {
         guard let name else { return nil }
         return name.split(separator: " ").prefix(2).joined(separator: " ")
     }

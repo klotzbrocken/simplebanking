@@ -1288,19 +1288,20 @@ private struct TransactionsPanelView: View {
     }
     
     private func recipientName(_ t: TransactionsResponse.Transaction) -> String {
-        let rawName: String
         if effectiveMerchantPipelineEnabled {
-            let merchant = MerchantResolver.resolve(transaction: t).effectiveMerchant
-            let cleaned = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleaned.isEmpty {
-                rawName = cleaned
-            } else {
-                rawName = fallbackRecipientRaw(t)
-            }
-        } else {
-            rawName = fallbackRecipientRaw(t)
+            let aufloesung = MerchantResolver.resolve(transaction: t)
+            // Der volle Name der Gegenseite, sofern die Bank ihn geliefert hat. Bei
+            // Buchungen von vor dem 29.08.2026 fehlt er — dann bleibt es beim gekürzten.
+            let istEingang = amountDouble(t) >= 0
+            let voll = istEingang ? (t.debtor?.fullName ?? t.creditor?.fullName)
+                                  : (t.creditor?.fullName ?? t.debtor?.fullName)
+            let name = MerchantResolver.anzeigeName(fuer: aufloesung, vollerName: voll)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Kein zweiter Wortschnitt: Genau er machte den vollen Namen wieder zunichte.
+            // Zu lange Namen kürzt die Zeile selbst mit „…", und dort ist es sichtbar.
+            if !name.isEmpty { return name }
         }
-        return truncateRecipient(rawName, maxWords: panelIsWide ? 3 : 2)
+        return truncateRecipient(fallbackRecipientRaw(t), maxWords: panelIsWide ? 3 : 2)
     }
 
     private func fallbackRecipientRaw(_ t: TransactionsResponse.Transaction) -> String {
