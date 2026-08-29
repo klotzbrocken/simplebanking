@@ -1041,7 +1041,12 @@ struct TransactionDetailView: View {
             localReminderId = reminderId
             isSavingsBookmarked = SavingsBookmarks.isBookmarked(transaction.stableIdentifier)
             displayedMerchantInput = counterpartyName
-            rulePatternInput = MerchantResolver.suggestedRulePattern(for: transaction)
+            // Muster UND Bereich vorbelegen. Nur das Muster zu setzen half nicht: Der
+            // Bereich stand fest auf „Verwendungszweck", während der Rückfall den
+            // Empfängernamen vorschlägt — die Regel hätte nie getroffen.
+            let vorschlag = MerchantResolver.regelVorschlag(fuer: transaction)
+            rulePatternInput = vorschlag.muster
+            rulePatternScope = vorschlag.bereich
             initializeCategorySelectionIfNeeded()
             noteText = initialUserNote ?? ""
             loadAttachments()

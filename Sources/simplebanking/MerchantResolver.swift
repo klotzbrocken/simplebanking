@@ -617,14 +617,38 @@ enum MerchantResolver {
     }
 
     static func suggestedRulePattern(for transaction: TransactionsResponse.Transaction) -> String {
+        regelVorschlag(fuer: transaction).muster
+    }
+
+    /// Vorschlag für eine Namensregel: das Suchmuster **und** der Bereich, zu dem es passt.
+    ///
+    /// Vorher gab es nur ein Muster, und zwar ausschließlich für PayPal-artige
+    /// Verwendungszwecke („Ihr Einkauf bei …"). Bei einer gewöhnlichen Kartenzahlung kam
+    /// eine leere Zeichenkette zurück; das Feld blieb leer, und „Als Regel speichern"
+    /// brach mit „Bitte ein Suchmuster angeben" ab. Von außen sah es aus, als täte der
+    /// Knopf nichts.
+    ///
+    /// Der Rückfall ist der **Name der Gegenseite**. Er steht in jeder Buchung desselben
+    /// Händlers gleich, weil er gekürzt gespeichert wird — genau das macht ihn zum
+    /// brauchbaren Muster.
+    static func regelVorschlag(fuer transaction: TransactionsResponse.Transaction)
+        -> (muster: String, bereich: MerchantUserRule.MatchScope) {
         let remittance = clean((transaction.remittanceInformation ?? []).joined(separator: " ")) ?? ""
         if let merchant = firstCapture(in: remittance, pattern: "(?i)ihr\\s+einkauf\\s+bei\\s+(.+)$") {
-            return normalizeForSearch(merchant)
+            return (normalizeForSearch(merchant), .verwendungszweck)
         }
         if let merchant = firstCapture(in: remittance, pattern: "(?i)purchase\\s+at\\s+(.+)$") {
-            return normalizeForSearch(merchant)
+            return (normalizeForSearch(merchant), .verwendungszweck)
         }
-        return ""
+        // Gegenseite: bei einer Ausgabe der Empfänger, bei einem Eingang der Absender.
+        let istEingang = TransactionDirection.from(amount: transaction.amount?.amount) == .incoming
+        let gegenseite = istEingang
+            ? (transaction.debtor?.name ?? transaction.creditor?.name)
+            : (transaction.creditor?.name ?? transaction.debtor?.name)
+        if let name = clean(gegenseite), !name.isEmpty {
+            return (name, .empfaenger)
+        }
+        return ("", .verwendungszweck)
     }
 
     // MARK: - Resolution
