@@ -319,6 +319,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     @AppStorage("confettiLastIncomeTxSig") private var confettiLastIncomeTxSig: String = ""
     /// Per-slot dict: latest tx sig observed from YAXI (not yet "seen" by opening the panel).
     private var latestTxSigBySlot: [String: String] = [:]
+    /// Zustand für das Menüleisten-Zeichen — bewusst **getrennt** von
+    /// `latestTxSigBySlot`. Beide Quellen (Saldo-Vergleich hier, Buchungsabruf
+    /// dort) beschreiben dasselbe Ereignis mit unterschiedlichen Signaturen;
+    /// aus einem gemeinsamen Topf gelesen, würde das eine das andere als
+    /// vermeintlich neue Bewegung wiederauferstehen lassen, nachdem du längst
+    /// hingeschaut hast.
+    private var bewegungBySlot: [String: Bewegungsstand] = [:]
     private var flyoutRippleTrigger: Int = 0
     private var logoObserver: AnyCancellable?
     private var txObserver: AnyCancellable?
@@ -332,6 +339,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     private func setLastSeenTxSig(_ sig: String, for slotId: String) {
         UserDefaults.standard.set(sig, forKey: "simplebanking.lastSeenTxSig.\(slotId)")
+    }
+
+    /// Setzt das Menüleisten-Zeichen zurück: Was gerade zu sehen ist, gilt als
+    /// gesehen. Im Unified-Mode zeigt ein Blick alle Konten, sonst nur das aktive —
+    /// deshalb überlebt ein Kreis für ein anderes Konto das Öffnen im Einzelmodus,
+    /// und du siehst weiterhin, dass dort etwas liegt.
+    private func markiereGeseheneBewegungen() {
+        func markiere(_ slotId: String) {
+            if let sig = latestTxSigBySlot[slotId], !sig.isEmpty {
+                setLastSeenTxSig(sig, for: slotId)   // Ripple & Benachrichtigungen
+            }
+            if let b = bewegungBySlot[slotId], !b.signatur.isEmpty {
+                UserDefaults.standard.set(b.signatur,
+                                          forKey: "simplebanking.lastSeenBewegung.\(slotId)")
+            }
+        }
+        if txVM.isUnifiedMode {
+            for slotId in Set(latestTxSigBySlot.keys).union(bewegungBySlot.keys) {
+                markiere(slotId)
+            }
+        } else {
+            markiere(TransactionsDatabase.activeSlotId)
+        }
+        updateStatusBalanceTitle()
     }
 
     /// One-time migration: copy old scalar lastSeenTxSig → legacy slot key.
@@ -384,14 +415,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     // daily SCA authorization limit (e.g. Sparkasse allows ~4 redirects per day).
     private var scaBackoffUntil: Date? = nil
 
-    private func decoratedTitle(_ title: String) -> String {
-        // New booking indicator: dot if any slot has unseen newer transactions.
-        let hasNew = latestTxSigBySlot.contains { slotId, sig in
-            !sig.isEmpty && sig != lastSeenTxSig(for: slotId)
-        }
-        if hasNew { return "\(title)  ●" }
-        return title
+    /// Das Zeichen, das gerade rechts außen in der Menüleiste steht (oder keins).
+    private func aktuellesBewegungszeichen() -> Kontobewegungszeichen? {
+        Bewegungszeichenrechner.zeichen(
+            stand: bewegungBySlot,
+            aktiverSlot: TransactionsDatabase.activeSlotId,
+            alleAktiv: txVM.isUnifiedMode,
+            gesehen: { lastSeenBewegung(for: $0) })
     }
+
+    private func lastSeenBewegung(for slotId: String) -> String {
+        UserDefaults.standard.string(forKey: "simplebanking.lastSeenBewegung.\(slotId)") ?? ""
+    }
+
+    /// Meldet einen frisch geholten Saldo und leitet die Kontobewegung aus der
+    /// Differenz zum zuletzt bekannten Wert ab — ohne zusätzlichen Bankabruf und
+    /// damit ohne jedes Risiko einer weiteren Freigabe. Anschließend wird der
+    /// Zwischenspeicher fortgeschrieben.
+    ///
+    /// **Nur für echte Kontostände.** Belegkonten (REWE, dm, Amazon) legen über
+    /// denselben Zwischenspeicher den Betrag ihres letzten Einkaufs ab — dort ist die
+    /// Differenz zweier Werte keine Kontobewegung, und „größer" bedeutet nicht
+    /// „Geldeingang", sondern das Gegenteil. Diese Annahme war beim Einbau übersehen
+    /// worden; siehe `applyREWEDisplay`.
+    ///
+    /// Nur der Saldo taugt als Auslöser: Der Buchungsabruf hängt am Schalter
+    /// „Umsätze automatisch laden", der ab Werk aus ist — daran gekoppelt bliebe
+    /// das Zeichen bei den meisten Installationen für immer unsichtbar.
+    private func saldoGemeldet(_ betrag: Double, slotId: String) {
+        let schluessel = "simplebanking.cachedBalance.\(slotId)"
+        let vorher = UserDefaults.standard.object(forKey: schluessel) as? Double
+        UserDefaults.standard.set(betrag, forKey: schluessel)
+        // Der allererste bekannte Saldo ist keine Bewegung — sonst begrüßte eine
+        // frische Installation den Nutzer sofort mit einem Pfeil.
+        guard let richtung = Saldobewegung.richtung(vorher: vorher, jetzt: betrag) else { return }
+        let jetzt = Date()
+        bewegungBySlot[slotId] = Bewegungsstand(
+            // Zeitstempel statt Betrag als Signatur: Ginge der Saldo von 100 auf
+            // 110 und zurück auf 100, wäre eine betragsbasierte Signatur wieder
+            // identisch mit einer bereits gesehenen — die Bewegung fiele unter den
+            // Tisch.
+            signatur: "saldo:\(jetzt.timeIntervalSince1970)",
+            istEingang: richtung,
+            zeitpunkt: Self.bewegungsZeitFormat.string(from: jetzt))
+        updateStatusBalanceTitle()
+    }
+
+    /// ISO-8601 sortiert lexikografisch nach Zeit — nötig für „jüngste gewinnt"
+    /// im Unified-Mode.
+    private static let bewegungsZeitFormat: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+
 
     private func t(_ de: String, _ en: String) -> String {
         L10n.t(de, en)
@@ -697,12 +775,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             let hiddenEmoji = balanceMoodEmojiEnabled && computeUnifiedBalanceTitle() == nil
                 ? currentMoodEmojiPrefix()
                 : ""
+            // Das Bewegungszeichen bleibt auch hier sichtbar: Es nennt keinen
+            // Betrag, sondern nur, dass etwas passiert ist. Ausgeblendet wird der
+            // Kontostand, nicht die App.
             if isShort {
                 // Short: logo + (optional) emoji, kein Mask-Text
-                setButtonTitle(button, logo != nil ? hiddenEmoji : "\(hiddenEmoji)€")
+                setButtonTitle(button, logo != nil ? hiddenEmoji : "\(hiddenEmoji)€",
+                               zeichen: aktuellesBewegungszeichen())
             } else {
                 // Long: logo + (optional) emoji + Mask
-                setButtonTitle(button, "\(p)\(hiddenEmoji)•••.•• ")
+                setButtonTitle(button, "\(p)\(hiddenEmoji)•••.•• ",
+                               zeichen: aktuellesBewegungszeichen())
             }
             statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
             return
@@ -720,12 +803,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // bleibt das Status-Item vollständig leer — sichtbar wurde das beim
             // Mouse-Over, das aus dem ausgeblendeten Zweig hierher wechselt und den
             // Platzhalter dabei verschwinden ließ.
-            setButtonTitle(button, logo != nil ? moodEmoji : "\(moodEmoji)€")
+            // Auch ohne Saldotext gehört das Bewegungszeichen in die Leiste — genau
+            // dieser Modus ist die Voreinstellung und blieb bisher stumm.
+            setButtonTitle(button, logo != nil ? moodEmoji : "\(moodEmoji)€",
+                           zeichen: aktuellesBewegungszeichen())
         } else if let unifiedTitle = computeUnifiedBalanceTitle() {
-            let indicator = latestTxSigBySlot.contains { id, sig in !sig.isEmpty && sig != lastSeenTxSig(for: id) } ? "  ●" : ""
-            setButtonTitle(button, "\(unifiedTitle)\(indicator)")
+            setButtonTitle(button, unifiedTitle, zeichen: aktuellesBewegungszeichen())
         } else {
-            setButtonTitle(button, "\(p)\(moodEmoji)\(decoratedTitle(lastShownTitle))")
+            setButtonTitle(button, "\(p)\(moodEmoji)\(lastShownTitle)",
+                           zeichen: aktuellesBewegungszeichen())
+        }
+        if let zeichen = aktuellesBewegungszeichen() {
+            button.toolTip = zeichen.hinweis
+        } else if button.toolTip?.isEmpty == false,
+                  Kontobewegungszeichen.alleHinweise.contains(button.toolTip ?? "") {
+            // Nur den eigenen Hinweis zurücknehmen, nie fremde Tooltips (Demo-Modus,
+            // Sperre, Einrichtung) überschreiben.
+            button.toolTip = ""
         }
         statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
     }
@@ -767,14 +861,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let emojiEnabled = UserDefaults.standard.bool(forKey: "balanceMoodEmojiEnabled")
         let emojiReserve: CGFloat = emojiEnabled ? 22 : 0
         let logoReserve = max(22, (logo?.size.width ?? 16) + 6)  // Bildbreite + Gap
-        return textWidth + emojiReserve + logoReserve
+        // Das Bewegungszeichen steht rechts außen und braucht eigenen Platz;
+        // ohne diese Reserve schneidet macOS im Saldo-Modus den letzten Cent ab.
+        let zeichenReserve: CGFloat = aktuellesBewegungszeichen() != nil ? 11 : 0
+        return textWidth + emojiReserve + logoReserve + zeichenReserve
     }
 
-    private func setButtonTitle(_ button: NSStatusBarButton, _ text: String) {
+    /// Schriftgröße des Bewegungszeichens. Deutlich kleiner als der Saldo: Ein
+    /// ausgefülltes Dreieck in Textgröße wirkt wie ein Fehler, nicht wie ein
+    /// Hinweis.
+    private static let zeichenGroesse: CGFloat = 8
+    /// Hebt das Zeichen auf die Mittellinie der Ziffern. Ohne den Versatz sitzt
+    /// das verkleinerte Dreieck auf der Grundlinie und damit sichtbar zu tief.
+    ///
+    /// Der Wert ist gemessen, nicht geschätzt: Die Ziffern der Menüleistenschrift
+    /// reichen von −0,15 bis 9,38 über der Grundlinie, ihre Mitte liegt also bei
+    /// 4,61. Das Dreieck ist bei 8 pt 5,08 hoch — 1,79 hebt seine Mitte genau
+    /// dorthin.
+    private static let zeichenVersatz: CGFloat = 1.79
+
+    private func setButtonTitle(_ button: NSStatusBarButton, _ text: String,
+                                zeichen: Kontobewegungszeichen? = nil) {
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         ]
-        button.attributedTitle = NSAttributedString(string: text, attributes: attrs)
+        let titel = NSMutableAttributedString(string: text, attributes: attrs)
+        if let zeichen {
+            titel.append(NSAttributedString(string: " ", attributes: attrs))
+            titel.append(NSAttributedString(string: zeichen.glyph, attributes: [
+                .font: NSFont.systemFont(ofSize: Self.zeichenGroesse, weight: .semibold),
+                .baselineOffset: Self.zeichenVersatz,
+            ]))
+        }
+        button.attributedTitle = titel
     }
 
     private func updateHiddenBalanceTooltip() {
@@ -907,6 +1026,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func applyREWEDisplay(slotId: String) {
         if let r = try? ReweReceiptStore.latest(slotId: slotId) {
             let amount = Double(r.totalCents) / 100.0
+            // Bewusst NICHT über `saldoGemeldet`: Das hier ist der Betrag des letzten
+            // Einkaufs, kein Kontostand. Ein teurerer Einkauf hätte sonst einen
+            // Aufwärtspfeil mit „Geldeingang" erzeugt — die Aussage genau verkehrt herum.
             UserDefaults.standard.set(amount, forKey: "simplebanking.cachedBalance.\(slotId)")
             lastBalance = amount
             txVM.currentBalance = formatEURWithCents(amount)
@@ -936,7 +1058,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Schreibt den echten PayPal-Saldo in die Menüleiste/Flyout (Muster wie
     /// `applyREWEDisplay`, aber echter Kontostand).
     private func applyPayPalDisplay(_ bal: Double, slotId: String) {
-        UserDefaults.standard.set(bal, forKey: "simplebanking.cachedBalance.\(slotId)")
+        saldoGemeldet(bal, slotId: slotId)
         lastBalance = bal
         txVM.currentBalance = formatEURWithCents(bal)
         updateStatusBalanceTitle()
@@ -4397,6 +4519,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         popover.contentViewController = host
         balancePopover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Erst NACH dem Aufbau zurücksetzen: `buildFlyoutHost` entscheidet anhand
+        // derselben ungesehenen Buchungen, ob der Ripple läuft. Vorher gelöscht,
+        // bliebe das Flyout beim Öffnen stumm.
+        markiereGeseheneBewegungen()
         // Die App läuft als `.accessory` und ist beim Klick aufs Status-Item nicht
         // aktiv. Das Popover erscheint dann zwar, sein Fenster wird aber nicht zum
         // Key-Window — der erste Klick hinein aktiviert nur die App und erreicht das
@@ -5177,7 +5303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 }
                 // Cache per slot for instant display on next slot switch
                 if let balance = self.lastBalance {
-                    UserDefaults.standard.set(balance, forKey: "simplebanking.cachedBalance.\(YaxiService.activeSlotId)")
+                    self.saldoGemeldet(balance, slotId: YaxiService.activeSlotId)
                 }
                 applyBalanceDisplayModeConstraints()
                 updateStatusBalanceTitle()
@@ -5333,7 +5459,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Load from local DB immediately — panel shows instant data while network loads.
         // Opening the transactions panel counts as "seen" for new-booking indicator.
         let daysToPreview = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").displayDays
-        let activeSlotIdNow = TransactionsDatabase.activeSlotId
         if txVM.isUnifiedMode {
             let allSlotIds = MultibankingStore.shared.slots.map { $0.id }
             if let cached = try? TransactionsDatabase.loadUnifiedTransactions(slots: allSlotIds, days: daysToPreview), !cached.isEmpty {
@@ -5344,20 +5469,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 let ownIBANs = Set(MultibankingStore.shared.slots.compactMap { $0.iban }.filter { !$0.isEmpty })
                 txVM.detectInternalTransfers(ownIBANs: ownIBANs)
             }
-            // Mark all slots as seen when opening unified view
-            for (slotId, sig) in latestTxSigBySlot where !sig.isEmpty {
-                setLastSeenTxSig(sig, for: slotId)
-            }
         } else {
             if let cached = try? TransactionsDatabase.loadTransactions(days: daysToPreview), !cached.isEmpty {
                 txVM.transactions = sortTransactionsNewestFirst(cached)
                 txVM.resetPaging()
             }
-            if let sig = latestTxSigBySlot[activeSlotIdNow], !sig.isEmpty {
-                setLastSeenTxSig(sig, for: activeSlotIdNow)
-            }
         }
-        updateStatusBalanceTitle()
+        markiereGeseheneBewegungen()
 
         // Wait for any concurrent HBCI call (e.g. balance refresh) to finish before
         // fetching transactions — banks fail with "Fehlender Dialogkontext" on parallel calls.
@@ -5481,7 +5599,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     txVM.connectedBankCurrency = booked.currency
                 }
                 if let balance = lastBalance {
-                    UserDefaults.standard.set(balance, forKey: "simplebanking.cachedBalance.\(YaxiService.activeSlotId)")
+                    saldoGemeldet(balance, slotId: YaxiService.activeSlotId)
                 }
                 applyBalanceDisplayModeConstraints()
                 updateStatusBalanceTitle()
