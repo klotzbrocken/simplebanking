@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import MCPRahmen
 
 // MARK: - Raw POSIX I/O (no buffering layers)
 
@@ -33,68 +34,57 @@ private func posixWrite(_ data: Data) {
 
 // MARK: - MCP framing
 
-/// Obergrenze für eine eingehende Nachricht.
-///
-/// Der Server läuft lokal über `stdio`, der Client ist der eigene Elternprozess — ein
-/// Angreifer ist hier nicht die naheliegende Sorge. Ein fehlerhafter Client aber schon:
-/// Ohne Grenze wächst die erste Zeile Byte für Byte weiter, und ein `Content-Length` von
-/// einigen Gigabyte fordert `posixReadExact` in einem Stück an. Eingehende Nachrichten
-/// sind Aufrufe, keine Nutzdaten; acht Mebibyte sind großzügig.
-private let maxNachrichtenGroesse = 8 * 1024 * 1024
-
-func readMessage() -> [String: Any]? {
-    // Read the first line
-    var line = ""
+/// Liest eine Zeile bis zum Zeilenumbruch. `grenze` begrenzt die Länge; wird sie
+/// überschritten, bricht das Lesen ab, statt weiter Speicher zu belegen.
+private func leseZeile(grenze: Int) -> String? {
+    var zeile = ""
     while true {
         guard let byte = posixReadByte() else { return nil }
         if byte == UInt8(ascii: "\n") {
-            if line.last == "\r" { line.removeLast() }
-            break
+            if zeile.last == "\r" { zeile.removeLast() }
+            return zeile
         }
-        line.append(Character(UnicodeScalar(byte)))
-        guard line.utf8.count <= maxNachrichtenGroesse else {
-            FileHandle.standardError.write(Data("mcp: Zeile über \(maxNachrichtenGroesse) Bytes — abgebrochen\n".utf8))
+        zeile.append(Character(UnicodeScalar(byte)))
+        guard zeile.utf8.count <= grenze else {
+            FileHandle.standardError.write(Data("mcp: Zeile über \(grenze) Bytes — abgebrochen\n".utf8))
             return nil
         }
     }
+}
+
+func readMessage() -> [String: Any]? {
+    // Die erste Zeile behält die große Grenze: Im NDJSON-Modus ist sie die vollständige
+    // Nachricht und kein Header.
+    guard let erste = leseZeile(grenze: maxNachrichtenGroesse) else { return nil }
 
     // NDJSON mode: line starts with '{' — no Content-Length framing
-    if line.hasPrefix("{") {
-        guard let data = line.data(using: .utf8),
+    if erste.hasPrefix("{") {
+        guard let data = erste.data(using: .utf8),
               let msg = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         return msg
     }
 
-    // LSP framing mode: parse Content-Length + remaining headers, then body
-    var contentLength = 0
-    if line.lowercased().hasPrefix("content-length:") {
-        let val = String(line.dropFirst("content-length:".count)).trimmingCharacters(in: .whitespaces)
-        contentLength = Int(val) ?? 0
+    // LSP framing mode: erst alle Headerzeilen einsammeln, dann einmal prüfen. Die
+    // frühere Fassung prüfte nach der ersten Zeile und ließ spätere Zeilen den geprüften
+    // Wert überschreiben — ein zweites `Content-Length` umging damit die Grenze.
+    var headerZeilen = [erste]
+    while true {
+        guard let zeile = leseZeile(grenze: maxHeaderZeile) else { return nil }
+        if zeile.isEmpty { break }
+        headerZeilen.append(zeile)
     }
-    guard contentLength >= 0, contentLength <= maxNachrichtenGroesse else {
-        FileHandle.standardError.write(Data("mcp: Content-Length \(contentLength) abgelehnt\n".utf8))
+
+    let laenge: Int
+    switch MCPRahmen.koerperLaenge(headerZeilen: headerZeilen) {
+    case .success(let n):
+        laenge = n
+    case .failure(let fehler):
+        FileHandle.standardError.write(Data("mcp: \(fehler) — abgelehnt\n".utf8))
         return nil
     }
-    // Read remaining headers until blank line
-    while true {
-        var hline = ""
-        while true {
-            guard let byte = posixReadByte() else { return nil }
-            if byte == UInt8(ascii: "\n") {
-                if hline.last == "\r" { hline.removeLast() }
-                break
-            }
-            hline.append(Character(UnicodeScalar(byte)))
-        }
-        if hline.isEmpty { break }
-        if hline.lowercased().hasPrefix("content-length:") {
-            let val = String(hline.dropFirst("content-length:".count)).trimmingCharacters(in: .whitespaces)
-            contentLength = Int(val) ?? 0
-        }
-    }
-    guard contentLength > 0,
-          let body = posixReadExact(contentLength),
+
+    guard let body = posixReadExact(laenge),
           let msg = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
     else { return nil }
     return msg

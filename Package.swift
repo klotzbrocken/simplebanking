@@ -62,8 +62,17 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
+        // Reine Rahmenprüfung des MCP-Protokolls. Eigenes Ziel, weil
+        // `simplebanking-mcp` ein Executable mit `main.swift` ist und sich aus dem
+        // Testziel nicht importieren lässt; ein Quelltext kann in SwiftPM nicht zu
+        // zwei Zielen gehören.
+        .target(
+            name: "MCPRahmen",
+            path: "Sources/MCPRahmen"
+        ),
         .executableTarget(
             name: "simplebanking-mcp",
+            dependencies: ["MCPRahmen"],
             path: "Sources/simplebanking-mcp",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
@@ -92,6 +101,7 @@ let package = Package(
             name: "simplebankingTests",
             dependencies: [
                 "simplebanking",
+                "MCPRahmen",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             path: "Tests/simplebankingTests"
