@@ -96,7 +96,11 @@ enum IntentDaten {
         -> [TransactionsResponse.Transaction] {
         let buchungen = (try? TransactionsDatabase.loadUnifiedTransactions(
             slots: slots, days: tage, bankId: aktuelleDatenbank)) ?? []
-        return Array(buchungen.prefix(max(1, anzahl)))
+        // `max(1, anzahl)` stand hier vorher und lieferte bei 0 trotzdem eine Buchung —
+        // im Widerspruch zur Zusage des Tests. Wer null Buchungen anfordert, bekommt
+        // keine.
+        guard anzahl > 0 else { return [] }
+        return Array(buchungen.prefix(anzahl))
     }
 
     // MARK: - Formatierung

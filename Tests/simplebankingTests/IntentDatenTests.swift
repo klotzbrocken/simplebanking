@@ -52,8 +52,46 @@ final class IntentDatenTests: XCTestCase {
     }
 
     /// Die Anzahl wird eingehalten, auch bei unsinniger Eingabe aus einem Kurzbefehl.
-    func test_anzahlWirdBegrenztUndNieNegativ() {
-        XCTAssertTrue(IntentDaten.letzteBuchungen(anzahl: -3, tage: 30, slots: []).isEmpty)
-        XCTAssertTrue(IntentDaten.letzteBuchungen(anzahl: 0, tage: 30, slots: []).isEmpty)
+    ///
+    /// **Mit vorhandenen Buchungen geprüft.** Die frühere Fassung dieses Tests rief
+    /// `slots: []` auf — eine leere Auswahl liefert aber immer nichts, wie der Test
+    /// darüber selbst festhält. Er konnte deshalb gar nicht fehlschlagen und blieb auch
+    /// dann grün, als die Umsetzung mit `max(1, anzahl)` bei 0 eine Buchung zurückgab.
+    func test_anzahlWirdBegrenztUndNieNegativ() throws {
+        let slots = try mitDemoBuchungen()
+
+        XCTAssertTrue(IntentDaten.letzteBuchungen(anzahl: 0, tage: jahre, slots: slots).isEmpty)
+        XCTAssertTrue(IntentDaten.letzteBuchungen(anzahl: -3, tage: jahre, slots: slots).isEmpty)
+    }
+
+    /// Gegenprobe: Ohne sie wäre der Test darüber auch mit einer Umsetzung grün, die
+    /// grundsätzlich nichts zurückgibt.
+    func test_anzahlSchneidetAufDieGewuenschteMengeZu() throws {
+        let slots = try mitDemoBuchungen()
+
+        XCTAssertGreaterThan(IntentDaten.letzteBuchungen(anzahl: 99, tage: jahre, slots: slots).count, 2,
+                             "Vorbedingung: die Demo-Datenbank muss mehr als zwei Buchungen haben")
+        XCTAssertEqual(IntentDaten.letzteBuchungen(anzahl: 2, tage: jahre, slots: slots).count, 2)
+        XCTAssertEqual(IntentDaten.letzteBuchungen(anzahl: 1, tage: jahre, slots: slots).count, 1)
+    }
+
+    // MARK: - Aufbau
+
+    /// Weit genug gefasst, dass der Tagesfilter das Ergebnis nicht mitbestimmt.
+    private let jahre = 3650
+
+    /// Legt die Demo-Datenbank an und schaltet `IntentDaten` darauf um. Ohne den
+    /// Demo-Schalter läse die Auswertung die echte Datenbank des Rechners.
+    private func mitDemoBuchungen() throws -> [String] {
+        let slots = ["demo-slot-0", "demo-slot-1", "demo-slot-2"]
+        try? FileManager.default.removeItem(at: TransactionsDatabase.databaseURL(bankId: "demo"))
+        TransactionsDatabase.writeDemoDB(seed: 4711, slotIds: slots)
+        UserDefaults.standard.set(true, forKey: "demoMode")
+        addTeardownBlock {
+            UserDefaults.standard.removeObject(forKey: "demoMode")
+            try? FileManager.default.removeItem(
+                at: TransactionsDatabase.databaseURL(bankId: "demo"))
+        }
+        return slots
     }
 }
