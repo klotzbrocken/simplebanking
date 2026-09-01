@@ -76,6 +76,15 @@ enum BackupArchive {
         var buchungen: Int
         var themes: Int
         var anhaenge: Int = 0
+        /// Belege und Theme-Dateien, die sich nicht schreiben ließen.
+        ///
+        /// Beide Schritte laufen bewusst über `try?` weiter, statt das Einspielen
+        /// abzubrechen — eine unschreibbare Beleg-PDF ist kein Grund, Konten und
+        /// Buchungen liegenzulassen. Ungezählt blieb der Fehlschlag aber unsichtbar:
+        /// Der Bericht nannte nur die Erfolge, und wer „12 Belege" las, erfuhr nie,
+        /// dass drei fehlten.
+        var anhaengeFehlend: Int = 0
+        var themesFehlend: Int = 0
     }
 
     enum Fehler: LocalizedError {
@@ -411,27 +420,39 @@ enum BackupArchive {
 
         // Belege und Entwürfe — mit den Unterordnern, die im Pfad stecken.
         var anhangAnzahl = 0
+        var anhangFehler = 0
         for (ziel, daten) in plan.dateien {
             try? FileManager.default.createDirectory(at: ziel.deletingLastPathComponent(),
                                                      withIntermediateDirectories: true)
-            if (try? daten.write(to: ziel, options: [.atomic])) != nil { anhangAnzahl += 1 }
+            if (try? daten.write(to: ziel, options: [.atomic])) != nil {
+                anhangAnzahl += 1
+            } else {
+                anhangFehler += 1
+            }
         }
 
         // Themes
         let themeOrdner = ThemeManager.shared.themesDirectoryURL
         try? FileManager.default.createDirectory(at: themeOrdner, withIntermediateDirectories: true)
         var themeAnzahl = 0
+        var themeFehler = 0
         for (ziel, daten) in plan.themes {
             // Gezählt wird, was geschrieben wurde. Vorher stand das Hochzählen hinter einem
             // `try?` und zählte die Fehlschläge mit.
-            if (try? daten.write(to: ziel, options: [.atomic])) != nil { themeAnzahl += 1 }
+            if (try? daten.write(to: ziel, options: [.atomic])) != nil {
+                themeAnzahl += 1
+            } else {
+                themeFehler += 1
+            }
         }
 
         return Bericht(einstellungen: gesetzt,
                        konten: konten,
                        buchungen: buchungen,
                        themes: themeAnzahl,
-                       anhaenge: anhangAnzahl)
+                       anhaenge: anhangAnzahl,
+                       anhaengeFehlend: anhangFehler,
+                       themesFehlend: themeFehler)
     }
 
     /// Wie viele beiseitegelegte Datenbanken aufgehoben werden.

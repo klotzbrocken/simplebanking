@@ -201,6 +201,49 @@ final class SicherungAngriffTests: XCTestCase {
         XCTAssertEqual(alteZeilen, 2, "die beiseitegelegte Datenbank ist die vorherige")
     }
 
+    /// Ein Beleg, der sich nicht schreiben lässt, darf nicht stillschweigend verschwinden.
+    ///
+    /// Belege laufen bewusst über `try?` weiter — eine unschreibbare PDF ist kein Grund,
+    /// Konten und Buchungen liegenzulassen. Vorher zählte der Bericht aber nur Erfolge:
+    /// „1 Beleg" bei zwei Belegen im Archiv, und niemand erfuhr vom zweiten.
+    func test_unschreibbarerBelegErscheintImBericht() throws {
+        // Eine reguläre Datei dort, wo ein Ordner entstehen müsste — der Unterordner
+        // lässt sich damit nicht anlegen und die PDF nicht schreiben.
+        let sperre = try CredentialsStore.appSupportURL()
+            .appendingPathComponent("attachments")
+            .appendingPathComponent("slot-gesperrt")
+        try FileManager.default.createDirectory(at: sperre.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try Data("kein Ordner".utf8).write(to: sperre)
+
+        let archiv = try sicherung(
+            themes: [:],
+            anhaenge: ["slot-gesperrt/tx-1/bon.pdf": nutzlast("%PDF"),
+                       "slot-frei/tx-2/bon.pdf": nutzlast("%PDF")],
+            datenbank: try datenbank(zeilen: 1))
+
+        let bericht = try BackupArchive.einspielen(archiv, passphrase: passphrase)
+
+        XCTAssertEqual(bericht.anhaengeFehlend, 1, "der gescheiterte Beleg fehlt im Bericht")
+        XCTAssertEqual(bericht.anhaenge, 1, "der andere Beleg muss trotzdem angekommen sein")
+        XCTAssertEqual(bericht.buchungen, 1, "ein Belegfehler darf die Buchungen nicht kosten")
+    }
+
+    /// Gegenprobe: Ohne Hindernis meldet der Bericht null Fehlschläge. Sonst wäre der
+    /// Test darüber auch mit einem Zähler grün, der immer eins zurückgibt.
+    func test_ohneHindernisMeldetDerBerichtKeineFehlschlaege() throws {
+        let archiv = try sicherung(
+            themes: ["mein-theme.json": nutzlast("{}")],
+            anhaenge: ["slot-frei/tx-2/bon.pdf": nutzlast("%PDF")],
+            datenbank: try datenbank(zeilen: 1))
+
+        let bericht = try BackupArchive.einspielen(archiv, passphrase: passphrase)
+
+        XCTAssertEqual(bericht.anhaengeFehlend, 0)
+        XCTAssertEqual(bericht.themesFehlend, 0)
+        XCTAssertEqual(bericht.anhaenge, 1)
+    }
+
     /// Es bleiben drei Rückfallebenen — ältere werden abgeräumt, nicht alle behalten.
     func test_esBleibenDreiRueckfallebenen() throws {
         try FileManager.default.createDirectory(at: sicherungsOrdner, withIntermediateDirectories: true)

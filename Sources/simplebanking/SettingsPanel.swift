@@ -3793,9 +3793,21 @@ struct SettingsView: View {
                 MultibankingStore.shared.reloadFromDisk()
                 availableThemes = ThemeManager.shared.availableThemes()
 
+                // Fehlgeschlagene Belege und Themes nur nennen, wenn es welche gab —
+                // die Zeile ist ohnehin lang. Verschweigen wäre die schlechtere Wahl:
+                // Wer „12 Beleg(e)" liest, hält das sonst für vollständig.
+                let fehlend = bericht.anhaengeFehlend + bericht.themesFehlend
+                let nachsatz = fehlend == 0 ? "" : t(
+                    " \(fehlend) Datei(en) konnten nicht geschrieben werden (\(bericht.anhaengeFehlend) Beleg(e), \(bericht.themesFehlend) Theme-Datei(en)).",
+                    " \(fehlend) file(s) could not be written (\(bericht.anhaengeFehlend) receipt(s), \(bericht.themesFehlend) theme file(s))."
+                )
                 sicherungMelden(t(
-                    "Eingespielt: \(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.anhaenge) Beleg(e), \(bericht.einstellungen) Einstellungen, \(bericht.themes) Theme-Datei(en). Bitte simplebanking neu starten und die Banken einmal neu freigeben.",
-                    "Restored: \(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.anhaenge) receipt(s), \(bericht.einstellungen) settings, \(bericht.themes) theme file(s). Restart simplebanking and re-approve your banks once."
+                    "Eingespielt: \(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.anhaenge) Beleg(e), \(bericht.einstellungen) Einstellungen, \(bericht.themes) Theme-Datei(en).\(nachsatz) Bitte simplebanking neu starten und die Banken einmal neu freigeben.",
+                    "Restored: \(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.anhaenge) receipt(s), \(bericht.einstellungen) settings, \(bericht.themes) theme file(s).\(nachsatz) Restart simplebanking and re-approve your banks once."
+                    // Bewusst kein `fehler: true`: Das löst einen modalen Dialog mit der
+                    // Überschrift „Sicherung fehlgeschlagen" aus. Fehlgeschlagen ist sie
+                    // nicht — Konten, Buchungen und Einstellungen sind da. Die fehlenden
+                    // Dateien stehen im Hinweis.
                 ), fehler: false)
                 neustartAnbieten()
             }
