@@ -75,6 +75,11 @@ enum SCAFieldInputPresenter {
                 // nach vorn holen + Level über das Setup-Panel heben.
                 panel.level = .modalPanel
                 NSApp.activate(ignoringOtherApps: true)
+                // Das Panel wurde mit fester Größe angelegt; mit Aufgabenbild ist der
+                // Inhalt größer und würde sonst abgeschnitten.
+                if let inhalt = panel.contentView {
+                    panel.setContentSize(inhalt.fittingSize)
+                }
                 panel.center()
                 panel.makeKeyAndOrderFront(nil)
                 NSApp.runModal(for: panel)   // blockiert bis Submit/Cancel/Close
@@ -96,6 +101,11 @@ enum SCAFieldInputPresenter {
                     onCancel: { box.resolve(nil, panel: panel) }
                 ))
                 panel.isFloatingPanel = true
+                // Das Panel wurde mit fester Größe angelegt; mit Aufgabenbild ist der
+                // Inhalt größer und würde sonst abgeschnitten.
+                if let inhalt = panel.contentView {
+                    panel.setContentSize(inhalt.fittingSize)
+                }
                 panel.center()
                 panel.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
@@ -141,6 +151,27 @@ private final class SCAFieldInputWindowDelegate: NSObject, NSWindowDelegate {
 
 // MARK: - View
 
+/// Zeigt die optische Aufgabe der Bank.
+///
+/// Bewusst eine `NSImageView` statt `Image(nsImage:)`: Flicker-Grafiken sind
+/// animierte GIFs, und SwiftUI zeigt davon nur das erste Einzelbild — der
+/// TAN-Generator bekäme damit nichts zu sehen.
+private struct AufgabenbildView: NSViewRepresentable {
+    let daten: Data
+
+    func makeNSView(context: Context) -> NSImageView {
+        let v = NSImageView()
+        v.imageScaling = .scaleProportionallyUpOrDown
+        v.animates = true
+        v.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return v
+    }
+
+    func updateNSView(_ v: NSImageView, context: Context) {
+        v.image = NSImage(data: daten)
+    }
+}
+
 private struct SCAFieldInputView: View {
     let spec: SCAFieldInput.Spec
     let onSubmit: (String) -> Void
@@ -148,6 +179,43 @@ private struct SCAFieldInputView: View {
 
     @State private var value: String = ""
     @FocusState private var focused: Bool
+    /// Feinjustierung der Flicker-Breite. Bildschirme melden ihre physische Größe
+    /// nicht zuverlässig, deshalb muss der Nutzer nachregeln können — sonst liest
+    /// der TAN-Generator nichts. Bleibt für das nächste Mal gespeichert.
+    @AppStorage("chipTanBreitenAnpassung") private var breitenAnpassung: Double = 1.0
+
+    /// Anzeigebreite der Aufgabe.
+    ///
+    /// Flicker-Grafiken brauchen physisch 62,5 mm; QR- und photoTAN-Bilder werden
+    /// einfach groß genug zum Abscannen gezeigt.
+    private var bildBreite: CGFloat {
+        guard let bild = spec.bild else { return 0 }
+        guard bild.istFlicker else { return 200 }
+        let schirm = NSScreen.main
+        let punkte = Double(schirm?.frame.width ?? 0)
+        let mm = schirm.map { s -> Double in
+            let id = (s.deviceDescription[.init("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+            return Double(CGDisplayScreenSize(id).width)
+        } ?? 0
+        return CGFloat(SCAFieldInput.flickerBreite(bildschirmBreitePunkte: punkte,
+                                                   bildschirmBreiteMm: mm,
+                                                   anpassung: breitenAnpassung))
+    }
+
+    /// Fensterhöhe: ohne Aufgabe wie bisher, mit Aufgabe um deren Höhe gewachsen.
+    private var fensterHoehe: CGFloat {
+        guard spec.bild != nil else { return 230 }
+        return 230 + bildHoehe + (spec.bild?.istFlicker == true ? 34 : 12)
+    }
+
+    private var bildHoehe: CGFloat {
+        guard let bild = spec.bild, let img = NSImage(data: bild.daten), img.size.width > 0 else {
+            return 0
+        }
+        return min(bildBreite * img.size.height / img.size.width, 260)
+    }
+
+    private var fensterBreite: CGFloat { max(380, bildBreite + 40) }
 
     private var promptText: String {
         if let m = spec.msg?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty { return m }
@@ -172,6 +240,32 @@ private struct SCAFieldInputView: View {
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let bild = spec.bild {
+                VStack(alignment: .leading, spacing: 6) {
+                    AufgabenbildView(daten: bild.daten)
+                        .frame(width: bildBreite, height: bildHoehe)
+                        .accessibilityLabel(L10n.t("Aufgabe der Bank zum Abscannen",
+                                                   "Bank challenge to scan"))
+                    if bild.istFlicker {
+                        // Nur bei Flicker: Dort ist die physische Breite Teil des
+                        // Verfahrens. Bei QR spielt sie keine Rolle.
+                        HStack(spacing: 8) {
+                            Text(L10n.t("Breite anpassen", "Adjust width"))
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            Button("−") { breitenAnpassung = max(0.5, breitenAnpassung - 0.05) }
+                                .buttonStyle(.borderless)
+                            Button("+") { breitenAnpassung = min(2.0, breitenAnpassung + 0.05) }
+                                .buttonStyle(.borderless)
+                            Text(L10n.t("bis die Markierungen zum Gerät passen",
+                                        "until the markers match your device"))
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
 
             Group {
                 if isSecure {
@@ -205,7 +299,7 @@ private struct SCAFieldInputView: View {
             }
         }
         .padding(20)
-        .frame(width: 380, height: 230)
+        .frame(width: fensterBreite, height: fensterHoehe)
         .onAppear { focused = true }
     }
 }

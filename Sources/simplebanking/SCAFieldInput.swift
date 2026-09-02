@@ -15,6 +15,52 @@ import RoutexClient
 
 enum SCAFieldInput {
 
+    /// Die optische Aufgabe der Bank: chipTAN-QR, Flicker-Grafik oder photoTAN.
+    ///
+    /// Ohne sie ist ein chipTAN-Dialog wertlos — der Generator erzeugt die TAN aus
+    /// dem Bild, nicht aus dem Text. Das SDK liefert sie als `Dialog.image` mit;
+    /// bis 02.09.2026 warf `SCACommon` sie beim Übersetzen weg, weshalb das
+    /// Eingabefenster nur den Begleittext zeigte.
+    struct Aufgabenbild: Sendable, Equatable {
+        let mimeType: String
+        let daten: Data
+        /// Roher HHD\_UC-Datenstrom für die optische Kopplung. Ist er gesetzt,
+        /// handelt es sich um eine Flicker-Grafik, und `daten` ist das dazu passende,
+        /// bereits gerenderte animierte GIF.
+        let hhdUC: Data?
+
+        /// Flicker-Grafiken haben eine vorgeschriebene physische Breite, QR- und
+        /// photoTAN-Bilder nicht.
+        var istFlicker: Bool { hhdUC != nil }
+    }
+
+    /// Vorgeschriebene physische Breite einer Flicker-Grafik in Millimetern.
+    static let flickerBreiteMm: Double = 62.5
+
+    /// Anzeigebreite in Punkten für eine Flicker-Grafik.
+    ///
+    /// Die Grafik muss auf dem Schirm physisch 62,5 mm breit sein, sonst treffen die
+    /// hellen Balken die Sensoren des TAN-Generators nicht und er liest nichts. Das
+    /// ist keine Stilfrage, sondern steht so in der SDK-Beschreibung.
+    ///
+    /// Punkte und Millimeter hängen über die **tatsächliche** Bildschirmgröße
+    /// zusammen, nicht über die nominellen 72 dpi eines Punkts — deshalb die
+    /// Umrechnung über die gemeldete Breite des Bildschirms statt einer festen Zahl.
+    ///
+    /// - Parameter anpassung: Faktor aus der Feinjustierung. Bildschirme melden ihre
+    ///   physische Größe nicht immer richtig (Fernseher und viele externe Monitore
+    ///   runden grob), deshalb kann der Nutzer nachregeln — so hält es jede
+    ///   chipTAN-Anwendung.
+    static func flickerBreite(bildschirmBreitePunkte: Double,
+                              bildschirmBreiteMm: Double,
+                              anpassung: Double = 1.0) -> Double {
+        // Unbekannte Bildschirmgröße: lieber ein brauchbarer Näherungswert als ein
+        // Bild der Breite null. Nachregeln kann der Nutzer.
+        guard bildschirmBreitePunkte > 0, bildschirmBreiteMm > 0 else { return 240 }
+        let breite = flickerBreiteMm * bildschirmBreitePunkte / bildschirmBreiteMm * anpassung
+        return min(max(breite, 80), 700)
+    }
+
     /// Was die Bank für den Eingabe-Dialog verlangt.
     struct Spec: Sendable, Equatable {
         let type: InputType
@@ -34,6 +80,8 @@ enum SCAFieldInput {
         /// nicht zwischenzeitlich die Bank gewechselt hat (sonst wäre der
         /// `InputContext` für eine andere Session).
         let slotEpochAtRequest: Int
+        /// Die optische Aufgabe, falls die Bank eine mitschickt (chipTAN, photoTAN).
+        var bild: Aufgabenbild? = nil
     }
 
     /// True, wenn der eingegebene Wert die Constraints der Spec erfüllt.

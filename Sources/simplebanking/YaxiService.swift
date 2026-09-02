@@ -30,7 +30,9 @@ enum YaxiService {
     }
 
     /// Called on MainActor when a SCA/TAN confirmation is waiting (true) or done (false).
-    nonisolated(unsafe) static var onTanStateChanged: (@MainActor (Bool) -> Void)?
+    /// Zweiter Parameter ist der Slot, dessen Bank fragt. Ohne ihn galt der Hinweis
+    /// für alle Konten gleichzeitig.
+    nonisolated(unsafe) static var onTanStateChanged: (@MainActor (Bool, String) -> Void)?
 
     /// Wird vom SCA-`.field`-Branch in `handleSCA` aufgerufen, wenn die Bank
     /// eine TAN/PIN-Eingabe verlangt. Meldet den eingegebenen String über die
@@ -685,7 +687,10 @@ enum YaxiService {
                           userInfo: [NSLocalizedDescriptionKey: "no connectionId for accounts()"])
         }
         let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
-        AppLogger.log("fetchAccounts: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
+        // Alter der Zustimmung mitschreiben: Ohne sie sagt „167b" nichts darüber,
+        // ob die Daten frisch sind oder seit Tagen unverändert mitgeschickt werden.
+        let cdAlter = await sessionStore.connectionDataAge(slotId: slotSnapshot)
+        AppLogger.log("fetchAccounts: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") alter=\(cdAlter.map { String(format: "%.1fh", $0 / 3600) } ?? "?") model.none=\(model.none)", category: "YaxiService")
         var storedSession = await sessionStore.session(for: .balances, slotId: slotSnapshot)
         let creds = try buildCredentials(
             connectionId: connectionId, model: model,
@@ -843,7 +848,10 @@ enum YaxiService {
             : [AccountReference(id: .iban(iban), currency: "EUR")]
 
         let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
-        AppLogger.log("fetchBalances: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
+        // Alter der Zustimmung mitschreiben: Ohne sie sagt „167b" nichts darüber,
+        // ob die Daten frisch sind oder seit Tagen unverändert mitgeschickt werden.
+        let cdAlter = await sessionStore.connectionDataAge(slotId: slotSnapshot)
+        AppLogger.log("fetchBalances: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") alter=\(cdAlter.map { String(format: "%.1fh", $0 / 3600) } ?? "?") model.none=\(model.none)", category: "YaxiService")
         let storedSession = await sessionStore.session(for: .balances, slotId: slotSnapshot)
         let creds = try buildCredentials(
             connectionId: connectionId, model: model,
@@ -1198,7 +1206,10 @@ enum YaxiService {
                                        userMessage: nil, scaRequired: nil)
         }
         let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
-        AppLogger.log("fetchTransactions: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") model.none=\(model.none)", category: "YaxiService")
+        // Alter der Zustimmung mitschreiben: Ohne sie sagt „167b" nichts darüber,
+        // ob die Daten frisch sind oder seit Tagen unverändert mitgeschickt werden.
+        let cdAlter = await sessionStore.connectionDataAge(slotId: slotSnapshot)
+        AppLogger.log("fetchTransactions: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") alter=\(cdAlter.map { String(format: "%.1fh", $0 / 3600) } ?? "?") model.none=\(model.none)", category: "YaxiService")
         let storedSession = await sessionStore.session(for: .transactions, slotId: slotSnapshot)
         let creds = try buildCredentials(
             connectionId: connectionId, model: model,
@@ -2298,8 +2309,14 @@ enum YaxiService {
     private enum SCACommon {
         case result(SCAPayload, Session?, ConnectionData?)
         /// `String?` = optionale Challenge-Nachricht der Bank (z.B. „TAN an ***1234"),
-        /// wird im Field-Input-Sheet angezeigt.
-        case dialog(DialogInput, String?)
+        /// `Aufgabenbild?` = die optische Aufgabe (chipTAN-QR, Flicker, photoTAN).
+        /// Beides wird im Field-Input-Sheet angezeigt.
+        ///
+        /// Das Bild fehlte hier bis 02.09.2026. Es kam im SDK längst mit
+        /// (`Dialog.image`), wurde beim Übersetzen aber weggeworfen — und damit stand
+        /// im chipTAN-Dialog nur der Begleittext. Ohne QR-Code erzeugt der Generator
+        /// keine TAN, der Dialog war also nicht zu beantworten.
+        case dialog(DialogInput, String?, SCAFieldInput.Aufgabenbild?)
         case redirect(URL, ConfirmationContext)
         case redirectHandle(String, ConfirmationContext)
     }
@@ -2315,7 +2332,9 @@ enum YaxiService {
         case .result(let res):
             return .result(verpacken(res.authenticated), res.session, res.connectionData)
         case .dialog(let d):
-            return .dialog(d.input, d.message)
+            return .dialog(d.input, d.message, d.image.map {
+                SCAFieldInput.Aufgabenbild(mimeType: $0.mimeType, daten: $0.data, hhdUC: $0.hhdUCData)
+            })
         case .redirect(let red):
             return .redirect(red.url, red.context)
         case .redirectHandle(let h):
@@ -2356,10 +2375,24 @@ enum YaxiService {
 
         case .result(let payload, let session, let connectionData):
             setupPhaseReporter?("sca_result", ["connection_data": connectionData == nil ? "none" : "\(connectionData!.bytes.count)b"])
-            AppLogger.log("SCA result: connectionData=\(connectionData == nil ? "nil" : "\(connectionData!.bytes.count)b")", category: "YaxiService")
+            AppLogger.log("SCA result: connectionData=\(connectionData == nil ? "nil" : "\(connectionData!.bytes.count)b") slot=\(slotId.prefix(8)) schritte=\(depth)", category: "YaxiService")
+            // `depth > 0` heißt: Zwischen Anfrage und Ergebnis lag mindestens ein
+            // Dialog oder ein Redirect — der Nutzer hat also etwas bestätigt. Kommt
+            // dabei keine neue Zustimmung zurück, kann die App die gespeicherte nicht
+            // erneuern und schickt beim nächsten Mal wieder die alte. Genau diese
+            // Sackgasse ließ sich am 02.09.2026 für bunq nur mühsam aus Zählwerten
+            // zurückrechnen; sie gehört als eine Zeile ins Protokoll.
+            if depth > 0, connectionData == nil {
+                let alter = await sessionStore.connectionDataAge(slotId: slotId)
+                let alterText = alter.map { String(format: "%.1f h", $0 / 3600) } ?? "unbekannt"
+                AppLogger.log(
+                    "SCA: Freigabe durchlaufen (\(depth) Schritte), aber KEINE neuen " +
+                    "Verbindungsdaten — gespeicherte sind \(alterText) alt, slot=\(slotId.prefix(8))",
+                    category: "YaxiService", level: "WARN")
+            }
             return SCAOutcome(payload: payload, session: session, connectionData: connectionData)
 
-        case .dialog(let input, let dialogMsg):
+        case .dialog(let input, let dialogMsg, let dialogBild):
             switch input {
 
             case .selection(let options, let context):
@@ -2437,7 +2470,8 @@ enum YaxiService {
                     minLength: minLen, maxLength: maxLen,
                     bankDisplayName: bankName,
                     msg: dialogMsg,
-                    slotEpochAtRequest: slotEpochSnapshot
+                    slotEpochAtRequest: slotEpochSnapshot,
+                    bild: dialogBild
                 )
                 // Nur Metadaten loggen — der eingegebene Wert ist Secret.
                 AppLogger.log(
@@ -2574,8 +2608,8 @@ enum YaxiService {
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         depth: Int
     ) async -> SCAOutcome? {
-        Task { @MainActor in YaxiService.onTanStateChanged?(true) }
-        defer { Task { @MainActor in YaxiService.onTanStateChanged?(false) } }
+        Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
+        defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
         var ctx = context
         var currentDelay = delay
         var consecutiveErrors = 0
@@ -2592,7 +2626,7 @@ enum YaxiService {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond, depth: depth + 1)
-                case .dialog(let input, _):
+                case .dialog(let input, _, _):
                     if case .confirmation(let newCtx, let newDelay) = input {
                         let ctxChanged = newCtx != ctx
                         ctx = newCtx
@@ -2641,8 +2675,8 @@ enum YaxiService {
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         callbackSignal: AsyncStream<Void>? = nil
     ) async -> SCAOutcome? {
-        Task { @MainActor in YaxiService.onTanStateChanged?(true) }
-        defer { Task { @MainActor in YaxiService.onTanStateChanged?(false) } }
+        Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
+        defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
         var ctx = context
         var callbackFired = false
         var consecutiveErrors = 0
@@ -2679,7 +2713,7 @@ enum YaxiService {
                     ctx = newCtx
                 case .redirectHandle(_, let newCtx):
                     ctx = newCtx
-                case .dialog(let input, _):
+                case .dialog(let input, _, _):
                     if case .confirmation = input {
                         return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                                confirm: confirm, respond: respond)
