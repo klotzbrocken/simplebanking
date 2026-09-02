@@ -395,7 +395,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var switchTask: Task<Void, Never>?
     private var isHBCICallInFlight: Bool = false    // guard against concurrent HBCI calls (balance + transactions)
     private var isPayPalCallInFlight: Bool = false  // PayPal-Provider (kein HBCI-Mutex nötig)
-    private var isTanPending: Bool = false
+    /// Konten, deren Bank gerade auf eine Freigabe wartet.
+    ///
+    /// Früher ein einzelnes `Bool`. Damit stand „TAN" in der Menüleiste und der Hinweis
+    /// über der Umsatzliste bei *jedem* Konto, sobald irgendeine Bank fragte — und blieb
+    /// nach einem Kontowechsel stehen. Beide Aufrufstellen in `YaxiService` kannten den
+    /// Slot längst, der Rückruf warf ihn nur weg.
+    private var tanPendingSlots: Set<String> = []
+
+    /// Wartet die Bank des gerade angezeigten Kontos auf eine Freigabe?
+    private var isTanPending: Bool {
+        TanAnzeige.zeigen(wartendeSlots: tanPendingSlots,
+                          aktiverSlot: TransactionsDatabase.activeSlotId,
+                          alleAktiv: txVM.isUnifiedMode)
+    }
+
+    /// Bringt Menüleiste und Umsatzliste auf den Freigabe-Stand des aktiven Kontos.
+    private func aktualisiereTanAnzeige() {
+        txVM.isTanPending = isTanPending
+        updateMenuBarButton()
+    }
 
     private var isHiddenBalance: Bool = false
     private var hideTimer: Timer?
@@ -1231,10 +1250,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         YaxiService.migrateCredentialsModelIfNeeded()
 
         // TAN/SCA state callback → update menu bar and transactions panel
-        YaxiService.onTanStateChanged = { [weak self] isPending in
-            self?.isTanPending = isPending
-            self?.txVM.isTanPending = isPending
-            self?.updateMenuBarButton()
+        YaxiService.onTanStateChanged = { [weak self] isPending, slotId in
+            guard let self else { return }
+            if isPending {
+                self.tanPendingSlots.insert(slotId)
+            } else {
+                self.tanPendingSlots.remove(slotId)
+            }
+            self.aktualisiereTanAnzeige()
         }
 
         // SCA `.field`-Branch (TAN-Eingabe-Dialog) — Bank verlangt einen
@@ -5121,6 +5144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.onActivateUnified = { [weak self] in
             guard let self else { return }
             self.txVM.unifiedModeEnabled = true
+            // In der Übersicht sind alle Konten zu sehen — damit ändert sich, welche
+            // Freigaben einschlägig sind.
+            self.aktualisiereTanAnzeige()
             self.refreshFlyoutIfVisible()
             // @AppStorage-Propagation greift beim synchronen Rebuild manchmal noch
             // nicht → zweiter Refresh im nächsten Runloop, damit es beim ERSTEN Klick
@@ -6375,6 +6401,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // Apply the new slot's identity to AppStorage + txVM immediately
         applySlotToViewModel(slot)
+
+        // Freigabe-Hinweis gehört zum Konto: Nach dem Wechsel gilt der Stand des neuen.
+        aktualisiereTanAnzeige()
 
         // Clear displayed data immediately
         txVM.transactions = []
