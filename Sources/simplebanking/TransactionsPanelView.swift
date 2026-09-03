@@ -1502,6 +1502,18 @@ private struct TransactionsPanelView: View {
     /// Konto-Indikatoren (Slot-Dots + „Alle Konten"). Von Normal- und Sparmode-Layout
     /// geteilt (im Sparmode in der RoundupOverlay-Steuerzeile, sonst eigene Zeile).
     @ViewBuilder
+    /// Oberste Stufe der Money-Heat — die Farbe, mit der der Karten-Verlauf oben
+    /// beginnt. Themes zeichnen dort ihre flache Fläche, Aufrunden und Belegkarten
+    /// tragen keinen Wash.
+    private var titelleistenWash: Color {
+        guard !roundupView.isActive, !receiptActive else { return .clear }
+        if themed { return .themedSurfaceOrClear }
+        let parsed = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
+        let level = BalanceSignal.classify(balance: parsed, thresholds: normalizedBalanceThresholds)
+        let style = BalanceSignal.style(for: level)
+        return BalanceWash.colors(level: level, style: style, dark: activeColorScheme == .dark).top
+    }
+
     /// Temperaturfarbe des aktiven Kontos (wie der Balance-Wash) — Tönung der aktiven Pille.
     private var headerTint: Color {
         let parsed = AmountParser.parseCurrencyDisplayOrNil(vm.currentBalance)
@@ -1852,6 +1864,14 @@ private struct TransactionsPanelView: View {
             .rippleEffect(trigger: vm.rippleTrigger,
                           defaultOrigin: CGPoint(x: 190, y: 65),
                           enabled: ThemeChrome.rippleEnabled)
+            // Statischer Wash UNTER dem gerippelten Inhalt, bis hinter die Titelleiste.
+            // Der Ripple-Shader (`layerEffect`) rastert nur den Rahmen der Karte; der
+            // Teil des Verlaufs, der per `ignoresSafeArea` hinter die Titelleiste ragt,
+            // liegt außerhalb und fiel deshalb für die Dauer des Ripples (1,5 s) weg —
+            // der Streifen über der Saldo-Karte wurde kurz farblos. Diese Fläche trägt
+            // dieselbe oberste Stufe der Money-Heat und ist im Normalfall vollständig
+            // vom Verlauf verdeckt; sichtbar wird sie nur in genau diesem Streifen.
+            .background(titelleistenWash.ignoresSafeArea(.container, edges: .top))
             // Randlos (0 Außen-Padding) für alle Saldo-/Marken-Karten; nur Roundup
             // behält das 16/-9-Inset-Layout.
             .padding(.horizontal, !roundupView.isActive ? 0 : 16)
