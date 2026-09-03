@@ -741,9 +741,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         return formatEURWithCents(total)
     }
 
+    /// Eine Menüleisten-Aktualisierung wurde zurückgestellt, weil das Flyout offen war.
+    private var menueleisteVeraltet = false
+
     private func updateMenuBarButton() {
         guard let button = statusItem?.button else { return }
         guard !locked else { return }
+        // Solange das Flyout offen ist, bleibt die Menüleiste unangetastet. Das Popover
+        // hängt an den Maßen seines Ankers: Ein neues Logo, ein längerer Saldo oder das
+        // Bewegungszeichen ändern die Breite des Status-Items — dann springt das Flyout
+        // oder schließt sich. Beides trat beim Bankwechsel auf. Die Leiste liegt in dem
+        // Moment ohnehin unter dem Flyout; nachgezogen wird sie beim Schließen.
+        if balancePopover?.isShown == true {
+            menueleisteVeraltet = true
+            return
+        }
 
         // v1.5.0: `showBalanceInMenuBar` steuert die Breite und den Title:
         //   true  → fest-breite Variante mit voller Saldo-Anzeige
@@ -784,7 +796,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // TAN / 2FA pending
         if isTanPending {
             setButtonTitle(button, "\(p)TAN")
-            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
+            setzeBreite(isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo))
             return
         }
 
@@ -806,7 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 setButtonTitle(button, "\(p)\(hiddenEmoji)•••.•• ",
                                zeichen: aktuellesBewegungszeichen())
             }
-            statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
+            setzeBreite(isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo))
             return
         }
 
@@ -840,7 +852,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Sperre, Einrichtung) überschreiben.
             button.toolTip = ""
         }
-        statusItem.length = isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo)
+        setzeBreite(isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo))
     }
 
     /// Liefert das Money-Mood-Emoji für den aktuellen Saldo des aktiven Slots, gefolgt
@@ -898,6 +910,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// 4,61. Das Dreieck ist bei 8 pt 5,08 hoch — 1,79 hebt seine Mitte genau
     /// dorthin.
     private static let zeichenVersatz: CGFloat = 1.79
+
+    /// Setzt die Breite des Status-Items nur, wenn sie sich tatsächlich ändert.
+    ///
+    /// Jede Zuweisung lässt die Menüleiste das Element neu setzen, und ein offenes
+    /// Popover hängt an den Maßen seines Ankers — es schließt sich dabei. Die
+    /// Zuweisung war bisher bedingungslos, obwohl der Wert fast immer derselbe ist.
+    private func setzeBreite(_ breite: CGFloat) {
+        guard statusItem.length != breite else { return }
+        statusItem.length = breite
+    }
 
     private func setButtonTitle(_ button: NSStatusBarButton, _ text: String,
                                 zeichen: Kontobewegungszeichen? = nil) {
@@ -3878,6 +3900,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// Erst hier ist `isShown` wieder false — zurückgestellte Aktualisierungen der
+    /// Menüleiste (siehe `updateMenuBarButton`) werden jetzt nachgeholt.
+    nonisolated func popoverDidClose(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            guard menueleisteVeraltet else { return }
+            menueleisteVeraltet = false
+            updateMenuBarButton()
+        }
+    }
+
     /// Solange der Quick-Send-Drawer offen ist, KEIN System-Dismiss zulassen
     /// (Klick außerhalb, App-Deaktivierung, auch performClose der Auto-Hide). Der
     /// User soll das Überweisungsformular in Ruhe ausfüllen können. Geschlossen
@@ -4541,11 +4573,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         popover.contentSize = flyoutContentSize(hasDots: hasDots)
         popover.contentViewController = host
         balancePopover = popover
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        // Erst NACH dem Aufbau zurücksetzen: `buildFlyoutHost` entscheidet anhand
-        // derselben ungesehenen Buchungen, ob der Ripple läuft. Vorher gelöscht,
-        // bliebe das Flyout beim Öffnen stumm.
+        // Nach dem Aufbau, aber VOR dem Anzeigen zurücksetzen.
+        //
+        // Nach dem Aufbau, weil `buildFlyoutHost` anhand derselben ungesehenen
+        // Buchungen entscheidet, ob der Ripple läuft — vorher gelöscht, bliebe das
+        // Flyout beim Öffnen stumm.
+        //
+        // Vor dem Anzeigen, weil das Zurücksetzen die Menüleiste neu schreibt und
+        // dabei `statusItem.length` anfasst. Ein Popover hängt an den Maßen seines
+        // Ankers: Ändert sich die Breite des Status-Items, während es offen ist,
+        // schließt es sich sofort wieder. Genau das passierte beim ersten Klick nach
+        // dem Start — dem einzigen, bei dem das Bewegungszeichen noch verschwindet
+        // und die Breite sich deshalb wirklich ändert.
         markiereGeseheneBewegungen()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         // Die App läuft als `.accessory` und ist beim Klick aufs Status-Item nicht
         // aktiv. Das Popover erscheint dann zwar, sein Fenster wird aber nicht zum
         // Key-Window — der erste Klick hinein aktiviert nur die App und erreicht das
@@ -6416,7 +6457,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             lastBalance = cachedBalance
             txVM.currentBalance = formatEURWithCents(cachedBalance)
             updateStatusBalanceTitle()
-        } else if !isHiddenBalance {
+        } else if !isHiddenBalance, balancePopover?.isShown != true {
+            // Gleicher Grund wie in `updateMenuBarButton`: kein Breitenwechsel unter
+            // einem offenen Flyout.
             statusItem.button?.title = "…"
         }
 
