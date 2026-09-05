@@ -267,6 +267,11 @@ private struct SCAFieldInputView: View {
                 }
             }
 
+            if spec.nurBestaetigen {
+                // Ohne Polling-Freigabe wartet die App nicht von selbst — der Nutzer
+                // sagt, wann er in seiner Banking-App bestätigt hat.
+                EmptyView()
+            } else {
             Group {
                 if isSecure {
                     SecureField("", text: $value)
@@ -280,7 +285,8 @@ private struct SCAFieldInputView: View {
             .font(.system(size: 18, weight: .medium).monospacedDigit())
             .onSubmit { if isValid { onSubmit(value) } }
 
-            let hint = SCAFieldInput.hint(for: spec)
+            }
+            let hint = spec.nurBestaetigen ? "" : SCAFieldInput.hint(for: spec)
             if !hint.isEmpty {
                 Text(hint)
                     .font(.system(size: 11))
@@ -293,13 +299,17 @@ private struct SCAFieldInputView: View {
                 Spacer()
                 Button(L10n.t("Abbrechen", "Cancel")) { onCancel() }
                     .keyboardShortcut(.cancelAction)
-                Button(L10n.t("Bestätigen", "Confirm")) { onSubmit(value) }
+                Button(spec.nurBestaetigen
+                        ? L10n.t("Habe ich bestätigt", "I have approved")
+                        : L10n.t("Bestätigen", "Confirm")) {
+                    onSubmit(spec.nurBestaetigen ? "OK" : value)
+                }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!isValid)
+                    .disabled(!spec.nurBestaetigen && !isValid)
             }
         }
         .padding(20)
         .frame(width: fensterBreite, height: fensterHoehe)
-        .onAppear { focused = true }
+        .onAppear { focused = !spec.nurBestaetigen }
     }
 }

@@ -2547,18 +2547,64 @@ enum YaxiService {
                         confirm: confirm, respond: respond, depth: depth
                     )
                 } else {
-                    // YAXI: pollingDelay not set — use a conservative 5 s default.
-                    // Push/decoupled banks don't prescribe an interval, but they do
-                    // complete via the same confirm() path once the user approves in
-                    // their banking app.  Polling with a longer delay is safe and is
-                    // what worked reliably before any button-based approach was tried.
-                    AppLogger.log("SCA Confirmation: no pollingDelay — polling with 5 s default", category: "YaxiService")
-                    return await pollConfirmation(
-                        context: context,
-                        delay: 5.0,
-                        client: client, ticket: ticket, slotId: slotId,
-                        confirm: confirm, respond: respond, depth: depth
+                    // Ohne `pollingDelay` **nicht** pollen. Hier standen früher feste 5 s
+                    // mit der Begründung, das habe zuverlässig funktioniert. YAXI erlaubt
+                    // automatisches Nachfragen aber nur mit angegebenem Abstand — ohne ihn
+                    // fragt die App die Bank ungefragt in einem Takt ab, den diese nie
+                    // genannt hat.
+                    //
+                    // Stattdessen: Bankmeldung zeigen und den Nutzer sagen lassen, wann er
+                    // bestätigt hat. Genau ein `confirm` danach.
+                    AppLogger.log("SCA Confirmation: kein pollingDelay — Bestätigung wird erfragt statt gepollt",
+                                  category: "YaxiService")
+                    guard let provider = fieldInputProvider else {
+                        AppLogger.log("SCA Confirmation: kein Provider — ohne Polling-Freigabe nicht fortsetzbar",
+                                      category: "YaxiService", level: "WARN")
+                        return .abgebrochen
+                    }
+                    let slotEpochSnapshot = await onMainRunLoop {
+                        MultibankingStore.shared.activeSlotEpoch
+                    }
+                    let slotName = await onMainRunLoop {
+                        MultibankingStore.shared.slots.first(where: { $0.id == slotId })?.displayName
+                    }
+                    let spec = SCAFieldInput.Spec(
+                        type: .text, secrecyLevel: .plain,
+                        minLength: nil, maxLength: nil,
+                        bankDisplayName: scaBankLabel(
+                            slotName: slotName,
+                            connectionName: UserDefaults.standard.string(forKey: connectionNameKey(for: slotId))),
+                        msg: dialogMsg ?? L10n.t(
+                            "Bitte bestätige die Anfrage in deiner Banking-App.",
+                            "Please approve the request in your banking app."),
+                        slotEpochAtRequest: slotEpochSnapshot,
+                        bild: dialogBild,
+                        nurBestaetigen: true
                     )
+                    let bestaetigt = await withCheckedContinuation {
+                        (cont: CheckedContinuation<String?, Never>) in
+                        RunLoop.main.perform(inModes: [.default, .modalPanel]) {
+                            MainActor.assumeIsolated {
+                                let guard_ = FieldInputResumeGuard(cont)
+                                provider(spec) { wert in guard_.resume(wert) }
+                            }
+                        }
+                    }
+                    guard bestaetigt != nil else {
+                        AppLogger.log("SCA Confirmation: vom Nutzer abgebrochen", category: "YaxiService")
+                        return .abgebrochen
+                    }
+                    do {
+                        let next = try await confirm(context)
+                        return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
+                                               confirm: confirm, respond: respond, depth: depth + 1)
+                    } catch {
+                        AppLogger.log("SCA Confirmation: confirm nach Bestätigung fehlgeschlagen: \(String(reflecting: error))",
+                                      category: "YaxiService", level: "ERROR")
+                        await writeTrace(client: client, label: "sca-confirm-manuell",
+                                         ticket: ticket, error: error)
+                        return .unklar
+                    }
                 }
 
             case .field(let type, let secrecy, let minLen, let maxLen, let context):
@@ -2797,7 +2843,7 @@ enum YaxiService {
     ) async -> SCAErgebnis {
         Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
         defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
-        var ctx = context
+        let ctx = context   // unverändert: ein neuer Kontext geht an handleSCA
         var callbackFired = false
         var consecutiveErrors = 0
 
@@ -2829,17 +2875,25 @@ enum YaxiService {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond)
-                case .redirect(_, let newCtx):
-                    ctx = newCtx
-                case .redirectHandle(_, let newCtx):
-                    ctx = newCtx
                 case .dialog(let input, _, _):
-                    if case .confirmation = input {
-                        return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                               confirm: confirm, respond: respond)
+                    // Eine Bestätigung mit unverändertem Kontext heißt „noch nicht
+                    // fertig" — dafür ist diese Schleife da, sie läuft weiter.
+                    if case .confirmation(let newCtx, _) = input, newCtx == ctx {
+                        break
                     }
-                    AppLogger.log("SCA Redirect poll: unexpected dialog", category: "YaxiService", level: "WARN")
-                    return .unklar
+                    // Alles andere gibt `handleSCA` weiter. Vorher endete hier jede
+                    // Auswahl und jede Eingabe mit „unexpected dialog" und einem
+                    // Abbruch — eine Bank, die NACH dem Browserschritt nach der TAN
+                    // fragt, war damit nicht bedienbar, und die chipTAN-Anzeige lief
+                    // ins Leere.
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
+                                           confirm: confirm, respond: respond)
+                case .redirect, .redirectHandle:
+                    // Ein zweiter Browserschritt. Bisher wurde nur der Kontext
+                    // übernommen und weitergepollt — die neue Seite hat nie jemand
+                    // geöffnet, also konnte die Freigabe nicht fertig werden.
+                    return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
+                                           confirm: confirm, respond: respond)
                 }
             } catch {
                 consecutiveErrors += 1

@@ -82,6 +82,12 @@ enum SCAFieldInput {
         let slotEpochAtRequest: Int
         /// Die optische Aufgabe, falls die Bank eine mitschickt (chipTAN, photoTAN).
         var bild: Aufgabenbild? = nil
+        /// Kein Eingabefeld, nur bestätigen.
+        ///
+        /// Für Freigaben, die die Bank **ohne** Polling-Abstand schickt. YAXI erlaubt
+        /// automatisches Nachfragen nur mit angegebenem Abstand; ohne ihn gehört die
+        /// Bankmeldung angezeigt und der Nutzer sagt selbst, wann er bestätigt hat.
+        var nurBestaetigen: Bool = false
     }
 
     /// True, wenn der eingegebene Wert die Constraints der Spec erfüllt.
