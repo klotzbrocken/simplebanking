@@ -694,20 +694,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
-    /// Computes the unified total balance (Double) for the flyout card.
-    private func computeUnifiedFlyoutTotal() -> Double? {
-        guard txVM.isUnifiedMode else { return nil }
+    /// Summe je Währung für die Flyout-Karte.
+    ///
+    /// Vorher wurden alle Salden als `Double` addiert und als EUR formatiert. Sobald ein
+    /// Konto in einer anderen Währung geführt wird, ist diese Zahl fachlich falsch. Die
+    /// Menüleiste trennt seit jeher nach Währung — hier fehlte es.
+    private func computeUnifiedFlyoutByCurrency() -> [String: Double] {
+        guard txVM.isUnifiedMode else { return [:] }
         let store = MultibankingStore.shared
-        guard store.realSlotCount > 1 else { return nil }
-        let slots = store.slots
-        var total = 0.0
-        var hasAny = false
-        for slot in slots where !slot.isReceiptSlot {
+        guard store.realSlotCount > 1 else { return [:] }
+        var jeWaehrung: [String: Double] = [:]
+        for slot in store.slots where !slot.isReceiptSlot {
             guard let b = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double else { continue }
-            total += b
-            hasAny = true
+            jeWaehrung[slot.currency ?? "EUR", default: 0] += b
         }
-        return hasAny ? total : nil
+        return jeWaehrung
+    }
+
+    /// Zahlenwert der Flyout-Summe — nur belastbar, wenn alle Konten dieselbe Währung
+    /// führen. Bei gemischten Währungen gibt es keine einzelne richtige Zahl.
+    private func computeUnifiedFlyoutTotal() -> Double? {
+        let jeWaehrung = computeUnifiedFlyoutByCurrency()
+        guard jeWaehrung.count == 1 else { return nil }
+        return jeWaehrung.first?.value
     }
 
     /// Ring fraction: balance / salaryReference, 0…1.
@@ -739,8 +748,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     /// Computes the unified total balance for the flyout card (formatted with cents).
     private func computeUnifiedFlyoutBalanceText() -> String? {
-        guard let total = computeUnifiedFlyoutTotal() else { return nil }
-        return formatEURWithCents(total)
+        let jeWaehrung = computeUnifiedFlyoutByCurrency()
+        guard !jeWaehrung.isEmpty else { return nil }
+        if jeWaehrung.count == 1, let nur = jeWaehrung.first {
+            return nur.key == "EUR"
+                ? formatEURWithCents(nur.value)
+                : formatBetragMitWaehrung(nur.value, waehrung: nur.key)
+        }
+        // Mehrere Währungen: die betragsmäßig führende nennen und die übrigen zählen —
+        // dasselbe Vorgehen wie in der Menüleiste. Addieren wäre gelogen.
+        let sortiert = jeWaehrung.sorted { abs($0.value) > abs($1.value) }
+        guard let fuehrend = sortiert.first else { return nil }
+        let rest = sortiert.count - 1
+        return formatBetragMitWaehrung(fuehrend.value, waehrung: fuehrend.key) + " +\(rest)"
+    }
+
+    /// Betrag mit dem Symbol der jeweiligen Währung.
+    private func formatBetragMitWaehrung(_ betrag: Double, waehrung: String) -> String {
+        let symbol: String
+        switch waehrung {
+        case "EUR": symbol = "€"
+        case "USD": symbol = "$"
+        case "GBP": symbol = "£"
+        case "CHF": symbol = "₣"
+        default: symbol = waehrung
+        }
+        let zahl = String(format: "%.2f", betrag)
+            .replacingOccurrences(of: ".", with: ",")
+        return "\(zahl) \(symbol)"
     }
 
     /// Eine Menüleisten-Aktualisierung wurde zurückgestellt, weil das Flyout offen war.
@@ -3714,7 +3749,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             .contains { WordMatch.atWordStart(text, $0) }
     }
 
+    /// Generation und laufende Aufgabe der leftToPay-Rechnung.
+    ///
+    /// Muster aus `TransactionsViewModel.scheduleIndexRebuild` — dort war es längst
+    /// richtig gelöst, hier fehlte es: Die Rechnung merkte sich zwar den Slot, prüfte
+    /// ihn beim Veröffentlichen aber nicht. Nach einem schnellen Kontowechsel landeten
+    /// deshalb Fixkosten, Gebühren und Saldoveränderung des **vorherigen** Kontos unter
+    /// dem neuen. Im Protokoll vom 02.09.2026 wechseln die Zeilen im Sekundentakt
+    /// zwischen zwei Konten.
+    private var leftToPayGen: Int = 0
+    private var leftToPayTask: Task<Void, Never>?
+
     private func recomputeLeftToPay() {
+        leftToPayGen &+= 1
+        let gen = leftToPayGen
+        leftToPayTask?.cancel()
         let activeSlot = YaxiService.activeSlotId
         let isDemo = demoMode
         let isMulti = isMultiDemo
@@ -3726,7 +3775,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // läuft unten detached. Hier abgreifen, statt drüben darauf zuzugreifen.
         let balanceSnapshot = lastBalance
 
-        Task.detached(priority: .utility) {
+        leftToPayTask = Task.detached(priority: .utility) {
             var total: Double = 0
             var sawAny = false
             var gebuehr: Double? = nil
@@ -3873,12 +3922,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     gesamt, stand: balanceSnapshot, bezug: .vormonat())
             }
 
+            if Task.isCancelled { return }
             await MainActor.run { [weak self] in
-                self?.txVM.leftToPayAmount = sawAny ? total : nil
-                self?.txVM.bankgebuehr = gebuehr
-                self?.txVM.leftToPayCycleEnd = cycleEndForDisplay
-                self?.txVM.balanceChange = balanceChange
-                self?.txVM.balanceChangeEuro = balanceChangeEuro
+                guard let self else { return }
+                // Zwei Prüfungen, beide nötig: Die Generation verwirft eine ältere
+                // Rechnung, die eine neuere sonst überschriebe. Der Slot verwirft ein
+                // Ergebnis, das zu einem inzwischen verlassenen Konto gehört — der
+                // Fall, den man am Gerät sieht.
+                guard gen == self.leftToPayGen else { return }
+                guard YaxiService.activeSlotId == activeSlot else {
+                    AppLogger.log("leftToPay: Ergebnis für \(activeSlot.prefix(8)) verworfen — aktiv ist \(YaxiService.activeSlotId.prefix(8))",
+                                  category: "LeftToPay")
+                    return
+                }
+                self.txVM.leftToPayAmount = sawAny ? total : nil
+                self.txVM.bankgebuehr = gebuehr
+                self.txVM.leftToPayCycleEnd = cycleEndForDisplay
+                self.txVM.balanceChange = balanceChange
+                self.txVM.balanceChangeEuro = balanceChangeEuro
             }
         }
     }
