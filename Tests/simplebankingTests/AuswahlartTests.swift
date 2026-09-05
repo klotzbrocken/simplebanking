@@ -12,7 +12,7 @@ final class AuswahlartTests: XCTestCase {
 
     func test_ibanWirdErkannt() {
         XCTAssertTrue(Auswahlart.enthaeltIban("DE89370400440532013000"))
-        XCTAssertTrue(Auswahlart.enthaeltIban("NL20BUNQ2029400129"))
+        XCTAssertTrue(Auswahlart.enthaeltIban("NL91ABNA0417164300"))
     }
 
     /// Banken schreiben IBANs oft in Vierergruppen.
@@ -76,8 +76,8 @@ final class QuellkontoTests: XCTestCase {
     }
 
     func test_kleinschreibungWirdVereinheitlicht() {
-        XCTAssertEqual(Quellkonto.iban(ausGespeicherter: "nl20bunq2029400129"),
-                       "NL20BUNQ2029400129")
+        XCTAssertEqual(Quellkonto.iban(ausGespeicherter: "nl91abna0417164300"),
+                       "NL91ABNA0417164300")
     }
 
     /// Ohne hinterlegte IBAN bleibt es beim bisherigen Verhalten. Eine geratene IBAN
