@@ -156,9 +156,11 @@ enum YaxiService {
         private func loadIfNeeded(_ slotId: String) -> SlotState {
             if let cached = slotStates[slotId] { return cached }
             var state = SlotState()
-            state.balancesSession     = SessionStore.persistRead("session.balances",     slotId: slotId)
-            state.transactionsSession = SessionStore.persistRead("session.transactions", slotId: slotId)
-            state.transferSession     = SessionStore.persistRead("session.transfer",     slotId: slotId)
+            // Sessions werden bewusst NICHT von der Platte gelesen. YAXI beschreibt sie
+            // als kurzlebig und nach Übergabe an einen Dienst als verbraucht; dauerhaft
+            // gehört nur `connectionData` gespeichert. Eine Session aus einer früheren
+            // Sitzung ist bestenfalls wirkungslos und schlimmstenfalls ein Grund, warum
+            // ein Aufruf scheitert. Alte Schlüssel räumt `alteSessionsAufraeumen` weg.
             state.connectionData      = SessionStore.persistRead("connectionData",       slotId: slotId)
             state.connectionDataAt    = SessionStore.persistRead("connectionDataAt",     slotId: slotId)
                 .flatMap { String(data: $0, encoding: .utf8) }
@@ -285,12 +287,38 @@ enum YaxiService {
         /// Slot-explizite Reader. Vor Refactor 2026-05-19 gab es Overloads ohne
         /// slotId, die das aktive in-memory Feld zurückgaben — was bei Multi-Slot-
         /// Setups zu Cross-Slot-Leaks führte (Aileen-Diagnose).
+        /// Gibt die Session heraus **und verbraucht sie**.
+        ///
+        /// „a session object should be considered obsolete after passing it to a
+        /// service" — dann darf sie auch nicht liegen bleiben und ein zweites Mal
+        /// mitgehen. Bis 05.09.2026 blieb sie stehen, bis eine neue kam.
         func session(for scope: Scope, slotId: String) -> Data? {
             let state = loadIfNeeded(slotId)
+            let vorhandene: Data?
             switch scope {
-            case .balances:     return state.balancesSession
-            case .transactions: return state.transactionsSession
-            case .transfer:     return state.transferSession
+            case .balances:     vorhandene = state.balancesSession
+            case .transactions: vorhandene = state.transactionsSession
+            case .transfer:     vorhandene = state.transferSession
+            }
+            guard vorhandene != nil else { return nil }
+            mutateState(slotId) { s in
+                switch scope {
+                case .balances:     s.balancesSession = nil
+                case .transactions: s.transactionsSession = nil
+                case .transfer:     s.transferSession = nil
+                }
+            }
+            return vorhandene
+        }
+
+        /// Räumt die früher dauerhaft abgelegten Sessions einmalig weg — sie sind
+        /// wertlos und hätten sonst unbegrenzt im Schlüsselbund bzw. in den
+        /// Einstellungen gelegen.
+        func alteSessionsAufraeumen(slotIds: [String]) {
+            for sid in slotIds {
+                persistDelete("session.balances",     slotId: sid)
+                persistDelete("session.transactions", slotId: sid)
+                persistDelete("session.transfer",     slotId: sid)
             }
         }
 
@@ -313,14 +341,8 @@ enum YaxiService {
                     case .transactions: state.transactionsSession = s
                     case .transfer:     state.transferSession     = s
                     }
-                    let key: String = {
-                        switch scope {
-                        case .balances:     return "session.balances"
-                        case .transactions: return "session.transactions"
-                        case .transfer:     return "session.transfer"
-                        }
-                    }()
-                    persistWrite(key, slotId: sid, data: s)
+                    // Kein `persistWrite` mehr: Die Session lebt nur für die Folge von
+                    // Aufrufen, die gerade läuft.
                 }
                 if let cd = connectionData {
                     state.connectionData = cd

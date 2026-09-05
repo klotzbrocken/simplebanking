@@ -1374,6 +1374,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // One-time migration: copy scalar lastSeenTxSig → per-slot key for legacy slot.
         migrateLastSeenTxSigIfNeeded()
+        // Früher dauerhaft abgelegte Sessions einmalig wegräumen. Sie sind kurzlebig und
+        // nach Übergabe verbraucht — gespeichert waren sie nur Altlast.
+        Task {
+            let slots = MultibankingStore.shared.slots.map { $0.id } + ["legacy"]
+            await YaxiService.sessionStore.alteSessionsAufraeumen(slotIds: slots)
+        }
 
         installEditMenu()
         applyDockMode()
