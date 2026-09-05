@@ -467,6 +467,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         UserDefaults.standard.set(betrag, forKey: schluessel)
         // Der allererste bekannte Saldo ist keine Bewegung — sonst begrüßte eine
         // frische Installation den Nutzer sofort mit einem Pfeil.
+        UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                  forKey: "simplebanking.cachedBalanceAt.\(slotId)")
         guard let richtung = Saldobewegung.richtung(vorher: vorher, jetzt: betrag) else { return }
         let jetzt = Date()
         bewegungBySlot[slotId] = Bewegungsstand(
@@ -5393,6 +5395,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // Offenes Dashboard auch bei reinem Saldo-Refresh aktualisieren (Auto-
                 // Umsatzabruf ist Default aus → sonst bliebe der Dashboard-Saldo veraltet).
                 refreshDashboardIfOpen()
+            } else if resp.kontoNichtInZustimmung == true {
+                // Die Bank kennt das hinterlegte Konto nicht. Bis 05.09.2026 zeigte der
+                // Slot hier den Saldo des erstbesten angebotenen Kontos — ein Betrag
+                // unter dem falschen Kontonamen. Jetzt bleibt der zuletzt bekannte Stand
+                // stehen, ausdrücklich als alt gekennzeichnet, und der Tooltip nennt den
+                // Grund samt Weg zur Kontoauswahl.
+                let alter = UserDefaults.standard.object(
+                    forKey: "simplebanking.cachedBalanceAt.\(YaxiService.activeSlotId)") as? Double
+                let standText = alter.map { wert -> String in
+                    let f = DateFormatter()
+                    f.dateStyle = .short; f.timeStyle = .short
+                    return f.string(from: Date(timeIntervalSince1970: wert))
+                }
+                txVM.error = t(
+                    "Dieses Konto steckt nicht in der erteilten Zustimmung. Der angezeigte Stand ist alt\(standText.map { " (\($0))" } ?? "") — bitte das Konto in den Einstellungen neu auswählen.",
+                    "This account is not covered by the granted consent. The balance shown is stale\(standText.map { " (\($0))" } ?? "") — please re-select the account in settings."
+                )
+                txVM.errorNeedsReconnect = true
+                statusItem.button?.toolTip = txVM.error
+                AppLogger.log("Saldo: Konto nicht in der Zustimmung — alter Stand bleibt stehen, slot=\(YaxiService.activeSlotId.prefix(8))",
+                              category: "Network", level: "WARN")
+                recordCLIRefreshError("Konto nicht in der Zustimmung")
             } else if resp.scaRequired == true {
                 // SCA redirect timed out or was missed. State has been cleared (server + Swift).
                 // Pause auto-refresh for 1 hour so we don't burn through the bank's daily

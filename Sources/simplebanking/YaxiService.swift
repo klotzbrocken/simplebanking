@@ -1092,17 +1092,22 @@ enum YaxiService {
                     }
                     AppLogger.log("fetchBalances: Bank bietet \(angeboten.balances.count) Konto(en): \(ibans.joined(separator: ", "))",
                                   category: "YaxiService", level: "WARN")
-                    if !angeboten.balances.isEmpty {
-                        // Bewusst OHNE die gespeicherte IBAN zu überschreiben: Welches
-                        // Konto der Slot zeigen soll, hat der Nutzer bei der Einrichtung
-                        // gewählt. Das hinter seinem Rücken umzustellen wäre schlimmer als
-                        // ein leerer Kontostand. Angezeigt wird, was die Bank liefert;
-                        // die Warnung oben nennt die Abweichung.
-                        return try makeBalancesResponse(angeboten,
-                                                        session: outcome.session?.bytes,
-                                                        connectionData: outcome.connectionData?.bytes,
-                                                        requestedIban: "")
-                    }
+                    // Die gespeicherte IBAN wird bewusst NICHT überschrieben: Welches
+                    // Konto der Slot zeigen soll, hat der Nutzer bei der Einrichtung
+                    // gewählt. Das hinter seinem Rücken umzustellen wäre schlimmer als
+                    // ein leerer Kontostand.
+                    //
+                    // Bis 05.09.2026 folgte daraus der falsche Schluss, stattdessen den
+                    // erstbesten fremden Saldo anzuzeigen. Der Zweitabruf bleibt — seine
+                    // Liste im Protokoll ist bei der Fehlersuche Gold wert —, aber er
+                    // liefert keinen Anzeigewert mehr. Der Slot meldet stattdessen, dass
+                    // sein Konto nicht in der Zustimmung steckt.
+                    return BalancesResponse(
+                        ok: false, booked: nil, expected: nil,
+                        session: outcome.session?.bytes.base64EncodedString(),
+                        connectionData: outcome.connectionData?.bytes.base64EncodedString(),
+                        error: nil, userMessage: nil, scaRequired: nil,
+                        kontoNichtInZustimmung: true)
                 }
             }
             if alwaysTrace {
@@ -2173,9 +2178,17 @@ enum YaxiService {
         if let idx = matchedIdx {
             allBalances = allEntries[idx].balances
         } else if !target.isEmpty, !allEntries.isEmpty {
-            AppLogger.log("makeBalancesResponse: requested IBAN \(target.prefix(8))… not in response (got \(allEntries.count) entries), using first as fallback",
+            // Hier stand „using first as fallback". Das lieferte den Saldo eines
+            // fremden Kontos unter dem Namen des eigenen. Wurde eine bestimmte IBAN
+            // angefragt und ist sie nicht dabei, gibt es keinen Saldo — nur den Hinweis.
+            AppLogger.log("makeBalancesResponse: angefragte IBAN \(target.prefix(8))… nicht in der Antwort (\(allEntries.count) andere) — kein Saldo",
                           category: "YaxiService", level: "WARN")
-            allBalances = allEntries.first?.balances ?? []
+            return BalancesResponse(
+                ok: false, booked: nil, expected: nil,
+                session: session?.base64EncodedString(),
+                connectionData: connectionData?.base64EncodedString(),
+                error: nil, userMessage: nil, scaRequired: nil,
+                kontoNichtInZustimmung: true)
         } else {
             allBalances = allEntries.first?.balances ?? []
         }

@@ -33,6 +33,14 @@ struct BalancesResponse: Codable, Sendable {
     let error: String?
     let userMessage: String?
     let scaRequired: Bool?
+    /// Die Bank kennt das am Slot hinterlegte Konto nicht — die erteilte Zustimmung
+    /// deckt ein anderes ab.
+    ///
+    /// Bis 05.09.2026 lieferte die App in diesem Fall den Saldo des erstbesten
+    /// angebotenen Kontos, ohne die gespeicherte IBAN zu ändern. Ein Betrag unter dem
+    /// falschen Kontonamen ist schlimmer als kein Betrag: Der Slot behauptete etwas
+    /// über ein Konto, das die Bank gar nicht geliefert hatte.
+    var kontoNichtInZustimmung: Bool? = nil
 }
 
 struct TransactionsResponse: Codable, Sendable {
