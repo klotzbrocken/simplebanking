@@ -765,7 +765,9 @@ enum YaxiService {
             try await toSCACommonAccounts(client.respondAccounts(ticket: finalTicket, context: ctx, response: r))
         }
 
-        guard let outcome = await handleSCA(
+        // Datenabrufe behandeln `unklar` wie einen Fehlschlag: Ein nicht gelesener Saldo
+        // richtet keinen Schaden an. Nur bei Zahlungen ist der Unterschied wichtig.
+        guard case .erfolg(let outcome) = await handleSCA(
             initial: toSCACommonAccounts(resp), client: client, ticket: finalTicket, slotId: slotSnapshot,
             confirm: confirm, respond: respond
         ) else {
@@ -1033,7 +1035,7 @@ enum YaxiService {
                 try await toSCACommon(client.respondBalances(ticket: scaTicket, context: ctx, response: r)) { .balances($0) }
             }
 
-            guard let outcome = await handleSCA(
+            guard case .erfolg(let outcome) = await handleSCA(
                 initial: toSCACommon(resp) { .balances($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
             ) else {
@@ -1364,7 +1366,7 @@ enum YaxiService {
                 try await toSCACommon(client.respondTransactions(ticket: scaTicket, context: ctx, response: r)) { .transactions($0) }
             }
 
-            guard let outcome = await handleSCA(
+            guard case .erfolg(let outcome) = await handleSCA(
                 initial: toSCACommon(resp) { .transactions($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
             ) else {
@@ -1659,12 +1661,25 @@ enum YaxiService {
         !istRedirectBank
     }
 
+    /// - Parameter istZahlung: Bei Zahlungen gelten andere Regeln als beim Lesen.
+    ///
+    ///   Ein `UnexpectedError` ohne Nutzertext wird sonst als veraltete Zustimmung
+    ///   gelesen und der Aufruf wiederholt. Beim Abruf von Salden kostet das nichts.
+    ///   Bei einer Überweisung schickt es womöglich **eine zweite Zahlung** — YAXI sagt
+    ///   ausdrücklich, dass ein `UnexpectedError` kein Beleg dafür ist, dass die
+    ///   Operation nicht ausgeführt wurde. Genau diese Vermutung stand hier.
+    ///
+    ///   Eine ausdrückliche Aussage der Bank (`unauthorized`) bleibt auch für Zahlungen
+    ///   ein gültiger Grund: Dort steht fest, dass nichts angenommen wurde.
     static func darfOhneConnectionDataWiederholen(error: Error,
-                                                  connectionDataAge: TimeInterval?) -> Bool {
+                                                  connectionDataAge: TimeInterval?,
+                                                  istZahlung: Bool = false) -> Bool {
         guard isConnectionResetError(error) else { return false }
         guard let re = error as? RoutexError, case .unexpectedError = re else {
             return true   // ausdrückliche Aussage der Bank — immer folgen
         }
+        // Ab hier: unklarer Fehler. Beim Lesen wiederholen, beim Zahlen niemals.
+        if istZahlung { return false }
         guard let alter = connectionDataAge else { return true }  // Alter unbekannt
         return alter >= frischeZustimmungSekunden
     }
@@ -1890,7 +1905,8 @@ enum YaxiService {
             )
                 } else if darfOhneConnectionDataWiederholen(
                               error: error,
-                              connectionDataAge: await sessionStore.connectionDataAge(slotId: slotSnapshot)),
+                              connectionDataAge: await sessionStore.connectionDataAge(slotId: slotSnapshot),
+                              istZahlung: true),
                           storedCD != nil {
                     // Yaxi-Empfehlung „Restart the service without passing
                     // connection data" — frischer Ticket + connectionData weg,
@@ -1927,12 +1943,29 @@ enum YaxiService {
                 try await toSCACommon(client.respondTransfer(ticket: scaTicket, context: ctx, response: r)) { .transfer($0) }
             }
 
-            guard let outcome = await handleSCA(
+            let freigabe = await handleSCA(
                 initial: toSCACommon(resp) { .transfer($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
-            ) else {
+            )
+            let outcome: SCAOutcome
+            switch freigabe {
+            case .erfolg(let o):
+                outcome = o
+            case .abgebrochen:
                 return TransferOutcome(ok: false, scaRequired: true, error: nil,
                                        userMessage: nil, mayHaveBeenExecuted: false)
+            case .unklar:
+                // Hier stand bisher ebenfalls `mayHaveBeenExecuted: false` — eine
+                // Gewissheit, die die App nicht hat. Es ging bereits etwas an die Bank;
+                // ob die Zahlung ausgeführt wurde, weiß nur der Kontoauszug.
+                AppLogger.log("sendTransfer: Ausgang unklar — kein Fehlschlag behaupten, slot=\(slotSnapshot.prefix(8))",
+                              category: "YaxiService", level: "WARN")
+                return TransferOutcome(
+                    ok: false, scaRequired: false, error: nil,
+                    userMessage: L10n.t(
+                        "Status unklar: Die Bank hat die Freigabe entgegengenommen, aber kein Ergebnis geliefert. Bitte prüfe deine Umsätze, bevor du erneut überweist.",
+                        "Status unclear: the bank accepted the approval but returned no result. Check your transactions before sending again."),
+                    mayHaveBeenExecuted: true)
             }
 
             // Connection-Data refreshen (Session ist out-of-band sowieso obsolete
@@ -2327,6 +2360,27 @@ enum YaxiService {
         let connectionData: ConnectionData?
     }
 
+    /// Ausgang eines Freigabe-Ablaufs.
+    ///
+    /// Bis 05.09.2026 war das ein `SCAOutcome?`, und jedes `nil` bedeutete für den
+    /// Aufrufer dasselbe: fehlgeschlagen. Bei einer **Zahlung** ist das eine Behauptung,
+    /// die die App nicht belegen kann — YAXI sagt ausdrücklich, dass ein
+    /// `UnexpectedError` kein Beleg dafür ist, dass die Operation nicht ausgeführt
+    /// wurde. Wer nach einer abgeschickten Bestätigung einen Fehler bekommt, weiß
+    /// schlicht nicht, ob das Geld unterwegs ist.
+    ///
+    /// Drei Zustände statt zwei. Die Regel für die Einordnung: Ging vor dem Abbruch
+    /// schon etwas an die Bank (`confirm`/`respond`), ist es `unklar` — sonst
+    /// `abgebrochen`.
+    private enum SCAErgebnis {
+        case erfolg(SCAOutcome)
+        /// Nichts wurde an die Bank geschickt, oder der Nutzer hat abgebrochen.
+        case abgebrochen
+        /// Der Ablauf brach ab, **nachdem** etwas an die Bank ging. Bei Zahlungen darf
+        /// daraus weder ein „fehlgeschlagen" noch ein neuer Versuch werden.
+        case unklar
+    }
+
     private enum SCACommon {
         case result(SCAPayload, Session?, ConnectionData?)
         /// `String?` = optionale Challenge-Nachricht der Bank (z.B. „TAN an ***1234"),
@@ -2386,10 +2440,10 @@ enum YaxiService {
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         depth: Int = 0
-    ) async -> SCAOutcome? {
+    ) async -> SCAErgebnis {
         if depth > 5 {
             AppLogger.log("SCA: max depth exceeded", category: "YaxiService", level: "WARN")
-            return nil
+            return .unklar
         }
 
         switch initial {
@@ -2411,7 +2465,7 @@ enum YaxiService {
                     "Verbindungsdaten — gespeicherte sind \(alterText) alt, slot=\(slotId.prefix(8))",
                     category: "YaxiService", level: "WARN")
             }
-            return SCAOutcome(payload: payload, session: session, connectionData: connectionData)
+            return .erfolg(SCAOutcome(payload: payload, session: session, connectionData: connectionData))
 
         case .dialog(let input, let dialogMsg, let dialogBild):
             switch input {
@@ -2423,7 +2477,7 @@ enum YaxiService {
                 }) ?? options.first
                 guard let preferred else {
                     AppLogger.log("SCA Selection: no options available", category: "YaxiService", level: "WARN")
-                    return nil
+                    return .abgebrochen
                 }
                 // Sieht die Auswahl nach Konten statt nach TAN-Verfahren aus, ist die
                 // Heuristik unten die falsche — sie kennt nur Verfahren. Seit die App
@@ -2442,7 +2496,7 @@ enum YaxiService {
                                            confirm: confirm, respond: respond, depth: depth + 1)
                 } catch {
                     AppLogger.log("SCA respond error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
-                    return nil
+                    return .unklar
                 }
 
             case .confirmation(let context, let pollingDelaySecs):
@@ -2478,7 +2532,7 @@ enum YaxiService {
                 guard let provider = fieldInputProvider else {
                     AppLogger.log("SCA field: no provider registered, aborting",
                                   category: "YaxiService", level: "WARN")
-                    return nil
+                    return .abgebrochen
                 }
                 // Tipp-TAN/PIN → Setup-UI auf „Code eingeben" stellen (nicht App-Freigabe).
                 scaMethodReporter?(.fieldInput)
@@ -2524,7 +2578,7 @@ enum YaxiService {
                 }
                 guard let userValue else {
                     AppLogger.log("SCA field: user cancelled", category: "YaxiService")
-                    return nil
+                    return .abgebrochen
                 }
                 // Slot-Race: User hat während Eingabe Bank gewechselt → der
                 // InputContext zeigt auf eine fremde Session, nicht abschicken.
@@ -2536,7 +2590,7 @@ enum YaxiService {
                 guard currentEpoch == slotEpochSnapshot else {
                     AppLogger.log("SCA field: slot epoch changed during input, aborting",
                                   category: "YaxiService", level: "WARN")
-                    return nil
+                    return .abgebrochen
                 }
                 do {
                     let next = try await respond(context, userValue)
@@ -2552,7 +2606,7 @@ enum YaxiService {
                                   category: "YaxiService", level: "ERROR")
                     await writeTrace(client: client, label: "sca-field-respond",
                                      ticket: ticket, error: error)
-                    return nil
+                    return .unklar
                 }
             }
 
@@ -2563,7 +2617,7 @@ enum YaxiService {
             guard await Freigabewache.shared.beginnen(slotId) else {
                 AppLogger.log("SCA Redirect: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
                               category: "YaxiService", level: "WARN")
-                return nil
+                return .abgebrochen
             }
             defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA Redirect: opening browser", category: "YaxiService")
@@ -2575,14 +2629,14 @@ enum YaxiService {
             guard await Freigabewache.shared.beginnen(slotId) else {
                 AppLogger.log("SCA RedirectHandle: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
                               category: "YaxiService", level: "WARN")
-                return nil
+                return .abgebrochen
             }
             defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA RedirectHandle: registering redirect URI", category: "YaxiService")
             let callbackServer = YaxiOAuthCallback()
             guard let port = try? await callbackServer.start(), port > 0 else {
                 AppLogger.log("SCA: failed to start callback server", category: "YaxiService", level: "ERROR")
-                return nil
+                return .abgebrochen
             }
             let bankURL: URL
             do {
@@ -2594,7 +2648,7 @@ enum YaxiService {
             } catch {
                 callbackServer.stop()
                 AppLogger.log("SCA registerRedirectURI failed: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
-                return nil
+                return .abgebrochen
             }
             AppLogger.log("SCA RedirectHandle: opening bank URL in browser", category: "YaxiService")
             await openRedirectURL(bankURL, vorgang: redirectVorgang(slotId: slotId, ticket: ticket))
@@ -2638,7 +2692,7 @@ enum YaxiService {
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         depth: Int
-    ) async -> SCAOutcome? {
+    ) async -> SCAErgebnis {
         Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
         defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
         var ctx = context
@@ -2648,7 +2702,7 @@ enum YaxiService {
         for i in 0..<180 {
             let sleepSeconds = max(currentDelay, 1.0) + errorBackoff
             try? await Task.sleep(nanoseconds: UInt64(sleepSeconds * 1_000_000_000))
-            if Task.isCancelled { return nil }
+            if Task.isCancelled { return .unklar }
             do {
                 let next = try await confirm(ctx)
                 consecutiveErrors = 0
@@ -2689,12 +2743,12 @@ enum YaxiService {
                 errorBackoff = scaBackoffSeconds(forConsecutiveErrors: consecutiveErrors)
                 AppLogger.log("SCA Confirmation poll \(i) error (\(consecutiveErrors) consecutive, next backoff \(errorBackoff)s): \(error.localizedDescription)", category: "YaxiService", level: "WARN")
                 // Höherer Threshold + Backoff schützt gegen 429-Rate-Limit-Bursts.
-                if consecutiveErrors >= scaMaxConsecutiveErrors { return nil }
+                if consecutiveErrors >= scaMaxConsecutiveErrors { return .unklar }
             }
         }
         setupPhaseReporter?("sca_confirmation_timeout", ["attempts": "180"])
         AppLogger.log("SCA Confirmation: timeout (180 attempts)", category: "YaxiService", level: "WARN")
-        return nil
+        return .unklar
     }
 
     private static func pollRedirect(
@@ -2705,7 +2759,7 @@ enum YaxiService {
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         callbackSignal: AsyncStream<Void>? = nil
-    ) async -> SCAOutcome? {
+    ) async -> SCAErgebnis {
         Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
         defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
         var ctx = context
@@ -2728,11 +2782,11 @@ enum YaxiService {
                         }
                     }
                 }
-                if Task.isCancelled { return nil }
+                if Task.isCancelled { return .unklar }
                 callbackFired = true // after first callback, fall through to normal 5s polling
             } else {
                 try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 s
-                if Task.isCancelled { return nil }
+                if Task.isCancelled { return .unklar }
             }
             do {
                 let next = try await confirm(ctx)
@@ -2750,7 +2804,7 @@ enum YaxiService {
                                                confirm: confirm, respond: respond)
                     }
                     AppLogger.log("SCA Redirect poll: unexpected dialog", category: "YaxiService", level: "WARN")
-                    return nil
+                    return .unklar
                 }
             } catch {
                 consecutiveErrors += 1
@@ -2761,7 +2815,7 @@ enum YaxiService {
                 AppLogger.log("SCA Redirect poll error (\(consecutiveErrors) consecutive, extra backoff \(extra)s): \(error.localizedDescription)", category: "YaxiService", level: "WARN")
                 if consecutiveErrors >= scaMaxConsecutiveErrors {
                     await writeTrace(client: client, label: "pollRedirect", ticket: ticket, error: error)
-                    return nil
+                    return .unklar
                 }
                 if extra > 0 {
                     try? await Task.sleep(nanoseconds: UInt64(extra * 1_000_000_000))
@@ -2772,7 +2826,7 @@ enum YaxiService {
         }
         AppLogger.log("SCA Redirect: timeout (120 × 5 s)", category: "YaxiService", level: "WARN")
         await writeTrace(client: client, label: "pollRedirect-timeout", ticket: ticket)
-        return nil
+        return .unklar
     }
 
     // MARK: - Trace
