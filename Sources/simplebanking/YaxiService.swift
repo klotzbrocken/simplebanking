@@ -1810,6 +1810,27 @@ enum YaxiService {
         // confirm/respond-Closures übergeben.
         var ticket = try await YaxiTicketMaker.issueTransferTicket()
 
+        // **Quellkonto ausdrücklich benennen.** Ohne `debtorAccount` fragt die Bank
+        // laut SDK-Doku selbst nach („the bank prompts the user when omitted") — und
+        // diese Rückfrage kommt als `.selection`, die `handleSCA` mit einer Heuristik
+        // für TAN-*Verfahren* beantwortet. Bei einem Zugang mit mehreren
+        // überweisungsfähigen Konten konnte so Geld von einem anderen Konto abgehen,
+        // als im Formular stand. Die IBAN ist dieselbe, gegen die `TransferSheet` den
+        // Slot bereits absichert.
+        //
+        // Währung fest EUR wie der Betrag darunter: Die App überweist ausschließlich
+        // SEPA in Euro. Ist keine IBAN hinterlegt, bleibt es bei `nil` und damit beim
+        // bisherigen Verhalten — mehr wäre geraten.
+        let quellIban = Quellkonto.iban(
+            ausGespeicherter: UserDefaults.standard.string(forKey: ibanKey(for: slotSnapshot)))
+        let quellkonto: DebtorAccountReference? = quellIban.map {
+            DebtorAccountReference(id: .iban($0), currency: Quellkonto.waehrung)
+        }
+        if quellkonto == nil {
+            AppLogger.log("sendTransfer: keine IBAN am Slot \(slotSnapshot.prefix(8)) — Quellkonto bleibt offen",
+                          category: "YaxiService", level: "WARN")
+        }
+
         let amountString = NSDecimalNumber(decimal: request.amountEUR).stringValue
         let amount = RoutexModels.Amount(amount: Decimal(string: amountString) ?? request.amountEUR, currency: "EUR")
         let details = [
@@ -1842,7 +1863,7 @@ enum YaxiService {
                 credentials: creds,
                 product: .sepaCreditTransfer,
                 details: details,
-                debtorAccount: nil,
+                debtorAccount: quellkonto,
                 debtorName: nil,
                 requestedExecutionDate: ausfuehrungstag,
                 session: storedSession.map(Session.init),
@@ -1861,7 +1882,7 @@ enum YaxiService {
                 credentials: credsNoUserId,
                 product: .sepaCreditTransfer,
                 details: details,
-                debtorAccount: nil,
+                debtorAccount: quellkonto,
                 debtorName: nil,
                 requestedExecutionDate: ausfuehrungstag,
                 session: storedSession.map(Session.init),
@@ -1885,7 +1906,7 @@ enum YaxiService {
                 credentials: credsNoCD,
                 product: .sepaCreditTransfer,
                 details: details,
-                debtorAccount: nil,
+                debtorAccount: quellkonto,
                 debtorName: nil,
                 requestedExecutionDate: ausfuehrungstag,
                 session: storedSession.map(Session.init),
@@ -2403,6 +2424,16 @@ enum YaxiService {
                 guard let preferred else {
                     AppLogger.log("SCA Selection: no options available", category: "YaxiService", level: "WARN")
                     return nil
+                }
+                // Sieht die Auswahl nach Konten statt nach TAN-Verfahren aus, ist die
+                // Heuristik unten die falsche — sie kennt nur Verfahren. Seit die App
+                // das Quellkonto benennt, sollte das nicht mehr auftreten; falls doch,
+                // steht der Grund hier statt nirgends.
+                if Auswahlart.sindKonten(options.map { "\($0.key) \($0.label) \($0.explanation ?? "")" }) {
+                    AppLogger.log(
+                        "SCA Selection: Optionen sehen nach KONTEN aus (\(options.count)) — " +
+                        "die Auswahl trifft die App, nicht der Nutzer. slot=\(slotId.prefix(8))",
+                        category: "YaxiService", level: "WARN")
                 }
                 AppLogger.log("SCA Selection: picking '\(preferred.key)'", category: "YaxiService")
                 do {
