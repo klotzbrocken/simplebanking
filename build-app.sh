@@ -64,8 +64,8 @@ fi
 # MCP und rewe-poc in dieselbe Const-Values-Datei. Wer zuletzt fertig wird, gewinnt — und
 # das Metadaten-Bundle wäre mal vollständig, mal leer. CLI und MCP baut das Skript ohnehin
 # weiter unten einzeln.
-swift build -c release --arch arm64 --product simplebanking "${INTENTS_FLAGS[@]}"
-swift build -c release --arch x86_64 --product simplebanking
+swift build --build-system native -c release --arch arm64 --product simplebanking "${INTENTS_FLAGS[@]}"
+swift build --build-system native -c release --arch x86_64 --product simplebanking
 
 # Sofort prüfen: Sind es wirklich die Typen der App? Eine leere oder fremde Datei würde
 # unten ein wohlgeformtes, aber leeres Metadaten-Bundle ergeben — in Kurzbefehlen wäre
@@ -77,7 +77,7 @@ if [[ ${#INTENTS_FLAGS[@]} -gt 0 ]]; then
         # Fall; der Normalfall ist der Bau, bei dem sich ohnehin etwas geändert hat.
         echo "Const-Values fehlen (inkrementeller Bau) — App-Modul wird einmal neu übersetzt."
         touch "$ROOT/Sources/simplebanking/BankingIntents.swift"
-        swift build -c release --arch arm64 --product simplebanking "${INTENTS_FLAGS[@]}"
+        swift build --build-system native -c release --arch arm64 --product simplebanking "${INTENTS_FLAGS[@]}"
     fi
     if ! grep -q '"simplebanking\.' "$INTENTS_CONSTVALS" 2>/dev/null; then
         echo "FATAL: Const-Values enthalten keine simplebanking-Typen — App Intents wären leer." >&2
@@ -291,8 +291,8 @@ PLIST
 cp "$BIN" "$APP/Contents/MacOS/simplebanking"
 
 # Build simplebanking-mcp (MCP server — no AppKit, no GRDB)
-swift build -c release --arch arm64 --product simplebanking-mcp
-swift build -c release --arch x86_64 --product simplebanking-mcp
+swift build --build-system native -c release --arch arm64 --product simplebanking-mcp
+swift build --build-system native -c release --arch x86_64 --product simplebanking-mcp
 MCP_ARM64="$ROOT/.build/arm64-apple-macosx/release/simplebanking-mcp"
 MCP_X86="$ROOT/.build/x86_64-apple-macosx/release/simplebanking-mcp"
 MCP_UNIVERSAL="$ROOT/.build/universal/simplebanking-mcp"
@@ -301,8 +301,8 @@ cp "$MCP_UNIVERSAL" "$APP/Contents/MacOS/simplebanking-mcp"
 echo "MCP server bundled: $(lipo -archs "$MCP_UNIVERSAL")"
 
 # Build simplebanking-cli (Terminal CLI — liest DB/UserDefaults direkt)
-swift build -c release --arch arm64 --product simplebanking-cli
-swift build -c release --arch x86_64 --product simplebanking-cli
+swift build --build-system native -c release --arch arm64 --product simplebanking-cli
+swift build --build-system native -c release --arch x86_64 --product simplebanking-cli
 CLI_ARM64="$ROOT/.build/arm64-apple-macosx/release/simplebanking-cli"
 CLI_X86="$ROOT/.build/x86_64-apple-macosx/release/simplebanking-cli"
 CLI_UNIVERSAL="$ROOT/.build/universal/simplebanking-cli"

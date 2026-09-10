@@ -49,7 +49,7 @@ PKG_CERT="3rd Party Mac Developer Installer: Maik Klotz (FTJLR8JRNS)"
 ENTITLEMENTS="$ROOT/Sources/simplebanking/simplebanking-mas.entitlements"
 
 # Build (arm64, release)
-swift build -c release --arch arm64
+swift build --build-system native -c release --arch arm64
 
 BIN="$ROOT/.build/arm64-apple-macosx/release/simplebanking"
 if [[ ! -x "$BIN" ]]; then

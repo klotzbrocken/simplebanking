@@ -36,10 +36,10 @@ fi
 bash "$ROOT/scripts/generate-bank-colors.sh"
 
 echo "[1/3] Build arm64…"
-swift build -c release --arch arm64 --scratch-path "$ROOT/.build-arm64"
+swift build --build-system native -c release --arch arm64 --scratch-path "$ROOT/.build-arm64"
 
 echo "[2/3] Build x86_64…"
-swift build -c release --arch x86_64 --scratch-path "$ROOT/.build-x86_64"
+swift build --build-system native -c release --arch x86_64 --scratch-path "$ROOT/.build-x86_64"
 
 BIN_ARM="$ROOT/.build-arm64/arm64-apple-macosx/release/simplebanking"
 BIN_X86="$ROOT/.build-x86_64/x86_64-apple-macosx/release/simplebanking"
