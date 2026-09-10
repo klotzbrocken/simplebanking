@@ -40,6 +40,10 @@
 - **Abruf ohne Freigabe-Maschinerie** — Salden und Umsätze gehen jetzt zuerst über den nicht-interaktiven Dienst von YAXI. Er braucht nur die bei der Einrichtung erteilte Zustimmung und kennt gar keine Zweige für TAN, Browser oder Freigabe-Handle. Für Banken mit Freigabe im Browser — bunq, N26, Revolut — ist das der vorgesehene Weg, dort Daten zu holen. Klappt er nicht, läuft unverändert alles Bisherige weiter, einschließlich Wiederholungen und Fehlerbericht. Abschaltbar über `yaxiNonInteractiveRefreshEnabled`.
 - **Banking-Bibliothek auf routex-client-swift 0.5** — YAXI hat das SDK von einem Rust-Kern hinter UniFFI auf reines Swift umgestellt. Für Nutzer ändert sich nichts; die App spricht dieselbe Schnittstelle mit denselben Banken. Intern ist es ein vollständiger Umbau: getrennte Ticket-Typen je Dienst, eine gemeinsame Antwortform statt vier, Werttypen für Sitzung, Zustimmung und Kalendertage — und vier Fehlerfamilien statt einer. Der letzte Punkt ist der heikelste: Bankfehler heißen jetzt `RoutexError` statt `RoutexClientError`, und eine Abfrage auf den alten Namen hätte weiter übersetzt, aber nie wieder zugetroffen. Betroffen waren zehn Entscheidungsstellen, darunter der bunq-Schutz, die Zwei-Stufen-Wiederholung und der Fehlerbericht — sie hätten stillschweigend aufgehört zu arbeiten. Neun Tests halten das jetzt fest.
 
+### Behoben
+
+- **Doppelklick auf das Menüleisten-Icon** öffnete unter macOS 27 nur noch das Flyout und schloss es gleich wieder: Das System liefert zwei schnelle Klicks auf den Menüleisten-Knopf dort als zwei Einzelklicks statt als Doppelklick. Die App zählt jetzt selbst — zwei Klicks innerhalb des Doppelklick-Intervalls aus den Systemeinstellungen gelten als Doppelklick, auch wenn das System es anders sieht. Auf älteren Versionen ändert sich nichts.
+
 ## [2.0.2] — 2026-08-06
 
 ### Neu

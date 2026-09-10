@@ -419,6 +419,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var isHiddenBalance: Bool = false
     private var hideTimer: Timer?
     private var pendingLeftClick: DispatchWorkItem?
+    /// Zeitstempel des letzten linken Mausklicks auf das Icon (Event-Zeit), für die eigene Doppelklick-Erkennung.
+    private var letzterLinksklick: TimeInterval = 0
     private var flyoutClosedByClickAt: Date?
     private var lastShownTitle: String = "—"
     
@@ -3546,9 +3548,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Swapped (true):  Single=Transactions, Double=Balance action
         // Balance action itself is configurable (toggle hide/show or flyout card).
         if ev.type == .leftMouseUp {
+            // Doppelklick selbst erkennen, statt auf `clickCount` zu vertrauen.
+            //
+            // Seit macOS 27 kommen zwei Klicks auf den Menüleisten-Button auch dann als
+            // zwei Einzelklicks (clickCount 1) an, wenn nur 150 ms dazwischen liegen —
+            // gemessen am 10.09.2026. Der Doppelklick auf das Icon öffnete deshalb nur
+            // das Flyout und schloss es wieder. Zwei Klicks innerhalb des System-
+            // Doppelklick-Intervalls zählen darum hier als Doppelklick; nach einem
+            // erkannten Doppelklick beginnt die Zählung neu, damit ein dritter Klick
+            // nicht gleich den nächsten auslöst.
+            let seitLetztemKlick = ev.timestamp - letzterLinksklick
+            let doppelklick = ev.clickCount >= 2
+                || (seitLetztemKlick > 0 && seitLetztemKlick < NSEvent.doubleClickInterval)
+            letzterLinksklick = doppelklick ? 0 : ev.timestamp
+
             if locked {
                 // Double-click while locked: show unlock dialog directly
-                if ev.clickCount >= 2 {
+                if doppelklick {
                     pendingLeftClick?.cancel()
                     pendingLeftClick = nil
                     promptUnlockIfNeeded()
@@ -3563,7 +3579,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if balancePopover?.isShown == true {
                 pendingLeftClick?.cancel()
                 pendingLeftClick = nil
-                if ev.clickCount >= 2 {
+                if doppelklick {
                     balancePopover?.performClose(nil)
                     if swapClickBehavior {
                         performBalancePrimaryAction()
@@ -3597,7 +3613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
             flyoutClosedByClickAt = nil
 
-            if ev.clickCount >= 2 {
+            if doppelklick {
                 pendingLeftClick?.cancel()
                 pendingLeftClick = nil
                 if swapClickBehavior {
