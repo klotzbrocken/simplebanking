@@ -63,6 +63,17 @@ enum LicenseConfig {
     /// echte Lizenzen zu „verbrauchen". Default: Production.
     static let useSandbox: Bool = false
 
+    /// Polar-API-Version, auf die jeder Request gepinnt wird (`Polar-Version`-Header).
+    ///
+    /// Polar versioniert seit September 2026 datumsbasiert und hält drei Stände
+    /// gleichzeitig: Current, Deprecated, Next. Ohne Header läuft ein Request auf
+    /// Current — und der wechselt mit jedem Quartal (Januar, April, Juli, Oktober).
+    /// Ein ausgelieferter Build kann seinen Vertrag nicht nachträglich wählen, also
+    /// muss er ihn hier festhalten. Fristen: 2026-04 wird am 01.10.2026 Deprecated
+    /// und im Januar 2027 abgeschaltet. Vorher gegen 2026-10 testen (Sandbox reicht)
+    /// und den Wert hochziehen.
+    static let polarAPIVersion: String = "2026-04"
+
     static var apiBaseURL: URL {
         URL(string: useSandbox
             ? "https://sandbox-api.polar.sh"

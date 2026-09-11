@@ -262,6 +262,15 @@ final class LicenseManager: ObservableObject {
             throw LicenseError.invalid(
                 message: L10n.t("Lizenz ist deaktiviert.", "License is disabled.")
             )
+        case .unbekannt(let roh):
+            // Ein Status, den diese Version nicht kennt, ist keine gültige Lizenz —
+            // aber auch kein Netzwerkfehler, der die Offline-Kulanz anstoßen würde.
+            AppLogger.log("license: unbekannter Polar-Status „\(roh)“ — als nicht lizenziert behandelt",
+                          category: "License", level: "WARN")
+            throw LicenseError.invalid(
+                message: L10n.t("Lizenzstatus „\(roh)“ ist dieser Version unbekannt — bitte simplebanking aktualisieren.",
+                                "License status \u{201C}\(roh)\u{201D} is unknown to this version — please update simplebanking.")
+            )
         }
         // Hard-Expiry: wenn Polar ein expires_at liefert und das in der
         // Vergangenheit liegt, ist die Lizenz tot. (Wir konfigurieren
@@ -301,6 +310,7 @@ final class LicenseManager: ObservableObject {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(LicenseConfig.polarAPIVersion, forHTTPHeaderField: "Polar-Version")
         req.httpBody = bodyData
         req.timeoutInterval = 15
 
@@ -428,10 +438,33 @@ private struct PolarValidateResponse: Decodable {
     }()
 }
 
-private enum PolarLicenseStatus: String, Decodable {
+/// Polars `status`. Ein neuer Wert in einer künftigen API-Version darf die
+/// Dekodierung nicht sprengen — sonst landet ein gültig antwortender Server im
+/// Netzwerkfehler-Pfad. Unbekanntes wird deshalb mitgeführt und oben bewertet.
+private enum PolarLicenseStatus: Decodable, Equatable {
     case granted
     case revoked
     case disabled
+    case unbekannt(String)
+
+    init(from decoder: Decoder) throws {
+        let roh = try decoder.singleValueContainer().decode(String.self)
+        switch roh {
+        case "granted":  self = .granted
+        case "revoked":  self = .revoked
+        case "disabled": self = .disabled
+        default:         self = .unbekannt(roh)
+        }
+    }
+
+    var rawValue: String {
+        switch self {
+        case .granted: return "granted"
+        case .revoked: return "revoked"
+        case .disabled: return "disabled"
+        case .unbekannt(let roh): return roh
+        }
+    }
 }
 
 /// Polars 422-Validation-Error-Format (FastAPI-Style).

@@ -42,6 +42,7 @@
 
 ### Behoben
 
+- **Lizenzprüfung auf Polar-API-Version 2026-04 festgelegt** — Polar versioniert seine API ab Oktober quartalsweise; ohne Festlegung würde jeder ausgelieferte Build mit dem nächsten Stand mitwandern. Ein Lizenzstatus, den die App nicht kennt, gilt jetzt als „nicht lizenziert" mit Hinweis auf ein Update, statt als Netzwerkfehler.
 - **KI-Kategorisierung lief ins Leere** — die App sprach Claude 3.5 Haiku an, das Anthropic am 19. Februar 2026 abgeschaltet hat, und verschluckte den Fehler. Jetzt Claude Haiku 4.5, und jeder Lauf steht im Protokoll: wie viele Buchungen zugeordnet wurden, und wenn etwas scheitert, warum.
 - **Doppelklick auf das Menüleisten-Icon** öffnete unter macOS 27 nur noch das Flyout und schloss es gleich wieder: Das System liefert zwei schnelle Klicks auf den Menüleisten-Knopf dort als zwei Einzelklicks statt als Doppelklick. Die App zählt jetzt selbst — zwei Klicks innerhalb des Doppelklick-Intervalls aus den Systemeinstellungen gelten als Doppelklick, auch wenn das System es anders sieht. Auf älteren Versionen ändert sich nichts.
 
