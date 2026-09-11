@@ -110,7 +110,10 @@ enum AIProviderService {
             let system: String; let messages: [Msg]
         }
         req.httpBody = try JSONEncoder().encode(Payload(
-            model: "claude-3-5-haiku-latest", max_tokens: maxTokens,
+            // Haiku 4.5 — Nachfolger von Claude 3.5 Haiku, das Anthropic am 19.02.2026
+            // abgeschaltet hat. Ein Alias wie „-latest" gibt es für diese Generation
+            // nicht; der Name ist die vollständige Modell-ID.
+            model: "claude-haiku-4-5", max_tokens: maxTokens,
             temperature: temperature, system: systemPrompt,
             messages: [Msg(role: "user", content: userMessage)]))
 
