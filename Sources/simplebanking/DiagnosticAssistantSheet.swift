@@ -386,8 +386,6 @@ struct DiagnosticAssistantSheet: View {
         HStack(spacing: 10) {
             supportKnoepfe
             Spacer()
-            Button(L10n.t("Schließen", "Close")) { onClose() }
-                .keyboardShortcut(.cancelAction)
             Button(action: startSession) {
                 HStack(spacing: 6) {
                     Image(systemName: "play.fill").font(.system(size: 11, weight: .semibold))
@@ -443,8 +441,6 @@ struct DiagnosticAssistantSheet: View {
                 NSWorkspace.shared.activateFileViewerSelecting([report.summaryFile])
             }
             Spacer()
-            Button(L10n.t("Schließen", "Close")) { onClose() }
-                .keyboardShortcut(.cancelAction)
             Button(action: { sendByMail(report: report) }) {
                 HStack(spacing: 6) {
                     Image(systemName: "envelope.fill").font(.system(size: 11, weight: .semibold))
@@ -470,8 +466,6 @@ struct DiagnosticAssistantSheet: View {
         HStack {
             supportKnoepfe
             Spacer()
-            Button(L10n.t("Schließen", "Close")) { onClose() }
-                .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
@@ -518,27 +512,44 @@ struct DiagnosticAssistantSheet: View {
     }
 }
 
-// MARK: - Logs + Bericht
+// MARK: - Logs + Diagnose
 
 extension DiagnosticAssistantSheet {
-    /// Links im Fuß, in jeder Phase außer „läuft": Log-Ordner zeigen, Bericht mailen.
+    /// Links im Fuß, in jeder Phase außer „läuft": Log-Ordner zeigen, Diagnose mailen.
+    /// Kein „Schließen"-Knopf mehr — das Fenster hat eine Ampel; Esc schließt weiterhin.
     var supportKnoepfe: some View {
-        HStack(spacing: 6) {
-            Button(action: onLogsOeffnen) {
-                Label(L10n.t("Logs öffnen", "Open Logs"), systemImage: "doc.text.magnifyingglass")
-                    .font(.system(size: 11.5))
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(.sbTextSecondary)
-            .help(L10n.t("Zeigt den Log-Ordner im Finder", "Shows the log folder in Finder"))
-            Text("·").foregroundColor(.sbTextSecondary.opacity(0.5))
-            Button(action: onBerichtSenden) {
-                Label(L10n.t("Diagnosebericht versenden…", "Send Diagnostic Report…"), systemImage: "envelope")
-                    .font(.system(size: 11.5))
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(.sbTextSecondary)
-            .help(L10n.t("Packt die Logs zusammen und öffnet eine Mail", "Bundles the logs and opens an email"))
+        HStack(spacing: 14) {
+            fussKnopf(L10n.t("Logs öffnen", "Open Logs"), symbol: "doc.text.magnifyingglass",
+                      hilfe: L10n.t("Zeigt den Log-Ordner im Finder", "Shows the log folder in Finder"),
+                      action: onLogsOeffnen)
+            fussKnopf(L10n.t("Diagnose versenden…", "Send Diagnostics…"), symbol: "envelope",
+                      hilfe: L10n.t("Packt die Logs zusammen und öffnet eine Mail", "Bundles the logs and opens an email"),
+                      action: onBerichtSenden)
+            // Unsichtbar, nur für Esc: schließt das Fenster wie vorher der Knopf.
+            Button("") { onClose() }
+                .keyboardShortcut(.cancelAction)
+                .frame(width: 0, height: 0)
+                .opacity(0)
         }
+    }
+
+    /// Icon und Text in einer Zeile mit fester Symbolbreite, damit beide Knöpfe auf
+    /// derselben Höhe sitzen — `Label` richtete die Symbole je nach Textlänge anders aus.
+    private func fussKnopf(_ titel: String, symbol: String, hilfe: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11.5))
+                    .frame(width: 14, height: 14)
+                Text(titel)
+                    .font(.system(size: 11.5))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .foregroundColor(.sbTextSecondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(hilfe)
     }
 }
