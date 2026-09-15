@@ -18,6 +18,10 @@ struct DiagnosticAssistantSheet: View {
     /// Startet den Einrichtungs-Assistenten im Aufzeichnungsmodus. Der Bericht
     /// entsteht danach von selbst — siehe `SetupDiagnosticsReport.aufzeichnungFertig`.
     var onAufzeichnen: () -> Void = {}
+    /// Bis 2.0.3 lagen beide im Support-Menü, getrennt von der Diagnose, zu der sie
+    /// gehören: Erst laufen lassen, dann ins Log schauen oder den Bericht schicken.
+    var onLogsOeffnen: () -> Void = {}
+    var onBerichtSenden: () -> Void = {}
 
     @StateObject private var session = DiagnosticSession()
     @State private var lastError: String? = nil
@@ -380,6 +384,7 @@ struct DiagnosticAssistantSheet: View {
 
     private var footerIdle: some View {
         HStack(spacing: 10) {
+            supportKnoepfe
             Spacer()
             Button(L10n.t("Schließen", "Close")) { onClose() }
                 .keyboardShortcut(.cancelAction)
@@ -433,6 +438,7 @@ struct DiagnosticAssistantSheet: View {
 
     private func footerDone(report: DiagnosticSession.Report) -> some View {
         HStack(spacing: 10) {
+            supportKnoepfe
             Button(L10n.t("Im Finder zeigen", "Show in Finder")) {
                 NSWorkspace.shared.activateFileViewerSelecting([report.summaryFile])
             }
@@ -462,6 +468,7 @@ struct DiagnosticAssistantSheet: View {
 
     private var footerError: some View {
         HStack {
+            supportKnoepfe
             Spacer()
             Button(L10n.t("Schließen", "Close")) { onClose() }
                 .keyboardShortcut(.defaultAction)
@@ -508,5 +515,30 @@ struct DiagnosticAssistantSheet: View {
         service.recipients = ["support@simplebanking.de"]
         service.subject = "simplebanking Bank-Diagnose \(report.id)"
         service.perform(withItems: report.mailAttachments)
+    }
+}
+
+// MARK: - Logs + Bericht
+
+extension DiagnosticAssistantSheet {
+    /// Links im Fuß, in jeder Phase außer „läuft": Log-Ordner zeigen, Bericht mailen.
+    var supportKnoepfe: some View {
+        HStack(spacing: 6) {
+            Button(action: onLogsOeffnen) {
+                Label(L10n.t("Logs öffnen", "Open Logs"), systemImage: "doc.text.magnifyingglass")
+                    .font(.system(size: 11.5))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.sbTextSecondary)
+            .help(L10n.t("Zeigt den Log-Ordner im Finder", "Shows the log folder in Finder"))
+            Text("·").foregroundColor(.sbTextSecondary.opacity(0.5))
+            Button(action: onBerichtSenden) {
+                Label(L10n.t("Diagnosebericht versenden…", "Send Diagnostic Report…"), systemImage: "envelope")
+                    .font(.system(size: 11.5))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.sbTextSecondary)
+            .help(L10n.t("Packt die Logs zusammen und öffnet eine Mail", "Bundles the logs and opens an email"))
+        }
     }
 }

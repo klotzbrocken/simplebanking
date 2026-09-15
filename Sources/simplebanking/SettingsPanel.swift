@@ -9,6 +9,10 @@ extension Notification.Name {
     /// „Zugangsdaten ändern…" (Einstellungen bzw. Fehlerzeile der Umsatzliste)
     /// → Dialog in `BalanceBar.changeBankCredentials`.
     static let changeBankCredentials = Notification.Name("simplebanking.changeBankCredentials")
+    /// Einstellungen → Allgemein → „Nach Updates suchen" → `BalanceBar.checkForUpdates`.
+    static let checkForUpdatesRequested = Notification.Name("simplebanking.checkForUpdatesRequested")
+    /// Einstellungen → Allgemein → „simplebanking beenden" → `BalanceBar.quit`.
+    static let quitRequested = Notification.Name("simplebanking.quitRequested")
 }
 
 // Breite des Gehaltseingang-Pickers ("31. des Monats") — via Font-Metriken + Button-Chrome
@@ -1103,6 +1107,32 @@ struct SettingsView: View {
                     .labelsHidden()
                     .onChange(of: globalRefreshHotkeyEnabled) { _ in postHotkeyChanged() }
             }
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
+
+            // Beides gab es nur im Menüleisten-Menü. Wer die Einstellungen offen hat,
+            // sucht es hier — vor allem „Beenden", das bei einer Menüleisten-App ohne
+            // Dock-Symbol sonst schwer zu finden ist.
+            VStack(alignment: .leading, spacing: 14) {
+                SettingsRow(
+                    title: t("Nach Updates suchen", "Check for updates"),
+                    subtitle: t("Fragt den Update-Server, ob eine neuere Version vorliegt.",
+                                "Asks the update server whether a newer version is available.")
+                ) {
+                    Button(t("Jetzt suchen…", "Check now…")) {
+                        NotificationCenter.default.post(name: .checkForUpdatesRequested, object: nil)
+                    }
+                }
+                SettingsRow(
+                    title: t("simplebanking beenden", "Quit simplebanking"),
+                    subtitle: t("Schließt die App samt Menüleisten-Symbol. Abrufe laufen erst nach dem nächsten Start weiter.",
+                                "Closes the app including the menu bar item. Refreshes resume after the next launch.")
+                ) {
+                    Button(t("Beenden", "Quit")) {
+                        NotificationCenter.default.post(name: .quitRequested, object: nil)
+                    }
+                }
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))

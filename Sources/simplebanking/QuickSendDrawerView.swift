@@ -614,6 +614,12 @@ struct QuickSendDrawerView: View {
     }
 
     private func apply(_ fav: QuickSendFavorite) {
+        // Wie ein Autocomplete-Pick behandeln: Der Name kommt aus einer bewussten
+        // Auswahl, nicht vom Tippen — die Vorschlagsliste bleibt zu, bis der Nutzer
+        // den Namen selbst wieder ändert. Ohne diese Zeilen öffnete jede Vorlage
+        // die Liste, weil `onChange(of: name)` den Wechsel für Tippen hielt.
+        lastPickedName = fav.name
+        acPicked = true
         name = fav.name
         ibanText = QuickSendFormatting.groupIban(fav.iban)
         amountInput = fav.amount

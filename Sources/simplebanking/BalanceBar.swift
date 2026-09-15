@@ -1483,6 +1483,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         NotificationCenter.default.addObserver(forName: .changeBankCredentials, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.changeBankCredentials() }
         }
+        // Einstellungen → Allgemein: dieselben Aktionen wie im Menü, nur erreichbar,
+        // ohne das Menü zu kennen.
+        NotificationCenter.default.addObserver(forName: .checkForUpdatesRequested, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkForUpdates() }
+        }
+        NotificationCenter.default.addObserver(forName: .quitRequested, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.quit() }
+        }
         NotificationCenter.default.addObserver(forName: .creditLimitToggleChanged, object: nil, queue: .main) { [weak self] _ in
             // Automatischer UI-Refresh (kein User-Sync) → kein eBon-Login-Fenster.
             Task { await self?.refreshAsync() }
@@ -1675,11 +1683,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // v1.5.0: separater "Diagnose aktivieren"-Toggle entfernt — die
         // Bank-Diagnose schaltet Verbose-Logging selbst ein und am Ende
         // wieder aus (siehe DiagnosticSession).
-
-        let diagReportItem = NSMenuItem(title: t("Diagnosebericht versenden…", "Send Diagnostic Report…"), action: #selector(sendDiagnosticReport), keyEquivalent: "")
-        diagReportItem.tag = 502
-        diagReportItem.target = self
-        supportSub.addItem(diagReportItem)
+        //
+        // Seit 2.0.3 stehen „Diagnosebericht versenden" (Tag 502) und „Logs öffnen"
+        // (Tag 503) nicht mehr hier, sondern im Bank-Diagnose-Fenster: Wer einen
+        // Bericht schickt, hat vorher die Diagnose laufen lassen — die beiden
+        // Einträge gehörten zusammen und lagen doch getrennt.
 
         let bankDiagItem = NSMenuItem(title: t("Bank-Diagnose…", "Bank Diagnostics…"), action: #selector(openBankDiagnostics), keyEquivalent: "")
         bankDiagItem.tag = 506
@@ -1690,17 +1698,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         supportSub.addItem(bankDiagItem)
 
-        supportSub.addItem(NSMenuItem.separator())
-
-        let openLogsItem = NSMenuItem(title: t("Logs öffnen", "Open Logs"), action: #selector(openLogs), keyEquivalent: "")
-        openLogsItem.tag = 503
-        openLogsItem.target = self
-        supportSub.addItem(openLogsItem)
-
         let docItem = NSMenuItem(title: t("Dokumentation", "Documentation"), action: #selector(openDocumentation), keyEquivalent: "")
         docItem.tag = 504
         docItem.target = self
         supportSub.addItem(docItem)
+
+        // Update-Suche gehört zum Support, nicht auf die oberste Ebene — dort stand
+        // sie als einziger Eintrag zwischen zwei Trennlinien.
+        let updateItem = NSMenuItem(title: t("Nach Updates suchen…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
+        updateItem.tag = 202
+        updateItem.target = self
+        supportSub.addItem(updateItem)
 
         supportSub.addItem(NSMenuItem.separator())
 
@@ -1729,12 +1737,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             img.isTemplate = true; supportItem.image = img
         }
         menu.addItem(supportItem)
-        menu.addItem(NSMenuItem.separator())
-
-        // ── Nach Updates suchen ───────────────────────────────────────────
-        let updateItem = NSMenuItem(title: t("Nach Updates suchen…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
-        updateItem.tag = 202
-        menu.addItem(updateItem)
         menu.addItem(NSMenuItem.separator())
 
         // ── Beenden ───────────────────────────────────────────────────────
@@ -2117,7 +2119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             },
             onAufzeichnen: { [weak self] in
                 self?.starteAufgezeichneteEinrichtung()
-            }
+            },
+            onLogsOeffnen: { [weak self] in self?.openLogs() },
+            onBerichtSenden: { [weak self] in self?.sendDiagnosticReport() }
         )
         let host = NSHostingController(rootView: sheet)
         let window = NSWindow(contentViewController: host)
@@ -3149,15 +3153,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
         }
 
-        menu.item(withTag: 202)?.title = t("Nach Updates suchen…", "Check for Updates…")
-
         // Support submenu — Tag 501 (Diagnose aktivieren) wurde in v1.5.0
-        // entfernt; Bank-Diagnose-Sheet schaltet Logging selbst.
+        // entfernt; 502/503 (Bericht, Logs) liegen seit 2.0.3 im Diagnosefenster.
         if let supportItem = menu.item(withTag: 500), let sub = supportItem.submenu {
             supportItem.title = t("Support", "Support")
-            sub.item(withTag: 502)?.title = t("Diagnosebericht versenden…", "Send Diagnostic Report…")
-            sub.item(withTag: 503)?.title = t("Logs öffnen", "Open Logs")
+            sub.item(withTag: 506)?.title = t("Bank-Diagnose…", "Bank Diagnostics…")
             sub.item(withTag: 504)?.title = t("Dokumentation", "Documentation")
+            sub.item(withTag: 202)?.title = t("Nach Updates suchen…", "Check for Updates…")
+            sub.item(withTag: 505)?.title = t("Bank neu verbinden", "Reconnect Bank")
             sub.item(withTag: 101)?.title = t("Zurücksetzen", "Reset")
         }
 

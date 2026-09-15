@@ -694,20 +694,23 @@ struct TransactionDetailView: View {
                         
                         // 5) IBAN und BIC (SWIFT-Code)
                         // Bei Ausgabe: creditor (Empfänger), bei Eingang: debtor (Absender)
-                        HStack(spacing: 20) {
-                            DetailColumn(
-                                label: "IBAN",
-                                value: isOutgoing
-                                    ? (transaction.creditor?.iban ?? transaction.debtor?.iban ?? "—")
-                                    : (transaction.debtor?.iban ?? transaction.creditor?.iban ?? "—")
-                            )
-                            DetailColumn(
-                                label: "BIC (SWIFT)",
-                                value: isOutgoing
-                                    ? (transaction.creditor?.bic ?? transaction.debtor?.bic ?? "—")
-                                    : (transaction.debtor?.bic ?? transaction.creditor?.bic ?? "—")
-                            )
-                        }
+                        // IBAN in voller Breite und einzeilig — in der halben Spalte brach
+                        // sie um und ließ sich nur markieren, nicht kopieren. Der leere
+                        // String statt „—" sorgt dafür, dass ohne IBAN kein Kopierknopf steht.
+                        DetailRow(
+                            label: "IBAN",
+                            value: isOutgoing
+                                ? (transaction.creditor?.iban ?? transaction.debtor?.iban ?? "")
+                                : (transaction.debtor?.iban ?? transaction.creditor?.iban ?? ""),
+                            singleLine: true
+                        )
+                        DetailRow(
+                            label: "BIC (SWIFT)",
+                            value: isOutgoing
+                                ? (transaction.creditor?.bic ?? transaction.debtor?.bic ?? "")
+                                : (transaction.debtor?.bic ?? transaction.creditor?.bic ?? ""),
+                            singleLine: true
+                        )
                     }
                     .padding(16)
                     .background(
@@ -1139,6 +1142,9 @@ struct TransactionDetailView: View {
 private struct DetailRow: View {
     let label: String
     let value: String
+    /// Kennungen wie IBAN und BIC bleiben auf einer Zeile: Ziffern in fester Breite,
+    /// bei Platznot leicht verkleinert statt umgebrochen.
+    var singleLine: Bool = false
     @State private var copyHovered: Bool = false
     @State private var showCopiedToast: Bool = false
 
@@ -1149,9 +1155,11 @@ private struct DetailRow: View {
                 .foregroundColor(.secondary)
             HStack(spacing: 6) {
                 Text(value.isEmpty ? "—" : value)
-                    .font(.system(size: 14))
+                    .font(singleLine ? .system(size: 14).monospacedDigit() : .system(size: 14))
                     .foregroundColor(.primary)
                     .textSelection(.enabled)
+                    .lineLimit(singleLine ? 1 : nil)
+                    .minimumScaleFactor(singleLine ? 0.8 : 1)
                 if !value.isEmpty {
                     Button(action: copyToPasteboard) {
                         Image(systemName: showCopiedToast ? "checkmark.circle.fill" : "doc.on.doc")
