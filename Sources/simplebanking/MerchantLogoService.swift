@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 // MARK: - Merchant Logo Service
-// Priority: 1) bundled SVG  2) Brandfetch (Labs, wenn aktiviert)  3) DuckDuckGo favicon
+// Priority: 1) bundled SVG  2) Brandfetch Logo API (wenn aktiviert + Client-ID)  3) DuckDuckGo favicon
 
 @MainActor
 final class MerchantLogoService: ObservableObject {
@@ -673,16 +673,25 @@ final class MerchantLogoService: ObservableObject {
         }
     }
 
-    // Lädt alle gecachten Logos aus DB in den Speicher (einmalig beim ersten preload).
-    // Brandfetch-aktiv: überspringen, damit Brandfetch immer frisch lädt.
+    /// Wie lange ein Brandfetch-Logo aus dem Cache gilt, bevor es neu geholt wird.
+    /// Brandfetch selbst nennt 30 Tage als Richtwert fürs Cachen von Markendaten.
+    static let brandfetchCacheDays = 30
+
+    // Lädt die gecachten Logos aus der DB in den Speicher (einmalig beim ersten preload).
+    //
+    // Bis 2.0.3 wurde der Cache bei aktivem Brandfetch übersprungen, „damit Brandfetch
+    // immer frisch lädt" — und so holte jeder App-Start jedes Logo neu. Ein Logo ändert
+    // sich nicht täglich: Jetzt gilt es 30 Tage, danach fällt es aus dem Speicher und
+    // wird beim nächsten Anzeigen einmal neu geholt. Ohne Brandfetch bleibt es beim
+    // alten Verhalten (Cache ohne Verfallsdatum), dort zählt kein Kontingent.
     private func loadPersistedLogosIfNeeded() {
         guard !persistedLogosLoaded else { return }
         persistedLogosLoaded = true
         let brandfetchEnabled = UserDefaults.standard.bool(forKey: "brandfetchEnabled")
         let clientId = UserDefaults.standard.string(forKey: "brandfetchClientId") ?? ""
-        guard !(brandfetchEnabled && !clientId.isEmpty) else { return }
+        let hoechstalter: Int? = (brandfetchEnabled && !clientId.isEmpty) ? Self.brandfetchCacheDays : nil
         Task.detached {
-            guard let entries = try? TransactionsDatabase.loadCachedLogoData() else { return }
+            guard let entries = try? TransactionsDatabase.loadCachedLogoData(maxAgeDays: hoechstalter) else { return }
             await MainActor.run {
                 for (key, data) in entries where self.imageCache[key] == nil {
                     if let image = NSImage(data: data) {
@@ -697,6 +706,10 @@ final class MerchantLogoService: ObservableObject {
         loadPersistedLogosIfNeeded()
         let key = normalizedMerchant.lowercased()
         guard imageCache[key] == nil, !inFlight.contains(key) else { return }
+        // Gebündeltes SVG zuerst — so stand es im Kopf dieser Datei, gerufen wurde es
+        // aber nur beim Entfernen eines eigenen Logos. Für die 129 mitgelieferten
+        // Händler fiel deshalb jedes Mal ein Netzaufruf an, den niemand brauchte.
+        if loadBundledSVG(key: key) { return }
         guard let domain = Self.domainWhitelist[key] else { return }
         inFlight.insert(key)
 
@@ -735,19 +748,20 @@ final class MerchantLogoService: ObservableObject {
 
     @discardableResult
     private func fetchBrandfetch(key: String, domain: String, clientId: String) async -> Bool {
-        // Brandfetch-Platzhalter (Marke unbekannt) ist typischerweise < 5 KB.
-        // Echte Logos sind größer → erster Treffer ≥ 5 KB gewinnt.
-        let minBytes = 5_000
-
+        // Logo API (cdn.brandfetch.io), freies Kontingent, nur die Client-ID als Auth.
+        // `fallback/404`: unbekannte Marke ⇒ echter 404 statt Platzhalterbild — bis
+        // 2.0.3 riet die App an der Dateigröße („unter 5 KB ist ein Platzhalter").
+        // `w/128/h/128`: feste Größe statt des Logos in voller Auflösung; die Zeile
+        // zeigt 16 pt, das Detail 32 pt, Retina eingerechnet reichen 128 px.
         for tryDomain in Self.brandfetchVariants(domain) {
-            let urlString = "https://cdn.brandfetch.io/\(tryDomain)?c=\(clientId)"
+            let urlString = "https://cdn.brandfetch.io/\(tryDomain)/fallback/404/w/128/h/128?c=\(clientId)"
             guard let url = URL(string: urlString) else { continue }
             // Explizites Timeout 15s — Logos sind kleine Assets, sollten schnell laden.
             var request = URLRequest(url: url)
             request.timeoutInterval = 15
             guard let (data, response) = try? await URLSession.shared.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
-                  data.count >= minBytes,
+                  !data.isEmpty,
                   let image = NSImage(data: data) else { continue }
             let capturedData = data
             await MainActor.run {

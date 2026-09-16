@@ -3578,11 +3578,16 @@ struct SettingsView: View {
             SettingsToggleRow(
                 title: t("Brandfetch Händler-Logos", "Brandfetch Merchant Logos"),
                 subtitle: t(
-                    "Lädt Logos bekannter Marken über Brandfetch. Es werden ausschließlich Firmennamen (keine IBANs, Beträge oder Transaktionsdaten) übermittelt.",
-                    "Fetches logos for known brands via Brandfetch. Only company names are transmitted — no IBANs, amounts, or transaction data."
+                    "Lädt Logos bekannter Marken über die Brandfetch Logo API. Übermittelt wird nur die Domain des Händlers (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Die Client-ID gibt es kostenlos unter developers.brandfetch.com; die Anfragen laufen unter deinem Konto und den Bedingungen von Brandfetch.",
+                    "Fetches logos for known brands via the Brandfetch Logo API. Only the merchant's domain is sent (e.g. rewe.de) — no IBANs, amounts or booking texts. The client ID is free at developers.brandfetch.com; requests run under your account and Brandfetch's terms."
                 ),
                 isOn: $brandfetchEnabled
             )
+            // Einschalten leert den Logo-Cache: Sonst blieben die DuckDuckGo-Favicons
+            // bis zu 30 Tage stehen, und Brandfetch käme erst danach zum Zug.
+            .onChange(of: brandfetchEnabled) { an in
+                if an { MerchantLogoService.shared.clearCache() }
+            }
 
             if brandfetchEnabled {
                 VStack(alignment: .leading, spacing: 6) {

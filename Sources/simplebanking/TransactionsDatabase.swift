@@ -1705,12 +1705,21 @@ enum TransactionsDatabase {
 
     // MARK: - Logo Cache
 
-    static func loadCachedLogoData() throws -> [String: Data] {
+    /// `maxAgeDays`: nur Logos, die jünger sind — ältere fallen weg und werden beim
+    /// nächsten Anzeigen neu geholt. `nil` = alle, egal wie alt.
+    static func loadCachedLogoData(maxAgeDays: Int? = nil) throws -> [String: Data] {
         try migrate()
         let queue = try makeQueue()
         return try queue.read { db in
             var result: [String: Data] = [:]
-            let rows = try Row.fetchAll(db, sql: "SELECT key, data FROM merchant_logos")
+            let rows: [Row]
+            if let tage = maxAgeDays {
+                rows = try Row.fetchAll(db,
+                    sql: "SELECT key, data FROM merchant_logos WHERE fetched_at >= datetime('now', ?)",
+                    arguments: ["-\(tage) days"])
+            } else {
+                rows = try Row.fetchAll(db, sql: "SELECT key, data FROM merchant_logos")
+            }
             for row in rows {
                 if let key = row["key"] as String?,
                    let data = row["data"] as Data? {

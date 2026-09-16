@@ -18,6 +18,7 @@
 
 ### Geändert
 
+- **Händler-Logos: mitgelieferte zuerst** — die 129 gebündelten Logos werden jetzt vor jedem Netzaufruf genutzt; bisher holte die App sie trotzdem von Brandfetch oder DuckDuckGo. Brandfetch-Abrufe fragen ein festes 128-px-Icon an und bekommen bei unbekannter Marke einen echten Fehler statt eines Platzhalterbilds, das die App an der Dateigröße erraten musste. Geladene Logos gelten 30 Tage, statt bei jedem Start neu geholt zu werden.
 - **Menüleisten-Menü aufgeräumt** — „Diagnose versenden" und „Logs öffnen" stehen jetzt im Bank-Diagnose-Fenster, wo sie hingehören: erst laufen lassen, dann schicken. „Nach Updates suchen" liegt unter Support statt allein zwischen zwei Trennlinien.
 - **Einstellungen → Allgemein** hat jetzt „Nach Updates suchen" und „simplebanking beenden" als Knöpfe — bei einer Menüleisten-App ohne Dock-Symbol ist Beenden sonst schwer zu finden.
 - **Buchungsdetails: IBAN und BIC** stehen einzeilig in voller Breite und lassen sich mit einem Klick kopieren; bisher brach die IBAN in der halben Spalte um.
