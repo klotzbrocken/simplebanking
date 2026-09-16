@@ -44,7 +44,8 @@ final class MerchantLogoService: ObservableObject {
         "trinkgut": "trinkgut",
         "getranke hoffmann": "getraenke-hoffmann",
         "getränke hoffmann": "getraenke-hoffmann",
-        "reformhaus": "reformhaus",
+        // "reformhaus": die gebündelte Datei zeichnet mit CoreSVG leer (geprüft am
+        // 16.09.2026) — ohne Zuordnung läuft Reformhaus über den Netz-Fallback.
         "denn's biomarkt": "denns-biomarkt",
         "denns biomarkt": "denns-biomarkt",
         "tchibo": "tchibo",
