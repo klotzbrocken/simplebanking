@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 // MARK: - Merchant Logo Service
-// Priority: 1) bundled SVG  2) Brandfetch Logo API (wenn aktiviert + Client-ID)  3) DuckDuckGo favicon
+// Priority: 1) bundled SVG  2) Cache (30 Tage)  3) logo.dev (Tagesbudget, siehe LogoDev)
 
 @MainActor
 final class MerchantLogoService: ObservableObject {
@@ -208,7 +208,7 @@ final class MerchantLogoService: ObservableObject {
         "real": "real",
     ]
 
-    // MARK: - Domain-Whitelist für Remote-Logos (Brandfetch / DuckDuckGo)
+    // MARK: - Domain-Whitelist für Remote-Logos (logo.dev)
     // Nur explizit gelistete bekannte Marken → verhindert Fehlzuordnungen
     static let domainWhitelist: [String: String] = [
         // Lebensmittel
@@ -677,7 +677,7 @@ final class MerchantLogoService: ObservableObject {
         loadBundledSVG(key: k)
     }
 
-    /// Lädt Merchant-Custom-Logos beim Start — immer, unabhängig von Brandfetch-Einstellung.
+    /// Lädt Merchant-Custom-Logos beim Start — immer, unabhängig vom Internet-Schalter.
     private func loadMerchantCustomLogos() {
         Task.detached {
             let entries = TransactionsDatabase.loadAllMerchantCustomLogos()
@@ -692,35 +692,92 @@ final class MerchantLogoService: ObservableObject {
         }
     }
 
-    /// Einstellung „Händler-Logos aus dem Internet laden" (DuckDuckGo, optional Brandfetch).
+    /// Einstellung „Händler-Logos aus dem Internet laden" (logo.dev).
     static let remoteLogosKey = "remoteMerchantLogosEnabled"
     static var remoteLogosEnabled: Bool {
         UserDefaults.standard.object(forKey: remoteLogosKey) as? Bool ?? true
     }
 
-    /// Wie lange ein Brandfetch-Logo aus dem Cache gilt, bevor es neu geholt wird.
-    /// Brandfetch selbst nennt 30 Tage als Richtwert fürs Cachen von Markendaten.
-    static let brandfetchCacheDays = 30
+    /// Wie lange ein geladenes Logo aus dem Cache gilt — und wie lange ein „kein Logo"
+    /// (404) gemerkt wird, damit unbekannte Händler nicht täglich neu kosten.
+    nonisolated static let remoteCacheDays = 30
+
+    // MARK: - logo.dev
+    //
+    // Ein Schlüssel für alle Installationen — logo.dev nennt ihn „publishable key", er
+    // ist zum Einbetten gedacht (bei Brandfetch war genau das der Graubereich; die
+    // Anbindung ist mit 2.0.3 entfallen). Das Kontingent des Free-Tarifs (500.000
+    // Anfragen im Monat, harte Grenze) teilen sich damit alle Nutzer. Darum drei
+    // Bremsen: gebündelte Logos zuerst, dann der 30-Tage-Cache, dann höchstens
+    // `fetchesPerDay` Netzabrufe je Installation und Tag. Rechnung: 4.000 Nutzer ×
+    // 3 × 30 = 360.000 im schlimmsten Fall; real liegt es nach der ersten Woche weit
+    // darunter, weil nur neue Händler noch Abrufe auslösen.
+    //
+    // Free-Tarif und kommerzielle Nutzung verlangen einen Hinweis „Logos provided by
+    // Logo.dev" auf der Website oder in der Store-Beschreibung.
+    enum LogoDev {
+        /// Publishable Key (`pk_…`). Leer oder Platzhalter ⇒ keine Netzabrufe.
+        static let publishableKey = "pk_W66nkzL5RtG8bEEb3ZWNTg"
+        static let fetchesPerDay = 3
+        static var istKonfiguriert: Bool {
+            publishableKey.hasPrefix("pk_") && publishableKey != "pk_PLACEHOLDER"
+        }
+        static func url(for domain: String) -> URL? {
+            URL(string: "https://img.logo.dev/\(domain)?token=\(publishableKey)&size=128&format=png&fallback=404")
+        }
+
+        private static let zaehlerTagKey = "merchantLogoFetchDay"
+        private static let zaehlerKey = "merchantLogoFetchCount"
+        private static let fehltreffernKey = "merchantLogoMisses"
+
+        private static var heute: String {
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
+            return f.string(from: Date())
+        }
+
+        /// Reserviert einen Netzabruf für heute. `false`, wenn das Tagesbudget aufgebraucht ist.
+        static func budgetVerbrauchen() -> Bool {
+            let d = UserDefaults.standard
+            let tag = heute
+            var count = d.string(forKey: zaehlerTagKey) == tag ? d.integer(forKey: zaehlerKey) : 0
+            guard count < fetchesPerDay else { return false }
+            count += 1
+            d.set(tag, forKey: zaehlerTagKey)
+            d.set(count, forKey: zaehlerKey)
+            return true
+        }
+
+        /// „Kein Logo bekannt" — 30 Tage lang nicht erneut fragen.
+        static func merkeFehltreffer(_ key: String) {
+            var misses = UserDefaults.standard.dictionary(forKey: fehltreffernKey) as? [String: Double] ?? [:]
+            misses[key] = Date().timeIntervalSince1970
+            // Alte Einträge gleich mit ausmisten, damit das Dictionary nicht wächst.
+            let grenze = Date().addingTimeInterval(-Double(remoteCacheDays) * 86_400).timeIntervalSince1970
+            misses = misses.filter { $0.value >= grenze }
+            UserDefaults.standard.set(misses, forKey: fehltreffernKey)
+        }
+
+        static func istFehltreffer(_ key: String) -> Bool {
+            guard let ts = (UserDefaults.standard.dictionary(forKey: fehltreffernKey) as? [String: Double])?[key] else { return false }
+            return Date().timeIntervalSince1970 - ts < Double(remoteCacheDays) * 86_400
+        }
+
+        static func vergissFehltreffer() {
+            UserDefaults.standard.removeObject(forKey: fehltreffernKey)
+        }
+    }
 
     // Lädt die gecachten Logos aus der DB in den Speicher (einmalig beim ersten preload).
-    //
-    // Bis 2.0.3 wurde der Cache bei aktivem Brandfetch übersprungen, „damit Brandfetch
-    // immer frisch lädt" — und so holte jeder App-Start jedes Logo neu. Ein Logo ändert
-    // sich nicht täglich: Jetzt gilt es 30 Tage, danach fällt es aus dem Speicher und
-    // wird beim nächsten Anzeigen einmal neu geholt. Ohne Brandfetch bleibt es beim
-    // alten Verhalten (Cache ohne Verfallsdatum), dort zählt kein Kontingent.
+    // Logos, die älter als 30 Tage sind, fallen weg und werden beim nächsten Anzeigen
+    // einmal neu geholt — innerhalb des Tagesbudgets.
     private func loadPersistedLogosIfNeeded() {
         guard !persistedLogosLoaded else { return }
         persistedLogosLoaded = true
-        let brandfetchEnabled = UserDefaults.standard.bool(forKey: "brandfetchEnabled")
-        let clientId = UserDefaults.standard.string(forKey: "brandfetchClientId") ?? ""
-        let hoechstalter: Int? = (brandfetchEnabled && !clientId.isEmpty) ? Self.brandfetchCacheDays : nil
         // Synchron, nicht im Hintergrund: `preload` prüft direkt danach den Speicher.
         // Lief das Laden asynchron, sah der erste Aufruf einen leeren Cache und holte
-        // die beim Start sichtbaren Händler jedes Mal neu — und `saveLogo` setzte dabei
-        // `fetched_at` zurück, sodass genau diese Logos nie aus dem 30-Tage-Fenster
-        // fielen. Es ist ein einzelner Blob-Read aus SQLite, wenige Millisekunden.
-        guard let entries = try? TransactionsDatabase.loadCachedLogoData(maxAgeDays: hoechstalter) else { return }
+        // die beim Start sichtbaren Händler jedes Mal neu. Es ist ein einzelner
+        // Blob-Read aus SQLite, wenige Millisekunden.
+        guard let entries = try? TransactionsDatabase.loadCachedLogoData(maxAgeDays: Self.remoteCacheDays) else { return }
         for (key, data) in entries where imageCache[key] == nil {
             if let image = NSImage(data: data) {
                 imageCache[key] = image
@@ -736,23 +793,16 @@ final class MerchantLogoService: ObservableObject {
         // aber nur beim Entfernen eines eigenen Logos. Für die mitgelieferten Händler
         // fiel deshalb jedes Mal ein Netzaufruf an, den niemand brauchte.
         if loadBundledSVG(key: key) { return }
-        // Ohne diesen Schalter gab es keinen Weg, die Abrufe bei DuckDuckGo zu
-        // unterbinden — der Brandfetch-Schalter wechselte nur die Quelle. Default an,
-        // damit sich für Bestandsnutzer nichts ändert; wer keine Händlerdomains an
+        // Ohne diesen Schalter gab es keinen Weg, die Netzabrufe zu unterbinden. Default
+        // an, damit sich für Bestandsnutzer nichts ändert; wer keine Händlerdomains an
         // Dritte schicken will, schaltet hier ab und behält die gebündelten Logos.
-        guard Self.remoteLogosEnabled else { return }
+        guard Self.remoteLogosEnabled, LogoDev.istKonfiguriert else { return }
         guard let domain = Self.domainWhitelist[key] else { return }
+        guard !LogoDev.istFehltreffer(key) else { return }
+        guard LogoDev.budgetVerbrauchen() else { return }
         inFlight.insert(key)
 
-        let brandfetchEnabled = UserDefaults.standard.bool(forKey: "brandfetchEnabled")
-        let clientId = UserDefaults.standard.string(forKey: "brandfetchClientId") ?? ""
-
-        Task {
-            if brandfetchEnabled && !clientId.isEmpty {
-                if await fetchBrandfetch(key: key, domain: domain, clientId: clientId) { return }
-            }
-            await fetchDuckDuckGo(key: key, domain: domain)
-        }
+        Task { await fetchLogoDev(key: key, domain: domain) }
     }
 
     @discardableResult
@@ -765,76 +815,32 @@ final class MerchantLogoService: ObservableObject {
         return true
     }
 
-    // Gibt .de + .com Varianten zurück, damit Brandfetch beide probiert.
-    // Brandfetch ist brand-basiert, nicht länder-spezifisch — mal ist .de besser, mal .com.
-    private static func brandfetchVariants(_ domain: String) -> [String] {
-        var variants = [domain]
-        if domain.hasSuffix(".de") {
-            variants.append(String(domain.dropLast(3)) + ".com")
-        } else if domain.hasSuffix(".com") {
-            variants.append(String(domain.dropLast(4)) + ".de")
-        }
-        return variants
-    }
-
-    @discardableResult
-    private func fetchBrandfetch(key: String, domain: String, clientId: String) async -> Bool {
-        // Logo API (cdn.brandfetch.io), freies Kontingent, nur die Client-ID als Auth.
-        // `fallback/404`: unbekannte Marke ⇒ echter 404 statt Platzhalterbild — bis
-        // 2.0.3 riet die App an der Dateigröße („unter 5 KB ist ein Platzhalter").
-        // `w/128/h/128`: feste Größe statt des Logos in voller Auflösung; die Zeile
-        // zeigt 16 pt, das Detail 32 pt, Retina eingerechnet reichen 128 px.
-        for tryDomain in Self.brandfetchVariants(domain) {
-            let urlString = "https://cdn.brandfetch.io/\(tryDomain)/fallback/404/w/128/h/128?c=\(clientId)"
-            guard let url = URL(string: urlString) else { continue }
-            // Explizites Timeout 15s — Logos sind kleine Assets, sollten schnell laden.
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 15
-            guard let (data, response) = try? await URLSession.shared.data(for: request),
-                  (response as? HTTPURLResponse)?.statusCode == 200,
-                  !data.isEmpty,
-                  let image = NSImage(data: data) else { continue }
-            let capturedData = data
-            await MainActor.run {
-                imageCache[key] = image
-                inFlight.remove(key)
-            }
-            Task.detached { TransactionsDatabase.saveLogo(key: key, data: capturedData) }
-            return true
-        }
-        return false
-    }
-
-    /// Leert nur die heruntergeladenen Logos. Eigene Logos bleiben im Speicher — sie
-    /// liegen in einer anderen Tabelle, wurden aber bis 2.0.3 mit gelöscht, während
-    /// `customLogoKeys` sie weiter meldete: Die Ansicht zeigte dann ein Fremdlogo mit
-    /// dem Löschen-X fürs eigene, und ein Klick darauf löschte das echte eigene Logo.
     func clearCache() {
         imageCache = imageCache.filter { customLogoKeys.contains($0.key) }
         inFlight = []
         persistedLogosLoaded = false
+        Self.LogoDev.vergissFehltreffer()
         Task.detached { TransactionsDatabase.clearLogoCache() }
     }
 
-    private func fetchDuckDuckGo(key: String, domain: String) async {
-        let urlString = "https://icons.duckduckgo.com/ip3/\(domain).ico"
-        guard let url = URL(string: urlString) else {
-            await MainActor.run { inFlight.remove(key) }
-            return
-        }
+    private func fetchLogoDev(key: String, domain: String) async {
+        defer { inFlight.remove(key) }
+        guard let url = Self.LogoDev.url(for: domain) else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 15
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              !data.isEmpty,
-              let image = NSImage(data: data) else {
-            await MainActor.run { inFlight.remove(key) }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else { return }
+        if http.statusCode == 404 {
+            // Kein Logo bekannt — 30 Tage nicht wieder fragen, sonst kostet derselbe
+            // Händler jeden Tag einen Abruf aus dem Budget.
+            Self.LogoDev.merkeFehltreffer(key)
             return
         }
+        // 202 = noch nicht indiziert, 429 = Kontingent erschöpft: beides ohne Merker,
+        // beim nächsten Tag klappt es vielleicht.
+        guard http.statusCode == 200, !data.isEmpty, let image = NSImage(data: data) else { return }
         let capturedData = data
-        await MainActor.run {
-            imageCache[key] = image
-            inFlight.remove(key)
-        }
+        imageCache[key] = image
         Task.detached { TransactionsDatabase.saveLogo(key: key, data: capturedData) }
     }
 }

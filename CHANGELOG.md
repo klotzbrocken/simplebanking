@@ -18,9 +18,9 @@
 
 ### Geändert
 
-- **Schalter „Händler-Logos aus dem Internet laden"** (Einstellungen → Zugänge) — bisher fragte die App für Händler ohne mitgeliefertes Logo immer das Favicon bei DuckDuckGo an, ohne Hinweis und ohne Abschaltmöglichkeit. Der Schalter ist standardmäßig an; aus heißt: nur gebündelte Logos. Die Einstellung nennt jetzt beide Quellen.
+- **Schalter „Händler-Logos aus dem Internet laden"** (Einstellungen → Zugänge) — bisher fragte die App für Händler ohne mitgeliefertes Logo immer im Netz an, ohne Hinweis und ohne Abschaltmöglichkeit. Der Schalter ist standardmäßig an; aus heißt: nur gebündelte Logos. Die Einstellung nennt die Quelle.
 - **Vier Händler mehr mit mitgeliefertem Logo** — Action, TK Maxx, Globus und Real lagen als Datei im Bundle, waren aber nirgends zugeordnet. Drei tote Dateien entfernt.
-- **Händler-Logos: mitgelieferte zuerst** — die 129 gebündelten Logos werden jetzt vor jedem Netzaufruf genutzt; bisher holte die App sie trotzdem von Brandfetch oder DuckDuckGo. Brandfetch-Abrufe fragen ein festes 128-px-Icon an und bekommen bei unbekannter Marke einen echten Fehler statt eines Platzhalterbilds, das die App an der Dateigröße erraten musste. Geladene Logos gelten 30 Tage, statt bei jedem Start neu geholt zu werden.
+- **Händler-Logos: mitgelieferte zuerst, dann logo.dev** — die gebündelten Logos werden jetzt vor jedem Netzaufruf genutzt; bisher holte die App sie trotzdem aus dem Netz. Für alles andere fragt die App logo.dev, statt wie bisher das DuckDuckGo-Favicon oder (mit eigener Client-ID) Brandfetch; die Brandfetch-Anbindung ist entfallen. Höchstens drei Abrufe je Installation und Tag, geladene Logos gelten 30 Tage, ein „kein Logo bekannt“ wird ebenfalls 30 Tage gemerkt.
 - **Menüleisten-Menü aufgeräumt** — „Diagnose versenden" und „Logs öffnen" stehen jetzt im Bank-Diagnose-Fenster, wo sie hingehören: erst laufen lassen, dann schicken. „Nach Updates suchen" liegt unter Support statt allein zwischen zwei Trennlinien.
 - **Einstellungen → Allgemein** hat jetzt „Nach Updates suchen" und „simplebanking beenden" als Knöpfe — bei einer Menüleisten-App ohne Dock-Symbol ist Beenden sonst schwer zu finden.
 - **Buchungsdetails: IBAN und BIC** stehen einzeilig in voller Breite und lassen sich mit einem Klick kopieren; bisher brach die IBAN in der halben Spalte um.

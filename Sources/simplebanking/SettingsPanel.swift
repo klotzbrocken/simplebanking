@@ -220,14 +220,12 @@ struct SettingsView: View {
     @AppStorage(AIProvider.storageKey) private var selectedAIProvider: String = AIProvider.anthropic.rawValue
     @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
     @AppStorage(MerchantLogoService.remoteLogosKey) private var remoteLogosEnabled: Bool = true
-    @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("pendingAsPill") private var pendingAsPill: Bool = true
     @AppStorage(BankTintProvider.globalKey) private var bankTintEnabled: Bool = BankTintProvider.globalDefault
     @AppStorage(BankTintProvider.intensityKey) private var bankTintIntensity: Double = BankTintProvider.defaultIntensity
     @AppStorage(BankTintStyle.storageKey) private var bankTintStyleRaw: String = BankTintStyle.sidebar.rawValue
-    @AppStorage("brandfetchClientId") private var brandfetchClientId: String = ""
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
     @AppStorage(AppLanguage.storageKey) private var appLanguage: String = AppLanguage.system.rawValue
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
@@ -3575,45 +3573,21 @@ struct SettingsView: View {
 
             Divider()
 
-            // Händler-Logos aus dem Netz — der eine Schalter für alle Quellen.
+            // Händler-Logos aus dem Netz — ein Schalter, eine Quelle (logo.dev).
             SettingsToggleRow(
                 title: t("Händler-Logos aus dem Internet laden", "Load merchant logos from the internet"),
                 subtitle: t(
-                    "Für Händler ohne mitgeliefertes Logo fragt die App das Favicon der Händler-Domain bei DuckDuckGo an (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Aus: nur die gebündelten Logos.",
-                    "For merchants without a bundled logo the app requests the favicon of the merchant's domain from DuckDuckGo (e.g. rewe.de) — no IBANs, amounts or booking texts. Off: bundled logos only."
+                    "Für Händler ohne mitgeliefertes Logo fragt die App das Logo bei logo.dev an. Übermittelt wird nur die Domain des Händlers (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Höchstens drei Abrufe am Tag, geladene Logos gelten 30 Tage. Aus: nur die gebündelten Logos.",
+                    "For merchants without a bundled logo the app asks logo.dev for it. Only the merchant's domain is sent (e.g. rewe.de) — no IBANs, amounts or booking texts. At most three requests a day; loaded logos are kept for 30 days. Off: bundled logos only."
                 ),
                 isOn: $remoteLogosEnabled
             )
-
-            // Brandfetch Logos
-            SettingsToggleRow(
-                title: t("Brandfetch Händler-Logos", "Brandfetch Merchant Logos"),
-                subtitle: t(
-                    "Statt des Favicons das Markenlogo über die Brandfetch Logo API — bessere Qualität, gleiche Daten (nur die Domain). Die Client-ID gibt es kostenlos unter developers.brandfetch.com; die Anfragen laufen unter deinem Konto und den Bedingungen von Brandfetch.",
-                    "The brand logo via the Brandfetch Logo API instead of the favicon — better quality, same data (domain only). The client ID is free at developers.brandfetch.com; requests run under your account and Brandfetch's terms."
-                ),
-                isOn: $brandfetchEnabled
-            )
-            .disabled(!remoteLogosEnabled)
-            .opacity(remoteLogosEnabled ? 1 : 0.5)
-            // Einschalten leert den Logo-Cache: Sonst blieben die DuckDuckGo-Favicons
-            // bis zu 30 Tage stehen, und Brandfetch käme erst danach zum Zug.
-            .onChange(of: brandfetchEnabled) { an in
-                if an { MerchantLogoService.shared.clearCache() }
+            HStack(spacing: 4) {
+                Text(t("Logos bereitgestellt von", "Logos provided by"))
+                Link("Logo.dev", destination: URL(string: "https://logo.dev")!)
             }
-
-            if brandfetchEnabled {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(t("Brandfetch Client ID", "Brandfetch Client ID"))
-                        .font(ThemeFonts.body(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
-                    TextField(t("Client ID (c=...)", "Client ID (c=...)"), text: $brandfetchClientId)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .font(ThemeFonts.body(size: 12))
-                }
-                .padding(.leading, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            .font(ThemeFonts.body(size: 11))
+            .foregroundColor(.secondary)
 
             Divider()
 
@@ -3658,7 +3632,6 @@ struct SettingsView: View {
             }
 
         }
-        .animation(.easeInOut(duration: 0.15), value: brandfetchEnabled)
     }
 
     // MARK: - Sicherung
