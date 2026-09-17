@@ -79,6 +79,14 @@ struct TransactionsResponse: Codable, Sendable {
         /// ist — alles andere muss aus Beträgen und Abständen geraten werden.
         /// `nil` bei Buchungen, die vor Einführung des Feldes gespeichert wurden.
         var bankTransactionCode: String? = nil
+        /// Bankseitige Referenzen aus dem SDK (`accountServicerReference`, `entryReference`,
+        /// `transactionID`). Bis 2.0.3 wurden sie beim Mapping verworfen. Sie liegen jetzt
+        /// in `raw_json`, gehen aber bewusst NICHT in den Fingerprint: Bei HBCI-Banken
+        /// sind sie nicht durchgängig vorhanden und nicht stabil über pending→booked,
+        /// und jede Änderung der Fingerprint-Formel verwaist Notizen, Anhänge und Flags.
+        var accountServicerReference: String? = nil
+        var entryReference: String? = nil
+        var transactionId: String? = nil
         var category: String? = nil         // Local category label (e.g. "Essen & Alltag")
         var slotId: String? = nil           // Unified inbox: which bank slot this transaction belongs to
     }

@@ -1162,15 +1162,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                                 "PayPal credentials missing — please set up again.")
             return
         }
+        // Slot-Epoche wie im YAXI-Pfad: Wechselt der Nutzer während der beiden PayPal-
+        // Roundtrips das Konto, gehört die Antwort noch zu diesem Slot — Anzeige und
+        // Datenbank aber schon zum neuen. Bis 2.0.3 landeten die Umsätze dann dauerhaft
+        // unter der falschen Bank und beim nächsten Abruf als Duplikat unter der richtigen.
+        let epochAtStart = slotEpoch
         do {
             let bal = try await PayPalService.fetchBalance(creds: creds)
+            guard slotEpoch == epochAtStart else { return }
             applyPayPalDisplay(bal, slotId: slotId)
 
             let days = BankSlotSettingsStore.load(slotId: slotId).displayDays
             let txs = try await PayPalService.fetchTransactions(days: days, slotId: slotId, creds: creds)
+            guard slotEpoch == epochAtStart else { return }
             if !txs.isEmpty {
                 let sorted = sortTransactionsNewestFirst(txs)
-                try? TransactionsDatabase.upsert(transactions: sorted)
+                // Slot ausdrücklich mitgeben, nicht aus dem globalen activeSlotId raten.
+                try? TransactionsDatabase.upsert(transactions: sorted, slotId: slotId)
                 if let persisted = try? TransactionsDatabase.loadTransactions(days: days) {
                     txVM.transactions = sortTransactionsNewestFirst(persisted)
                     txVM.loadEnrichmentData(bankId: "primary")
@@ -5794,7 +5802,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 let sortedNetwork = sortTransactionsNewestFirst(tx)
 
                 do {
-                    try TransactionsDatabase.upsert(transactions: sortedNetwork)
+                    if sortedNetwork.isEmpty {
+                        // Erfolgreich, aber nichts gebucht: Die Bank meldet dann auch keine
+                        // Vormerkung mehr. `upsert([])` kehrt sofort um — die Bereinigung
+                        // muss hier eigens laufen, sonst bleibt eine erledigte Vormerkung stehen.
+                        try TransactionsDatabase.purgeAllPending()
+                    } else {
+                        try TransactionsDatabase.upsert(transactions: sortedNetwork)
+                    }
                     let persistedTransactions = try TransactionsDatabase.loadTransactions(days: displayDays)
                     txVM.transactions = sortTransactionsNewestFirst(persistedTransactions)
                     // Reload enrichment so newly inserted rows (is_unread=1) show
@@ -6589,9 +6604,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         guard !Task.isCancelled else { return }
 
-        // Wait for any in-flight HBCI call to finish before refreshing for the new slot.
-        // The old call was epoch-invalidated above and will return soon.
-        while isHBCICallInFlight {
+        // Wait for any in-flight HBCI or PayPal call to finish before refreshing for the
+        // new slot. The old call was epoch-invalidated above and will return soon.
+        while isHBCICallInFlight || isPayPalCallInFlight {
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
             guard !Task.isCancelled else { return }
         }

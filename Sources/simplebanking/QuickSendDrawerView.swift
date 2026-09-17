@@ -67,6 +67,9 @@ struct QuickSendDrawerView: View {
         /// Der Nutzer hat das Warten auf die Freigabe beendet. Kein Fehler — der Auftrag
         /// liegt bei der Bank und wird dort verworfen, nicht hier.
         case warteBeendet
+        /// Die Bank hat nicht eindeutig geantwortet; der Auftrag kann ausgeführt sein.
+        /// Kein Weg zurück ins ausgefüllte Formular — das wäre der Ein-Klick-Doppelversand.
+        case statusUnklar(String)
     }
 
     // MARK: Derived
@@ -104,6 +107,8 @@ struct QuickSendDrawerView: View {
                     failedRow(msg)
                 case .warteBeendet:
                     warteBeendetRow
+                case .statusUnklar(let msg):
+                    statusUnklarRow(msg)
                 default:
                     form
                 }
@@ -539,6 +544,41 @@ struct QuickSendDrawerView: View {
         }
     }
 
+    /// Orange statt rot, und ohne „Zurück": Das Formular wird geleert, damit derselbe
+    /// Auftrag nicht mit einem Klick ein zweites Mal rausgeht.
+    private func statusUnklarRow(_ msg: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(Color.sbOrangeStrong.opacity(0.15)).frame(width: 30, height: 30)
+                    Image(systemName: "questionmark")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.sbOrangeStrong)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.t("Status unklar", "Status unclear"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.sbTextPrimary)
+                    Text(msg)
+                        .font(.system(size: 11))
+                        .foregroundColor(.sbTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            Button {
+                name = ""; ibanText = ""; amountInput = ""; purpose = ""
+                lastPickedName = nil; acPicked = false
+                phase = .idle
+            } label: {
+                Text(L10n.t("Verstanden", "Got it"))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.sbBlueStrong)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func failedRow(_ msg: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
@@ -635,7 +675,8 @@ struct QuickSendDrawerView: View {
                 creditorName: trimmedName,
                 creditorIban: TransferRequest.normalizeIban(ibanText),
                 amountEUR: amt,
-                remittance: purpose.isEmpty ? nil : purpose
+                remittance: purpose.isEmpty ? nil : purpose,
+                endToEndId: TransferRequest.neueEndToEndId()
             )
         } catch {
             phase = .failed((error as? TransferRequestError)?.localizedHint ?? error.localizedDescription)
@@ -672,9 +713,9 @@ struct QuickSendDrawerView: View {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 onClose?()
             } else if outcome.mayHaveBeenExecuted {
-                phase = .failed(outcome.userMessage
-                                ?? L10n.t("Status unklar — bitte Umsätze prüfen.",
-                                          "Status unclear — please check transactions."))
+                phase = .statusUnklar(outcome.userMessage
+                                      ?? L10n.t("Die Bank hat nicht eindeutig bestätigt. Bitte erst die Umsätze prüfen, bevor du erneut sendest.",
+                                                "The bank didn't confirm clearly. Check your transactions before sending again."))
             } else {
                 phase = .failed(outcome.userMessage ?? outcome.error
                                 ?? L10n.t("Senden fehlgeschlagen.", "Send failed."))

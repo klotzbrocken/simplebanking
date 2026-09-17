@@ -27,7 +27,7 @@ enum OFXImporter {
 
         let countBefore = (try? TransactionsDatabase.loadTransactions(days: 3650).count) ?? 0
         do {
-            try TransactionsDatabase.upsert(transactions: parsed.transactions)
+            try TransactionsDatabase.upsert(transactions: parsed.transactions, purgeStalePending: false)
         } catch {
             throw ImportError.databaseFailed(error.localizedDescription)
         }

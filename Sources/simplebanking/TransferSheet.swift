@@ -1780,7 +1780,8 @@ struct TransferSheet: View {
                 creditorName: trimmedName,
                 creditorIban: ibanClean,
                 amountEUR: amountValue,
-                remittance: purpose.nilIfEmpty
+                remittance: purpose.nilIfEmpty,
+                endToEndId: TransferRequest.neueEndToEndId()
             )
         } catch let err as TransferRequestError {
             await MainActor.run { bodyError = err.localizedHint; phase = .idle }

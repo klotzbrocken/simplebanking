@@ -19,6 +19,13 @@ struct TransferRequest: Equatable, Sendable {
     let remittance: String?
     let endToEndId: String?
 
+    /// Eine End-to-End-Kennung je Auftrag, damit ein versehentlich zweimal gesendeter
+    /// Auftrag in der Umsatzliste als Doppel erkennbar ist — die Bank reicht sie durch.
+    /// 32 Hex-Zeichen aus einer UUID; SEPA erlaubt höchstens 35.
+    static func neueEndToEndId() -> String {
+        "SB" + UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(30)
+    }
+
     init(
         creditorName: String,
         creditorIban: String,

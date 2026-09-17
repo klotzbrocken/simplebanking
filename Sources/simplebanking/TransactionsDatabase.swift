@@ -594,18 +594,40 @@ enum TransactionsDatabase {
         }
     }
 
-    static func upsert(transactions: [TransactionsResponse.Transaction], bankId: String = "primary") throws {
+    /// `slotId`: der Slot, zu dem die Buchungen gehören. Ohne Angabe der gerade aktive —
+    /// das ist nur richtig, wenn zwischen Abruf und Schreiben kein Kontowechsel liegt.
+    /// Abrufe mit Wartezeit (PayPal) geben ihren Slot deshalb ausdrücklich mit.
+    /// `purgeStalePending`: nach dem Schreiben Vormerkungen löschen, die dieser Abruf
+    /// nicht mehr enthielt. Richtig für den Live-Abruf (die Bank meldet Vormerkungen,
+    /// solange sie bestehen), falsch für Datei-Importe: OFX/CAMT/Deep-Sync enthalten nie
+    /// Vormerkungen — bis 2.0.3 löschte jeder Import stillschweigend alle Vormerkungen
+    /// des Slots.
+    static func upsert(transactions: [TransactionsResponse.Transaction], slotId explicitSlotId: String? = nil, bankId: String = "primary", purgeStalePending: Bool = true) throws {
         guard !transactions.isEmpty else { return }
 
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
         let now = currentTimestamp()
 
-        let slotId = activeSlotId
+        let slotId = explicitSlotId ?? activeSlotId
 
         // Records vorab bauen, damit der Roundup-Hook nach dem Write (status,
         // waehrung, betrag, txID, buchungsdatum) ohne zweiten Build-Pass auswerten kann.
-        let records = try transactions.map { try TransactionRecord(transaction: $0, updatedAt: now) }
+        //
+        // Gleiche Buchungen im selben Abruf — zweimal derselbe Kaffee am selben Automaten,
+        // zwei gleiche Tickets — haben denselben Fingerprint und fielen bis 2.0.3 per
+        // ON CONFLICT auf eine Zeile zusammen. Ab dem zweiten Vorkommen hängt jetzt ein
+        // Zähler an der ID. Das erste Vorkommen behält exakt die bisherige ID, damit
+        // Notizen, Anhänge und Flags zugeordnet bleiben; die Zählung ist bei jedem
+        // Abruf dieselbe, weil die Bank die Reihenfolge nicht ändert.
+        var gesehen: [String: Int] = [:]
+        let records = try transactions.map { tx -> TransactionRecord in
+            var record = try TransactionRecord(transaction: tx, updatedAt: now)
+            let n = (gesehen[record.txID] ?? 0) + 1
+            gesehen[record.txID] = n
+            if n > 1 { record.txID += "#\(n)" }
+            return record
+        }
 
         // Pre-Query: welche tx_ids sind bereits *als booked* in diesem Slot bekannt?
         // Pending→Booked-Übergänge bleiben dadurch außerhalb dieser Menge und
@@ -692,13 +714,9 @@ enum TransactionsDatabase {
             // without cleanup it would linger in the DB forever.
             // We only remove rows that are still pending AND whose updated_at was NOT
             // touched by this batch (i.e., YAXI no longer includes them).
-            try db.execute(
-                sql: """
-                    DELETE FROM transactions
-                    WHERE slot_id = ? AND status = 'pending' AND updated_at < ?
-                    """,
-                arguments: [slotId, now]
-            )
+            if purgeStalePending {
+                try Self.purgeStalePending(db, slotId: slotId, olderThan: now)
+            }
         }
 
         // Roundup-Hook: nach commit, separat geschrieben (RoundupStore öffnet eigene
@@ -1504,6 +1522,38 @@ enum TransactionsDatabase {
             return bool ? "true" : "false"
         }
         return String(describing: value)
+    }
+
+    /// Alle `tx_id`s eines Slots — für Tests und Diagnose.
+    static func allTxIds(slotId: String, bankId: String = "primary") throws -> [String] {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        return try queue.read { db in
+            try String.fetchAll(db, sql: "SELECT tx_id FROM transactions WHERE slot_id = ? ORDER BY tx_id", arguments: [slotId])
+        }
+    }
+
+    /// Löscht Vormerkungen des Slots, die seit `olderThan` nicht mehr bestätigt wurden.
+    private static func purgeStalePending(_ db: Database, slotId: String, olderThan: String) throws {
+        try db.execute(
+            sql: """
+                DELETE FROM transactions
+                WHERE slot_id = ? AND status = 'pending' AND updated_at < ?
+                """,
+            arguments: [slotId, olderThan]
+        )
+    }
+
+    /// Für einen erfolgreichen Live-Abruf ohne eine einzige Buchung: `upsert([])` kehrt
+    /// sofort um, die Bereinigung liefe sonst nie — eine weggefallene Vormerkung bliebe
+    /// stehen. Löscht alle noch offenen Vormerkungen des Slots.
+    static func purgeAllPending(slotId explicitSlotId: String? = nil, bankId: String = "primary") throws {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        let slotId = explicitSlotId ?? activeSlotId
+        try queue.write { db in
+            try purgeStalePending(db, slotId: slotId, olderThan: currentTimestamp())
+        }
     }
 
     private static func currentTimestamp() -> String {

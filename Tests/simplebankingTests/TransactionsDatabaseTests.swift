@@ -52,6 +52,54 @@ final class TransactionsDatabaseTests: XCTestCase {
             "Slot B darf vom Slot-A-Filter nicht beeinflusst werden.")
     }
 
+    // MARK: - Gleiche Buchungen im selben Abruf (Audit 09/2026, Befund 3)
+
+    /// Zwei identische Buchungen — gleicher Tag, Betrag, Text, ohne End-to-End-ID — haben
+    /// denselben Fingerprint. Bis 2.0.3 fiel die zweite per ON CONFLICT auf die erste.
+    /// Jetzt bleiben beide; die erste behält exakt ihre bisherige ID.
+    func test_gleicheBuchungenImSelbenAbruf_bleibenGetrennt() throws {
+        let kaffee1 = makeTx(endToEndId: "", merchant: "Kaffeeautomat", amount: -2.50)
+        let kaffee2 = makeTx(endToEndId: "", merchant: "Kaffeeautomat", amount: -2.50)
+        let fp = TransactionRecord.fingerprint(for: kaffee1)
+        XCTAssertEqual(fp, TransactionRecord.fingerprint(for: kaffee2), "Vorbedingung: gleicher Fingerprint")
+
+        TransactionsDatabase.activeSlotId = "slot-a"
+        try TransactionsDatabase.upsert(transactions: [kaffee1, kaffee2], bankId: testBankId)
+
+        let ids = try TransactionsDatabase.allTxIds(slotId: "slot-a", bankId: testBankId).sorted()
+        XCTAssertEqual(ids, [fp, fp + "#2"].sorted())
+
+        // Zweiter Abruf mit denselben Buchungen: keine dritte Zeile.
+        try TransactionsDatabase.upsert(transactions: [kaffee1, kaffee2], bankId: testBankId)
+        XCTAssertEqual(try TransactionsDatabase.allTxIds(slotId: "slot-a", bankId: testBankId).count, 2)
+    }
+
+    // MARK: - Vormerkungen (Audit 09/2026, Befund 4)
+
+    /// Ein erfolgreicher Live-Abruf ohne Buchungen räumt Vormerkungen auf; ein Datei-Import
+    /// lässt sie in Ruhe.
+    func test_pendingBereinigung_liveLeerLoescht_importLaesstStehen() throws {
+        var vormerkung = makeTx(endToEndId: "pend-1", merchant: "Tanke", amount: -40.0)
+        vormerkung = TransactionsResponse.Transaction(
+            bookingDate: vormerkung.bookingDate, valueDate: vormerkung.valueDate, status: "pending",
+            endToEndId: vormerkung.endToEndId, amount: vormerkung.amount, creditor: vormerkung.creditor,
+            debtor: vormerkung.debtor, remittanceInformation: vormerkung.remittanceInformation,
+            additionalInformation: vormerkung.additionalInformation, purposeCode: nil)
+        TransactionsDatabase.activeSlotId = "slot-a"
+        try TransactionsDatabase.upsert(transactions: [vormerkung], bankId: testBankId)
+        XCTAssertEqual(try TransactionsDatabase.allTxIds(slotId: "slot-a", bankId: testBankId).count, 1)
+
+        // Datei-Import ohne die Vormerkung: bleibt stehen.
+        let importiert = makeTx(endToEndId: "ofx-1", merchant: "Baecker", amount: -3.0)
+        try TransactionsDatabase.upsert(transactions: [importiert], bankId: testBankId, purgeStalePending: false)
+        XCTAssertEqual(try TransactionsDatabase.allTxIds(slotId: "slot-a", bankId: testBankId).count, 2)
+
+        // Erfolgreicher Live-Abruf ohne eine einzige Buchung: Vormerkung weg, Rest bleibt.
+        try TransactionsDatabase.purgeAllPending(slotId: "slot-a", bankId: testBankId)
+        let rest = try TransactionsDatabase.allTxIds(slotId: "slot-a", bankId: testBankId)
+        XCTAssertEqual(rest, [TransactionRecord.fingerprint(for: importiert)])
+    }
+
     // MARK: - Enrichment-Key (Composite (slot_id, tx_id))
 
     /// Regression: gleiche `tx_id` in verschiedenen Slots muss getrennte

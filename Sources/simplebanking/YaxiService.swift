@@ -1754,6 +1754,44 @@ enum YaxiService {
         error is HTTPError
     }
 
+    /// Kann eine Überweisung trotz dieses Fehlers ausgeführt worden sein?
+    ///
+    /// Die Frage ist nicht „war es ein Fehler", sondern „hat der Auftrag die Bank
+    /// erreicht". Nur wenn das sicher zu verneinen ist, darf die Oberfläche
+    /// „fehlgeschlagen" sagen und zum erneuten Senden einladen. Alles andere ist
+    /// „unklar" — ein zweiter Versand wäre sonst eine Doppelzahlung.
+    ///
+    /// - `RoutexError`: fachliche Antworten der Bank. `paymentFailed`, ungültige
+    ///   Zugangsdaten, gesperrter Dienst, Validierung (`unexpectedValue`), Ticket,
+    ///   Abbruch durch den Nutzer — die Bank hat abgelehnt oder nie angefangen.
+    ///   `unexpectedError`/`providerError` können laut YAXI-Doku trotzdem ausgeführt
+    ///   sein; `unrecognizedResponse`/`notFound`/`interruptError` sind Infrastruktur-
+    ///   antworten, bei denen die Bank den Auftrag schon haben kann.
+    /// - `RoutexClientError`: `sealingFailed` passiert vor dem Senden. Unsealing
+    ///   oder ein unlesbares Format heißt dagegen: Es kam eine Antwort, wir konnten
+    ///   sie nur nicht lesen.
+    /// - `HTTPError` (Verbindungsabbruch, Timeout), `CancellationError`, Unbekanntes:
+    ///   der Auftrag kann längst angekommen sein.
+    static func transferMayHaveBeenExecuted(_ error: Error) -> Bool {
+        switch error {
+        case let routex as RoutexError:
+            switch routex {
+            case .paymentFailed, .invalidCredentials, .serviceBlocked, .unauthorized,
+                 .accessExceeded, .periodOutOfBounds, .unsupportedProduct,
+                 .unexpectedValue, .ticketError, .canceled:
+                return false
+            case .unexpectedError, .providerError, .unrecognizedResponse, .notFound,
+                 .interruptError:
+                return true
+            }
+        case let client as RoutexClientError:
+            if case .sealingFailed = client { return false }
+            return true
+        default:
+            return true
+        }
+    }
+
     private static func shouldRetryWithoutUserId(error: Error, model: CredentialsModel, userId: String?) -> Bool {
         guard model.full, !model.userID, userId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty != nil else {
             return false
@@ -2017,17 +2055,16 @@ enum YaxiService {
         } catch {
             await writeTrace(client: client, label: "sendTransfer", ticket: ticket, error: error)
             AppLogger.log("sendTransfer error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
-            // YAXI-Doku-Hinweis: bei UnexpectedError/ProviderError kann der
-            // Transfer trotzdem ausgeführt worden sein. Caller-UI muss
-            // ehrlich kommunizieren: „Status unklar, prüfe Banking-App".
-            let msg = error.localizedDescription.lowercased()
-            let mayBeExecuted =
-                msg.contains("unexpected") || msg.contains("provider")
+            // Caller-UI muss ehrlich kommunizieren: „Status unklar, prüfe Banking-App",
+            // sobald der Auftrag die Bank erreicht haben kann. Klassifikation nach
+            // Fehlertyp, siehe `transferMayHaveBeenExecuted` — bis 2.0.3 stand hier
+            // ein Textvergleich auf „unexpected"/„provider", der Verbindungsabbrüche
+            // nach dem Senden als sicher fehlgeschlagen ausgab.
             return TransferOutcome(
                 ok: false, scaRequired: false,
                 error: error.localizedDescription,
                 userMessage: nil,
-                mayHaveBeenExecuted: mayBeExecuted
+                mayHaveBeenExecuted: Self.transferMayHaveBeenExecuted(error)
             )
         }
     }
@@ -2296,7 +2333,10 @@ enum YaxiService {
                 remittanceInformation: tx.remittanceInformation.isEmpty ? nil : tx.remittanceInformation,
                 additionalInformation: tx.additionalInformation,
                 purposeCode: tx.purposeCode,
-                bankTransactionCode: compactBankTransactionCode(tx.bankTransactionCodes)
+                bankTransactionCode: compactBankTransactionCode(tx.bankTransactionCodes),
+                accountServicerReference: tx.accountServicerReference,
+                entryReference: tx.entryReference,
+                transactionId: tx.transactionID
             )
         }
 

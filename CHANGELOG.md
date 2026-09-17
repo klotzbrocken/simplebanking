@@ -18,6 +18,8 @@
 
 ### Geändert
 
+- **Schalter „Händler-Logos aus dem Internet laden"** (Einstellungen → Zugänge) — bisher fragte die App für Händler ohne mitgeliefertes Logo immer das Favicon bei DuckDuckGo an, ohne Hinweis und ohne Abschaltmöglichkeit. Der Schalter ist standardmäßig an; aus heißt: nur gebündelte Logos. Die Einstellung nennt jetzt beide Quellen.
+- **Vier Händler mehr mit mitgeliefertem Logo** — Action, TK Maxx, Globus und Real lagen als Datei im Bundle, waren aber nirgends zugeordnet. Drei tote Dateien entfernt.
 - **Händler-Logos: mitgelieferte zuerst** — die 129 gebündelten Logos werden jetzt vor jedem Netzaufruf genutzt; bisher holte die App sie trotzdem von Brandfetch oder DuckDuckGo. Brandfetch-Abrufe fragen ein festes 128-px-Icon an und bekommen bei unbekannter Marke einen echten Fehler statt eines Platzhalterbilds, das die App an der Dateigröße erraten musste. Geladene Logos gelten 30 Tage, statt bei jedem Start neu geholt zu werden.
 - **Menüleisten-Menü aufgeräumt** — „Diagnose versenden" und „Logs öffnen" stehen jetzt im Bank-Diagnose-Fenster, wo sie hingehören: erst laufen lassen, dann schicken. „Nach Updates suchen" liegt unter Support statt allein zwischen zwei Trennlinien.
 - **Einstellungen → Allgemein** hat jetzt „Nach Updates suchen" und „simplebanking beenden" als Knöpfe — bei einer Menüleisten-App ohne Dock-Symbol ist Beenden sonst schwer zu finden.
@@ -43,6 +45,12 @@
 
 ### Behoben
 
+- **Überweisung: „fehlgeschlagen" nur, wenn es sicher ist** — bei einem Verbindungsabbruch nach dem Senden meldete die App „Senden fehlgeschlagen", obwohl die Bank den Auftrag längst haben konnte; wer daraufhin erneut sendete, zahlte doppelt. Die Einordnung geht jetzt nach Fehlertyp statt nach Wortlaut, und die Schnellüberweisung zeigt bei unklarem Status keinen „Zurück"-Knopf ins ausgefüllte Formular mehr. Jede Überweisung trägt außerdem eine eigene End-to-End-Kennung, damit ein Doppel in der Umsatzliste erkennbar wäre.
+- **PayPal-Umsätze landeten nach einem Kontowechsel im falschen Konto** — wechselte man während des Abrufs die Bank, wurden die Umsätze unter der neuen gespeichert und beim nächsten Abruf unter der richtigen noch einmal; die Menüleiste zeigte den PayPal-Saldo unter der falschen Bank. Der Abruf prüft jetzt nach jedem Schritt, ob das Konto noch dasselbe ist, und schreibt ausdrücklich in sein eigenes.
+- **Gleiche Buchungen im selben Abruf** — zweimal derselbe Kaffee am selben Automaten, zwei gleiche Tickets: Die zweite Buchung überschrieb bisher die erste. Jetzt bleiben beide erhalten; bestehende Notizen und Anhänge bleiben zugeordnet.
+- **Erledigte Vormerkungen blieben stehen**, wenn ein Abruf zwar gelang, aber keine einzige Buchung lieferte. Umgekehrt löschte jeder OFX-/CAMT-Import stillschweigend alle Vormerkungen des Kontos. Beides korrigiert.
+- **Logo-Cache leeren nahm eigene Logos mit** — die selbst gesetzten Händlerlogos verschwanden bis zum Neustart aus der Anzeige, und an ihrer Stelle erschien ein Fremdlogo mit dem Löschen-Knopf fürs eigene. Eigene Logos bleiben jetzt beim Leeren erhalten.
+- **Logo-Cache griff beim Start nicht** — die beim Start sichtbaren Händler wurden bei jedem Start neu geholt, weil der Cache noch nicht geladen war, wenn die Liste erschien.
 - **Schnellüberweisung: Vorlage öffnete die Vorschlagsliste** — nach dem Antippen einer gespeicherten Vorlage klappten unter dem Namen die Empfänger-Vorschläge aus, als hätte man getippt. Eine Vorlage zählt jetzt wie eine Auswahl: Die Liste bleibt zu, bis der Name selbst geändert wird.
 - **Lizenzprüfung auf Polar-API-Version 2026-04 festgelegt** — Polar versioniert seine API ab Oktober quartalsweise; ohne Festlegung würde jeder ausgelieferte Build mit dem nächsten Stand mitwandern. Ein Lizenzstatus, den die App nicht kennt, gilt jetzt als „nicht lizenziert" mit Hinweis auf ein Update, statt als Netzwerkfehler.
 - **KI-Kategorisierung lief ins Leere** — die App sprach Claude 3.5 Haiku an, das Anthropic am 19. Februar 2026 abgeschaltet hat, und verschluckte den Fehler. Jetzt Claude Haiku 4.5, und jeder Lauf steht im Protokoll: wie viele Buchungen zugeordnet wurden, und wenn etwas scheitert, warum.

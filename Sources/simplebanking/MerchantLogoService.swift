@@ -197,6 +197,15 @@ final class MerchantLogoService: ObservableObject {
 
         // Tech / Apple
         "apple": "apple",
+
+        // Ergänzt 17.09.2026: Dateien lagen im Bundle, waren aber nirgends zugeordnet.
+        "action": "action",
+        "tk maxx": "tk-maxx",
+        "tkmaxx": "tk-maxx",
+        "tk-maxx": "tk-maxx",
+        "globus": "globus-sb-warenhaus",
+        "globus sb-warenhaus": "globus-sb-warenhaus",
+        "real": "real",
     ]
 
     // MARK: - Domain-Whitelist für Remote-Logos (Brandfetch / DuckDuckGo)
@@ -553,6 +562,15 @@ final class MerchantLogoService: ObservableObject {
         "württembergische": "ww-ag.com",
         "wurttembergische": "ww-ag.com",
         "zurich versicherung": "zurich.de",
+
+        // Ergänzt 17.09.2026 (siehe svgMap).
+        "action": "action.com",
+        "tk maxx": "tkmaxx.de",
+        "tkmaxx": "tkmaxx.de",
+        "tk-maxx": "tkmaxx.de",
+        "globus": "globus.de",
+        "globus sb-warenhaus": "globus.de",
+        "real": "real.de",
     ]
 
     // Längste Schlüssel zuerst → spezifischere Treffer vor generischen ("apple music" vor "apple")
@@ -674,6 +692,12 @@ final class MerchantLogoService: ObservableObject {
         }
     }
 
+    /// Einstellung „Händler-Logos aus dem Internet laden" (DuckDuckGo, optional Brandfetch).
+    static let remoteLogosKey = "remoteMerchantLogosEnabled"
+    static var remoteLogosEnabled: Bool {
+        UserDefaults.standard.object(forKey: remoteLogosKey) as? Bool ?? true
+    }
+
     /// Wie lange ein Brandfetch-Logo aus dem Cache gilt, bevor es neu geholt wird.
     /// Brandfetch selbst nennt 30 Tage als Richtwert fürs Cachen von Markendaten.
     static let brandfetchCacheDays = 30
@@ -691,14 +715,15 @@ final class MerchantLogoService: ObservableObject {
         let brandfetchEnabled = UserDefaults.standard.bool(forKey: "brandfetchEnabled")
         let clientId = UserDefaults.standard.string(forKey: "brandfetchClientId") ?? ""
         let hoechstalter: Int? = (brandfetchEnabled && !clientId.isEmpty) ? Self.brandfetchCacheDays : nil
-        Task.detached {
-            guard let entries = try? TransactionsDatabase.loadCachedLogoData(maxAgeDays: hoechstalter) else { return }
-            await MainActor.run {
-                for (key, data) in entries where self.imageCache[key] == nil {
-                    if let image = NSImage(data: data) {
-                        self.imageCache[key] = image
-                    }
-                }
+        // Synchron, nicht im Hintergrund: `preload` prüft direkt danach den Speicher.
+        // Lief das Laden asynchron, sah der erste Aufruf einen leeren Cache und holte
+        // die beim Start sichtbaren Händler jedes Mal neu — und `saveLogo` setzte dabei
+        // `fetched_at` zurück, sodass genau diese Logos nie aus dem 30-Tage-Fenster
+        // fielen. Es ist ein einzelner Blob-Read aus SQLite, wenige Millisekunden.
+        guard let entries = try? TransactionsDatabase.loadCachedLogoData(maxAgeDays: hoechstalter) else { return }
+        for (key, data) in entries where imageCache[key] == nil {
+            if let image = NSImage(data: data) {
+                imageCache[key] = image
             }
         }
     }
@@ -708,9 +733,14 @@ final class MerchantLogoService: ObservableObject {
         let key = normalizedMerchant.lowercased()
         guard imageCache[key] == nil, !inFlight.contains(key) else { return }
         // Gebündeltes SVG zuerst — so stand es im Kopf dieser Datei, gerufen wurde es
-        // aber nur beim Entfernen eines eigenen Logos. Für die 129 mitgelieferten
-        // Händler fiel deshalb jedes Mal ein Netzaufruf an, den niemand brauchte.
+        // aber nur beim Entfernen eines eigenen Logos. Für die mitgelieferten Händler
+        // fiel deshalb jedes Mal ein Netzaufruf an, den niemand brauchte.
         if loadBundledSVG(key: key) { return }
+        // Ohne diesen Schalter gab es keinen Weg, die Abrufe bei DuckDuckGo zu
+        // unterbinden — der Brandfetch-Schalter wechselte nur die Quelle. Default an,
+        // damit sich für Bestandsnutzer nichts ändert; wer keine Händlerdomains an
+        // Dritte schicken will, schaltet hier ab und behält die gebündelten Logos.
+        guard Self.remoteLogosEnabled else { return }
         guard let domain = Self.domainWhitelist[key] else { return }
         inFlight.insert(key)
 
@@ -775,8 +805,12 @@ final class MerchantLogoService: ObservableObject {
         return false
     }
 
+    /// Leert nur die heruntergeladenen Logos. Eigene Logos bleiben im Speicher — sie
+    /// liegen in einer anderen Tabelle, wurden aber bis 2.0.3 mit gelöscht, während
+    /// `customLogoKeys` sie weiter meldete: Die Ansicht zeigte dann ein Fremdlogo mit
+    /// dem Löschen-X fürs eigene, und ein Klick darauf löschte das echte eigene Logo.
     func clearCache() {
-        imageCache = [:]
+        imageCache = imageCache.filter { customLogoKeys.contains($0.key) }
         inFlight = []
         persistedLogosLoaded = false
         Task.detached { TransactionsDatabase.clearLogoCache() }

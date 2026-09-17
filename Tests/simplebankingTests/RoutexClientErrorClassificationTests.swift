@@ -87,3 +87,53 @@ final class RoutexClientErrorClassificationTests: XCTestCase {
         XCTAssertFalse(YaxiService.isConnectionResetError(err))
     }
 }
+
+/// Sichert die Klassifikation ab, die entscheidet, ob eine Überweisung nach einem
+/// Fehler als „fehlgeschlagen" oder als „Status unklar" gezeigt wird. Bis 2.0.3 war
+/// das ein Textvergleich auf „unexpected"/„provider" — ein Verbindungsabbruch nach
+/// dem Senden galt damit als sicher fehlgeschlagen und lud zur Doppelzahlung ein.
+final class TransferMayHaveBeenExecutedTests: XCTestCase {
+
+    // Die Bank hat abgelehnt oder nie angefangen → sicher nicht ausgeführt.
+    func test_bankHatAbgelehnt_istSicherFehlgeschlagen() {
+        XCTAssertFalse(YaxiService.transferMayHaveBeenExecuted(RoutexError.paymentFailed(code: nil, userMessage: nil)))
+        XCTAssertFalse(YaxiService.transferMayHaveBeenExecuted(RoutexError.invalidCredentials(userMessage: nil)))
+        XCTAssertFalse(YaxiService.transferMayHaveBeenExecuted(RoutexError.unsupportedProduct(reason: nil, userMessage: nil)))
+        XCTAssertFalse(YaxiService.transferMayHaveBeenExecuted(RoutexError.canceled))
+    }
+
+    // „unexpectedValue" enthält das Wort „unexpected" — der alte Textvergleich hielt
+    // eine reine Eingabevalidierung für „vielleicht ausgeführt".
+    func test_unexpectedValue_istSicherFehlgeschlagen() {
+        XCTAssertFalse(YaxiService.transferMayHaveBeenExecuted(RoutexError.unexpectedValue(error: "iban")))
+    }
+
+    // Laut YAXI-Doku kann der Auftrag hier trotzdem ausgeführt sein.
+    func test_unexpectedUndProvider_bleibenUnklar() {
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(RoutexError.unexpectedError(userMessage: nil)))
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(RoutexError.providerError(code: nil, userMessage: nil)))
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(RoutexError.unrecognizedResponse(status: 504, text: "gateway")))
+    }
+
+    // Der eigentliche Anlass: Transportfehler nach dem Senden.
+    func test_transportfehler_istUnklar() {
+        let url = URLError(.networkConnectionLost)
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(HTTPError.transportFailure(underlying: url)))
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(HTTPError.noResponse))
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(CancellationError()))
+    }
+
+    // Vor dem Senden gescheitert → nichts ging raus. Antwort nicht lesbar → sie kam.
+    func test_clientFehler_nachSealingUnterscheidung() {
+        XCTAssertFalse(YaxiService.transferMayHaveBeenExecuted(RoutexClientError.sealingFailed(message: "x", underlying: nil)))
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(RoutexClientError.unsealingFailed(message: "x", underlying: nil)))
+        XCTAssertTrue(YaxiService.transferMayHaveBeenExecuted(RoutexClientError.malformedResponse(message: "x", underlying: nil)))
+    }
+
+    func test_endToEndId_passtInSEPA() {
+        let id = TransferRequest.neueEndToEndId()
+        XCTAssertEqual(id.count, 32)
+        XCTAssertTrue(id.hasPrefix("SB"))
+        XCTAssertNotEqual(id, TransferRequest.neueEndToEndId())
+    }
+}

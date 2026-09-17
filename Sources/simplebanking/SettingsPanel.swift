@@ -219,6 +219,7 @@ struct SettingsView: View {
     @AppStorage("apiKeyPresent_openai") private var openaiKeyPresent: Bool = false
     @AppStorage(AIProvider.storageKey) private var selectedAIProvider: String = AIProvider.anthropic.rawValue
     @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
+    @AppStorage(MerchantLogoService.remoteLogosKey) private var remoteLogosEnabled: Bool = true
     @AppStorage("brandfetchEnabled") private var brandfetchEnabled: Bool = false
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
@@ -3574,15 +3575,27 @@ struct SettingsView: View {
 
             Divider()
 
+            // Händler-Logos aus dem Netz — der eine Schalter für alle Quellen.
+            SettingsToggleRow(
+                title: t("Händler-Logos aus dem Internet laden", "Load merchant logos from the internet"),
+                subtitle: t(
+                    "Für Händler ohne mitgeliefertes Logo fragt die App das Favicon der Händler-Domain bei DuckDuckGo an (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Aus: nur die gebündelten Logos.",
+                    "For merchants without a bundled logo the app requests the favicon of the merchant's domain from DuckDuckGo (e.g. rewe.de) — no IBANs, amounts or booking texts. Off: bundled logos only."
+                ),
+                isOn: $remoteLogosEnabled
+            )
+
             // Brandfetch Logos
             SettingsToggleRow(
                 title: t("Brandfetch Händler-Logos", "Brandfetch Merchant Logos"),
                 subtitle: t(
-                    "Lädt Logos bekannter Marken über die Brandfetch Logo API. Übermittelt wird nur die Domain des Händlers (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Die Client-ID gibt es kostenlos unter developers.brandfetch.com; die Anfragen laufen unter deinem Konto und den Bedingungen von Brandfetch.",
-                    "Fetches logos for known brands via the Brandfetch Logo API. Only the merchant's domain is sent (e.g. rewe.de) — no IBANs, amounts or booking texts. The client ID is free at developers.brandfetch.com; requests run under your account and Brandfetch's terms."
+                    "Statt des Favicons das Markenlogo über die Brandfetch Logo API — bessere Qualität, gleiche Daten (nur die Domain). Die Client-ID gibt es kostenlos unter developers.brandfetch.com; die Anfragen laufen unter deinem Konto und den Bedingungen von Brandfetch.",
+                    "The brand logo via the Brandfetch Logo API instead of the favicon — better quality, same data (domain only). The client ID is free at developers.brandfetch.com; requests run under your account and Brandfetch's terms."
                 ),
                 isOn: $brandfetchEnabled
             )
+            .disabled(!remoteLogosEnabled)
+            .opacity(remoteLogosEnabled ? 1 : 0.5)
             // Einschalten leert den Logo-Cache: Sonst blieben die DuckDuckGo-Favicons
             // bis zu 30 Tage stehen, und Brandfetch käme erst danach zum Zug.
             .onChange(of: brandfetchEnabled) { an in

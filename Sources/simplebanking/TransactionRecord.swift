@@ -5,7 +5,7 @@ import GRDB
 struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
     static let databaseTableName = "transactions"
 
-    let txID: String
+    var txID: String
     let endToEndID: String?
     let datum: String
     let buchungsdatum: String

@@ -59,7 +59,7 @@ enum YaxiDeepSyncImporter {
         }
 
         do {
-            try TransactionsDatabase.upsert(transactions: txs)
+            try TransactionsDatabase.upsert(transactions: txs, purgeStalePending: false)
         } catch {
             throw ImportError.databaseFailed(error.localizedDescription)
         }
