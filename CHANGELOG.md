@@ -1,5 +1,11 @@
 # Changelog — simplebanking
 
+## [2.0.4]
+
+### Behoben
+
+- **ING: „400 Request Header Or Cookie Too Large“ bei der Freigabe** — INGs Login-Seite lehnte die Anfrage ab, sobald Safari über die Jahre zu viele Cookies für ing.com angesammelt hatte; Umsätze blieben aus, Neueinrichtungen scheiterten. Die Freigabe-Seite öffnet jetzt in einem eigenen Fenster ohne Cookies und Verlauf des Browsers, jeder Durchlauf startet leer. Das gilt für alle Banken mit Freigabe im Browser (ING, bunq, N26, Revolut). Wer Safari zurückhaben will: Einstellungen → Allgemein → „Bank-Freigabe im eigenen Fenster“ aus.
+
 ## [2.0.3]
 
 ### Neu

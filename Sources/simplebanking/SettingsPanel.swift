@@ -220,6 +220,7 @@ struct SettingsView: View {
     @AppStorage(AIProvider.storageKey) private var selectedAIProvider: String = AIProvider.anthropic.rawValue
     @AppStorage(AICategorizationService.enabledKey) private var aiCategorizationEnabled: Bool = false
     @AppStorage(MerchantLogoService.remoteLogosKey) private var remoteLogosEnabled: Bool = true
+    @AppStorage(Freigabefenster.einstellungKey) private var scaEphemeralWindow: Bool = true
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("monthRingEnabled") private var monthRingEnabled: Bool = true
     @AppStorage("pendingAsPill") private var pendingAsPill: Bool = true
@@ -1114,6 +1115,14 @@ struct SettingsView: View {
             // sucht es hier — vor allem „Beenden", das bei einer Menüleisten-App ohne
             // Dock-Symbol sonst schwer zu finden ist.
             VStack(alignment: .leading, spacing: 14) {
+                SettingsToggleRow(
+                    title: t("Bank-Freigabe im eigenen Fenster", "Bank approval in its own window"),
+                    subtitle: t(
+                        "Öffnet die Freigabe-Seite der Bank in einem eigenen Fenster ohne die Cookies und den Verlauf deines Browsers — jeder Durchlauf startet leer. Aus: Safari übernimmt, wie bis Version 2.0.3. Hilft, wenn die Bank „Request Header Or Cookie Too Large“ meldet.",
+                        "Opens the bank's approval page in its own window without your browser's cookies and history — every run starts clean. Off: Safari takes over, as before 2.0.4. Helps when the bank reports “Request Header Or Cookie Too Large”."
+                    ),
+                    isOn: $scaEphemeralWindow
+                )
                 SettingsRow(
                     title: t("Nach Updates suchen", "Check for updates"),
                     subtitle: t("Fragt den Update-Server, ob eine neuere Version vorliegt.",

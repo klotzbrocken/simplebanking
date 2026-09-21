@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.0.4":
+            return v204
         case "2.0.3":
             return v203
         case "2.0.2":
@@ -283,6 +285,19 @@ enum WhatsNewContent {
     /// 2.0.3. Auswahlregel unverändert: nur, was jemand auch merkt. Der Umstieg auf die
     /// neue Banking-Bibliothek steht deshalb nicht drin — er ist die größte Änderung
     /// dieser Runde und für den Nutzer vollständig unsichtbar.
+    private static let v204: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "macwindow.badge.plus",
+            tint: .sbBlueStrong,
+            title: L10n.t("Bank-Freigabe im eigenen Fenster",
+                          "Bank approval in its own window"),
+            description: L10n.t(
+                "Die Freigabe-Seite der Bank öffnet nicht mehr in Safari, sondern in einem eigenen Fenster ohne Cookies und Verlauf — jeder Durchlauf startet leer. Damit ist der ING-Fehler \u{201E}Request Header Or Cookie Too Large\u{201C} vom Tisch, an dem Umsätze und Neueinrichtungen scheiterten. Wer Safari zurück will: Einstellungen → Allgemein.",
+                "The bank's approval page no longer opens in Safari but in its own window without cookies or history — every run starts clean. That settles the ING error \u{201C}Request Header Or Cookie Too Large\u{201D} that blocked transactions and new setups. Prefer Safari? Settings → General."
+            )
+        ),
+    ]
+
     private static let v203: [WhatsNewItem] = [
         WhatsNewItem(
             icon: "antenna.radiowaves.left.and.right",

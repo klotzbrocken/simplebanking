@@ -2742,9 +2742,15 @@ enum YaxiService {
             }
             defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA Redirect: opening browser", category: "YaxiService")
-            await openRedirectURL(url, vorgang: redirectVorgang(slotId: slotId, ticket: ticket))
-            return await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
-                                      confirm: confirm, respond: respond)
+            // Rückleitung hat hier YAXI vorgegeben, nicht wir — das eigene Fenster kann
+            // sie nicht erkennen und endet erst mit dem Polling.
+            let fenster = await openRedirectURL(url, vorgang: redirectVorgang(slotId: slotId, ticket: ticket),
+                                                erwartetRueckleitung: false)
+            let ergebnis = await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
+                                              confirm: confirm, respond: respond,
+                                              callbackSignal: fenster?.fertig)
+            await fenster?.schliessen()
+            return ergebnis
 
         case .redirectHandle(let handle, let context):
             guard await Freigabewache.shared.beginnen(slotId) else {
@@ -2754,33 +2760,55 @@ enum YaxiService {
             }
             defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA RedirectHandle: registering redirect URI", category: "YaxiService")
-            let callbackServer = YaxiOAuthCallback()
-            guard let port = try? await callbackServer.start(), port > 0 else {
-                AppLogger.log("SCA: failed to start callback server", category: "YaxiService", level: "ERROR")
-                return .abgebrochen
+            // Zwei Wege zur Rückleitung. Eigenes Fenster (Standard seit 2.0.4): Die Bank
+            // leitet auf `simplebanking://auth-callback`, die Sitzung erkennt das Schema
+            // und endet. Safari (Schalter in den Einstellungen): lokaler HTTP-Server auf
+            // 127.0.0.1 wie bis 2.0.3.
+            let eigenesFenster = await MainActor.run { Freigabefenster.aktiv }
+            var callbackServer: YaxiOAuthCallback? = nil
+            let redirectURI: String
+            if eigenesFenster {
+                redirectURI = Freigabefenster.callbackURI
+            } else {
+                let server = YaxiOAuthCallback()
+                guard let port = try? await server.start(), port > 0 else {
+                    AppLogger.log("SCA: failed to start callback server", category: "YaxiService", level: "ERROR")
+                    return .abgebrochen
+                }
+                callbackServer = server
+                redirectURI = "http://localhost:\(port)/simplebanking-auth-callback"
             }
             let bankURL: URL
             do {
                 bankURL = try await client.registerRedirectURI(
                     ticket: ticket,
                     handle: handle,
-                    redirectURI: "http://localhost:\(port)/simplebanking-auth-callback"
+                    redirectURI: redirectURI
                 )
             } catch {
-                callbackServer.stop()
+                callbackServer?.stop()
                 AppLogger.log("SCA registerRedirectURI failed: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
                 return .abgebrochen
             }
             AppLogger.log("SCA RedirectHandle: opening bank URL in browser", category: "YaxiService")
-            await openRedirectURL(bankURL, vorgang: redirectVorgang(slotId: slotId, ticket: ticket))
-            // Signal stream: fires immediately when localhost callback arrives
-            let callbackSignal = AsyncStream<Void> { continuation in
-                callbackServer.onCallbackReceived = { continuation.yield(); continuation.finish() }
+            let fenster = await openRedirectURL(bankURL, vorgang: redirectVorgang(slotId: slotId, ticket: ticket),
+                                                erwartetRueckleitung: true)
+            // Signal: feuert, sobald die Rückleitung ankommt — im Fenster oder am lokalen Server.
+            let callbackSignal: AsyncStream<Void>?
+            if let fenster {
+                callbackSignal = fenster.fertig
+            } else if let server = callbackServer {
+                callbackSignal = AsyncStream<Void> { continuation in
+                    server.onCallbackReceived = { continuation.yield(); continuation.finish() }
+                }
+            } else {
+                callbackSignal = nil
             }
             let result = await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                              confirm: confirm, respond: respond,
                                              callbackSignal: callbackSignal)
-            callbackServer.stop()
+            callbackServer?.stop()
+            await fenster?.schliessen()
             return result
         }
     }
@@ -3159,11 +3187,15 @@ enum YaxiService {
     /// logisch dieselbe Freigabe ist. Über das Ticket sind beide Fälle richtig: neuer
     /// Dienstaufruf → neues Ticket → neues Fenster; Wiederholung derselben Anfrage →
     /// gleiches Ticket → kein zweites Fenster.
-    private static func openRedirectURL(_ url: URL, vorgang: String) async {
+    /// Liefert das eigene Freigabefenster, wenn eines geöffnet wurde — der Aufrufer
+    /// schließt es nach dem Polling. `nil`: Safari übernimmt (Schalter aus, Sitzung
+    /// nicht startbar, oder die Seite war für diesen Vorgang schon offen).
+    @discardableResult
+    private static func openRedirectURL(_ url: URL, vorgang: String, erwartetRueckleitung: Bool) async -> Freigabefenster? {
         guard await RedirectCoordinator.shared.darfOeffnen(vorgang: vorgang) else {
             AppLogger.log("SCA: Freigabe-Seite für diesen Vorgang bereits geöffnet — kein zweites Fenster",
                           category: "YaxiService")
-            return
+            return nil
         }
         // Länge und Parameterzahl mitloggen, nicht die URL: Sie enthält Freigabe-Token.
         // Hintergrund (09/2026, ING): Safari zeigte „400 Request Header Or Cookie Too
@@ -3173,8 +3205,16 @@ enum YaxiService {
         let queryParams = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.count ?? 0
         setupPhaseReporter?("sca_redirect_open", ["host": url.host ?? "?", "urlLength": "\(url.absoluteString.count)"])
         AppLogger.log("SCA: öffne Freigabe-Seite (host=\(url.host ?? "?"), länge=\(url.absoluteString.count), parameter=\(queryParams))", category: "YaxiService")
-        NSWorkspace.shared.open(url)
+        let fenster: Freigabefenster? = await MainActor.run {
+            guard Freigabefenster.aktiv else { return nil }
+            let f = Freigabefenster()
+            return f.oeffnen(url, erwartetRueckleitung: erwartetRueckleitung) ? f : nil
+        }
+        if fenster == nil {
+            NSWorkspace.shared.open(url)
+        }
         sendSCANotification()
+        return fenster
     }
 
     private static func sendSCANotification() {

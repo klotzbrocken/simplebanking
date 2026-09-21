@@ -154,6 +154,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSRemindersUsageDescription</key><string>simplebanking erstellt Erinnerungen für Buchungen in der Reminders-App.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>tech.yaxi.simplebanking.auth</string>
+      <key>CFBundleURLSchemes</key><array><string>simplebanking</string></array>
+    </dict>
+  </array>
   ${ICON_KEY}
 </dict>
 </plist>
