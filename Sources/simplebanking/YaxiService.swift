@@ -3165,8 +3165,14 @@ enum YaxiService {
                           category: "YaxiService")
             return
         }
-        setupPhaseReporter?("sca_redirect_open", ["host": url.host ?? "?"])
-        AppLogger.log("SCA: öffne Freigabe-Seite (host=\(url.host ?? "?"))", category: "YaxiService")
+        // Länge und Parameterzahl mitloggen, nicht die URL: Sie enthält Freigabe-Token.
+        // Hintergrund (09/2026, ING): Safari zeigte „400 Request Header Or Cookie Too
+        // Large" — nginx meldet das ab ~8 KB Request-Zeile plus Header. Ob die URL selbst
+        // gewachsen ist oder der Cookie-Bestand des Nutzers, lässt sich damit im
+        // Diagnosebericht unterscheiden.
+        let queryParams = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.count ?? 0
+        setupPhaseReporter?("sca_redirect_open", ["host": url.host ?? "?", "urlLength": "\(url.absoluteString.count)"])
+        AppLogger.log("SCA: öffne Freigabe-Seite (host=\(url.host ?? "?"), länge=\(url.absoluteString.count), parameter=\(queryParams))", category: "YaxiService")
         NSWorkspace.shared.open(url)
         sendSCANotification()
     }
