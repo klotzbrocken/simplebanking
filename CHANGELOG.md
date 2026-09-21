@@ -45,6 +45,7 @@
 
 ### Behoben
 
+- **Verbindung zu den Banken wiederhergestellt** — seit dem 21. September meldeten alle Konten „offline": Der Schlüssel, mit dem simplebanking sich beim Bankdienst ausweist, war abgelaufen. Diese Version trägt den neuen; ohne das Update bleibt jede Bank stumm.
 - **Überweisung: „fehlgeschlagen" nur, wenn es sicher ist** — bei einem Verbindungsabbruch nach dem Senden meldete die App „Senden fehlgeschlagen", obwohl die Bank den Auftrag längst haben konnte; wer daraufhin erneut sendete, zahlte doppelt. Die Einordnung geht jetzt nach Fehlertyp statt nach Wortlaut, und die Schnellüberweisung zeigt bei unklarem Status keinen „Zurück"-Knopf ins ausgefüllte Formular mehr. Jede Überweisung trägt außerdem eine eigene End-to-End-Kennung, damit ein Doppel in der Umsatzliste erkennbar wäre.
 - **PayPal-Umsätze landeten nach einem Kontowechsel im falschen Konto** — wechselte man während des Abrufs die Bank, wurden die Umsätze unter der neuen gespeichert und beim nächsten Abruf unter der richtigen noch einmal; die Menüleiste zeigte den PayPal-Saldo unter der falschen Bank. Der Abruf prüft jetzt nach jedem Schritt, ob das Konto noch dasselbe ist, und schreibt ausdrücklich in sein eigenes.
 - **Gleiche Buchungen im selben Abruf** — zweimal derselbe Kaffee am selben Automaten, zwei gleiche Tickets: Die zweite Buchung überschrieb bisher die erste. Jetzt bleiben beide erhalten; bestehende Notizen und Anhänge bleiben zugeordnet.

@@ -285,80 +285,82 @@ enum WhatsNewContent {
     /// dieser Runde und für den Nutzer vollständig unsichtbar.
     private static let v203: [WhatsNewItem] = [
         WhatsNewItem(
+            icon: "antenna.radiowaves.left.and.right",
+            tint: .sbRedStrong,
+            title: L10n.t("Verbindung zu den Banken wiederhergestellt",
+                          "Bank connections restored"),
+            description: L10n.t(
+                "Seit dem 21. September meldeten alle Konten \u{201E}offline\u{201C}: Der Schlüssel, mit dem simplebanking sich beim Bankdienst ausweist, war abgelaufen. Diese Version trägt den neuen. Ohne das Update bleibt jede Bank stumm — deshalb steht dieser Punkt ganz oben.",
+                "Since September 21 every account reported \u{201C}offline\u{201D}: the key simplebanking uses to identify itself to the banking service had expired. This version carries the new one. Without the update every bank stays silent — which is why this comes first."
+            )
+        ),
+        WhatsNewItem(
+            icon: "cursorarrow.click.2",
+            tint: .sbBlueStrong,
+            title: L10n.t("Doppelklick auf das Menüleisten-Symbol geht wieder",
+                          "Double-clicking the menu bar icon works again"),
+            description: L10n.t(
+                "Auf dem neuen macOS öffnete ein Doppelklick nur das Flyout und schloss es gleich wieder, statt die Umsatzliste zu zeigen. Das System zählt zwei schnelle Klicks dort nicht mehr als einen Doppelklick — simplebanking zählt jetzt selbst.",
+                "On the new macOS a double-click only opened the flyout and closed it again instead of showing the transaction list. The system no longer counts two quick clicks there as a double-click — simplebanking now counts for itself."
+            )
+        ),
+        WhatsNewItem(
+            icon: "questionmark.circle",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Überweisung: \u{201E}fehlgeschlagen\u{201C} nur, wenn es sicher ist",
+                          "Transfers: \u{201C}failed\u{201D} only when it is certain"),
+            description: L10n.t(
+                "Brach die Verbindung nach dem Senden ab, meldete die App \u{201E}Senden fehlgeschlagen\u{201C} — obwohl die Bank den Auftrag längst haben konnte. Wer daraufhin erneut sendete, zahlte doppelt. Jetzt heißt es in dem Fall \u{201E}Status unklar\u{201C}, und die Schnellüberweisung bietet keinen Weg zurück ins ausgefüllte Formular.",
+                "If the connection dropped after sending, the app reported \u{201C}send failed\u{201D} — even though the bank might already have the order. Anyone who sent again paid twice. It now says \u{201C}status unclear\u{201D} in that case, and the quick transfer offers no way back into the filled-in form."
+            )
+        ),
+        WhatsNewItem(
+            icon: "arrow.left.arrow.right",
+            tint: .sbGreenStrong,
+            title: L10n.t("Umsätze landen im richtigen Konto",
+                          "Transactions land in the right account"),
+            description: L10n.t(
+                "Wer während eines PayPal-Abrufs die Bank wechselte, fand die Umsätze unter der falschen — und beim nächsten Abruf doppelt unter der richtigen. Außerdem bleiben zwei gleiche Buchungen am selben Tag jetzt beide erhalten, und erledigte Vormerkungen verschwinden auch dann, wenn der Abruf sonst nichts Neues bringt.",
+                "Switching banks during a PayPal refresh put the transactions under the wrong one — and duplicated them under the right one on the next refresh. Two identical bookings on the same day are now both kept, and settled pending entries disappear even when a refresh brings nothing else new."
+            )
+        ),
+        WhatsNewItem(
             icon: "sparkles",
             tint: .sbBlueStrong,
-            title: L10n.t("Kurzbefehle und Spotlight", "Shortcuts and Spotlight"),
+            title: L10n.t("KI-Kategorisierung läuft wieder",
+                          "AI categorization works again"),
             description: L10n.t(
-                "\u{201E}Kontostand abfragen\u{201C}, \u{201E}Letzte Umsätze\u{201C}, \u{201E}Ausgaben abfragen\u{201C} — als Kurzbefehl, per Spotlight oder in einer Automatisierung, ohne die App zu öffnen. Gelesen wird der lokale Bestand: keine Bankabfrage, keine Freigabe.",
-                "“Check balance\u{201D}, “Recent transactions\u{201D}, “Spending\u{201D} — as a shortcut, from Spotlight or inside an automation, without opening the app. It reads local data only: no bank request, no approval."
+                "Sie sprach ein Claude-Modell an, das Anthropic im Februar abgeschaltet hatte, und verschluckte den Fehler — es sah aus, als würde sie nie starten. Jetzt Claude Haiku 4.5, und jeder Lauf steht im Protokoll.",
+                "It called a Claude model Anthropic retired in February and swallowed the error — it looked as if it never started. Now Claude Haiku 4.5, and every run is logged."
             )
         ),
         WhatsNewItem(
-            icon: "doc.viewfinder",
-            tint: .sbGreenStrong,
-            title: L10n.t("Rechnung aufs Fenster ziehen", "Drop an invoice on the window"),
-            description: L10n.t(
-                "Trägt die Rechnung einen SEPA-QR-Code, kommen Empfänger und IBAN direkt daraus — dort hat sie der Rechnungssteller selbst eingetragen. Betrag und Rechnungsnummer ergänzt der Text. Vorher wurde geraten, und gelegentlich gewann die Tabellenüberschrift.",
-                "If the invoice carries a SEPA QR code, payee and IBAN come straight from it — the issuer put them there. Amount and invoice number are filled in from the text. Before this it was guesswork, and now and then the table header won."
-            )
-        ),
-        WhatsNewItem(
-            icon: "clock.badge.exclamationmark",
+            icon: "slider.horizontal.3",
             tint: .sbOrangeStrong,
-            title: L10n.t("Warten auf die Freigabe lässt sich beenden",
-                          "You can stop waiting for approval"),
+            title: L10n.t("Menü und Einstellungen aufgeräumt",
+                          "Menu and settings tidied up"),
             description: L10n.t(
-                "Wer eine Überweisung anstößt und die Freigabe nicht erteilt, wartete bis zu eine Viertelstunde — und solange war die Bankverbindung für Abrufe gesperrt. Jetzt gibt es \u{201E}Warten beenden\u{201C}. Zurückgeholt ist die Überweisung damit nicht: Der Auftrag liegt bei deiner Bank, verwerfen kannst du ihn nur dort.",
-                "Starting a transfer and not approving it meant waiting up to fifteen minutes — and the bank connection was blocked for refreshes all that time. There is now “Stop waiting\u{201D}. That does not withdraw the transfer: the order sits with your bank, and only there can you discard it."
+                "\u{201E}Nach Updates suchen\u{201C} und \u{201E}Beenden\u{201C} stehen jetzt auch in Einstellungen → Allgemein. Diagnose versenden und Logs öffnen liegen im Bank-Diagnose-Fenster, wo sie hingehören. In den Buchungsdetails stehen IBAN und BIC einzeilig mit Kopierknopf, und eine Vorlage in der Schnellüberweisung öffnet nicht mehr die Vorschlagsliste.",
+                "\u{201C}Check for updates\u{201D} and \u{201C}Quit\u{201D} now also live in Settings → General. Sending diagnostics and opening logs moved into the Bank Diagnostics window where they belong. Transaction details show IBAN and BIC on one line with a copy button, and picking a template in the quick transfer no longer pops the suggestion list."
             )
         ),
         WhatsNewItem(
-            icon: "building.columns",
-            tint: .sbRedStrong,
-            title: L10n.t("Was die Bank kostet — und was sich zurückholen lässt",
-                          "What the bank costs — and what you can claw back"),
+            icon: "photo.on.rectangle",
+            tint: .sbGreenStrong,
+            title: L10n.t("Händler-Logos: mitgelieferte zuerst, Rest von logo.dev",
+                          "Merchant logos: bundled first, the rest from logo.dev"),
             description: L10n.t(
-                "Kontoführungsentgelte erkennt die App jetzt selbst und weist sie unter Verbindlichkeiten aus; die Zeile unter dem Kontostand zeigt sie auf Klick. Und wer eine Lastschrift anklickt, sieht, wie lange sie sich noch zurückholen lässt — acht Wochen nach der Belastung, ohne Angabe von Gründen.",
-                "The app now recognises account fees and lists them under obligations; the line below the balance shows them on click. And selecting a direct debit tells you how long it can still be reclaimed — eight weeks from the debit, no reason required."
+                "Die gebündelten Logos werden jetzt vor jedem Netzaufruf genutzt, vier Händler sind neu dabei. Alles andere kommt von logo.dev statt vom Favicon — höchstens drei Abrufe am Tag, 30 Tage gemerkt. Neuer Schalter unter Zugänge, falls du gar keine Händlerdomain ins Netz schicken willst.",
+                "Bundled logos are now used before any network request, with four more merchants included. Everything else comes from logo.dev instead of the favicon — at most three requests a day, remembered for 30 days. A new switch under Access if you don't want any merchant domain sent out at all."
             )
         ),
         WhatsNewItem(
-            icon: "externaldrive",
+            icon: "plus.circle",
             tint: .sbBlueStrong,
-            title: L10n.t("Sicherung: Umzug ohne Neuaufbau",
-                          "Backup: move without starting over"),
+            title: L10n.t("Außerdem neu", "Also new"),
             description: L10n.t(
-                "Einstellungen → Konten → Sicherung legt Konten, Umsätze, Belege, Einstellungen und Themes in einer Datei ab — verschlüsselt mit einer Passphrase, die du vergibst. Nach einer Neuinstallation ist alles wieder da; die Banken gibst du einmal neu frei. Einspielen geht auch direkt im Einrichtungs-Assistenten.",
-                "Settings → Accounts → Backup stores accounts, transactions, receipts, settings and themes in one file — encrypted with a passphrase you choose. After a fresh install everything is back; you re-approve your banks once. Restoring also works right from the setup assistant."
-            )
-        ),
-        WhatsNewItem(
-            icon: "magnifyingglass",
-            tint: .sbOrangeStrong,
-            title: L10n.t("simplebanking in Raycast", "simplebanking in Raycast"),
-            description: L10n.t(
-                "Kontostand, Umsätze und Monatsübersicht ohne die App zu öffnen. Die Erweiterung liest denselben lokalen Bestand wie die Kommandozeile und fragt dabei keine Bank — es kostet also keine Freigabe.",
-                "Balance, transactions and monthly overview without opening the app. The extension reads the same local data as the command line and never contacts a bank — so it costs no approval."
-            )
-        ),
-        WhatsNewItem(
-            icon: "lock.shield",
-            tint: .sbGreenStrong,
-            title: L10n.t("Der Claude-Zugang ist jetzt ausschließlich lesend",
-                          "The Claude connection is now read-only"),
-            description: L10n.t(
-                "Das Werkzeug, mit dem ein Agent einen Überweisungsentwurf anlegen konnte, ist entfernt. Ausgelöst wurde damit nie etwas ohne deine Bestätigung — aber ein Entwurf entstand, ohne dass du gefragt wurdest, und in einem Verwendungszweck kann jede beliebige Anweisung stehen. Neu unter Einstellungen → Extras: Zugänge einzeln vergeben und widerrufen.",
-                "The tool that let an agent create a transfer draft has been removed. Nothing was ever executed without your confirmation — but a draft appeared without asking you, and a payment reference can contain any instruction at all. New under Settings → Extras: grant and revoke access individually."
-            )
-        ),
-        WhatsNewItem(
-            icon: "qrcode",
-            tint: .sbRedStrong,
-            title: L10n.t("bunq hängt nicht mehr in der Freigabe-Schleife",
-                          "bunq no longer loops through approvals"),
-            description: L10n.t(
-                "Meldete die Bank einen Zugriffsfehler, warf simplebanking die erteilte Zustimmung weg und holte eine neue — was bei Banken mit Freigabe im Browser nichts heilte, sondern die Schleife war. Bei bunq, N26 und Revolut wird jetzt in keinem Fall mehr automatisch verworfen.",
-                "When the bank reported an access error, simplebanking discarded your consent and fetched a new one — which for browser-approved banks cured nothing and was the loop itself. For bunq, N26 and Revolut nothing is discarded automatically any more."
+                "Kurzbefehle und Spotlight-Aktionen für Kontostand und Umsätze. Sicherung und Wiederherstellung unter Einstellungen → Konten. Rechnungen mit SEPA-QR-Code aufs Fenster ziehen. Rückholfrist bei Lastschriften. Und simplebanking in Raycast.",
+                "Shortcuts and Spotlight actions for balance and transactions. Backup and restore under Settings → Accounts. Drop invoices with a SEPA QR code on the window. Claw-back period for direct debits. And simplebanking in Raycast."
             )
         ),
     ]
