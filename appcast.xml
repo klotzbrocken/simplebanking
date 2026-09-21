@@ -49,6 +49,42 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.0.3</title>
+            <pubDate>Mon, 21 Sep 2026 06:24:46 +0200</pubDate>
+            <sparkle:version>20260921679</sparkle:version>
+            <sparkle:shortVersionString>2.0.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.0.3/simplebanking-20260921-061843.dmg" length="32005401" type="application/octet-stream" sparkle:edSignature="hzWEaQ9eyptBRVODehtcPdN+pautZwNJtC5MRxXcvKYzUUzuFdt/cehV5gikdZLM5CmKHslXJTDZvuebPQ7IBQ=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.0.3</h2>
+                <p><strong>Wichtig:</strong> Seit dem 21. September meldeten alle Konten „offline“ — der Schlüssel, mit dem simplebanking sich beim Bankdienst ausweist, war abgelaufen. Diese Version trägt den neuen. Ohne das Update bleibt jede Bank stumm.</p>
+                <h3>Behoben</h3>
+                <ul>
+                    <li>Doppelklick auf das Menüleisten-Symbol öffnet auf dem neuen macOS wieder die Umsatzliste.</li>
+                    <li>Überweisung: „fehlgeschlagen“ nur noch, wenn es sicher ist. Bei einem Verbindungsabbruch nach dem Senden heißt es „Status unklar“, und die Schnellüberweisung bietet keinen Weg zurück ins ausgefüllte Formular.</li>
+                    <li>PayPal-Umsätze landen nach einem Kontowechsel nicht mehr im falschen Konto. Zwei gleiche Buchungen am selben Tag bleiben beide erhalten. Erledigte Vormerkungen verschwinden auch, wenn der Abruf sonst nichts Neues bringt.</li>
+                    <li>KI-Kategorisierung läuft wieder (Claude Haiku 4.5) und protokolliert jeden Lauf.</li>
+                    <li>Schnellüberweisung: Eine Vorlage öffnet nicht mehr die Vorschlagsliste.</li>
+                </ul>
+                <h3>Bedienung</h3>
+                <ul>
+                    <li>„Nach Updates suchen“ und „Beenden“ auch in Einstellungen → Allgemein. Diagnose versenden und Logs öffnen im Bank-Diagnose-Fenster.</li>
+                    <li>Buchungsdetails: IBAN und BIC einzeilig mit Kopierknopf.</li>
+                    <li>Händler-Logos: mitgelieferte zuerst, vier neue dabei, der Rest von logo.dev mit höchstens drei Abrufen am Tag. Neuer Schalter unter Zugänge, um alle Netzabrufe abzustellen.</li>
+                </ul>
+                <h3>Außerdem neu</h3>
+                <ul>
+                    <li>Kurzbefehle und Spotlight-Aktionen für Kontostand und Umsätze.</li>
+                    <li>Sicherung und Wiederherstellung unter Einstellungen → Konten.</li>
+                    <li>Rechnungen mit SEPA-QR-Code aufs Fenster ziehen, Rückholfrist bei Lastschriften, simplebanking in Raycast.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.0.2</title>
             <pubDate>Thu, 06 Aug 2026 05:58:20 +0200</pubDate>
             <sparkle:version>20260806603</sparkle:version>
