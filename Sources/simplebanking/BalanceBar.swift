@@ -1332,6 +1332,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // damit eine bereits geschriebene Claude-Config gültig bleibt (No-op, wenn nicht
         // installiert oder Ziel bereits korrekt).
         MCPInstaller.refreshIfInstalled()
+        // Liegt die App doppelt auf dem Rechner, gehen Spotlight- und Kurzbefehl-
+        // Aktionen an die andere Kopie und macOS meldet nur „LinkDaemon.ProcessRegistry".
+        // Siehe `Doppelinstallation` — im Normalfall (eine Kopie) passiert hier nichts.
+        Doppelinstallation.hinweisZeigenFallsNoetig()
         // Theme-Schriften registrieren, bevor die erste Oberfläche rendert —
         // sonst greift die Schrift des aktiven Themes erst nach einem Neustart.
         ThemeFonts.registerBundledFonts()
