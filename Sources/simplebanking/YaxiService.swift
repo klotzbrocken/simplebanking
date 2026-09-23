@@ -2760,7 +2760,7 @@ enum YaxiService {
             }
             defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA RedirectHandle: registering redirect URI", category: "YaxiService")
-            // Zwei Wege zur Rückleitung. Eigenes Fenster (Standard seit 2.0.4): Die Bank
+            // Zwei Wege zur Rückleitung. Eigenes Fenster (Standard seit 2.0.5): Die Bank
             // leitet auf `simplebanking://auth-callback`, die Sitzung erkennt das Schema
             // und endet. Safari (Schalter in den Einstellungen): lokaler HTTP-Server auf
             // 127.0.0.1 wie bis 2.0.3.
@@ -3255,7 +3255,7 @@ final class FieldInputResumeGuard {
 ///
 /// Ein Actor, weil der Zustand vorher in zwei `nonisolated(unsafe)`-Variablen lag und
 /// von jedem SCA-Ablauf ohne Absicherung verändert wurde. In der Praxis serialisieren
-/// `BankRequestQueue` und `isHBCICallInFlight` die meisten Bank-Aufrufe, aber nicht alle
+/// `BankRequestQueue` und `hbciSlotsInFlight` die meisten Bank-Aufrufe, aber nicht alle
 /// Pfade gehen dort durch — eine Einrichtung und ein Hintergrund-Abgleich auf einem
 /// anderen Konto können sich überschneiden.
 actor RedirectCoordinator {

@@ -393,8 +393,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var slotEpoch: Int = 0
     /// Cancellable task for the current slot switch — ensures only the last click wins.
     private var switchTask: Task<Void, Never>?
-    private var isHBCICallInFlight: Bool = false    // guard against concurrent HBCI calls (balance + transactions)
-    private var isPayPalCallInFlight: Bool = false  // PayPal-Provider (kein HBCI-Mutex nötig)
+    /// Konten, für die gerade ein Bank-Aufruf läuft (Saldo, Umsätze, Überweisung).
+    ///
+    /// Früher ein einzelnes `Bool` für die ganze App. Der Grund für die Sperre ist echt —
+    /// FinTS-Banken sind dialogorientiert und antworten auf einen zweiten gleichzeitigen
+    /// Aufruf mit „Fehlender Dialogkontext" —, gilt aber **je Bankverbindung**, nicht
+    /// global. Genau das brach am 23.09.2026: Ein Abruf für ein bunq-Konto wartete auf
+    /// die Freigabe im Browser, hielt dabei minutenlang die globale Sperre, und jedes
+    /// „Aktualisieren" auf einem *anderen* Konto lief nach zehn Sekunden Wartezeit
+    /// stumm ins Leere („HBCI still busy, skipping"). Erst ein Neustart der App half,
+    /// weil die Sperre nur im Arbeitsspeicher lebt.
+    ///
+    /// `BankRequestQueue` sichert dieselbe Regel eine Ebene tiefer bereits je Slot ab;
+    /// hier ist sie es damit auch.
+    private var hbciSlotsInFlight: Set<String> = []
+    private var paypalSlotsInFlight: Set<String> = []
+
+    /// Läuft für dieses Konto gerade ein Bank-Aufruf?
+    private func bankAufrufLaeuft(_ slotId: String) -> Bool {
+        hbciSlotsInFlight.contains(slotId) || paypalSlotsInFlight.contains(slotId)
+    }
+
+    /// Der Slot, auf den sich ein Refresh gerade bezieht. Ein eigener Name, weil
+    /// `TransactionsDatabase.activeSlotId` und `MultibankingStore.activeSlot` bei
+    /// Sonderfällen (Legacy-Slot, eBon, PayPal) auseinanderlaufen können.
+    private var aktuellerSlotId: String {
+        MultibankingStore.shared.activeSlot?.id ?? TransactionsDatabase.activeSlotId
+    }
     /// Konten, deren Bank gerade auf eine Freigabe wartet.
     ///
     /// Früher ein einzelnes `Bool`. Damit stand „TAN" in der Menüleiste und der Hinweis
@@ -1148,9 +1173,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Refresh eines PayPal-Slots: Saldo (GetBalance) + Umsätze (TransactionSearch)
     /// → normale Transaktions-DB. Kein HBCI-Mutex (eigener Provider).
     private func refreshPayPal(slotId: String) async {
-        guard !isPayPalCallInFlight else { return }
-        isPayPalCallInFlight = true
-        defer { isPayPalCallInFlight = false }
+        guard !paypalSlotsInFlight.contains(slotId) else { return }
+        paypalSlotsInFlight.insert(slotId)
+        defer { paypalSlotsInFlight.remove(slotId) }
 
         guard let pw = masterPassword else {
             if locked { promptUnlockIfNeeded() }
@@ -5315,16 +5340,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             await refreshPayPal(slotId: active.id)
             return
         }
-        // Prevent concurrent HBCI calls — banks like Volksbank fail with "Fehlender Dialogkontext"
-        // when two simultaneous requests hit the same HBCI connection.
-        guard !isHBCICallInFlight else {
-            AppLogger.log("refreshAsync: HBCI call already in flight, skipping", category: "Network", level: "WARN")
+        // Zwei gleichzeitige Aufrufe **auf derselben Bankverbindung** beantworten
+        // FinTS-Banken (Volksbank, viele Sparkassen) mit „Fehlender Dialogkontext".
+        // Ein anderes Konto stört dabei nicht — deshalb je Slot.
+        let slotFuerAufruf = aktuellerSlotId
+        guard !hbciSlotsInFlight.contains(slotFuerAufruf) else {
+            AppLogger.log("refreshAsync: Bankaufruf für \(slotFuerAufruf.prefix(8)) läuft bereits, übersprungen",
+                          category: "Network", level: "WARN")
             // Schedule a retry for the currently active slot once the in-flight call finishes.
             // Without this, switching slots while another account is doing SCA silently drops
             // the new slot's refresh request — it never gets data until the timer fires again.
             let epochWhenQueued = slotEpoch
             Task {
-                while isHBCICallInFlight {
+                while hbciSlotsInFlight.contains(slotFuerAufruf) {
                     try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
                 }
                 // Only retry if the slot hasn't changed again since we queued
@@ -5333,8 +5361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
             return
         }
-        isHBCICallInFlight = true
-        defer { isHBCICallInFlight = false }
+        hbciSlotsInFlight.insert(slotFuerAufruf)
+        defer { hbciSlotsInFlight.remove(slotFuerAufruf) }
 
         let epochAtStart = slotEpoch
         // Demo-Modus: Keine echten API-Calls
@@ -5662,19 +5690,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         markiereGeseheneBewegungen()
 
-        // Wait for any concurrent HBCI call (e.g. balance refresh) to finish before
-        // fetching transactions — banks fail with "Fehlender Dialogkontext" on parallel calls.
+        // Auf einen laufenden Aufruf **desselben Kontos** warten (etwa den Saldo-Refresh) —
+        // parallel beantworten FinTS-Banken den zweiten Aufruf mit „Fehlender Dialogkontext".
+        // Andere Konten sind eine andere Verbindung und gehen uns nichts an.
+        let slotFuerAufruf = aktuellerSlotId
         var waitMs = 0
-        while isHBCICallInFlight && waitMs < 10_000 {
+        while hbciSlotsInFlight.contains(slotFuerAufruf) && waitMs < 10_000 {
             try? await Task.sleep(nanoseconds: 200_000_000) // 0.2s
             waitMs += 200
         }
-        guard !isHBCICallInFlight else {
-            AppLogger.log("openTransactionsPanel: HBCI still busy after \(waitMs)ms, skipping", category: "Network", level: "WARN")
+        guard !hbciSlotsInFlight.contains(slotFuerAufruf) else {
+            // Stumm abzubrechen war der zweite Teil des Fehlers vom 23.09.2026: Der Nutzer
+            // zog die Liste herunter, nichts geschah, und der einzige Hinweis stand im
+            // Protokoll. Wenn wir nicht können, sagen wir warum.
+            AppLogger.log("openTransactionsPanel: Bankaufruf für \(slotFuerAufruf.prefix(8)) läuft noch (\(waitMs)ms gewartet)",
+                          category: "Network", level: "WARN")
+            txVM.error = tanPendingSlots.contains(slotFuerAufruf)
+                ? t("Die Bank wartet noch auf deine Freigabe. Danach werden die Umsätze geladen.",
+                    "The bank is still waiting for your approval. Transactions will load afterwards.")
+                : t("Für dieses Konto läuft gerade ein Abruf. Gleich nochmal versuchen.",
+                    "A request for this account is already running. Please try again in a moment.")
+            txVM.isLoading = false
             return
         }
-        isHBCICallInFlight = true
-        defer { isHBCICallInFlight = false }
+        hbciSlotsInFlight.insert(slotFuerAufruf)
+        defer { hbciSlotsInFlight.remove(slotFuerAufruf) }
 
         if locked { promptUnlockIfNeeded() }
         guard !locked, let pw = masterPassword else {
@@ -5742,7 +5782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // HBCI-Requests auf dieselbe Bank-Connection feuern — FinTS-Banken (Volksbank,
             // Genossenschaftsbanken, viele Sparkassen) sind dialog-orientiert und
             // antworten dann mit „Fehlender Dialogkontext". Genau aus diesem Grund
-            // schützt `isHBCICallInFlight` (refreshAsync :2658-2675) andere Aufruf-
+            // schützt `hbciSlotsInFlight` (refreshAsync) andere Aufruf-
             // Pfade gegeneinander — innerhalb desselben Pfads müssen wir die Calls
             // ebenfalls serialisieren. Balance zuerst (ist schnell ~1-3s), Transactions
             // danach (~5-30s) — UX gefühlt gleich, weil der Saldo früh sichtbar wird.
@@ -5982,14 +6022,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // refreshAsync (das wegen busy früh-returnt + retry queued) und ruft
         // dann uns hier — ohne diesen Guard würden wir den parallelen Call
         // trotzdem feuern. CLI bekommt outcome=failed, ehrlich.
-        guard !isHBCICallInFlight else {
-            AppLogger.log("checkNewBookings: HBCI call already in flight, skipping",
+        let slotFuerAufruf = aktuellerSlotId
+        guard !hbciSlotsInFlight.contains(slotFuerAufruf) else {
+            AppLogger.log("checkNewBookings: Bankaufruf für \(slotFuerAufruf.prefix(8)) läuft bereits, übersprungen",
                           category: "Network", level: "WARN")
             recordCLIRefreshError("Refresh läuft bereits")
             return
         }
-        isHBCICallInFlight = true
-        defer { isHBCICallInFlight = false }
+        hbciSlotsInFlight.insert(slotFuerAufruf)
+        defer { hbciSlotsInFlight.remove(slotFuerAufruf) }
 
         // Avoid noisy UI if locked/hidden; still compute indicator.
         let from = isoDateDaysAgo(7)
@@ -6604,9 +6645,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         guard !Task.isCancelled else { return }
 
-        // Wait for any in-flight HBCI or PayPal call to finish before refreshing for the
-        // new slot. The old call was epoch-invalidated above and will return soon.
-        while isHBCICallInFlight || isPayPalCallInFlight {
+        // Auf einen laufenden Aufruf **des Zielkontos** warten; ein Aufruf auf dem
+        // vorherigen Konto wurde oben per Epoche entwertet und geht uns nichts an.
+        // Vorher wartete diese Schleife auf *jeden* Aufruf — eine Bankfreigabe, auf
+        // die niemand mehr reagierte, legte damit auch den Kontowechsel lahm, bis
+        // die Freigabewache nach fünf Minuten aufräumte.
+        while bankAufrufLaeuft(slot.id) {
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
             guard !Task.isCancelled else { return }
         }
