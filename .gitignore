@@ -34,3 +34,6 @@ Sources/simplebanking/Secrets.swift
 # kein Repo-Inhalt. In die Sourcen wandern nur btx.cfg, VT323 samt Lizenz und der
 # Mosaik-Code.
 /.btx-paket/
+
+# Video-Ausgabe von /brag — 26 MB Medien, gehören nicht in die App-Historie
+/brag-output/

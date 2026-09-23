@@ -1,10 +1,13 @@
 # Changelog — simplebanking
 
-## [2.0.4]
+## [2.0.5]
 
 ### Behoben
 
 - **ING: „400 Request Header Or Cookie Too Large“ bei der Freigabe** — INGs Login-Seite lehnte die Anfrage ab, sobald Safari über die Jahre zu viele Cookies für ing.com angesammelt hatte; Umsätze blieben aus, Neueinrichtungen scheiterten. Die Freigabe-Seite öffnet jetzt in einem eigenen Fenster ohne Cookies und Verlauf des Browsers, jeder Durchlauf startet leer. Das gilt für alle Banken mit Freigabe im Browser (ING, bunq, N26, Revolut). Wer Safari zurückhaben will: Einstellungen → Allgemein → „Bank-Freigabe im eigenen Fenster“ aus.
+- **Aktualisieren blieb wirkungslos, bis die App neu gestartet wurde** — wartete ein Konto mit Freigabe im Browser (bunq, N26, Revolut, ING) auf die Bestätigung, sperrte dieses Warten bis zu drei Minuten lang *alle* Konten: Herunterziehen der Umsatzliste, das ↻ und der Klick aufs Symbol taten nichts, ohne jede Rückmeldung. Die Sperre gilt jetzt nur noch für die Bankverbindung, um die es geht — jedes andere Konto lässt sich weiter abrufen, auch ein Kontowechsel. Kann ein Konto gerade wirklich nicht, steht der Grund über der Umsatzliste, statt dass nichts passiert.
+- **Händler-Logos sahen verwaschen und ausgefranst aus** — zwei Ursachen. Erstens stammten sie bis 2.0.2 von einem Dienst, der nur Favicons lieferte (16 bis 48 Pixel); die blieben nach dem Anbieterwechsel noch 30 Tage im Zwischenspeicher und wurden stark vergrößert. Zweitens überließ die App das Verkleinern der neuen, großen Logos dem Zeichensystem — bei 256 Pixeln Quelle auf 20 Pixel Anzeige fransten Kanten aus und Wortmarken wie DHL wurden unlesbar. Beides ist behoben: zu kleine Bilder fliegen raus, und die App rechnet jedes Logo selbst in genau der Pixelzahl, in der es erscheint (Lanczos mit leichter Nachschärfung, mitgelieferte SVGs werden direkt in Zielgröße gerastert). Auf einem angeschlossenen Monitor ohne Retina ist der Unterschied am deutlichsten.
+- **Breite Logos wurden angeschnitten** — Marken, die breiter als hoch sind (dm, Amazon, Zalando), presste die Umsatzliste auf ein Quadrat und schnitt links und rechts ab; bei dm fehlte das halbe „m" samt Wellenende. Sie werden jetzt vollständig eingepasst.
 
 ## [2.0.3]
 

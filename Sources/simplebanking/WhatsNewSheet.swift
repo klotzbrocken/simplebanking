@@ -267,8 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
-        case "2.0.4":
-            return v204
+        case "2.0.5":
+            return v205
         case "2.0.3":
             return v203
         case "2.0.2":
@@ -285,7 +285,7 @@ enum WhatsNewContent {
     /// 2.0.3. Auswahlregel unverändert: nur, was jemand auch merkt. Der Umstieg auf die
     /// neue Banking-Bibliothek steht deshalb nicht drin — er ist die größte Änderung
     /// dieser Runde und für den Nutzer vollständig unsichtbar.
-    private static let v204: [WhatsNewItem] = [
+    private static let v205: [WhatsNewItem] = [
         WhatsNewItem(
             icon: "macwindow.badge.plus",
             tint: .sbBlueStrong,
@@ -294,6 +294,26 @@ enum WhatsNewContent {
             description: L10n.t(
                 "Die Freigabe-Seite der Bank öffnet nicht mehr in Safari, sondern in einem eigenen Fenster ohne Cookies und Verlauf — jeder Durchlauf startet leer. Damit ist der ING-Fehler \u{201E}Request Header Or Cookie Too Large\u{201C} vom Tisch, an dem Umsätze und Neueinrichtungen scheiterten. Wer Safari zurück will: Einstellungen → Allgemein.",
                 "The bank's approval page no longer opens in Safari but in its own window without cookies or history — every run starts clean. That settles the ING error \u{201C}Request Header Or Cookie Too Large\u{201D} that blocked transactions and new setups. Prefer Safari? Settings → General."
+            )
+        ),
+        WhatsNewItem(
+            icon: "arrow.clockwise",
+            tint: .sbGreenStrong,
+            title: L10n.t("Aktualisieren wirkt wieder sofort",
+                          "Refresh works again, right away"),
+            description: L10n.t(
+                "Wartete ein Konto auf die Freigabe im Browser, standen bis zu drei Minuten lang alle Konten still — Herunterziehen, das ↻ und der Klick aufs Symbol taten nichts, und nur ein Neustart half. Das Warten bremst jetzt nur noch das Konto, um das es geht.",
+                "While one account waited for browser approval, every account stalled for up to three minutes — pull-to-refresh, the ↻ button and clicking the icon did nothing, and only a restart helped. That wait now only holds up the account it belongs to."
+            )
+        ),
+        WhatsNewItem(
+            icon: "photo.on.rectangle.angled",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Schärfere Händler-Logos",
+                          "Sharper merchant logos"),
+            description: L10n.t(
+                "Alte Logos waren winzige Favicons, und die neuen, großen wurden erst beim Zeichnen verkleinert — Kanten fransten aus, „DHL\u{201C} war nicht mehr zu lesen. Jetzt rechnet die App jedes Logo in genau der Pixelzahl, in der es erscheint, und breite Marken wie dm werden nicht mehr angeschnitten.",
+                "Old logos were tiny favicons, and the new large ones were only scaled down while drawing — edges frayed and \u{201C}DHL\u{201D} became unreadable. Every logo is now rendered at exactly the pixel size it appears at, and wide marks like dm are no longer cropped."
             )
         ),
     ]
