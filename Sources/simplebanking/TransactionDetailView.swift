@@ -51,6 +51,7 @@ struct TransactionDetailView: View {
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var logoService = MerchantLogoService.shared
+    @Environment(\.displayScale) private var displayScale
     @State private var customLogo: NSImage? = nil
     @State private var isLogoDropTargeted: Bool = false
     @State private var isSavingsBookmarked: Bool = false
@@ -160,7 +161,8 @@ struct TransactionDetailView: View {
     }
 
     private var merchantLogo: NSImage? {
-        logoService.image(for: logoKey)
+        // 48 pt, in exakter Pixelzahl gerechnet — siehe `Logoskalierung`.
+        logoService.anzeigebild(for: logoKey, kante: 48, skala: displayScale)
     }
 
     /// Anzeige-Logo: Custom (Händler-weit) > Service-Cache > nil (→ Kategorie-Icon)
@@ -569,7 +571,7 @@ struct TransactionDetailView: View {
                                 if let logo = displayLogo {
                                     Image(nsImage: logo)
                                         .resizable()
-                                        .scaledToFill()
+                                        .scaledToFit()
                                         .frame(width: 48, height: 48)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                         .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 2)

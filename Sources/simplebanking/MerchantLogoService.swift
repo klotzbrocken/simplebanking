@@ -9,6 +9,9 @@ final class MerchantLogoService: ObservableObject {
     static let shared = MerchantLogoService()
 
     @Published private(set) var imageCache: [String: NSImage] = [:]
+    /// Fertig gerechnete Anzeigegrößen, Schlüssel `"händler@punkte@pixel"`.
+    /// Siehe `anzeigebild(for:kante:skala:)`.
+    private var anzeigeCache: [String: NSImage] = [:]
     private var inFlight: Set<String> = []
     private var persistedLogosLoaded = false
     /// @Published damit der X-Lösch-Button (hasCustomLogo) reaktiv erscheint
@@ -654,6 +657,33 @@ final class MerchantLogoService: ObservableObject {
         imageCache[normalizedMerchant.lowercased()]
     }
 
+    /// Anzeigefertiges Logo: quadratisch, in genau der Pixelzahl, in der es gezeichnet
+    /// wird. Siehe `Logoskalierung` — dort steht, warum das nicht SwiftUI übernimmt.
+    ///
+    /// `kante` in Punkten (20 in der Umsatzzeile, 48 in den Buchungsdetails), `skala`
+    /// aus `\.displayScale`. Das Ergebnis wird je Kombination gemerkt; ein Bild kostet
+    /// wenige Kilobyte, und der Wechsel zwischen internem und externem Bildschirm
+    /// fragt einfach die andere Größe an.
+    func anzeigebild(for normalizedMerchant: String, kante: CGFloat, skala: CGFloat) -> NSImage? {
+        let key = normalizedMerchant.lowercased()
+        guard let quelle = imageCache[key] else { return nil }
+        let merkmal = "\(key)@\(Int(kante.rounded()))@\(Logoskalierung.zielPixel(kante: kante, skala: skala))"
+        if let fertig = anzeigeCache[merkmal] { return fertig }
+        guard let bild = Logoskalierung.anzeigebild(aus: quelle, kante: kante, skala: skala) else {
+            return quelle
+        }
+        anzeigeCache[merkmal] = bild
+        return bild
+    }
+
+    /// Verwirft die gerechneten Anzeigegrößen eines Händlers — nötig, sobald sich das
+    /// Quellbild ändert (Netzabruf, eigenes Logo, Cache geleert).
+    private func anzeigebilderVergessen(_ key: String? = nil) {
+        guard let key else { anzeigeCache = [:]; return }
+        let praefix = key.lowercased() + "@"
+        anzeigeCache = anzeigeCache.filter { !$0.key.hasPrefix(praefix) }
+    }
+
     func hasCustomLogo(forKey key: String) -> Bool {
         customLogoKeys.contains(key.lowercased())
     }
@@ -663,6 +693,7 @@ final class MerchantLogoService: ObservableObject {
         let k = key.lowercased()
         guard let image = NSImage(data: data) else { return }
         imageCache[k] = image
+        anzeigebilderVergessen(k)
         customLogoKeys.insert(k)
         Task.detached { TransactionsDatabase.saveMerchantCustomLogo(merchantKey: k, data: data) }
     }
@@ -672,6 +703,7 @@ final class MerchantLogoService: ObservableObject {
         let k = key.lowercased()
         customLogoKeys.remove(k)
         imageCache.removeValue(forKey: k)
+        anzeigebilderVergessen(k)
         Task.detached { TransactionsDatabase.deleteMerchantCustomLogo(merchantKey: k) }
         // Gebündeltes SVG wiederherstellen falls vorhanden
         loadBundledSVG(key: k)
@@ -685,6 +717,7 @@ final class MerchantLogoService: ObservableObject {
                 for (key, data) in entries {
                     if let image = NSImage(data: data) {
                         self.imageCache[key] = image
+                        self.anzeigebilderVergessen(key)
                         self.customLogoKeys.insert(key)
                     }
                 }
@@ -701,6 +734,26 @@ final class MerchantLogoService: ObservableObject {
     /// Wie lange ein geladenes Logo aus dem Cache gilt — und wie lange ein „kein Logo"
     /// (404) gemerkt wird, damit unbekannte Händler nicht täglich neu kosten.
     nonisolated static let remoteCacheDays = 30
+
+    /// Kürzeste Kante, die ein Logo aus dem Netz haben muss, um benutzt zu werden.
+    ///
+    /// Bis 2.0.2 kamen die Logos von DuckDuckGo, und das sind Favicons: 16, 32, manchmal
+    /// 48 Pixel. In einer 20-Punkt-Zeile auf einem Retina-Bildschirm werden daraus 40 bis
+    /// 60 Pixel — ein 16er Favicon wird dabei um das Zweieinhalbfache aufgeblasen und
+    /// zerfällt sichtbar. Mit 2.0.3 liefert logo.dev saubere Bilder, aber die alten
+    /// Favicons lagen weiter im Cache und galten dort noch 30 Tage. Sie sahen nicht
+    /// „etwas schlechter" aus, sondern kaputt, und genau das war zu sehen.
+    ///
+    /// Die Grenze gilt auch für neue Abrufe: Lieber das Kategorie-Symbol als ein Bild,
+    /// das man nicht erkennt.
+    nonisolated static let mindestKante = 64
+
+    /// Kürzeste Kante des Bildes in echten Pixeln — nicht `size`, das bei mehreren
+    /// Auflösungen (.ico) die Punktgröße der ersten Repräsentation meldet.
+    nonisolated static func kanteInPixeln(_ image: NSImage) -> Int {
+        let kanten = image.representations.map { min($0.pixelsWide, $0.pixelsHigh) }
+        return kanten.max() ?? Int(min(image.size.width, image.size.height))
+    }
 
     // MARK: - logo.dev
     //
@@ -722,13 +775,41 @@ final class MerchantLogoService: ObservableObject {
         static var istKonfiguriert: Bool {
             publishableKey.hasPrefix("pk_") && publishableKey != "pk_PLACEHOLDER"
         }
+        /// 256 statt 128 Pixel: Die Zeile zeigt das Logo 20 Punkte breit, auf einem
+        /// Retina-Bildschirm sind das 40 bis 60 echte Pixel, die Detailansicht nimmt
+        /// 30 Punkte. 128 reichte dafür, 256 kostet nur Bytes (keinen zusätzlichen
+        /// Abruf) und hält auch eine größere Darstellung scharf.
         static func url(for domain: String) -> URL? {
-            URL(string: "https://img.logo.dev/\(domain)?token=\(publishableKey)&size=128&format=png&fallback=404")
+            URL(string: "https://img.logo.dev/\(domain)?token=\(publishableKey)&size=256&format=png&fallback=404")
         }
 
         private static let zaehlerTagKey = "merchantLogoFetchDay"
         private static let zaehlerKey = "merchantLogoFetchCount"
         private static let fehltreffernKey = "merchantLogoMisses"
+        private static let nachholKey = "merchantLogoNachholBudget"
+
+        /// Obergrenze des einmaligen Nachhol-Kontingents. Es greift genau dann, wenn beim
+        /// Start alte Favicons aus dem Cache fliegen (siehe `mindestKante`), und nur für
+        /// so viele Abrufe, wie tatsächlich weggefallen sind. Rechnung für das Kontingent
+        /// von logo.dev: 4.000 Installationen × höchstens 30 Abrufe = 120.000 — einmalig,
+        /// neben den 500.000 im Monat des Free-Tarifs.
+        static let nachholHoechstzahl = 30
+
+        /// Meldet, dass `anzahl` gecachte Logos verworfen wurden und einmalig
+        /// nachgeholt werden dürfen. Mehrfachaufrufe erhöhen nicht über die Grenze.
+        static func nachholenErlauben(_ anzahl: Int) {
+            let d = UserDefaults.standard
+            let neu = min(d.integer(forKey: nachholKey) + anzahl, nachholHoechstzahl)
+            d.set(neu, forKey: nachholKey)
+        }
+
+        private static func nachholenVerbrauchen() -> Bool {
+            let d = UserDefaults.standard
+            let rest = d.integer(forKey: nachholKey)
+            guard rest > 0 else { return false }
+            d.set(rest - 1, forKey: nachholKey)
+            return true
+        }
 
         private static var heute: String {
             let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
@@ -736,7 +817,10 @@ final class MerchantLogoService: ObservableObject {
         }
 
         /// Reserviert einen Netzabruf für heute. `false`, wenn das Tagesbudget aufgebraucht ist.
+        /// Das einmalige Nachhol-Kontingent geht vor, damit die beim Start verworfenen
+        /// Logos nicht hinter dem Tagesbudget in der Schlange stehen.
         static func budgetVerbrauchen() -> Bool {
+            if nachholenVerbrauchen() { return true }
             let d = UserDefaults.standard
             let tag = heute
             var count = d.string(forKey: zaehlerTagKey) == tag ? d.integer(forKey: zaehlerKey) : 0
@@ -767,6 +851,46 @@ final class MerchantLogoService: ObservableObject {
         }
     }
 
+    // MARK: - Rückfall: Googles Favicon-Dienst
+    //
+    // Kennt logo.dev einen Händler nicht (404), bleibt die Zeile beim Kategorie-Symbol.
+    // Googles inoffizieller Favicon-Dienst nimmt, was die Website selbst hinterlegt hat,
+    // und kennt dadurch manches, was in keiner Markendatenbank steht.
+    //
+    // **Wie viel das bringt, ist gemessen — heute nichts.** Am 23.09.2026 gegen alle 133
+    // Domains der Whitelist ohne mitgeliefertes SVG geprüft: logo.dev liefert für 129 ein
+    // brauchbares Bild, bei drei weiteren (storytel.de, tamoil.de, viaplay.de) hat auch
+    // Google nur seine Ersatz-Weltkugel. Der Rückfall rettet also im Moment **keinen
+    // einzigen** Händler.
+    //
+    // Er bleibt trotzdem drin, weil er nichts kostet, solange er nicht greift: kein
+    // Schlüssel, kein Kontingent, und im Normalfall (logo.dev antwortet mit 200) wird er
+    // gar nicht erst aufgerufen. Er ist das Netz für neue Whitelist-Einträge und für den
+    // Fall, dass logo.dev einen Händler wieder verliert. Wer ihn später bewertet: Die
+    // Messung oben lässt sich mit denselben zwei Abrufen je Domain wiederholen.
+    //
+    // Als *Ersatz* für logo.dev taugt Google ohnehin nicht — die Größe hängt daran, was
+    // die Website hinterlegt hat: anthropic.com 256 px, dhl.de 192, uber.com 180, aber
+    // apple.com nur 64, edeka.de 48, rossmann.de 16.
+    //
+    // Zwei Dinge, die man wissen muss:
+    //
+    //   * **Kein 404.** Für unbekannte Domains liefert Google ein festes Ersatzbild —
+    //     eine 16×16 große Weltkugel (am 23.09.2026 für drei erfundene Domains byte-
+    //     gleich). Die Mindestgröße fängt das ab; ein Abgleich auf genau dieses Bild
+    //     wäre die brüchigere Prüfung, weil Google es jederzeit austauschen kann.
+    //   * **Ohne Zusage.** Der Dienst ist inoffiziell und unmaintained — nach logo.dev's
+    //     eigener Dokumentation. Er darf deshalb nie tragende Rolle spielen: fällt er
+    //     aus, steht wie bisher das Kategorie-Symbol da.
+    enum GoogleFavicon {
+        /// Kein Schlüssel, kein Kontingent — nur die Domain geht raus, wie bei logo.dev.
+        static func url(for domain: String) -> URL? {
+            guard let kodiert = domain.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed)
+            else { return nil }
+            return URL(string: "https://www.google.com/s2/favicons?domain=\(kodiert)&sz=256")
+        }
+    }
+
     // Lädt die gecachten Logos aus der DB in den Speicher (einmalig beim ersten preload).
     // Logos, die älter als 30 Tage sind, fallen weg und werden beim nächsten Anzeigen
     // einmal neu geholt — innerhalb des Tagesbudgets.
@@ -778,11 +902,25 @@ final class MerchantLogoService: ObservableObject {
         // die beim Start sichtbaren Händler jedes Mal neu. Es ist ein einzelner
         // Blob-Read aus SQLite, wenige Millisekunden.
         guard let entries = try? TransactionsDatabase.loadCachedLogoData(maxAgeDays: Self.remoteCacheDays) else { return }
+        // Zu kleine Bilder (Favicons aus der Zeit vor logo.dev) wandern nicht in den
+        // Speicher, sondern aus dem Cache. Sonst blieben sie bis zu 30 Tage stehen und
+        // verhinderten obendrein, dass für denselben Händler ein gutes Logo geholt wird.
+        var zuKlein: [String] = []
         for (key, data) in entries where imageCache[key] == nil {
-            if let image = NSImage(data: data) {
-                imageCache[key] = image
+            guard let image = NSImage(data: data) else { continue }
+            if Self.kanteInPixeln(image) < Self.mindestKante {
+                zuKlein.append(key)
+                continue
             }
+            imageCache[key] = image
         }
+        guard !zuKlein.isEmpty else { return }
+        // Was hier wegfällt, hat der Nutzer vorher gesehen — deshalb ein einmaliges
+        // Zusatzkontingent, damit die Lücken in Tagen statt Wochen wieder zuwachsen.
+        LogoDev.nachholenErlauben(zuKlein.count)
+        AppLogger.log("Logo-Cache: \(zuKlein.count) zu kleine Bilder verworfen (< \(Self.mindestKante)px)",
+                      category: "Logos")
+        Task.detached { TransactionsDatabase.deleteLogos(keys: zuKlein) }
     }
 
     func preload(normalizedMerchant: String) {
@@ -811,12 +949,14 @@ final class MerchantLogoService: ObservableObject {
               let url = Bundle.main.url(forResource: svgName, withExtension: "svg", subdirectory: "merchant-logos"),
               let image = NSImage(contentsOf: url) else { return false }
         imageCache[key] = image
+        anzeigebilderVergessen(key)
         inFlight.remove(key)
         return true
     }
 
     func clearCache() {
         imageCache = imageCache.filter { customLogoKeys.contains($0.key) }
+        anzeigebilderVergessen()
         inFlight = []
         persistedLogosLoaded = false
         Self.LogoDev.vergissFehltreffer()
@@ -826,21 +966,67 @@ final class MerchantLogoService: ObservableObject {
     private func fetchLogoDev(key: String, domain: String) async {
         defer { inFlight.remove(key) }
         guard let url = Self.LogoDev.url(for: domain) else { return }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 15
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse else { return }
+        guard let (data, http) = await Self.holen(url) else { return }
+
         if http.statusCode == 404 {
-            // Kein Logo bekannt — 30 Tage nicht wieder fragen, sonst kostet derselbe
-            // Händler jeden Tag einen Abruf aus dem Budget.
-            Self.LogoDev.merkeFehltreffer(key)
+            // logo.dev kennt den Händler nicht. Bevor die Zeile beim Kategorie-Symbol
+            // bleibt, fragen wir Googles Favicon-Dienst — der kostet nichts und kennt
+            // auch kleinere Läden. Siehe `GoogleFavicon`.
+            await versucheGoogleFavicon(key: key, domain: domain)
             return
         }
         // 202 = noch nicht indiziert, 429 = Kontingent erschöpft: beides ohne Merker,
         // beim nächsten Tag klappt es vielleicht.
         guard http.statusCode == 200, !data.isEmpty, let image = NSImage(data: data) else { return }
-        let capturedData = data
+        // Zu klein heißt: in der Zeile nicht erkennbar. Dann lieber erst Google fragen
+        // und, wenn auch das nichts taugt, das Kategorie-Symbol zeigen.
+        guard Self.kanteInPixeln(image) >= Self.mindestKante else {
+            AppLogger.log("logo.dev: \(key) nur \(Self.kanteInPixeln(image))px — Rückfall auf Google",
+                          category: "Logos")
+            await versucheGoogleFavicon(key: key, domain: domain)
+            return
+        }
+        uebernehmen(image, data: data, key: key)
+    }
+
+    /// Rückfall, wenn logo.dev nichts Brauchbares hat. Kein Fehler, wenn es misslingt —
+    /// dann bleibt es beim Kategorie-Symbol, wie vor diesem Rückfall auch.
+    ///
+    /// Verbraucht **kein** logo.dev-Budget: Der Dienst hat keines, und der Abruf für
+    /// diesen Händler ist oben schon bezahlt worden.
+    private func versucheGoogleFavicon(key: String, domain: String) async {
+        defer { Self.LogoDev.merkeFehltreffer(key) }   // in jedem Fall 30 Tage Ruhe
+        guard let url = Self.GoogleFavicon.url(for: domain),
+              let (data, http) = await Self.holen(url),
+              http.statusCode == 200, !data.isEmpty,
+              let image = NSImage(data: data)
+        else {
+            AppLogger.log("Kein Logo für \(key) — auch Google hat keins", category: "Logos")
+            return
+        }
+        // Unbekannte Domains beantwortet Google mit einer 16×16-Weltkugel statt mit 404.
+        // Die Mindestgröße sortiert sie zusammen mit allen anderen zu kleinen Favicons aus.
+        guard Self.kanteInPixeln(image) >= Self.mindestKante else {
+            AppLogger.log("Google-Favicon für \(key) nur \(Self.kanteInPixeln(image))px — verworfen",
+                          category: "Logos")
+            return
+        }
+        AppLogger.log("Logo für \(key) über Google (\(Self.kanteInPixeln(image))px)", category: "Logos")
+        uebernehmen(image, data: data, key: key)
+    }
+
+    /// Ein geholtes Logo in Speicher- und Plattencache legen.
+    private func uebernehmen(_ image: NSImage, data: Data, key: String) {
         imageCache[key] = image
-        Task.detached { TransactionsDatabase.saveLogo(key: key, data: capturedData) }
+        anzeigebilderVergessen(key)
+        Task.detached { TransactionsDatabase.saveLogo(key: key, data: data) }
+    }
+
+    private static func holen(_ url: URL) async -> (Data, HTTPURLResponse)? {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else { return nil }
+        return (data, http)
     }
 }

@@ -1114,7 +1114,7 @@ private struct TransactionsPanelView: View {
                     if themed && !ThemeChrome.merchantLogosEnabled {
                         BTXMosaicIcon(category: .essenAlltag)
                     } else if let logo = receiptLogo {
-                        Image(nsImage: logo).resizable().scaledToFill().frame(width: 20, height: 20)
+                        Image(nsImage: logo).resizable().scaledToFit().frame(width: 20, height: 20)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                             .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)
                     } else {
@@ -3439,6 +3439,10 @@ private struct TransactionRowNew: View {
     @AppStorage("pendingAsPill") private var pendingAsPill: Bool = true
 
     @ObservedObject private var logoService = MerchantLogoService.shared
+    /// Pixel je Punkt des Bildschirms, auf dem die Zeile gerade liegt. Wandert das
+    /// Fenster vom Notebook auf einen angeschlossenen Monitor, ändert sich der Wert
+    /// und das Logo wird in der neuen Pixelzahl neu gerechnet.
+    @Environment(\.displayScale) private var displayScale
     @State private var showDetail: Bool = false
 
     /// Eigene Beobachtung des Themes: die Zeile ist ein eigener View-Wert, dessen Body
@@ -3468,8 +3472,10 @@ private struct TransactionRowNew: View {
         )
     }
 
+    /// Logo der Umsatzzeile, fertig in Anzeigegröße gerechnet (20 pt × Bildschirmskala).
+    /// Warum nicht einfach das Quellbild und `resizable()`: siehe `Logoskalierung`.
     private var merchantLogo: NSImage? {
-        logoService.image(for: logoKey)
+        logoService.anzeigebild(for: logoKey, kante: 20, skala: displayScale)
     }
 
     /// Row-Hintergrund: Selektion > Bank-Tint-Style > cardBackground. Im Aufrunden-View
@@ -3540,9 +3546,13 @@ private struct TransactionRowNew: View {
                     // Reihenfolge und Platz sind fix (20×20) — nur der Inhalt wechselt.
                     // Ein Theme ohne Bildmarken (BTX) setzt hier Mosaik-Semigrafik.
                     if let logo = merchantLogo, ThemeChrome.merchantLogosEnabled {
+                        // Das Bild kommt bereits quadratisch und in exakter Pixelzahl
+                        // (`Logoskalierung`). `scaledToFit` bleibt als Sicherheitsnetz
+                        // für den Fall, dass die Skalierung nicht greift — beschneiden
+                        // darf es nichts, sonst fehlt bei dm das halbe „m".
                         Image(nsImage: logo)
                             .resizable()
-                            .scaledToFill()
+                            .scaledToFit()
                             .frame(width: 20, height: 20)
                             .clipShape(RoundedRectangle(cornerRadius: 5))
                             .shadow(color: .black.opacity(0.12), radius: 1.5, x: 0, y: 1)

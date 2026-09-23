@@ -1757,9 +1757,9 @@ enum TransactionsDatabase {
 
     /// `maxAgeDays`: nur Logos, die jünger sind — ältere fallen weg und werden beim
     /// nächsten Anzeigen neu geholt. `nil` = alle, egal wie alt.
-    static func loadCachedLogoData(maxAgeDays: Int? = nil) throws -> [String: Data] {
-        try migrate()
-        let queue = try makeQueue()
+    static func loadCachedLogoData(maxAgeDays: Int? = nil, bankId: String = "primary") throws -> [String: Data] {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
         return try queue.read { db in
             var result: [String: Data] = [:]
             let rows: [Row]
@@ -1780,8 +1780,11 @@ enum TransactionsDatabase {
         }
     }
 
-    static func saveLogo(key: String, data: Data) {
-        guard let queue = try? makeQueue() else { return }
+    static func saveLogo(key: String, data: Data, bankId: String = "primary") {
+        // Ohne Migration gibt es die Tabelle womöglich noch nicht und das INSERT liefe
+        // still ins Leere — bisher rettete nur die Reihenfolge (erst laden, dann holen).
+        try? migrate(bankId: bankId)
+        guard let queue = try? makeQueue(bankId: bankId) else { return }
         try? queue.write { db in
             try db.execute(
                 sql: "INSERT OR REPLACE INTO merchant_logos (key, data, fetched_at) VALUES (?, ?, datetime('now'))",
@@ -1794,6 +1797,20 @@ enum TransactionsDatabase {
         guard let queue = try? makeQueue() else { return }
         try? queue.write { db in
             try db.execute(sql: "DELETE FROM merchant_logos")
+        }
+    }
+
+    /// Entfernt einzelne Logos aus dem Cache. Gebraucht für Bilder, die zu klein sind,
+    /// um in der Umsatzliste sauber auszusehen — sie sollen nicht bis zum Ablauf der
+    /// 30 Tage weiterbenutzt werden, sondern beim nächsten Budget neu geholt.
+    static func deleteLogos(keys: [String], bankId: String = "primary") {
+        guard !keys.isEmpty else { return }
+        try? migrate(bankId: bankId)
+        guard let queue = try? makeQueue(bankId: bankId) else { return }
+        try? queue.write { db in
+            let platzhalter = Array(repeating: "?", count: keys.count).joined(separator: ",")
+            try db.execute(sql: "DELETE FROM merchant_logos WHERE key IN (\(platzhalter))",
+                           arguments: StatementArguments(keys))
         }
     }
 

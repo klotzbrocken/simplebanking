@@ -1119,7 +1119,7 @@ struct SettingsView: View {
                     title: t("Bank-Freigabe im eigenen Fenster", "Bank approval in its own window"),
                     subtitle: t(
                         "Öffnet die Freigabe-Seite der Bank in einem eigenen Fenster ohne die Cookies und den Verlauf deines Browsers — jeder Durchlauf startet leer. Aus: Safari übernimmt, wie bis Version 2.0.3. Hilft, wenn die Bank „Request Header Or Cookie Too Large“ meldet.",
-                        "Opens the bank's approval page in its own window without your browser's cookies and history — every run starts clean. Off: Safari takes over, as before 2.0.4. Helps when the bank reports “Request Header Or Cookie Too Large”."
+                        "Opens the bank's approval page in its own window without your browser's cookies and history — every run starts clean. Off: Safari takes over, as in version 2.0.3 and earlier. Helps when the bank reports “Request Header Or Cookie Too Large”."
                     ),
                     isOn: $scaEphemeralWindow
                 )
@@ -3582,12 +3582,13 @@ struct SettingsView: View {
 
             Divider()
 
-            // Händler-Logos aus dem Netz — ein Schalter, eine Quelle (logo.dev).
+            // Händler-Logos aus dem Netz — ein Schalter, zwei Quellen: logo.dev, und
+            // nur wenn die den Händler nicht kennt, Googles Favicon-Dienst.
             SettingsToggleRow(
                 title: t("Händler-Logos aus dem Internet laden", "Load merchant logos from the internet"),
                 subtitle: t(
-                    "Für Händler ohne mitgeliefertes Logo fragt die App das Logo bei logo.dev an. Übermittelt wird nur die Domain des Händlers (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Höchstens drei Abrufe am Tag, geladene Logos gelten 30 Tage. Aus: nur die gebündelten Logos.",
-                    "For merchants without a bundled logo the app asks logo.dev for it. Only the merchant's domain is sent (e.g. rewe.de) — no IBANs, amounts or booking texts. At most three requests a day; loaded logos are kept for 30 days. Off: bundled logos only."
+                    "Für Händler ohne mitgeliefertes Logo fragt die App bei logo.dev an; kennt logo.dev den Händler nicht, einmal zusätzlich bei Googles Favicon-Dienst. Übermittelt wird beide Male nur die Domain des Händlers (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Höchstens drei Abrufe am Tag, geladene Logos gelten 30 Tage. Aus: nur die gebündelten Logos.",
+                    "For merchants without a bundled logo the app asks logo.dev; if logo.dev doesn't know the merchant, it asks Google's favicon service once. Either way only the merchant's domain is sent (e.g. rewe.de) — no IBANs, amounts or booking texts. At most three requests a day; loaded logos are kept for 30 days. Off: bundled logos only."
                 ),
                 isOn: $remoteLogosEnabled
             )
