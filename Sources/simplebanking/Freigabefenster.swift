@@ -52,20 +52,39 @@ final class Freigabefenster: NSObject, ASWebAuthenticationPresentationContextPro
         let s = ASWebAuthenticationSession(
             url: url,
             callbackURLScheme: erwartetRueckleitung ? Self.callbackScheme : nil
-        ) { [weak self] callbackURL, error in
+        // `@Sendable` ist hier kein Beiwerk, sondern der ganze Punkt.
+        //
+        // Ohne die Auszeichnung erbt dieser Abschluss die Isolation der Funktion, in
+        // der er steht — und die ist `@MainActor`. Aufgerufen wird er aber von
+        // AuthenticationServices auf der XPC-Antwortschlange des Safari-Agenten. Swift 6
+        // prüft das beim Eintritt (`swift_task_checkIsolated`), die Prüfung schlägt fehl,
+        // und der Prozess endet mit SIGTRAP. Für den Nutzer sah das so aus: Freigabe in
+        // der Bank erteilt, App weg. Zweimal reproduziert (24.09.2026, Builds
+        // 20260923691 und 20260924692), Absturzbericht jeweils
+        // `_dispatch_assert_queue_fail` unter dieser Closure.
+        //
+        // Das `Task { @MainActor in … }` darunter gab es vorher schon — es kam nur nie
+        // dazu, weil die Prüfung davor zuschlug. Deshalb ausdrücklich isolationsfrei
+        // und der Sprung auf den Hauptthread von Hand.
+        ) { @Sendable [weak self] callbackURL, error in
+            // Vor dem Sprung auf das Nötige eindampfen: `any Error` ist nicht `Sendable`
+            // und dürfte die Schlangengrenze nicht überqueren.
+            let rueckleitungKam = callbackURL != nil
+            let vomNutzerGeschlossen = (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin
+            let fehlertext = error?.localizedDescription
+
             Task { @MainActor in
                 guard let self else { return }
-                if callbackURL != nil {
+                if rueckleitungKam {
                     AppLogger.log("Freigabefenster: Rückleitung angekommen", category: "YaxiService")
                     self.fertigContinuation?.yield()
-                } else if let error = error as? ASWebAuthenticationSessionError,
-                          error.code == .canceledLogin {
+                } else if vomNutzerGeschlossen {
                     // Fenster vom Nutzer geschlossen. Kein Abbruch: Die Freigabe kann in der
                     // Banking-App längst erteilt sein, das Polling läuft weiter und der
                     // Nutzer kann es über „Warten beenden" selbst stoppen.
                     AppLogger.log("Freigabefenster: vom Nutzer geschlossen — Polling läuft weiter", category: "YaxiService")
-                } else if let error {
-                    AppLogger.log("Freigabefenster: Sitzung endete mit Fehler: \(error.localizedDescription)",
+                } else if let fehlertext {
+                    AppLogger.log("Freigabefenster: Sitzung endete mit Fehler: \(fehlertext)",
                                   category: "YaxiService", level: "WARN")
                 }
                 self.fertigContinuation?.finish()
