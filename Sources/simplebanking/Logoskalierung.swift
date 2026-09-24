@@ -38,6 +38,13 @@ enum Logoskalierung {
     /// gemacht (Retina, 256 → 144), ist es ohne sie besser dran.
     static let schaerfeAbFaktor: CGFloat = 2.0
 
+    /// Einer für alle. Ein `CIContext` bringt eine eigene Metal-Queue und eigene Caches
+    /// mit; ihn je Logo neu zu bauen hieß beim ersten Start mit leerem Cache, hundert
+    /// davon hintereinander anzulegen und wieder wegzuwerfen. Der Kontext ist
+    /// threadsicher (Apple dokumentiert das ausdrücklich), gemeinsame Nutzung ist der
+    /// vorgesehene Weg.
+    static let kontext = CIContext(options: [.useSoftwareRenderer: false])
+
     /// Zielkantenlänge in echten Pixeln. Eigene Funktion, weil genau hier die Fehler
     /// entstehen: abrunden statt runden ergibt bei 1,5-fachen Bildschirmen ein Pixel
     /// zu wenig und damit wieder eine Skalierung beim Zeichnen.
@@ -125,7 +132,6 @@ enum Logoskalierung {
         // Auf den tatsächlichen Bildausschnitt beschneiden: Lanczos und Unsharp
         // liefern ein Bild mit unendlicher Ausdehnung bzw. weichem Rand.
         let rahmen = CGRect(x: 0, y: 0, width: breite, height: hoehe)
-        let kontext = CIContext(options: [.useSoftwareRenderer: false])
         return kontext.createCGImage(bild.cropped(to: rahmen), from: rahmen)
     }
 
