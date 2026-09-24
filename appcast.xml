@@ -49,6 +49,29 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.0.5</title>
+            <pubDate>Thu, 24 Sep 2026 03:24:32 +0200</pubDate>
+            <sparkle:version>20260924694</sparkle:version>
+            <sparkle:shortVersionString>2.0.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.0.5/simplebanking-2.0.5.dmg" length="32124318" type="application/octet-stream" sparkle:edSignature="Xirz2wJ4lcMnbB9TnZRON3Ec4kZwSE74XmCu6+ubLkWjE4wAANNNI5pg5a8iCnsdkXC405vtYm5MbaoclELuBA=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.0.5</h2>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>ING: „400 Request Header Or Cookie Too Large“ bei der Freigabe.</strong> INGs Login-Seite lehnte die Anfrage ab, sobald Safari über die Jahre zu viele Cookies f&#252;r ing.com angesammelt hatte. Die Freigabe-Seite &#246;ffnet jetzt in einem eigenen Fenster ohne Cookies und Verlauf des Browsers, jeder Durchlauf startet leer. Gilt f&#252;r alle Banken mit Freigabe im Browser (ING, bunq, N26, Revolut). Zur&#252;ck zu Safari: Einstellungen &#8594; Allgemein.</li>
+                    <li><strong>Aktualisieren blieb wirkungslos, bis die App neu gestartet wurde.</strong> Wartete ein Konto auf eine Freigabe im Browser, sperrte dieses Warten bis zu drei Minuten lang <em>alle</em> Konten — ohne jede R&#252;ckmeldung. Die Sperre gilt jetzt nur noch f&#252;r die betroffene Bankverbindung.</li>
+                    <li><strong>H&#228;ndler-Logos sahen verwaschen und ausgefranst aus.</strong> Zu kleine Bilder aus dem alten Zwischenspeicher fliegen raus, und die App rechnet jedes Logo selbst in genau der Pixelzahl, in der es erscheint. Breite Marken wie dm oder Amazon werden nicht mehr angeschnitten.</li>
+                    <li><strong>Spotlight-Aktionen scheiterten mit „LinkDaemon.ProcessRegistry“,</strong> wenn die App doppelt auf dem Mac liegt. simplebanking pr&#252;ft das jetzt beim Start und nennt beide Pfade im Klartext.</li>
+                    <li><strong>Dauerhafte Rechenlast im Leerlauf.</strong> Nach einmal ge&#246;ffneter Umsatzliste zeichnete die App die Saldokarte bis zum Beenden mit 60 Bildern je Sekunde weiter — 10 bis 15 Prozent Rechenlast ohne Grund. Jetzt null.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.0.3</title>
             <pubDate>Mon, 21 Sep 2026 06:24:46 +0200</pubDate>
             <sparkle:version>20260921679</sparkle:version>
