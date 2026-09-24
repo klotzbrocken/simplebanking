@@ -9,7 +9,11 @@ APP="${APP_PATH:-$ROOT/SimpleBankingBuild/simplebanking.app}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 STAGE_DIR="$OUTDIR/.dmg-stage-$TIMESTAMP"
 APP_BASENAME="$(basename "$APP" .app)"
-DMG_PATH="$OUTDIR/${APP_BASENAME}-${TIMESTAMP}.dmg"
+# Überschreibbar, damit ein Release einen sprechenden Namen tragen kann
+# (simplebanking-2.0.5.dmg). Ohne Angabe bleibt es beim Zeitstempel, wie er
+# für Zwischenbauten sinnvoll ist. Versioniert MUSS er sein: Die
+# Enclosure-URL im Appcast zeigt auf genau diese Datei.
+DMG_PATH="${DMG_PATH:-$OUTDIR/${APP_BASENAME}-${TIMESTAMP}.dmg}"
 
 # Defaults auf die tatsächlich vorhandenen Artefakte dieser Maschine:
 #  - Developer ID: "…(FTJLR8JRNS)" (SHA-1 53CF9A…), Private Key vorhanden.
