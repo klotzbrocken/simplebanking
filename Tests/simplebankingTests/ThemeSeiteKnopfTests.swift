@@ -12,6 +12,17 @@ import XCTest
 @MainActor
 final class ThemeSeiteKnopfTests: XCTestCase {
 
+    /// Die Panels wieder schließen. Ein Testlauf baut hier mehrere Fenster auf; bleiben
+    /// sie offen, ändert das die Lage für spätere Tests — `ModalRunLoopDeliveryTests`
+    /// misst das Verhalten der Hauptschleife im Modal-Mode und kippte dadurch.
+    private var offeneFenster: [NSWindow] = []
+
+    override func tearDown() {
+        for fenster in offeneFenster { fenster.close() }
+        offeneFenster.removeAll()
+        super.tearDown()
+    }
+
     /// Die Aktionen sind `private`, ihr Name ist es nicht — danach wird verglichen.
     private func knoepfe(_ panel: SetupFlowPanel, mitAktion name: String) -> [NSButton] {
         panel.debugKnoepfe().filter { $0.action.map(NSStringFromSelector) == name }
@@ -20,6 +31,7 @@ final class ThemeSeiteKnopfTests: XCTestCase {
     private func panelMitThemeSeite() -> SetupFlowPanel {
         let panel = SetupFlowPanel(connectAction: { _, _, _, _ in throw CancellationError() })
         panel.debugAufbauen(onboardingSeite: 3)
+        if let f = panel.debugInhalt?.window { offeneFenster.append(f) }
         return panel
     }
 

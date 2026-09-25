@@ -453,14 +453,30 @@ enum YaxiService {
     // Throttle re-opening the bank redirect URL (< 290 s cooldown).
     /// Führt `body` auf dem Main-Thread aus — auch während einer modalen Sitzung.
     ///
-    /// `await MainActor.run` reiht den Block in die Main-Dispatch-Queue ein, und die
-    /// wird nur in den Common-Modes bedient. `NSApp.runModal()` fährt die Runloop aber
-    /// in `NSModalPanelRunLoopMode`, der nicht dazugehört: Solange der
-    /// Einrichtungsassistent modal läuft, bleibt so ein Hop schlicht liegen, bis die
-    /// Sitzung endet. Bei Banken mit Tipp-TAN (HypoVereinsbank) verzögerte das die
-    /// Anzeige des TAN-Felds bis zum Abbruch — gemessen 17 bis 60 Sekunden, die TAN war
-    /// dann abgelaufen. `RunLoop.perform(inModes:)` wird auch im Modal-Mode bedient;
-    /// `SetupFlowPanel.enqueueOnMainRunLoop` nimmt für seine Callbacks denselben Weg.
+    /// `await MainActor.run` reiht den Block in die Main-Dispatch-Queue ein.
+    /// `NSApp.runModal()` fährt die Runloop in `NSModalPanelRunLoopMode`, und dort kam
+    /// so ein Hop nicht rechtzeitig an: Bei Banken mit Tipp-TAN (HypoVereinsbank)
+    /// erschien das TAN-Feld erst beim Abbruch der Einrichtung — gemessen 17 bis 60
+    /// Sekunden zu spät, die TAN war dann abgelaufen. `RunLoop.perform(inModes:)` nennt
+    /// die Modes ausdrücklich und kommt an; `SetupFlowPanel.enqueueOnMainRunLoop` nimmt
+    /// für seine Callbacks denselben Weg.
+    ///
+    /// **Korrektur vom 25.09.2026.** Hier stand als Begründung, der Modal-Mode gehöre
+    /// nicht zu den Common-Modes und die Main-Queue werde dort deshalb *gar nicht*
+    /// bedient. Das ist so nicht richtig. Im selben Prozess nachgemessen:
+    ///
+    ///     ohne Fenster im Prozess → Main-Queue im Modal-Mode NICHT bedient
+    ///     mit einem Fenster       → bedient
+    ///
+    /// Ein Programm hat immer Fenster, die Absolutaussage traf also nie zu. Sie stammte
+    /// aus einem Test, der nur deshalb bestand, weil vor ihm noch kein AppKit-Fenster
+    /// entstanden war (siehe `ModalRunLoopDeliveryTests`).
+    ///
+    /// Am Code ändert das nichts, und zwar aus einem Grund, der die Unterscheidung wert
+    /// ist: „wird bedient" heißt nicht „rechtzeitig". Der Feldbefund steht — über die
+    /// Main-Queue kam der Hop eine Minute zu spät, über `perform(inModes:)` sofort.
+    /// Dieser Weg nennt die Modes ausdrücklich und hängt an keiner Annahme darüber,
+    /// welche Quellen AppKit gerade wo eingehängt hat.
     static func onMainRunLoop<T: Sendable>(_ body: @escaping @MainActor @Sendable () -> T) async -> T {
         await withCheckedContinuation { (cont: CheckedContinuation<T, Never>) in
             RunLoop.main.perform(inModes: [.default, .modalPanel]) {

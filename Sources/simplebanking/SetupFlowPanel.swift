@@ -1449,13 +1449,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let titleLabel = NSTextField(labelWithString: t("100 % sicher. Deine Daten gehören dir.", "100% secure. Your data belongs to you."))
         titleLabel.font = .systemFont(ofSize: 19, weight: .semibold)
 
-        let subtitle = NSTextField(wrappingLabelWithString: t("Deine Finanzdaten gehören nur dir.", "Your financial data belongs only to you."))
-        subtitle.font = .systemFont(ofSize: 13)
-        subtitle.textColor = .secondaryLabelColor
 
         let f1 = featureRow(icon: "checkmark.shield.fill", title: t("Bank-Zugangsdaten verschlüsselt", "Bank credentials encrypted"), body: t("Login + Passwort verschlüsselt im Keychain. Umsätze als lokaler Cache (für CLI/MCP).", "Login + password encrypted in the Keychain. Transactions kept as local cache (for CLI/MCP)."))
         let f2 = featureRow(icon: "touchid", title: t("Touch ID verfügbar", "Touch ID available"), body: t("Einmal einrichten, dann ohne Passwort entsperren.", "Set up once, then unlock without a password."))
-        let f3 = featureRow(icon: "wifi.slash", title: t("Kein Cloudkonto", "No cloud account"), body: t("Kein simplebanking-Backend. Bankabfragen laufen verschlüsselt über YAXI Open Banking, KI-Funktionen sind optional und nutzen den von dir gewählten Anbieter (Anthropic, OpenAI oder Mistral) — sonst bleibt alles lokal.", "No simplebanking backend. Bank queries run encrypted through YAXI Open Banking; AI features are optional and use the provider you choose (Anthropic, OpenAI, or Mistral) — everything else stays local."))
+        let f3 = featureRow(icon: "wifi.slash", title: t("Kein Cloudkonto", "No cloud account"), body: t("Es gibt kein simplebanking-Backend. Bankabfragen laufen verschlüsselt über YAXI Open Banking; die optionalen KI-Funktionen fragen den Anbieter, den du selbst wählst. Alles andere bleibt auf diesem Mac.", "There is no simplebanking backend. Bank queries run encrypted through YAXI Open Banking; the optional AI features ask the provider you pick yourself. Everything else stays on this Mac."))
 
         let features = NSStackView(views: [f1, f2, f3])
         features.orientation = .vertical
@@ -1475,14 +1472,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
 
         rootStack.addArrangedSubview(titleLabel)
-        rootStack.addArrangedSubview(subtitle)
         rootStack.addArrangedSubview(features)
         rootStack.addArrangedSubview(pills)
         rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(buttonRow.stack)
 
-        rootStack.setCustomSpacing(4, after: titleLabel)
-        rootStack.setCustomSpacing(20, after: subtitle)
+        // Der Untertitel stand hier einmal und sagte „Deine Finanzdaten gehören nur dir."
+        // — also dasselbe wie die Überschrift eine Zeile darüber. Gestrichen; sein
+        // Abstand hängt jetzt am Titel.
+        rootStack.setCustomSpacing(20, after: titleLabel)
         rootStack.setCustomSpacing(14, after: features)
         rootStack.setCustomSpacing(20, after: pills)
     }
@@ -1668,6 +1666,19 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         bodyLbl.font = .systemFont(ofSize: 12)
         bodyLbl.textColor = .secondaryLabelColor
 
+        // Die Breite muss stehen, sonst sucht sich der Fließtext seine eigene.
+        //
+        // `rootStack` hat `alignment = .leading`: Seine Kinder werden **nicht** auf die
+        // volle Breite gezogen, sie bekommen ihre natürliche. Die eines umbrechenden
+        // Labels ist die der ungebrochenen Zeile, und AppKit umbricht dann nach eigenem
+        // Gutdünken — über den rechten Rand der Seite hinaus. Sichtbar wurde das am
+        // längsten Absatz („Kein Cloudkonto"), der deutlich näher an die Fensterkante
+        // lief als die Überschrift darüber.
+        let textBreite = fieldWidth - 40 - 12   // Inhaltsbreite minus Symbol und Abstand
+        bodyLbl.preferredMaxLayoutWidth = textBreite
+        bodyLbl.widthAnchor.constraint(equalToConstant: textBreite).isActive = true
+        titleLbl.widthAnchor.constraint(lessThanOrEqualToConstant: textBreite).isActive = true
+
         let textStack = NSStackView(views: [titleLbl, bodyLbl])
         textStack.orientation = .vertical
         textStack.spacing = 2
@@ -1677,6 +1688,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         row.orientation = .horizontal
         row.spacing = 12
         row.alignment = .centerY
+        row.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
         return row
     }
 

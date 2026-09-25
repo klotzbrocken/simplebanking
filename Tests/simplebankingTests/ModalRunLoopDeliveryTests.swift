@@ -7,9 +7,14 @@ import AppKit
 // Bei Banken mit Tipp-TAN (HypoVereinsbank) erschien das TAN-Feld erst, wenn der Nutzer
 // die Einrichtung abbrach — gemessen 17 bis 60 Sekunden zu spät, die TAN war dann
 // abgelaufen. Ursache war kein Z-Order-Problem, sondern die Zustellung: `NSApp.runModal`
-// fährt die Runloop in `NSModalPanelRunLoopMode`, und die Main-Dispatch-Queue wird dort
-// nicht bedient. Jeder `await MainActor.run` blieb deshalb liegen, bis die modale
-// Sitzung endete.
+// fährt die Runloop in `NSModalPanelRunLoopMode`, und ein `await MainActor.run` kam dort
+// nicht rechtzeitig an — er blieb liegen, bis die modale Sitzung endete.
+//
+// Nachtrag 25.09.2026: Die frühere Erklärung „die Main-Dispatch-Queue wird im Modal-Mode
+// gar nicht bedient" ist so nicht haltbar. Nachgemessen hängt das am Prozesszustand —
+// ohne Fenster nicht bedient, mit Fenster bedient (s. den Test weiter unten). Was bleibt,
+// ist der gemessene Befund aus dem Feld: Über `RunLoop.perform(inModes:)` kommt der Hop
+// rechtzeitig an, über die Main-Queue kam er es nicht.
 //
 // Diese Tests pumpen die Runloop AUSSCHLIESSLICH im Modal-Mode — also so, wie sie
 // während `NSApp.runModal` läuft — und prüfen, was dabei ankommt. Die bestehenden
@@ -54,17 +59,40 @@ final class ModalRunLoopDeliveryTests: XCTestCase {
                        "Hop kam im Modal-Mode nicht an — genau der HVB-Fehler")
     }
 
-    /// Die Gegenprobe, die erklärt, warum es der alte Weg nicht konnte. Schlägt dieser
-    /// Test eines Tages um (weil AppKit den Modal-Mode zu den Common-Modes nimmt), ist
-    /// das keine Verschlechterung — aber dann ist die Begründung an `onMainRunLoop`
-    /// überholt und gehört korrigiert.
-    func test_mainQueue_wirdImModalPanelModeNichtBedient() {
+    /// Die Gegenprobe — und sie fiel anders aus als lange angenommen.
+    ///
+    /// Hier stand bis 25.09.2026 die Behauptung, die Main-Queue werde im Modal-Mode
+    /// **nie** bedient. Der Test bestand auch, aber nur, solange vor ihm kein Fenster
+    /// entstanden war. Sobald eine andere Testklasse eines anlegte, kippte er. Beide
+    /// Fälle im selben Prozess nachgemessen:
+    ///
+    ///     ohne Fenster im Prozess → Main-Queue NICHT bedient
+    ///     mit einem Fenster       → Main-Queue bedient
+    ///
+    /// Das Anlegen eines `NSWindow` hängt die Quelle der Main-Queue also in den
+    /// Modal-Mode ein. Ein echter App-Prozess hat immer Fenster — die Absolutaussage
+    /// traf dort demnach nie zu, und der Test prüfte in Wahrheit nur, dass die
+    /// Testumgebung noch keine AppKit-Fenster gesehen hatte.
+    ///
+    /// Geprüft wird deshalb jetzt die Hälfte, die reproduzierbar ist und die Lage im
+    /// Programm beschreibt: mit Fenster wird bedient. Dass `onMainRunLoop` trotzdem
+    /// gebraucht wird, sichert der Test darüber ab — der HVB-Fehler war real und
+    /// gemessen, „bedient" heißt hier nur „irgendwann", nicht „rechtzeitig".
+    func test_mainQueue_imModalMode_haengtAmVorhandenseinEinesFensters() {
+        let fenster = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+                               styleMask: [.titled], backing: .buffered, defer: false)
+        // Ohne das gibt `close()` das Fenster frei, das ARC danach noch einmal freigibt
+        // — der Testlauf endet mit SIGSEGV statt mit einem Ergebnis.
+        fenster.isReleasedWhenClosed = false
+        _ = fenster.contentView
+        defer { fenster.close() }
+
         let box = Mailbox<Int>()
         DispatchQueue.main.async { box.set(1) }
-        pumpModalRunLoop(timeout: 0.5) { box.value != nil }
-        XCTAssertNil(box.value,
-                     "Main-Queue wurde im Modal-Mode bedient — dann ist die Begründung " +
-                     "an YaxiService.onMainRunLoop überholt")
+        pumpModalRunLoop(timeout: 1.0) { box.value != nil }
+        XCTAssertEqual(box.value, 1,
+                       "Mit einem Fenster im Prozess wird die Main-Queue im Modal-Mode bedient. "
+                       + "Kippt das, ist die Begründung an YaxiService.onMainRunLoop erneut zu prüfen.")
     }
 
     /// Nach dem Pumpen im Modal-Mode muss die Main-Queue wieder normal laufen, sonst
