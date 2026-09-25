@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.0.7":
+            return v207
         case "2.0.6":
             return v206
         case "2.0.5":
@@ -283,6 +285,22 @@ enum WhatsNewContent {
             return nil
         }
     }
+
+    /// 2.0.7. Ein Fehler, ein Eintrag. Er traf nur, wer ING, bunq, N26 oder Revolut als
+    /// allererstes Konto verband — also niemanden, der dieses Fenster liest. Es steht
+    /// trotzdem hier, weil jemand es weitergeben können soll.
+    private static let v207: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "lock.open.trianglebadge.exclamationmark",
+            tint: .sbBlueStrong,
+            title: L10n.t("Erste Bank mit Freigabe im Browser ließ sich nicht einrichten",
+                          "Connecting a browser-approval bank as your first account failed"),
+            description: L10n.t(
+                "Wer ING, bunq, N26 oder Revolut als erstes Konto verbinden wollte, sah den Assistenten bei \u{201E}Sicherheitsfreigabe\u{201C} stehenbleiben — kein Browser-Fenster, keine Meldung. Ein zweites Konto hinzuzufügen war nie betroffen. Behoben; der Fehler kam mit 2.0.5 herein.",
+                "Anyone connecting ING, bunq, N26 or Revolut as their first account saw the wizard stall at the security approval step — no browser window, no message. Adding a second account was never affected. Fixed; the fault arrived with 2.0.5."
+            )
+        ),
+    ]
 
     /// 2.0.6. Zwei behobene Fehler, beide in der Ersteinrichtung — also in einem Teil der
     /// App, den die meisten Leser dieses Fensters nie wieder sehen. Trotzdem stehen sie

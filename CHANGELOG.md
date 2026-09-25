@@ -1,5 +1,11 @@
 # Changelog — simplebanking
 
+## [2.0.7]
+
+### Behoben
+
+- **Die erste Bank mit Freigabe im Browser ließ sich nicht einrichten** — wer ING, bunq, N26 oder Revolut als **erstes** Konto verbinden wollte, sah den Assistenten bei „Sicherheitsfreigabe" stehenbleiben: kein Browser-Fenster, keine Meldung, kein Fortschritt. Ursache war ein einzelner Sprung auf den Hauptthread, der während des Assistenten nicht ankommt — der Assistent läuft modal, und ein gewöhnlicher Sprung wartet dort, bis die modale Sitzung endet. Er stand direkt vor dem Schritt, der die Adresse der Bank holt; deshalb öffnete sich auch nichts. Ein zweites Konto hinzuzufügen war nie betroffen, denn das läuft nicht modal. Der Fehler kam mit 2.0.5 herein, zusammen mit dem Schalter für das eigene Freigabe-Fenster, den diese Abfrage liest — und zwar unabhängig davon, wie der Schalter steht. Alle drei Sprünge dieser Art im Bankweg sind umgestellt, und ein Test hält die Regel jetzt fest, statt sie nur zu kommentieren.
+
 ## [2.0.6]
 
 ### Behoben

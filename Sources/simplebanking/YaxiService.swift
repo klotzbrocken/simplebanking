@@ -2780,7 +2780,20 @@ enum YaxiService {
             // leitet auf `simplebanking://auth-callback`, die Sitzung erkennt das Schema
             // und endet. Safari (Schalter in den Einstellungen): lokaler HTTP-Server auf
             // 127.0.0.1 wie bis 2.0.3.
-            let eigenesFenster = await MainActor.run { Freigabefenster.aktiv }
+            // `onMainRunLoop`, nicht `MainActor.run` — und das ist hier keine Stilfrage.
+            //
+            // Der Einrichtungsassistent läuft unter `NSApp.runModal`. Ein gewöhnlicher
+            // Hop auf den Hauptthread reiht sich in die Main-Dispatch-Queue ein und kommt
+            // dort nicht rechtzeitig an; er wartet, bis die modale Sitzung endet. Gemeldet
+            // am 25.09.2026: Die Ersteinrichtung der ING blieb genau hier stehen, ohne dass
+            // ein Browser aufging — die Bank-URL wird erst darunter geholt. Im Protokoll
+            // endete alles nach „SCA RedirectHandle: registering redirect URI".
+            //
+            // Betroffen war jede Bank mit Freigabe über einen Handle (ING, bunq, N26,
+            // Revolut) und ausschließlich als **erstes** Konto, denn nur die
+            // Ersteinrichtung läuft modal. Die Zeile kam mit 2.0.5 herein, zusammen mit
+            // dem Schalter, den sie abfragt.
+            let eigenesFenster = await onMainRunLoop { Freigabefenster.aktiv }
             var callbackServer: YaxiOAuthCallback? = nil
             let redirectURI: String
             if eigenesFenster {
@@ -3149,8 +3162,13 @@ enum YaxiService {
         let createdAt = Date()
         let userMsgFromBankCopy = userMsgFromBank
 
-        // 3. Hop auf MainActor für Bank-Name + Store-Register.
-        await MainActor.run {
+        // 3. Hop auf den Hauptthread für Bank-Name + Store-Register.
+        //
+        // Auch hier `onMainRunLoop`: Diese Funktion läuft aus den Fehlerzweigen von
+        // `fetchAccounts` und `fetchBalances` heraus, und die laufen während der
+        // Ersteinrichtung — also unter `NSApp.runModal`. Ein gewöhnlicher Hop bliebe
+        // liegen, und der Fehler, der gemeldet werden soll, käme nie beim Nutzer an.
+        await onMainRunLoop {
             let bankName = MultibankingStore.shared.slots
                 .first(where: { $0.id == slotSnapshot })?.displayName
             let report = ErrorReportStore.PendingErrorReport(
@@ -3221,7 +3239,9 @@ enum YaxiService {
         let queryParams = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.count ?? 0
         setupPhaseReporter?("sca_redirect_open", ["host": url.host ?? "?", "urlLength": "\(url.absoluteString.count)"])
         AppLogger.log("SCA: öffne Freigabe-Seite (host=\(url.host ?? "?"), länge=\(url.absoluteString.count), parameter=\(queryParams))", category: "YaxiService")
-        let fenster: Freigabefenster? = await MainActor.run {
+        // Ebenfalls `onMainRunLoop`: Diese Stelle liegt im selben Weg und würde denselben
+        // Stillstand erzeugen, nur ein paar Zeilen später.
+        let fenster: Freigabefenster? = await onMainRunLoop {
             guard Freigabefenster.aktiv else { return nil }
             let f = Freigabefenster()
             return f.oeffnen(url, erwartetRueckleitung: erwartetRueckleitung) ? f : nil
