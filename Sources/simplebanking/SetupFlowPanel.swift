@@ -630,7 +630,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         let tagline = NSTextField(labelWithString: t("Dein Kontostand. Immer sichtbar.", "Your balance. Always visible."))
         tagline.font = .systemFont(ofSize: 14, weight: .medium)
-        tagline.textColor = NSColor.labelColor.withAlphaComponent(0.8)
+        // Siehe `renderOnboardingPage0`: Alpha über die Ansicht, nicht über die Farbe —
+        // sonst friert das Erscheinungsbild des Aufrufzeitpunkts mit ein.
+        tagline.textColor = .labelColor
+        tagline.alphaValue = 0.8
         tagline.alignment = .center
 
         let body = NSTextField(wrappingLabelWithString: t("Keine App öffnen, kein Login – einfach hingucken. Dein Kontostand lebt in der Menüleiste.", "No app to open, no login – just look. Your balance lives in the menu bar."))
@@ -1243,16 +1246,41 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         galerie.contentTintColor = .controlAccentColor
         galerie.font = .systemFont(ofSize: 12)
 
+        // Diese Seite ist die LETZTE des Assistenten — erst ihr „Fertig" schreibt das
+        // Konto weg (`onOnboardingNext` setzt `outcome` und beendet den Modal-Lauf).
+        // Sie hatte keinen Knopf. Wer eine Bank frisch verband, kam bis hierher, konnte
+        // ein Theme wählen und dann nichts mehr: kein Weiter, keine Tastaturbedienung,
+        // nur das Fenster schließen — und damit galt die ganze Einrichtung als
+        // abgebrochen, das Konto war weg. Gemeldet am 25.09.2026, reproduzierbar.
+        //
+        // Zweitkonten traf es nie: Für die ist `totalPages` 1, der Assistent endet auf
+        // Seite 0 mit „Fertig". Betroffen war ausschließlich die Ersteinrichtung — also
+        // genau jeder neue Nutzer.
+        let knopfReihe = horizontalButtons(
+            backTitle: t("Zurück", "Back"),
+            backAction: #selector(onOnboardingBack),
+            primaryTitle: t("Fertig", "Done"),
+            primaryAction: #selector(onOnboardingNext(_:)),
+            primaryEnabled: true
+        )
+        knopfReihe.primary.tag = 3
+        knopfReihe.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        // Voreingestellt, damit auch die Eingabetaste ans Ziel führt.
+        knopfReihe.primary.keyEquivalent = "\r"
+
         rootStack.addArrangedSubview(titel)
         rootStack.addArrangedSubview(text)
         rootStack.addArrangedSubview(flexSpacer())
         rootStack.addArrangedSubview(reihe1)
         rootStack.addArrangedSubview(reihe2)
         rootStack.addArrangedSubview(galerie)
+        rootStack.addArrangedSubview(flexSpacer())
+        rootStack.addArrangedSubview(knopfReihe.stack)
 
         rootStack.setCustomSpacing(4, after: titel)
         rootStack.setCustomSpacing(16, after: text)
         rootStack.setCustomSpacing(10, after: reihe2)
+        rootStack.setCustomSpacing(16, after: galerie)
     }
 
     @objc private func onThemeGewaehlt(_ sender: NSButton) {
@@ -1283,7 +1311,22 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let bankName = completedBank?.displayName ?? "Bank"
         let bankConnected = NSTextField(labelWithString: "\(bankName) \(t("verbunden", "connected"))")
         bankConnected.font = .systemFont(ofSize: 13, weight: .medium)
-        bankConnected.textColor = NSColor.labelColor.withAlphaComponent(0.8)
+        // `labelColor` bleibt unangetastet, die Abschwächung macht die Ansicht.
+        //
+        // Vorher stand hier `NSColor.labelColor.withAlphaComponent(0.8)`, und das ist
+        // die Falle: `withAlphaComponent` **friert** eine dynamische Systemfarbe auf
+        // das Erscheinungsbild ein, das beim Aufruf gerade gilt. Die Ansichten entstehen
+        // in `render(step:)`, bevor sie im Fenster hängen — also im Hellmodus. Nachgemessen:
+        //
+        //   im Hellmodus erzeugt, im Dunkelmodus gelesen
+        //     labelColor.withAlphaComponent(0.8) → R 0.00 G 0.00 B 0.00 A 0.80
+        //     labelColor                         → R 1.00 G 1.00 B 1.00 A 0.85
+        //
+        // Im Dunkelmodus stand die Zeile „<Bank> verbunden" damit als schwarze Schrift
+        // auf dunklem Grund. Gemeldet am 25.09.2026. `alphaValue` gehört der Ansicht und
+        // lässt die Farbe dynamisch.
+        bankConnected.textColor = .labelColor
+        bankConnected.alphaValue = 0.8
         bankConnected.alignment = .center
 
         let body = NSTextField(wrappingLabelWithString: t("Ab jetzt siehst du deinen Kontostand direkt in der Menüleiste.", "From now on, your balance is visible directly in the menu bar."))

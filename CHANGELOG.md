@@ -1,5 +1,12 @@
 # Changelog — simplebanking
 
+## [2.0.6]
+
+### Behoben
+
+- **Die Ersteinrichtung ließ sich nicht abschließen** — der letzte Schritt des Assistenten, „Wie soll es aussehen?", hatte keinen Knopf zum Bestätigen. Ein Theme ließ sich auswählen, weiter kam man nicht, weder mit der Maus noch mit der Tastatur; blieb nur, das Fenster zu schließen. Und weil erst dieser letzte Schritt das Konto wegschreibt, war die ganze Einrichtung danach verloren. Betroffen war ausschließlich die **erste** Bankverbindung — wer ein zweites Konto hinzufügte, bekam diese Seite nie zu sehen, weshalb der Fehler seit 2.0.3 unbemerkt blieb. Die Seite hat jetzt „Zurück" und „Fertig", und die Eingabetaste bestätigt. *Danke an den Nutzer, der das mit Screenshots gemeldet hat.*
+- **Dunkelmodus: die Zeile „… verbunden" stand schwarz auf dunklem Grund** — am Ende der Einrichtung war die Zeile, die die verbundene Bank nennt, praktisch unlesbar. Die Abschwächung der Schriftfarbe hatte diese auf das Erscheinungsbild festgenagelt, das beim Aufbau des Fensters gerade galt, und das ist immer das helle. Dasselbe galt für die Zeile „Dein Kontostand. Immer sichtbar." auf der Startseite.
+
 ## [2.0.5]
 
 ### Behoben
