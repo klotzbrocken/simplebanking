@@ -212,6 +212,29 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         render(step: existingMasterPassword != nil ? .bankSearch : .welcome)
     }
 
+    #if DEBUG
+    /// Nur für Tests: einen Schritt direkt aufbauen und das Fenster durchmessen lassen.
+    ///
+    /// Das Panel hat feste 460×520 und lässt sich nicht vergrößern. Ob ein Knopf unten
+    /// noch hineinpasst, entscheidet also das Layout und nicht der Augenschein — deshalb
+    /// gibt es hier einen Weg, eine Seite ohne den ganzen Assistenten aufzubauen.
+    func debugAufbauen(onboardingSeite: Int) {
+        render(step: .onboarding(page: onboardingSeite))
+        panel.layoutIfNeeded()
+    }
+
+    /// Das Inhaltsfenster, um Kindansichten und ihre Rahmen zu prüfen.
+    var debugInhalt: NSView? { panel.contentView }
+
+    /// Alle Knöpfe der aktuell aufgebauten Seite, flach.
+    func debugKnoepfe() -> [NSButton] {
+        func sammeln(_ v: NSView) -> [NSButton] {
+            (v as? NSButton).map { [$0] } ?? v.subviews.flatMap(sammeln)
+        }
+        return (panel.contentView?.subviews.flatMap(sammeln)) ?? []
+    }
+    #endif
+
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
