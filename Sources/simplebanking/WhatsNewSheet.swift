@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.0.6":
+            return v206
         case "2.0.5":
             return v205
         case "2.0.3":
@@ -281,6 +283,33 @@ enum WhatsNewContent {
             return nil
         }
     }
+
+    /// 2.0.6. Zwei behobene Fehler, beide in der Ersteinrichtung — also in einem Teil der
+    /// App, den die meisten Leser dieses Fensters nie wieder sehen. Trotzdem stehen sie
+    /// hier: Wer die Einrichtung abgebrochen hat, weil sie nicht weiterging, soll lesen
+    /// können, dass es nicht an ihm lag.
+    private static let v206: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "checkmark.circle.badge.questionmark",
+            tint: .sbBlueStrong,
+            title: L10n.t("Die Ersteinrichtung geht wieder zu Ende",
+                          "Setting up your first account works again"),
+            description: L10n.t(
+                "Der letzte Schritt des Assistenten — die Theme-Auswahl — hatte keinen Knopf zum Bestätigen. Weiter kam man weder mit der Maus noch mit der Tastatur, und weil erst dieser Schritt das Konto wegschreibt, war die ganze Einrichtung danach verloren. Nur die allererste Bankverbindung war betroffen; ein zweites Konto hinzuzufügen überspringt diese Seite. Jetzt stehen dort \u{201E}Zurück\u{201C} und \u{201E}Fertig\u{201C}, und die Eingabetaste bestätigt.",
+                "The wizard's last step — choosing a theme — had no button to confirm. Neither mouse nor keyboard got you any further, and since that step is what actually saves the account, the whole setup was lost. Only the very first bank connection was affected; adding a second account skips that page. It now has \u{201C}Back\u{201D} and \u{201C}Done\u{201D}, and Return confirms."
+            )
+        ),
+        WhatsNewItem(
+            icon: "circle.lefthalf.filled",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Dunkelmodus: unlesbare Zeile am Ende der Einrichtung",
+                          "Dark mode: an unreadable line at the end of setup"),
+            description: L10n.t(
+                "Die Zeile, die die verbundene Bank nennt, wurde im Dunkelmodus schwarz auf dunklem Grund gezeichnet. Ursache war eine Systemfarbe, die beim Aufbau des Fensters auf das helle Erscheinungsbild festgelegt wurde und danach nicht mehr mitwechselte.",
+                "The line naming the connected bank was drawn black on a dark background in dark mode. A system colour had been pinned to the light appearance while the window was built and stopped adapting after that."
+            )
+        ),
+    ]
 
     /// 2.0.3. Auswahlregel unverändert: nur, was jemand auch merkt. Der Umstieg auf die
     /// neue Banking-Bibliothek steht deshalb nicht drin — er ist die größte Änderung
