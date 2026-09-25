@@ -49,6 +49,25 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.0.7</title>
+            <pubDate>Fri, 25 Sep 2026 16:28:00 +0200</pubDate>
+            <sparkle:version>20260925704</sparkle:version>
+            <sparkle:shortVersionString>2.0.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.0.7/simplebanking-2.0.7.dmg" length="32144733" type="application/octet-stream" sparkle:edSignature="Y9FNK71LdOs27dFeHAhzkhIaO908HkGIX/drBZLOFsTC1xNJ4SguDalXI6msBY9pAWRXbxqrSU/C0GtLj31+Aw=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.0.7</h2>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>Die erste Bank mit Freigabe im Browser ließ sich nicht einrichten.</strong> Wer ING, bunq, N26 oder Revolut als <em>erstes</em> Konto verbinden wollte, sah den Assistenten bei „Sicherheitsfreigabe" stehenbleiben — kein Browser-Fenster, keine Meldung. In einem zweiten Fall ging der Browser auf, die Freigabe wurde erteilt, und der Assistent blieb trotzdem stehen, obwohl die Bank längst geantwortet hatte. Beide Male wartete die App auf einen Sprung auf den Hauptthread, der während des Assistenten nicht ankommt. Ein zweites Konto hinzuzufügen war nie betroffen. Der Fehler kam mit 2.0.5 herein.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.0.6</title>
             <pubDate>Fri, 25 Sep 2026 06:36:00 +0200</pubDate>
             <sparkle:version>20260925701</sparkle:version>
