@@ -105,7 +105,32 @@ final class Freigabefenster: NSObject, ASWebAuthenticationPresentationContextPro
     }
 
     /// Schließt das Fenster, wenn das Polling fertig ist oder der Nutzer das Warten beendet.
-    func schliessen() {
+    ///
+    /// `nonisolated` mit eigenem Sprung über die Runloop — und das ist der Punkt.
+    ///
+    /// Aufgerufen wird das aus dem Bankweg, also aus einem Zusammenhang ohne Isolation.
+    /// Wäre die Methode schlicht `@MainActor`, müsste Swift dafür auf die
+    /// Main-Dispatch-Queue springen, und die kommt während des modalen
+    /// Einrichtungsassistenten nicht rechtzeitig dran. Gemeldet am 25.09.2026: Die
+    /// Freigabe der ING war erteilt, das Fenster zu, das Polling fertig —
+    /// `SCA result: connectionData=1637b` steht im Protokoll — und danach stand der
+    /// Assistent still, weil er genau hier auf den Hauptthread wartete. Siehe die
+    /// Begründung an `YaxiService.onMainRunLoop`.
+    ///
+    /// Der Sprung steckt deshalb in der Methode selbst und nicht in ihren Aufrufern:
+    /// So kann keine spätere Aufrufstelle ihn vergessen.
+    nonisolated func schliessen() async {
+        await withCheckedContinuation { (fortsetzung: CheckedContinuation<Void, Never>) in
+            RunLoop.main.perform(inModes: [.default, .modalPanel]) {
+                MainActor.assumeIsolated {
+                    self.schliessenAufDemHauptthread()
+                    fortsetzung.resume()
+                }
+            }
+        }
+    }
+
+    private func schliessenAufDemHauptthread() {
         session?.cancel()
         session = nil
         fertigContinuation?.finish()
