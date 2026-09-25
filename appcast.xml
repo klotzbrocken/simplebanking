@@ -49,6 +49,27 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.0.6</title>
+            <pubDate>Fri, 25 Sep 2026 06:36:00 +0200</pubDate>
+            <sparkle:version>20260925701</sparkle:version>
+            <sparkle:shortVersionString>2.0.6</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.0.6/simplebanking-2.0.6.dmg" length="32125684" type="application/octet-stream" sparkle:edSignature="u3jJGd0Cu1bE6MBSo8nvLc9vPVdl/KEnYum/yLgIGUaYpUOzUrVTJMlnP6Kg/8K+d+oMdLKalu3oZ1e9NAplBw=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.0.6</h2>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>Die Ersteinrichtung ließ sich nicht abschließen.</strong> Der letzte Schritt des Assistenten, „Wie soll es aussehen?", hatte keinen Knopf zum Bestätigen — weiter kam man weder mit der Maus noch mit der Tastatur. Und weil erst dieser Schritt das Konto wegschreibt, war die ganze Einrichtung danach verloren. Betroffen war ausschließlich die <em>erste</em> Bankverbindung; ein zweites Konto hinzuzufügen überspringt diese Seite. Jetzt stehen dort „Zurück" und „Fertig", und die Eingabetaste bestätigt.</li>
+                    <li><strong>Dunkelmodus: die Zeile „… verbunden" war unlesbar.</strong> Am Ende der Einrichtung stand der Name der verbundenen Bank schwarz auf dunklem Grund.</li>
+                    <li><strong>Text lief über den Fensterrand.</strong> Auf der Seite „100 % sicher" reichte der Fließtext bis an die Fensterkante und darüber hinaus. Dazu ein doppelter Satz und ein Komma zwischen zwei Hauptsätzen — beides bereinigt.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.0.5</title>
             <pubDate>Thu, 24 Sep 2026 03:24:32 +0200</pubDate>
             <sparkle:version>20260924694</sparkle:version>
