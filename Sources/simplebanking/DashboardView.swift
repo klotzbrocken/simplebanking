@@ -83,7 +83,21 @@ struct DashboardView: View {
     @ObservedObject var model: DashboardModel
 
     private func bankLogo(for slot: BankSlot) -> NSImage? {
-        let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: nil, iban: nil)
+        // Alle drei Merkmale mitgeben, nicht nur den Namen.
+        //
+        // `resolve` geht sie der Reihe nach durch: logoID, dann Name, dann IBAN. Hier
+        // standen die anderen beiden auf `nil`, also blieb allein der Anzeigename — und
+        // wenn der kein bekanntes Stichwort enthält, gab es kein Logo, obwohl die
+        // Bankleitzahl es verraten hätte (vierte Stelle 5 heißt Sparkasse, 6 oder 9
+        // Volks- und Raiffeisenbank). Jede andere Stelle in der App übergibt längst
+        // alles drei; diese hier war übrig geblieben.
+        //
+        // Belegslots (REWE, dm) bleiben außen vor: Ihre „IBAN" ist keine, und eine
+        // Bankleitzahl daraus zu lesen ergäbe ein zufälliges Logo. Dasselbe Muster wie
+        // im Konto-Umschalter.
+        let brand = BankLogoAssets.resolve(displayName: slot.displayName,
+                                           logoID: slot.logoId,
+                                           iban: slot.isReceiptSlot ? nil : slot.iban)
         BankLogoStore.shared.preload(brand: brand)
         return BankLogoStore.shared.image(for: brand)
     }

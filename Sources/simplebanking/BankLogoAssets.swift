@@ -367,16 +367,31 @@ enum BankLogoAssets {
         if let brandID = blzMapping[blz], let brand = brandsByID[brandID] {
             return brand
         }
-        if let brandID = blzPrefixMapping[prefix3], let brand = brandsByID[brandID] {
-            return brand
-        }
-
-        // Generic German bank groups (fallback only).
+        // Die vierte Stelle vor der dreistelligen Vorwahl — und die Reihenfolge ist der
+        // ganze Punkt.
+        //
+        // Im deutschen Bankleitzahlenschema sagt die vierte Stelle, zu welcher
+        // Institutsgruppe eine Bank gehört: 5 heißt Sparkasse, 6 und 9 heißen Volks- und
+        // Raiffeisenbank. Das ist eine Eigenschaft der Bank. Die ersten drei Stellen
+        // sagen nur, wo sie sitzt — in einer Region sitzen aber alle Gruppen.
+        //
+        // Gemeldet am 28.09.2026: Bei einem Kunden trug die Hamburger Sparkasse das
+        // „C" von comdirect. Ursache war die Vorwahl `200` für Hamburg, die auf
+        // comdirect zeigte und damit jede Hamburger Bank einfing — die HASPA
+        // (200 505 50) ebenso wie die Hamburger Volksbank (201 900 03).
+        //
+        // Die Vorwahl bleibt, sie trägt comdirect (200 411 xx, vierte Stelle 1), aber
+        // erst nach der Gruppenkennung. Genau das meinte schon der Kommentar an
+        // `blzPrefixMapping`, als „500" und „100" als zu grob herausflogen.
         if digit4 == "5" {
             return brandsByID["sparkasse"]
         }
         if digit4 == "6" || digit4 == "9" {
             return brandsByID["volksbank"]
+        }
+
+        if let brandID = blzPrefixMapping[prefix3], let brand = brandsByID[brandID] {
+            return brand
         }
         return nil
     }
