@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.0.8":
+            return v208
         case "2.0.7":
             return v207
         case "2.0.6":
@@ -285,6 +287,42 @@ enum WhatsNewContent {
             return nil
         }
     }
+
+    /// 2.0.8. Drei Punkte, die jemand merkt: eine Buchung, die zweimal dasteht, ein
+    /// eigenes Logo, das verschwand, und eine Sicherung, die mehr verschwieg als sie
+    /// sagte. Der Rest der Runde ist Innenarbeit und steht im Änderungsprotokoll.
+    private static let v208: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "doc.on.doc",
+            tint: .sbBlueStrong,
+            title: L10n.t("Zwei gleiche Buchungen bleiben zwei",
+                          "Two identical bookings stay two"),
+            description: L10n.t(
+                "Steht dieselbe Buchung zweimal im Abruf — zweimal derselbe Automat, zwei gleiche Tickets —, teilten sich beide Zeilen bisher Notiz, Beleg und Markierung, und was an der zweiten hing, war nicht erreichbar. Jede Zeile hat jetzt ihre eigene Kennung. Betrifft auch den Export und die gemerkten Sparraten; Gemerktes bleibt gemerkt.",
+                "When the same booking appears twice in one fetch — the same vending machine, two identical tickets — both rows used to share their note, receipt and flag, and whatever belonged to the second was unreachable. Each row now carries its own identity. This also covers the export and saved savings entries; what you marked stays marked."
+            )
+        ),
+        WhatsNewItem(
+            icon: "photo.badge.checkmark",
+            tint: .sbGreenStrong,
+            title: L10n.t("Ein eigenes Händler-Logo bleibt stehen",
+                          "Your own merchant logo stays put"),
+            description: L10n.t(
+                "Ein Logo, das du selbst gesetzt hast, konnte kurz darauf wieder durch eines aus dem Netz ersetzt werden — manchmal gleich beim Start, ohne dass du etwas getan hattest. Eigene Logos haben jetzt Vorrang. Nebenbei: Die Hamburger Sparkasse trug das Zeichen von comdirect.",
+                "A logo you set yourself could be replaced by one from the internet moments later — sometimes right at startup, without you doing anything. Your own logos now take precedence. Also: Hamburger Sparkasse was showing comdirect's mark."
+            )
+        ),
+        WhatsNewItem(
+            icon: "externaldrive.badge.exclamationmark",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Die Sicherung sagt, was sie ausgelassen hat",
+                          "The backup says what it left out"),
+            description: L10n.t(
+                "Sehr große oder unlesbare Belege blieben draußen, gemeldet wurde trotzdem nur \u{201E}Sicherung abgelegt\u{201C} — nach einem Rechnerwechsel fehlten sie dann. Die Meldung nennt jetzt, was nicht mitkam. Lässt sich eine Bankverbindung nicht lesen, bricht die Sicherung ab, statt das Konto stillschweigend zu verlieren. Und das Einspielen prüft vorher, ob der Platz reicht.",
+                "Very large or unreadable receipts were left out while the message still said only “Backup saved” — after moving to a new Mac they were missing. The message now names what did not travel. If an account's credentials cannot be read, the backup stops instead of silently losing it. And restoring checks beforehand whether there is enough space."
+            )
+        ),
+    ]
 
     /// 2.0.7. Ein Fehler, ein Eintrag. Er traf nur, wer ING, bunq, N26 oder Revolut als
     /// allererstes Konto verband — also niemanden, der dieses Fenster liest. Es steht
