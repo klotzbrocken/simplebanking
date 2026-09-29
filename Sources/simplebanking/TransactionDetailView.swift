@@ -11,12 +11,38 @@ enum SavingsBookmarks {
         return bookmarks.contains(transactionId)
     }
 
+    /// Ist diese Buchung gemerkt — unter dem heutigen **oder** dem alten Schlüssel?
+    ///
+    /// Bis 2.0.7 hingen Sparmarken an `stableIdentifierAusBankdaten`. Seit dem Umstieg auf
+    /// den Datenbankschlüssel wäre alles Gespeicherte sonst unsichtbar geworden. Neue
+    /// Marken entstehen nur noch unter dem neuen Schlüssel; die alten bleiben lesbar und
+    /// lassen sich abwählen.
+    static func isBookmarked(_ transaction: TransactionsResponse.Transaction) -> Bool {
+        let bookmarks = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        return bookmarks.contains(transaction.stableIdentifier)
+            || bookmarks.contains(transaction.stableIdentifierAusBankdaten)
+    }
+
     static func toggle(_ transactionId: String) {
         var bookmarks = UserDefaults.standard.stringArray(forKey: key) ?? []
         if let index = bookmarks.firstIndex(of: transactionId) {
             bookmarks.remove(at: index)
         } else {
             bookmarks.append(transactionId)
+        }
+        UserDefaults.standard.set(bookmarks, forKey: key)
+    }
+
+    /// Umschalten über beide Schreibweisen: Beim Abwählen muss auch eine alte Marke
+    /// verschwinden, sonst ließe sie sich nicht loswerden.
+    static func toggle(_ transaction: TransactionsResponse.Transaction) {
+        var bookmarks = UserDefaults.standard.stringArray(forKey: key) ?? []
+        let neu = transaction.stableIdentifier
+        let alt = transaction.stableIdentifierAusBankdaten
+        if bookmarks.contains(neu) || bookmarks.contains(alt) {
+            bookmarks.removeAll { $0 == neu || $0 == alt }
+        } else {
+            bookmarks.append(neu)
         }
         UserDefaults.standard.set(bookmarks, forKey: key)
     }
@@ -130,8 +156,15 @@ struct TransactionDetailView: View {
             : (transaction.debtor?.name ?? transaction.creditor?.name ?? "—")
     }
 
+    /// Der Schlüssel, unter dem Notizen, Belege, Flags und Erinnerungen dieser Buchung
+    /// liegen.
+    ///
+    /// Zuerst der Schlüssel der Datenbankzeile. Die Neuberechnung darunter gilt nur für
+    /// Buchungen, die noch nicht aus der Datenbank kommen — sonst träfe sie bei zwei
+    /// gleichen Buchungen immer die erste, und alles, was an der zweiten hängt, wäre
+    /// unerreichbar.
     private var txFingerprint: String {
-        TransactionRecord.fingerprint(for: transaction)
+        transaction.anreicherungsSchluessel
     }
 
     private var txSlotId: String {
@@ -995,8 +1028,7 @@ struct TransactionDetailView: View {
                     // Sparrate-Bookmark (nur für Ausgaben)
                     if isOutgoing {
                         Button(action: {
-                            let txId = transaction.stableIdentifier
-                            SavingsBookmarks.toggle(txId)
+                            SavingsBookmarks.toggle(transaction)
                             isSavingsBookmarked.toggle()
                         }) {
                             HStack(spacing: 12) {
@@ -1044,7 +1076,7 @@ struct TransactionDetailView: View {
             localIsUnread = isUnread
             localHasReminder = hasReminder
             localReminderId = reminderId
-            isSavingsBookmarked = SavingsBookmarks.isBookmarked(transaction.stableIdentifier)
+            isSavingsBookmarked = SavingsBookmarks.isBookmarked(transaction)
             displayedMerchantInput = counterpartyName
             // Muster UND Bereich vorbelegen. Nur das Muster zu setzen half nicht: Der
             // Bereich stand fest auf „Verwendungszweck", während der Rückfall den

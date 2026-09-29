@@ -805,12 +805,12 @@ enum YaxiService {
 
         // Datenabrufe behandeln `unklar` wie einen Fehlschlag: Ein nicht gelesener Saldo
         // richtet keinen Schaden an. Nur bei Zahlungen ist der Unterschied wichtig.
-        guard case .erfolg(let outcome) = await handleSCA(
+        let freigabe = await handleSCA(
             initial: toSCACommonAccounts(resp), client: client, ticket: finalTicket, slotId: slotSnapshot,
             confirm: confirm, respond: respond
-        ) else {
-            throw NSError(domain: "YaxiService", code: -2,
-                          userInfo: [NSLocalizedDescriptionKey: "Konten: Freigabe konnte nicht abgeschlossen werden (Schritt 1 von 3). Bitte erneut verbinden."])
+        )
+        guard case .erfolg(let outcome) = freigabe else {
+            throw scaFehler(freigabe, schritt: L10n.t("Konten", "Accounts"), von: 1, bis: 3)
         }
 
         // Accounts establishes recurring consent and fresh connectionData for follow-up
@@ -1073,13 +1073,19 @@ enum YaxiService {
                 try await toSCACommon(client.respondBalances(ticket: scaTicket, context: ctx, response: r)) { .balances($0) }
             }
 
-            guard case .erfolg(let outcome) = await handleSCA(
+            let freigabe = await handleSCA(
                 initial: toSCACommon(resp) { .balances($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
-            ) else {
+            )
+            guard case .erfolg(let outcome) = freigabe else {
+                // `userMessage` war hier immer nil, und der Aufrufer setzte dafür einen
+                // allgemeinen Satz ein. Bei der eigenen Wache ist der Grund bekannt —
+                // dann soll er auch dastehen.
+                var meldung: String? = nil
+                if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
                 return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
                                        connectionData: nil, error: nil,
-                                       userMessage: nil, scaRequired: true)
+                                       userMessage: meldung, scaRequired: true)
             }
 
             AppLogger.log("fetchBalances: outcome.connectionData=\(outcome.connectionData == nil ? "nil" : "\(outcome.connectionData!.bytes.count)b")", category: "YaxiService")
@@ -1409,13 +1415,16 @@ enum YaxiService {
                 try await toSCACommon(client.respondTransactions(ticket: scaTicket, context: ctx, response: r)) { .transactions($0) }
             }
 
-            guard case .erfolg(let outcome) = await handleSCA(
+            let freigabe = await handleSCA(
                 initial: toSCACommon(resp) { .transactions($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
                 confirm: confirm, respond: respond
-            ) else {
+            )
+            guard case .erfolg(let outcome) = freigabe else {
+                var meldung: String? = nil
+                if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
                 return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                            connectionData: nil, error: nil,
-                                           userMessage: nil, scaRequired: true)
+                                           userMessage: meldung, scaRequired: true)
             }
 
             // Gegenstück zur Zeile in fetchBalances. Beim Umsatzabruf war bislang nicht
@@ -2035,6 +2044,12 @@ enum YaxiService {
             case .abgebrochen:
                 return TransferOutcome(ok: false, scaRequired: true, error: nil,
                                        userMessage: nil, mayHaveBeenExecuted: false)
+            case .freigabeLaeuftBereits:
+                // Wie `abgebrochen` in der Sache — nichts ging an die Bank —, aber der
+                // Nutzer bekommt den wahren Grund statt eines Bankfehlers.
+                return TransferOutcome(ok: false, scaRequired: true, error: nil,
+                                       userMessage: Self.freigabeLaeuftText,
+                                       mayHaveBeenExecuted: false)
             case .unklar:
                 // Hier stand bisher ebenfalls `mayHaveBeenExecuted: false` — eine
                 // Gewissheit, die die App nicht hat. Es ging bereits etwas an die Bank;
@@ -2463,10 +2478,42 @@ enum YaxiService {
     /// Drei Zustände statt zwei. Die Regel für die Einordnung: Ging vor dem Abbruch
     /// schon etwas an die Bank (`confirm`/`respond`), ist es `unklar` — sonst
     /// `abgebrochen`.
+    /// Der Satz, den der Nutzer sieht, wenn die eigene Wache eine zweite Freigabe
+    /// verhindert hat. Er sagt, was los ist, und rät **nicht** zum sofortigen Wiederholen.
+    static let freigabeLaeuftText = L10n.t(
+        "Für dieses Konto läuft gerade schon eine Freigabe. Schließe sie in der Banking-App oder im Browser ab — oder warte einen Moment, dann geht es wieder.",
+        "An approval is already running for this account. Finish it in your banking app or browser — or wait a moment and try again.")
+
+    /// Übersetzt ein nicht erfolgreiches Freigabe-Ergebnis in die Meldung eines Datenabrufs.
+    ///
+    /// `schritt` nennt den Namen, `von`/`bis` die Stelle in der Einrichtung — beides steht
+    /// so schon in den bisherigen Texten und bleibt unverändert. Neu ist nur, dass die
+    /// eigene Sperre nicht mehr wie ein Bankfehler klingt.
+    private static func scaFehler(_ ergebnis: SCAErgebnis, schritt: String,
+                                  von: Int, bis: Int) -> NSError {
+        let text: String
+        if case .freigabeLaeuftBereits = ergebnis {
+            text = "\(schritt): \(freigabeLaeuftText)"
+        } else {
+            text = L10n.t("\(schritt): Freigabe konnte nicht abgeschlossen werden (Schritt \(von) von \(bis)). Bitte erneut verbinden.",
+                          "\(schritt): approval could not be completed (step \(von) of \(bis)). Please reconnect.")
+        }
+        return NSError(domain: "YaxiService", code: -2,
+                       userInfo: [NSLocalizedDescriptionKey: text])
+    }
+
     private enum SCAErgebnis {
         case erfolg(SCAOutcome)
         /// Nichts wurde an die Bank geschickt, oder der Nutzer hat abgebrochen.
         case abgebrochen
+        /// Für dieses Konto läuft bereits eine Freigabe — die `Freigabewache` hat eine
+        /// zweite Seite verhindert.
+        ///
+        /// Eigener Fall, weil es kein Fehler der Bank ist, sondern eine Entscheidung der
+        /// App. Unter `abgebrochen` gebündelt kam beim Nutzer „Freigabe konnte nicht
+        /// abgeschlossen werden. Bitte erneut verbinden" an — ein Rat, der genau das
+        /// empfiehlt, was für die nächsten Minuten wieder scheitert.
+        case freigabeLaeuftBereits
         /// Der Ablauf brach ab, **nachdem** etwas an die Bank ging. Bei Zahlungen darf
         /// daraus weder ein „fehlgeschlagen" noch ein neuer Versuch werden.
         case unklar
@@ -2754,9 +2801,8 @@ enum YaxiService {
             guard await Freigabewache.shared.beginnen(slotId) else {
                 AppLogger.log("SCA Redirect: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
                               category: "YaxiService", level: "WARN")
-                return .abgebrochen
+                return .freigabeLaeuftBereits
             }
-            defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA Redirect: opening browser", category: "YaxiService")
             // Rückleitung hat hier YAXI vorgegeben, nicht wir — das eigene Fenster kann
             // sie nicht erkennen und endet erst mit dem Polling.
@@ -2766,15 +2812,18 @@ enum YaxiService {
                                               confirm: confirm, respond: respond,
                                               callbackSignal: fenster?.fertig)
             await fenster?.schliessen()
+            // Freigabe **abwarten**, nicht in ein loses `Task` schieben. Hier stand
+            // `defer { Task { … } }`: Der Vorgang endete, die Wache hielt das Konto noch,
+            // und ein sofortiger zweiter Anlauf prallte an der eigenen Sperre ab.
+            await Freigabewache.shared.beenden(slotId)
             return ergebnis
 
         case .redirectHandle(let handle, let context):
             guard await Freigabewache.shared.beginnen(slotId) else {
                 AppLogger.log("SCA RedirectHandle: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
                               category: "YaxiService", level: "WARN")
-                return .abgebrochen
+                return .freigabeLaeuftBereits
             }
-            defer { Task { await Freigabewache.shared.beenden(slotId) } }
             AppLogger.log("SCA RedirectHandle: registering redirect URI", category: "YaxiService")
             // Zwei Wege zur Rückleitung. Eigenes Fenster (Standard seit 2.0.5): Die Bank
             // leitet auf `simplebanking://auth-callback`, die Sitzung erkennt das Schema
@@ -2802,6 +2851,7 @@ enum YaxiService {
                 let server = YaxiOAuthCallback()
                 guard let port = try? await server.start(), port > 0 else {
                     AppLogger.log("SCA: failed to start callback server", category: "YaxiService", level: "ERROR")
+                    await Freigabewache.shared.beenden(slotId)
                     return .abgebrochen
                 }
                 callbackServer = server
@@ -2817,6 +2867,7 @@ enum YaxiService {
             } catch {
                 callbackServer?.stop()
                 AppLogger.log("SCA registerRedirectURI failed: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
+                await Freigabewache.shared.beenden(slotId)
                 return .abgebrochen
             }
             AppLogger.log("SCA RedirectHandle: opening bank URL in browser", category: "YaxiService")
@@ -2838,6 +2889,10 @@ enum YaxiService {
                                              callbackSignal: callbackSignal)
             callbackServer?.stop()
             await fenster?.schliessen()
+            // Siehe `.redirect`: abwarten statt in ein loses `Task` schieben. Die Wache
+            // wird an **jedem** Ausgang dieses Zweiges freigegeben — bewusst von Hand an
+            // drei Stellen statt über `defer`, denn `defer` kann nicht `await`.
+            await Freigabewache.shared.beenden(slotId)
             return result
         }
     }

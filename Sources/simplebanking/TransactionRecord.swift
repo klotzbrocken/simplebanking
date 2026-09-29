@@ -110,6 +110,10 @@ struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
             transaction.category = kategorie
         }
         transaction.slotId = slotId
+        // Der Schlüssel dieser Zeile — die einzige Stelle, an der er ins Modell kommt.
+        // Ohne ihn berechnet die Anzeige die Identität neu und trifft bei Doppelbuchungen
+        // immer die erste Zeile.
+        transaction.dbTxId = txID
         return transaction
     }
 
@@ -141,5 +145,23 @@ struct TransactionRecord: Codable, FetchableRecord, PersistableRecord {
         guard let value = clean(value) else { return nil }
         // Input expected as ISO yyyy-MM-dd from backend; keep normalized format.
         return value
+    }
+}
+
+extension TransactionsResponse.Transaction {
+    /// Der Schlüssel, unter dem Notizen, Belege, Flags, Erinnerungen, Kategorie- und
+    /// Händler-Überschreibungen dieser Buchung liegen.
+    ///
+    /// Erst der Schlüssel der Datenbankzeile (`dbTxId`), dann die Neuberechnung. Die
+    /// Neuberechnung gilt nur für Buchungen, die noch nicht aus der Datenbank kommen —
+    /// ein frischer Abruf, eine Vorschau, ein Test.
+    ///
+    /// Es gibt diese Eigenschaft, damit die Regel **an einer Stelle** steht. Zwei gleiche
+    /// Buchungen aus einem Abruf liegen unter `fp` und `fp#2`; würde eine Stelle neu
+    /// rechnen und eine andere den gespeicherten Schlüssel nehmen, verschwänden Notizen
+    /// aus der Anzeige, statt bloß an der falschen Zeile zu hängen. Aus einem Audit,
+    /// 29.09.2026.
+    var anreicherungsSchluessel: String {
+        dbTxId ?? TransactionRecord.fingerprint(for: self)
     }
 }

@@ -676,7 +676,7 @@ enum MerchantResolver {
 
     static func resolve(transaction: TransactionsResponse.Transaction) -> MerchantResolution {
         let remittance = (transaction.remittanceInformation ?? []).joined(separator: " ")
-        let txID = TransactionRecord.fingerprint(for: transaction)
+        let txID = transaction.anreicherungsSchluessel
         return resolve(
             txID: txID,
             // transaction.slotId ist von DB-load gesetzt (unified-mode), sonst nil

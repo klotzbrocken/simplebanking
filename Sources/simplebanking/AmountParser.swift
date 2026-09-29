@@ -52,7 +52,31 @@ extension TransactionsResponse.Transaction {
         AmountParser.parse(amount?.amount)
     }
 
+    /// Identität einer Buchung für Anzeige und Export.
+    ///
+    /// Zuerst der Schlüssel der Datenbankzeile: Er ist der einzige Wert, der zwei gleiche
+    /// Buchungen auseinanderhält (`fp` und `fp#2`). Die End-to-End-ID der Bank kann das
+    /// nicht — sie ist oft leer, und Sentinels wie `NOTPROVIDED` wären für alle Zeilen
+    /// gleich. Aus einem Audit, 29.09.2026: Kollisionen trafen die Zeilenidentität in der
+    /// Liste, die `FITID` im OFX-Export und — am schwersten — den Speicherschlüssel der
+    /// Sparmarken.
+    ///
+    /// Der Rückfall darunter bleibt unverändert, für Buchungen, die noch nicht aus der
+    /// Datenbank kommen (frischer Abruf, Vorschau, Tests).
     var stableIdentifier: String {
+        if let dbTxId, !dbTxId.isEmpty {
+            return dbTxId
+        }
+        return stableIdentifierAusBankdaten
+    }
+
+    /// Die Identität, wie sie bis 2.0.7 galt — allein aus dem, was die Bank liefert.
+    ///
+    /// Sie bleibt erreichbar, weil unter ihr etwas gespeichert ist: Sparmarken hängen an
+    /// diesem Wert. Ohne einen Lese-Rückfall wären alle Marken mit dem Umstieg verloren
+    /// gewesen — kein Datenverlust im engeren Sinn, aber genau die Art stiller
+    /// Verschlechterung, die niemand meldet und jeder merkt.
+    var stableIdentifierAusBankdaten: String {
         let trimmedID = endToEndId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmedID.isEmpty {
             return trimmedID

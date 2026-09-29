@@ -244,6 +244,40 @@ final class TransactionsDatabaseTests: XCTestCase {
         XCTAssertEqual(try RoundupStore.pot(slotId: "slot-b", potDate: "2026-04-01", bankId: testBankId)?.amountCents, 77)
     }
 
+
+    /// Aus einem Audit, 29.09.2026: Der Suffix `#2` blieb beim Laden auf der Strecke, und
+    /// damit waren die Anreicherungsspalten der zweiten Zeile unerreichbar — nicht
+    /// schreibbar, nicht lesbar. Der Test darüber belegte nur, dass der Suffix beim
+    /// Speichern entsteht. Dieser hier geht den ganzen Weg.
+    func test_notizAnDerZweitenGleichenBuchung_bleibtDort() throws {
+        let kaffee1 = makeTx(endToEndId: "", merchant: "Kaffeeautomat", amount: -2.50)
+        let kaffee2 = makeTx(endToEndId: "", merchant: "Kaffeeautomat", amount: -2.50)
+        let fp = TransactionRecord.fingerprint(for: kaffee1)
+
+        TransactionsDatabase.activeSlotId = "slot-a"
+        try TransactionsDatabase.upsert(transactions: [kaffee1, kaffee2], bankId: testBankId)
+
+        // Laden — erst hier bekommen die Buchungen ihren Zeilenschlüssel.
+        let geladen = try TransactionsDatabase.loadAllTransactions(bankId: testBankId)
+            .filter { $0.slotId == "slot-a" }
+            .compactMap { $0.toTransaction() }
+        XCTAssertEqual(geladen.count, 2)
+        let schluessel = geladen.map(\.anreicherungsSchluessel).sorted()
+        XCTAssertEqual(schluessel, [fp, fp + "#2"].sorted(),
+                       "beide Zeilen müssen ihren eigenen Schlüssel mitbringen")
+
+        // Notiz an die zweite Zeile.
+        let zweite = try XCTUnwrap(geladen.first { $0.anreicherungsSchluessel == fp + "#2" })
+        try TransactionsDatabase.saveNote(txID: zweite.anreicherungsSchluessel, slotId: "slot-a",
+                                          note: "zweiter Kaffee", bankId: testBankId)
+
+        let anreicherung = try TransactionsDatabase.loadEnrichmentData(bankId: testBankId)
+        XCTAssertEqual(anreicherung[TxEnrichmentKey.make(slotId: "slot-a", txID: fp + "#2")]?.note,
+                       "zweiter Kaffee")
+        XCTAssertNil(anreicherung[TxEnrichmentKey.make(slotId: "slot-a", txID: fp)]?.note,
+                     "die erste Buchung darf die Notiz der zweiten nicht tragen")
+    }
+
     private func makeTx(endToEndId: String, merchant: String, amount: Double)
         -> TransactionsResponse.Transaction
     {

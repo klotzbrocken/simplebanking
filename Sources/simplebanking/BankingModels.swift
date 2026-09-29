@@ -89,6 +89,28 @@ struct TransactionsResponse: Codable, Sendable {
         var transactionId: String? = nil
         var category: String? = nil         // Local category label (e.g. "Essen & Alltag")
         var slotId: String? = nil           // Unified inbox: which bank slot this transaction belongs to
+
+        /// Der Schlüssel, unter dem die Datenbank **diese** Zeile führt.
+        ///
+        /// Zwei gleiche Buchungen aus einem Abruf bekommen beim Speichern verschiedene
+        /// Schlüssel (`fp` und `fp#2`, s. `TransactionsDatabase.upsert`). Berechnet man
+        /// die Identität beim Anzeigen neu, kommt für beide derselbe Wert heraus — und
+        /// die Anreicherungsspalten der zweiten Zeile sind unerreichbar: nicht schreibbar,
+        /// nicht lesbar. Aus einem Audit, 29.09.2026.
+        ///
+        /// Bewusst **nicht** in `CodingKeys`: Der Wert gehört zur Zeile, nicht zur
+        /// Buchung, und hat in `raw_json` nichts verloren. Gesetzt wird er an genau einer
+        /// Stelle, `TransactionRecord.toTransaction()`.
+        var dbTxId: String? = nil
+
+        /// Alle Felder außer `dbTxId`. Ohne diese Liste würde der Schlüssel der Zeile in
+        /// das gespeicherte JSON wandern.
+        private enum CodingKeys: String, CodingKey {
+            case bookingDate, valueDate, status, endToEndId, amount, creditor, debtor
+            case remittanceInformation, additionalInformation, purposeCode
+            case bankTransactionCode, accountServicerReference, entryReference, transactionId
+            case category, slotId
+        }
     }
 
     let ok: Bool?

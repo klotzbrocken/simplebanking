@@ -2147,7 +2147,10 @@ private struct TransactionsPanelView: View {
 
                             // Transactions for this date
                             ForEach(group.transactions, id: \.stableIdentifier) { t in
-                                let txID = TransactionRecord.fingerprint(for: t)
+                                // Wie in der Detailansicht: erst der Schlüssel der Zeile,
+                                // dann die Neuberechnung. Sonst tragen zwei gleiche
+                                // Buchungen dieselben Notiz- und Flag-Abzeichen.
+                                let txID = t.anreicherungsSchluessel
                                 let txSlotId = t.slotId ?? TransactionsDatabase.activeSlotId
                                 let enrichment = vm.enrichmentData[TxEnrichmentKey.make(slotId: txSlotId, txID: txID)]
                                 let resolution = MerchantResolver.resolve(transaction: t)
@@ -2570,7 +2573,7 @@ private struct TransactionsPanelView: View {
                 // Demo: mark all transactions as unread in-memory
                 var enrichment: [String: TxEnrichment] = [:]
                 for t in vm.transactions {
-                    let txID = TransactionRecord.fingerprint(for: t)
+                    let txID = t.anreicherungsSchluessel
                     let slotId = t.slotId ?? TransactionsDatabase.activeSlotId
                     let key = TxEnrichmentKey.make(slotId: slotId, txID: txID)
                     enrichment[key] = TxEnrichment(note: nil, attachmentCount: 0, isUnread: true, isFlagged: false)

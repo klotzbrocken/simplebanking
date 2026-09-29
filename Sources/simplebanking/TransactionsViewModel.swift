@@ -298,7 +298,7 @@ final class TransactionsViewModel: ObservableObject {
         case .reminders:
             base = base.filter { tx in
                 let slotId = tx.slotId ?? TransactionsDatabase.activeSlotId
-                let key = TxEnrichmentKey.make(slotId: slotId, txID: TransactionRecord.fingerprint(for: tx))
+                let key = TxEnrichmentKey.make(slotId: slotId, txID: tx.anreicherungsSchluessel)
                 return enrichmentData[key]?.reminderId != nil
             }
         }
