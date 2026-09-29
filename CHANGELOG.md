@@ -1,5 +1,15 @@
 # Changelog — simplebanking
 
+## [2.0.8]
+
+### Behoben
+
+- **Hamburger Sparkasse trug das Logo von comdirect** — die Zuordnung über die Bankleitzahl ging bei Hamburger Instituten von der Vorwahl aus, und die sagt nur, wo eine Bank sitzt. Jetzt entscheidet die Institutsgruppe, die in der Bankleitzahl selbst steht. Betraf auch die Hamburger Volksbank.
+- **Ein eigenes Händler-Logo konnte von einem laufenden Abruf überschrieben werden** — wer während eines Abrufs ein eigenes Logo setzte, sah Sekunden später wieder das aus dem Netz. Dasselbe konnte gleich beim Start passieren, ohne jedes Zutun: Eigene Logos wurden nebenher geladen, der Abruf entschied währenddessen am noch leeren Speicher. Beides behoben; eigene Logos haben Vorrang, wie es beim Leeren des Zwischenspeichers längst der Fall war.
+- **Eine Sicherung konnte stillschweigend unvollständig sein** — Belege blieben draußen, wenn sie zu groß waren, die Gesamtgrenze erreicht war oder sich eine Datei nicht lesen ließ; gemeldet wurde trotzdem nur „Sicherung abgelegt". Nach einem Rechnerwechsel fehlten dann Belege, deren Buchungen sehr wohl da waren. Die Meldung nennt jetzt, was ausgelassen wurde, und Belege werden vor Theme-Dateien eingesammelt, damit nicht das Beiwerk den Nutzerdaten den Platz wegnimmt. **Eine Bankverbindung, die sich nicht lesen lässt, bricht die Sicherung ab** statt still zu fehlen.
+- **Wiederherstellung prüft jetzt den freien Speicher, bevor sie etwas ändert** — war die Platte voll, konnte sie Einstellungen und Zugangsdaten ersetzt zurücklassen und an der Datenbank scheitern. Ein zweiter Versuch half dabei nicht, denn er brauchte denselben Platz. Zusätzlich werden die bisherigen Zugangsdaten beiseitegelegt, wie es die Datenbank längst wird.
+- **Der Einrichtungsassistent verschwieg nicht geschriebene Dateien** — die Meldung nach dem Einspielen nannte nur die Erfolge. Sie sagt jetzt dasselbe wie die in den Einstellungen; gerade auf diesem Weg, nach einem Rechnerwechsel, wiegt eine fehlende Datei am schwersten.
+
 ## [2.0.7]
 
 ### Behoben

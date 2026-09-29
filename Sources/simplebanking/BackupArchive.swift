@@ -87,11 +87,38 @@ enum BackupArchive {
         var themesFehlend: Int = 0
     }
 
+    /// Was beim Erstellen einer Sicherung ausgelassen wurde.
+    ///
+    /// Gegenstück zu `Bericht`, nur für die andere Richtung. Die Wiederherstellung zählt
+    /// seit `e7a7519`, was sie nicht schreiben konnte — das Erstellen zählte gar nichts.
+    /// Aus einem Audit, 29.09.2026: Eine Sicherung konnte Belege stillschweigend
+    /// auslassen und trotzdem „Sicherung abgelegt" melden. Nach einem Umzug fehlten dann
+    /// Belege, deren Datenbankzeilen sehr wohl mitgekommen waren — es sah aus wie ein
+    /// Fehler der App, und war einer.
+    struct Exportbericht {
+        /// Einzeldateien über der 20-MB-Grenze.
+        var zuGross: Int = 0
+        /// Dateien, für die das Gesamtbudget nicht mehr reichte.
+        var budgetErschoepft: Int = 0
+        /// Dateien, die sich nicht lesen ließen.
+        var unlesbar: Int = 0
+
+        var ausgelassen: Int { zuGross + budgetErschoepft + unlesbar }
+        var istVollstaendig: Bool { ausgelassen == 0 }
+    }
+
     enum Fehler: LocalizedError {
         case falschePassphrase
         case unbekanntesFormat(Int)
         case beschaedigt(String)
         case abgelehnterPfad(String)
+        /// Eine Zugangsdatendatei ließ sich nicht lesen.
+        ///
+        /// Anders als bei einem Beleg wird hier abgebrochen: Ein Konto, das unbemerkt
+        /// nicht mitreist, fällt erst auf dem neuen Rechner auf — und dann fehlt es.
+        case zugangsdatenUnlesbar(String)
+        /// Der freie Speicher reicht für das Einspielen nicht.
+        case zuWenigSpeicher(benoetigt: Int, frei: Int)
 
         var errorDescription: String? {
             switch self {
@@ -107,6 +134,13 @@ enum BackupArchive {
             case .abgelehnterPfad(let name):
                 return L10n.t("Die Sicherung enthält einen unzulässigen Dateinamen und wurde nicht eingespielt: \(name)",
                               "The backup contains an invalid file name and was not restored: \(name)")
+            case .zuWenigSpeicher(let benoetigt, let frei):
+                let b = benoetigt / 1_048_576, f = frei / 1_048_576
+                return L10n.t("Zu wenig freier Speicher: Die Sicherung braucht rund \(b) MB, frei sind \(f) MB. Es wurde nichts geändert.",
+                              "Not enough free space: the backup needs about \(b) MB, \(f) MB are available. Nothing was changed.")
+            case .zugangsdatenUnlesbar(let name):
+                return L10n.t("Die Zugangsdaten eines Kontos ließen sich nicht lesen (\(name)) — die Sicherung wurde nicht erstellt, weil dieses Konto sonst unbemerkt gefehlt hätte.",
+                              "One account's credentials could not be read (\(name)) — the backup was not created, because that account would otherwise have been missing without notice.")
             }
         }
     }
@@ -120,7 +154,7 @@ enum BackupArchive {
     static func exportieren(passphrase: String,
                             merkhilfe: String? = nil,
                             mitThemes: Bool = true,
-                            domain: String = "tech.yaxi.simplebanking") throws -> Data {
+                            domain: String = "tech.yaxi.simplebanking") throws -> (daten: Data, bericht: Exportbericht) {
         let d = UserDefaults.standard.persistentDomain(forName: domain) ?? [:]
         var gefiltert: [String: Any] = [:]
         for (k, v) in d where !istAuszuschliessen(k) { gefiltert[k] = v }
@@ -130,9 +164,13 @@ enum BackupArchive {
         // Ein gemeinsames Budget für alle drei Sammler — nacheinander, weil zwei
         // gleichzeitige `inout`-Zugriffe in einer Argumentliste nicht erlaubt sind.
         var budget = sammelGrenze
-        let themes = mitThemes ? themesSammeln(budget: &budget) : [:]
-        let anhaenge = ordnerSammeln("attachments", budget: &budget)
-        let entwuerfe = ordnerSammeln("transfer-drafts", budget: &budget)
+        var bericht = Exportbericht()
+        // Reihenfolge: Nutzerdaten vor Zierrat. Vorher standen die Themes vorn und
+        // konnten Belegen das Budget wegnehmen — ein Theme lädt man nach, einen Beleg
+        // nicht.
+        let anhaenge = ordnerSammeln("attachments", budget: &budget, bericht: &bericht)
+        let entwuerfe = ordnerSammeln("transfer-drafts", budget: &budget, bericht: &bericht)
+        let themes = mitThemes ? themesSammeln(budget: &budget, bericht: &bericht) : [:]
 
         let inhalt = Inhalt(
             version: formatVersion,
@@ -146,8 +184,15 @@ enum BackupArchive {
             entwuerfe: entwuerfe
         )
 
-        return try verschluesseln(try JSONEncoder().encode(inhalt),
-                                  passphrase: passphrase, merkhilfe: merkhilfe)
+        let daten = try verschluesseln(try JSONEncoder().encode(inhalt),
+                                       passphrase: passphrase, merkhilfe: merkhilfe)
+        if !bericht.istVollstaendig {
+            AppLogger.log("Sicherung: \(bericht.ausgelassen) Datei(en) ausgelassen "
+                          + "(zu groß \(bericht.zuGross), Budget \(bericht.budgetErschoepft), "
+                          + "unlesbar \(bericht.unlesbar))",
+                          category: "Backup", level: "WARN")
+        }
+        return (daten, bericht)
     }
 
     /// Die Umschläge liegen bereits verschlüsselt vor — wir reichen sie unverändert durch.
@@ -156,9 +201,13 @@ enum BackupArchive {
         let dateien = (try? FileManager.default.contentsOfDirectory(atPath: ordner.path)) ?? []
         var aus: [String: String] = [:]
         for name in dateien where name.hasPrefix("credentials") && name.hasSuffix(".json") {
-            if let daten = try? Data(contentsOf: ordner.appendingPathComponent(name)) {
-                aus[name] = daten.base64EncodedString()
+            // Kein `try?`: Ein Beleg darf fehlen und gezählt werden, ein Konto nicht.
+            // Vorher fiel eine unlesbare Datei hier lautlos heraus — die Sicherung galt
+            // als gelungen und war eine Bankverbindung ärmer.
+            guard let daten = try? Data(contentsOf: ordner.appendingPathComponent(name)) else {
+                throw Fehler.zugangsdatenUnlesbar(name)
             }
+            aus[name] = daten.base64EncodedString()
         }
         return aus
     }
@@ -195,7 +244,8 @@ enum BackupArchive {
     ///
     /// Bewusst NICHT dabei: `logo-cache` (baut sich von selbst wieder auf) und
     /// `transactions-demo.db` (Vorführdaten, keine Nutzerdaten).
-    private static func ordnerSammeln(_ unterordner: String, budget: inout Int) -> [String: String] {
+    private static func ordnerSammeln(_ unterordner: String, budget: inout Int,
+                                      bericht: inout Exportbericht) -> [String: String] {
         guard let basis = try? CredentialsStore.appSupportURL()
                 .appendingPathComponent(unterordner) else { return [:] }
         guard let lauf = FileManager.default.enumerator(at: basis,
@@ -205,17 +255,28 @@ enum BackupArchive {
         var aus: [String: String] = [:]
         for fall in lauf {
             guard let url = fall as? URL,
-                  (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
-                  let daten = try? Data(contentsOf: url) else { continue }
+                  (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+            else { continue }
+            // Ein Lesefehler fiel bisher als Einziger lautlos unter den Tisch: kein
+            // Protokolleintrag, kein Zähler. Genau der Fall, in dem der Nutzer später
+            // eine Lücke findet und nichts erklärt sie.
+            guard let daten = try? Data(contentsOf: url) else {
+                bericht.unlesbar += 1
+                AppLogger.log("Sicherung: \(url.lastPathComponent) nicht lesbar — ausgelassen",
+                              category: "Backup", level: "WARN")
+                continue
+            }
             // Einzelne sehr große Dateien bleiben draußen, damit eine Sicherung nicht an
             // einem versehentlich abgelegten Video scheitert. Wird protokolliert, statt
             // stillschweigend zu fehlen.
             guard daten.count <= 20_000_000 else {
+                bericht.zuGross += 1
                 AppLogger.log("Sicherung: \(url.lastPathComponent) übersprungen (\(daten.count / 1_048_576) MB)",
                               category: "Backup", level: "WARN")
                 continue
             }
             guard daten.count <= budget else {
+                bericht.budgetErschoepft += 1
                 AppLogger.log("Sicherung: \(url.lastPathComponent) übersprungen — Gesamtgrenze erreicht",
                               category: "Backup", level: "WARN")
                 continue
@@ -235,21 +296,33 @@ enum BackupArchive {
         return aus
     }
 
-    private static func themesSammeln(budget: inout Int) -> [String: String] {
+    private static func themesSammeln(budget: inout Int, bericht: inout Exportbericht) -> [String: String] {
         let ordner = ThemeManager.shared.themesDirectoryURL
         let dateien = (try? FileManager.default.contentsOfDirectory(atPath: ordner.path)) ?? []
         var aus: [String: String] = [:]
         for name in dateien {
-            if let daten = try? Data(contentsOf: ordner.appendingPathComponent(name)),
-               daten.count < 5_000_000 {
-                guard daten.count <= budget else {
-                    AppLogger.log("Sicherung: Theme \(name) übersprungen — Gesamtgrenze erreicht",
-                                  category: "Backup", level: "WARN")
-                    continue
-                }
-                budget -= daten.count
-                aus[name] = daten.base64EncodedString()
+            // Vorher hing alles an einem `if let … , daten.count < 5_000_000`: Ein zu
+            // großes oder unlesbares Theme fiel ohne Protokoll und ohne Zähler heraus.
+            guard let daten = try? Data(contentsOf: ordner.appendingPathComponent(name)) else {
+                bericht.unlesbar += 1
+                AppLogger.log("Sicherung: Theme \(name) nicht lesbar — ausgelassen",
+                              category: "Backup", level: "WARN")
+                continue
             }
+            guard daten.count < 5_000_000 else {
+                bericht.zuGross += 1
+                AppLogger.log("Sicherung: Theme \(name) übersprungen (\(daten.count / 1_048_576) MB)",
+                              category: "Backup", level: "WARN")
+                continue
+            }
+            guard daten.count <= budget else {
+                bericht.budgetErschoepft += 1
+                AppLogger.log("Sicherung: Theme \(name) übersprungen — Gesamtgrenze erreicht",
+                              category: "Backup", level: "WARN")
+                continue
+            }
+            budget -= daten.count
+            aus[name] = daten.base64EncodedString()
         }
         return aus
     }
@@ -353,6 +426,36 @@ enum BackupArchive {
             themes.append((try sichererZielpfad(basis: themeOrdner, name: name), daten))
         }
 
+        // Platz und Schreibbarkeit prüfen — als Letztes, weil hier alle Größen bekannt sind.
+        //
+        // Der bewusste Verzicht auf einen Rückweg ist damit begründet, dass ein Einspielen
+        // sich wiederholen lässt: Dasselbe Archiv noch einmal einzuspielen führt aus jedem
+        // Mischzustand heraus. Das trägt bei einem vorübergehenden Fehler — **nicht** bei
+        // vollem Speicher, denn der zweite Versuch braucht denselben Platz, den es gerade
+        // nicht gab. Aus einem Audit, 29.09.2026: Genau dieser Fall konnte Einstellungen
+        // und Zugangsdaten ersetzt zurücklassen, während die Datenbank fehlte.
+        //
+        // Deshalb wird hier abgebrochen, bevor das erste Byte geschrieben ist. Der
+        // Schätzwert liegt bewusst hoch: Die Datenbank wird nicht überschrieben, sondern
+        // beiseitegelegt, also liegen kurzzeitig beide Stände nebeneinander.
+        let benoetigt = (datenbank?.daten.count ?? 0)
+            + zugangsdaten.reduce(0) { $0 + $1.daten.count }
+            + dateien.reduce(0) { $0 + $1.daten.count }
+            + themes.reduce(0) { $0 + $1.daten.count }
+        if benoetigt > 0,
+           let werte = try? credOrdner.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+           let frei = werte.volumeAvailableCapacityForImportantUsage {
+            // Ein Sicherheitsaufschlag von einem Viertel deckt Dateisystem-Verwaltung und
+            // das kurzzeitige Nebeneinander von alter und neuer Datenbank ab.
+            let mitReserve = benoetigt + benoetigt / 4
+            guard Int64(mitReserve) <= frei else {
+                throw Fehler.zuWenigSpeicher(benoetigt: mitReserve, frei: Int(clamping: frei))
+            }
+        }
+        guard FileManager.default.isWritableFile(atPath: credOrdner.path) else {
+            throw Fehler.beschaedigt(L10n.t("Zielordner nicht beschreibbar", "target folder not writable"))
+        }
+
         return Vorbereitet(einstellungen: woerterbuch, zugangsdaten: zugangsdaten,
                            datenbank: datenbank, dateien: dateien, themes: themes)
     }
@@ -391,6 +494,13 @@ enum BackupArchive {
         // Zugangsdaten — unverändert zurückschreiben, 0600 wie beim Original.
         let credOrdner = try CredentialsStore.appSupportURL()
         try FileManager.default.createDirectory(at: credOrdner, withIntermediateDirectories: true)
+        // Die alten Umschläge vorher beiseitelegen, wie es die Datenbank längst tut.
+        //
+        // Sie waren bis 29.09.2026 das einzige Stück, das ein gescheitertes Einspielen
+        // unwiederbringlich überschrieb: Die Datenbank wandert nach `db-sicherungen`, die
+        // Einstellungen lassen sich aus der Sicherung erneut setzen — die Zugangsdaten
+        // waren weg. Kostet einen Ordner und eine Bewegung je Datei.
+        zugangsdatenBeiseiteLegen(credOrdner)
         var konten = 0
         for (ziel, daten) in plan.zugangsdaten {
             try daten.write(to: ziel, options: [.atomic])
@@ -463,6 +573,38 @@ enum BackupArchive {
     /// Vorher hieß die Datei fest `transactions-vor-wiederherstellung.db` und wurde vor
     /// jedem Versuch gelöscht — **zwei fehlgeschlagene Einspielversuche hintereinander
     /// hätten die letzte funktionierende Datenbank vernichtet.**
+    /// Legt die vorhandenen Zugangsdaten neben die Datenbank-Rückfallebenen.
+    ///
+    /// Bewusst ohne `throws`: Scheitert das Beiseitelegen, ist das kein Grund, ein sonst
+    /// geprüftes Einspielen abzubrechen — es ist ein Netz, keine Bedingung. Der Fehlschlag
+    /// steht im Protokoll.
+    private static func zugangsdatenBeiseiteLegen(_ credOrdner: URL) {
+        let vorhanden = ((try? FileManager.default.contentsOfDirectory(atPath: credOrdner.path)) ?? [])
+            .filter { $0.hasPrefix("credentials") && $0.hasSuffix(".json") }
+        guard !vorhanden.isEmpty else { return }
+
+        let ordner = credOrdner.appendingPathComponent("db-sicherungen", isDirectory: true)
+            .appendingPathComponent("zugangsdaten-vor-wiederherstellung-\(dateiStempel.string(from: Date()))",
+                                    isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)) != nil
+        else {
+            AppLogger.log("Zugangsdaten konnten nicht beiseitegelegt werden — Ordner nicht anlegbar",
+                          category: "Backup", level: "WARN")
+            return
+        }
+        for name in vorhanden {
+            do {
+                try FileManager.default.copyItem(at: credOrdner.appendingPathComponent(name),
+                                                 to: ordner.appendingPathComponent(name))
+            } catch {
+                AppLogger.log("Zugangsdaten \(name) nicht beiseitegelegt: \(error.localizedDescription)",
+                              category: "Backup", level: "WARN")
+            }
+        }
+        AppLogger.log("Zugangsdaten beiseitegelegt: \(vorhanden.count) Datei(en) in \(ordner.lastPathComponent)",
+                      category: "Backup")
+    }
+
     private static func beiseiteLegen(_ ziel: URL) throws {
         let ordner = ziel.deletingLastPathComponent()
             .appendingPathComponent("db-sicherungen", isDirectory: true)

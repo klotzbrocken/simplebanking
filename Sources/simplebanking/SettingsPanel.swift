@@ -3804,12 +3804,22 @@ struct SettingsView: View {
                 // Abbruch hier ist eine Entscheidung des Nutzers, kein Fehler.
                 guard panel.runModal() == .OK, let ziel = panel.url else { return }
 
-                let daten = try BackupArchive.exportieren(passphrase: passphrase, merkhilfe: merkhilfe)
+                let (daten, exportbericht) = try BackupArchive.exportieren(passphrase: passphrase,
+                                                                           merkhilfe: merkhilfe)
                 try daten.write(to: ziel, options: [.atomic])
                 try? FileManager.default.setAttributes([.posixPermissions: 0o600],
                                                        ofItemAtPath: ziel.path)
                 let mb = String(format: "%.1f", Double(daten.count) / 1_048_576)
-                sicherungMelden(t("Sicherung abgelegt (\(mb) MB).", "Backup saved (\(mb) MB)."), fehler: false)
+                // Ausgelassene Dateien nennen, wie es das Einspielen längst tut. Vorher
+                // stand hier nur die Größe, und eine Sicherung, der Belege fehlten, las
+                // sich wie eine vollständige.
+                let ausgelassen = exportbericht.ausgelassen
+                let exportNachsatz = ausgelassen == 0 ? "" : t(
+                    " \(ausgelassen) Datei(en) sind nicht mitgekommen (\(exportbericht.zuGross) zu groß, \(exportbericht.budgetErschoepft) über der Gesamtgrenze, \(exportbericht.unlesbar) nicht lesbar).",
+                    " \(ausgelassen) file(s) were left out (\(exportbericht.zuGross) too large, \(exportbericht.budgetErschoepft) over the total limit, \(exportbericht.unlesbar) unreadable)."
+                )
+                sicherungMelden(t("Sicherung abgelegt (\(mb) MB).\(exportNachsatz)",
+                                  "Backup saved (\(mb) MB).\(exportNachsatz)"), fehler: false)
             case .einspielen:
                 guard let quelle = sicherungZiel else {
                     sicherungMelden(t("Keine Sicherung gewählt.", "No backup chosen."), fehler: true)

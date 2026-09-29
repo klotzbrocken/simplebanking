@@ -1782,9 +1782,17 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         do {
             let bericht = try BackupArchive.einspielen(try Data(contentsOf: quelle), passphrase: passphrase)
             ergebnis.messageText = t("Sicherung eingespielt", "Backup restored")
+            // Derselbe Nachsatz wie in den Einstellungen. Er fehlte hier — ausgerechnet
+            // auf dem Weg, den ein Nutzer nach einem Rechnerwechsel nimmt, also genau
+            // dann, wenn eine fehlende Datei am schwersten wiegt.
+            let fehlend = bericht.anhaengeFehlend + bericht.themesFehlend
+            let nachsatz = fehlend == 0 ? "" : t(
+                " \(fehlend) Datei(en) konnten nicht geschrieben werden (\(bericht.anhaengeFehlend) Beleg(e), \(bericht.themesFehlend) Theme-Datei(en)).",
+                " \(fehlend) file(s) could not be written (\(bericht.anhaengeFehlend) receipt(s), \(bericht.themesFehlend) theme file(s))."
+            )
             ergebnis.informativeText = t(
-                "\(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.anhaenge) Beleg(e). simplebanking startet jetzt neu; die Banken gibst du danach einmal neu frei.",
-                "\(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.anhaenge) receipt(s). simplebanking will restart now; you grant your bank approvals once afterwards."
+                "\(bericht.konten) Konto/Konten, \(bericht.buchungen) Buchungen, \(bericht.anhaenge) Beleg(e).\(nachsatz) simplebanking startet jetzt neu; die Banken gibst du danach einmal neu frei.",
+                "\(bericht.konten) account(s), \(bericht.buchungen) transactions, \(bericht.anhaenge) receipt(s).\(nachsatz) simplebanking will restart now; you grant your bank approvals once afterwards."
             )
             ergebnis.addButton(withTitle: t("Neu starten", "Restart"))
             ergebnis.runModal()

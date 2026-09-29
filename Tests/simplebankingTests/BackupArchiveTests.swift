@@ -94,7 +94,7 @@ final class BackupArchiveTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: ordner) }
         let datei = ordner.appendingPathComponent("probe.\(BackupArchive.dateiendung)")
 
-        let daten = try BackupArchive.exportieren(passphrase: "korrekt-pferd-batterie",
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "korrekt-pferd-batterie",
                                                   merkhilfe: "wie beim alten Router",
                                                   mitThemes: false, domain: testDomain)
         try daten.write(to: datei)
@@ -116,14 +116,14 @@ final class BackupArchiveTests: XCTestCase {
 
     /// Die Merkhilfe muss ohne Passphrase lesbar sein, sonst hilft sie nicht.
     func test_merkhilfeIstOhnePassphraseLesbar() throws {
-        let daten = try BackupArchive.exportieren(passphrase: "geheim",
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "geheim",
                                                   merkhilfe: "wie beim alten Router",
                                                   mitThemes: false, domain: testDomain)
         XCTAssertEqual(BackupArchive.merkhilfe(aus: daten), "wie beim alten Router")
     }
 
     func test_ohneMerkhilfeKeineMerkhilfe() throws {
-        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
                                                   domain: testDomain)
         XCTAssertNil(BackupArchive.merkhilfe(aus: daten))
     }
@@ -148,7 +148,7 @@ final class BackupArchiveTests: XCTestCase {
         }
         defer { try? FileManager.default.removeItem(at: ziel) }
 
-        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
                                                   domain: testDomain)
         let bericht = try BackupArchive.einspielen(daten, passphrase: "geheim")
         XCTAssertEqual(bericht.buchungen, 2,
@@ -170,7 +170,7 @@ final class BackupArchiveTests: XCTestCase {
         let beleg = basis.appendingPathComponent("bon.pdf")
         try Data("ein Beleg".utf8).write(to: beleg)
 
-        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
                                                   domain: testDomain)
         try FileManager.default.removeItem(at: beleg)
         XCTAssertFalse(FileManager.default.fileExists(atPath: beleg.path))
@@ -186,7 +186,7 @@ final class BackupArchiveTests: XCTestCase {
     /// Entwürfe kamen später dazu und sind deshalb optional.
     func test_aeltereSicherungOhneBelegeBleibtLesbar() throws {
         // Eine Sicherung ohne die neuen Felder nachbilden: Inhalt ohne `anhaenge`.
-        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
                                                   domain: testDomain)
         let bericht = try BackupArchive.einspielen(daten, passphrase: "geheim")
         XCTAssertGreaterThanOrEqual(bericht.einstellungen, 1,
@@ -324,7 +324,7 @@ final class BackupArchiveTests: XCTestCase {
         }
 
         try datenbankAnlegen(3)
-        let sicherung = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
+        let (sicherung, _) = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false,
                                                       domain: testDomain)
         try BackupArchive.einspielen(sicherung, passphrase: "geheim")
         // Zwischen den Läufen muss eine Sekunde liegen — der Stempel geht auf Sekunden.
@@ -352,7 +352,7 @@ final class BackupArchiveTests: XCTestCase {
 
     /// Rundlauf: Was hineingeht, kommt heraus.
     func test_rundlaufMitRichtigerPassphrase() throws {
-        let daten = try BackupArchive.exportieren(passphrase: "korrekt-pferd-batterie-klammer",
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "korrekt-pferd-batterie-klammer",
                                                   mitThemes: false, domain: testDomain)
         XCTAssertFalse(daten.isEmpty)
         // Entschlüsseln über den öffentlichen Weg wäre ein Einspielen und würde die
@@ -368,7 +368,7 @@ final class BackupArchiveTests: XCTestCase {
     /// Eine veränderte Datei darf nicht als echt durchgehen. AES-GCM leistet das; der
     /// Test hält fest, dass wir den Nachweis auch prüfen und nicht wegwerfen.
     func test_veraenderteSicherungWirdAbgelehnt() throws {
-        let daten = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false, domain: testDomain)
+        let (daten, _) = try BackupArchive.exportieren(passphrase: "geheim", mitThemes: false, domain: testDomain)
         var text = try XCTUnwrap(String(data: daten, encoding: .utf8))
 
         // Ein Zeichen mitten im Geheimtext austauschen — verlässlich, nicht auf gut Glück:

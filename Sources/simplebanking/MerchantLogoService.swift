@@ -710,18 +710,22 @@ final class MerchantLogoService: ObservableObject {
     }
 
     /// Lädt Merchant-Custom-Logos beim Start — immer, unabhängig vom Internet-Schalter.
+    ///
+    /// Synchron, nicht im Hintergrund, und zwar aus demselben Grund wie bei
+    /// `loadPersistedLogosIfNeeded`: `preload` entscheidet am Speicher, ob es einen
+    /// Netzabruf startet. Lief dieses Laden nebenher, sah der erste Aufruf den Cache
+    /// leer, holte ein Logo für einen Händler, der längst ein eigenes hatte, und
+    /// überschrieb es Sekunden später — ohne jedes Zutun des Nutzers.
+    ///
+    /// Es ist ein einzelner Blob-Read aus SQLite, und er ist gegen eine fehlende
+    /// Datenbank abgesichert (`loadAllMerchantCustomLogos` liefert dann ein leeres
+    /// Ergebnis).
     private func loadMerchantCustomLogos() {
-        Task.detached {
-            let entries = TransactionsDatabase.loadAllMerchantCustomLogos()
-            await MainActor.run {
-                for (key, data) in entries {
-                    if let image = NSImage(data: data) {
-                        self.imageCache[key] = image
-                        self.anzeigebilderVergessen(key)
-                        self.customLogoKeys.insert(key)
-                    }
-                }
-            }
+        for (key, data) in TransactionsDatabase.loadAllMerchantCustomLogos() {
+            guard let image = NSImage(data: data) else { continue }
+            imageCache[key] = image
+            anzeigebilderVergessen(key)
+            customLogoKeys.insert(key)
         }
     }
 
@@ -1015,8 +1019,31 @@ final class MerchantLogoService: ObservableObject {
         uebernehmen(image, data: data, key: key)
     }
 
+    /// Darf ein aus dem Netz geholtes Logo diesen Schlüssel belegen?
+    ///
+    /// Reine Entscheidung, damit sie prüfbar ist: Der Dienst selbst lässt sich in Tests
+    /// nicht aufbauen (privater `init`, nur `shared`).
+    ///
+    /// Die Regel ist dieselbe, die `clearCache()` längst anwendet — ein eigenes Logo des
+    /// Nutzers wiegt schwerer als alles, was aus dem Netz kommt. Dass sie hier fehlte,
+    /// war ein Versehen, keine Absicht.
+    nonisolated static func darfNetzlogoUebernehmen(key: String, eigene: Set<String>) -> Bool {
+        !eigene.contains(key.lowercased())
+    }
+
     /// Ein geholtes Logo in Speicher- und Plattencache legen.
     private func uebernehmen(_ image: NSImage, data: Data, key: String) {
+        // Zwischen dem Start des Abrufs und diesem Augenblick liegen bis zu zwei
+        // Netzrunden à 15 Sekunden. In der Zeit kann der Nutzer ein eigenes Logo gesetzt
+        // haben — geprüft wurde das zuletzt vor dem Abruf, in `preload`, und danach nie
+        // wieder. Das Ergebnis war kein bloß falsches Bild, sondern ein widersprüchlicher
+        // Zustand: `customLogoKeys` enthielt den Schlüssel weiter, das Lösch-X blieb
+        // sichtbar, und darunter stand ein fremdes Logo.
+        guard Self.darfNetzlogoUebernehmen(key: key, eigene: customLogoKeys) else {
+            AppLogger.log("Logo für \(key) verworfen — der Nutzer hat inzwischen ein eigenes gesetzt",
+                          category: "Logos")
+            return
+        }
         imageCache[key] = image
         anzeigebilderVergessen(key)
         Task.detached { TransactionsDatabase.saveLogo(key: key, data: data) }
