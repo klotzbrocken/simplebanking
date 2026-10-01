@@ -714,7 +714,8 @@ enum YaxiService {
         userId: String,
         password: String,
         alwaysTrace: Bool = false,
-        callSource: ErrorReportStore.CallSource = .normal
+        callSource: ErrorReportStore.CallSource = .normal,
+        ausloeser: Freigabeausloeser = .hintergrund
     ) async throws -> [RoutexModels.Account] {
         let slotSnapshot = activeSlotId
         let connIdKey = connectionIdKey(for: slotSnapshot)
@@ -807,7 +808,7 @@ enum YaxiService {
         // richtet keinen Schaden an. Nur bei Zahlungen ist der Unterschied wichtig.
         let freigabe = await handleSCA(
             initial: toSCACommonAccounts(resp), client: client, ticket: finalTicket, slotId: slotSnapshot,
-            confirm: confirm, respond: respond
+            confirm: confirm, respond: respond, ausloeser: ausloeser
         )
         guard case .erfolg(let outcome) = freigabe else {
             throw scaFehler(freigabe, schritt: L10n.t("Konten", "Accounts"), von: 1, bis: 3)
@@ -836,7 +837,8 @@ enum YaxiService {
         userId: String,
         password: String,
         alwaysTrace: Bool = false,
-        callSource: ErrorReportStore.CallSource = .normal
+        callSource: ErrorReportStore.CallSource = .normal,
+        ausloeser: Freigabeausloeser = .hintergrund
     ) async throws -> BalancesResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
@@ -849,7 +851,8 @@ enum YaxiService {
                 userId: userId,
                 password: password,
                 alwaysTrace: alwaysTrace,
-                callSource: callSource
+                callSource: callSource,
+                ausloeser: ausloeser
             )
         }
         guard let response = result else {
@@ -868,7 +871,8 @@ enum YaxiService {
         userId: String,
         password: String,
         alwaysTrace: Bool,
-        callSource: ErrorReportStore.CallSource
+        callSource: ErrorReportStore.CallSource,
+        ausloeser: Freigabeausloeser
     ) async throws -> BalancesResponse {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let ibanKeySnap = ibanKey(for: slotSnapshot)
@@ -1075,17 +1079,23 @@ enum YaxiService {
 
             let freigabe = await handleSCA(
                 initial: toSCACommon(resp) { .balances($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
-                confirm: confirm, respond: respond
+                confirm: confirm, respond: respond, ausloeser: ausloeser
             )
             guard case .erfolg(let outcome) = freigabe else {
                 // `userMessage` war hier immer nil, und der Aufrufer setzte dafür einen
                 // allgemeinen Satz ein. Bei der eigenen Wache ist der Grund bekannt —
                 // dann soll er auch dastehen.
                 var meldung: String? = nil
+                var freigabeNoetig = false
                 if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
+                if case .freigabeNoetig = freigabe {
+                    meldung = Self.freigabeNoetigText
+                    freigabeNoetig = true
+                }
                 return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
                                        connectionData: nil, error: nil,
-                                       userMessage: meldung, scaRequired: true)
+                                       userMessage: meldung, scaRequired: true,
+                                       freigabeNoetig: freigabeNoetig)
             }
 
             AppLogger.log("fetchBalances: outcome.connectionData=\(outcome.connectionData == nil ? "nil" : "\(outcome.connectionData!.bytes.count)b")", category: "YaxiService")
@@ -1207,7 +1217,8 @@ enum YaxiService {
         password: String,
         from: String,
         alwaysTrace: Bool = false,
-        callSource: ErrorReportStore.CallSource = .normal
+        callSource: ErrorReportStore.CallSource = .normal,
+        ausloeser: Freigabeausloeser = .hintergrund
     ) async throws -> TransactionsResponse {
         // Snapshot slot ID immediately — activeSlotId may change during async fetch
         let slotSnapshot = activeSlotId
@@ -1219,7 +1230,8 @@ enum YaxiService {
                 password: password,
                 from: from,
                 alwaysTrace: alwaysTrace,
-                callSource: callSource
+                callSource: callSource,
+                ausloeser: ausloeser
             )
         }
         guard let response = result else {
@@ -1239,7 +1251,8 @@ enum YaxiService {
         password: String,
         from: String,
         alwaysTrace: Bool,
-        callSource: ErrorReportStore.CallSource
+        callSource: ErrorReportStore.CallSource,
+        ausloeser: Freigabeausloeser
     ) async throws -> TransactionsResponse {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let ibanKeySnap = ibanKey(for: slotSnapshot)
@@ -1417,14 +1430,20 @@ enum YaxiService {
 
             let freigabe = await handleSCA(
                 initial: toSCACommon(resp) { .transactions($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
-                confirm: confirm, respond: respond
+                confirm: confirm, respond: respond, ausloeser: ausloeser
             )
             guard case .erfolg(let outcome) = freigabe else {
                 var meldung: String? = nil
+                var freigabeNoetig = false
                 if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
+                if case .freigabeNoetig = freigabe {
+                    meldung = Self.freigabeNoetigText
+                    freigabeNoetig = true
+                }
                 return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                            connectionData: nil, error: nil,
-                                           userMessage: meldung, scaRequired: true)
+                                           userMessage: meldung, scaRequired: true,
+                                           freigabeNoetig: freigabeNoetig)
             }
 
             // Gegenstück zur Zeile in fetchBalances. Beim Umsatzabruf war bislang nicht
@@ -2035,7 +2054,10 @@ enum YaxiService {
 
             let freigabe = await handleSCA(
                 initial: toSCACommon(resp) { .transfer($0) }, client: client, ticket: scaTicket, slotId: slotSnapshot,
-                confirm: confirm, respond: respond
+                confirm: confirm, respond: respond,
+                // Eine Überweisung gibt es nur, weil jemand sie ausgelöst und
+                // bestätigt hat — hier darf die Bankseite aufgehen.
+                ausloeser: .nutzerhandlung
             )
             let outcome: SCAOutcome
             switch freigabe {
@@ -2044,6 +2066,13 @@ enum YaxiService {
             case .abgebrochen:
                 return TransferOutcome(ok: false, scaRequired: true, error: nil,
                                        userMessage: nil, mayHaveBeenExecuted: false)
+            case .freigabeNoetig:
+                // Kann hier eigentlich nicht auftreten — eine Überweisung stößt immer
+                // der Nutzer an. Der Fall steht trotzdem ausdrücklich da, damit niemand
+                // ihn später stillschweigend unter `default` verschwinden lässt.
+                return TransferOutcome(ok: false, scaRequired: true, error: nil,
+                                       userMessage: Self.freigabeNoetigText,
+                                       mayHaveBeenExecuted: false)
             case .freigabeLaeuftBereits:
                 // Wie `abgebrochen` in der Sache — nichts ging an die Bank —, aber der
                 // Nutzer bekommt den wahren Grund statt eines Bankfehlers.
@@ -2480,6 +2509,12 @@ enum YaxiService {
     /// `abgebrochen`.
     /// Der Satz, den der Nutzer sieht, wenn die eigene Wache eine zweite Freigabe
     /// verhindert hat. Er sagt, was los ist, und rät **nicht** zum sofortigen Wiederholen.
+    /// Der Satz, wenn ein Hintergrundabruf eine Freigabe bräuchte und deshalb stehen
+    /// geblieben ist. Er sagt, was zu tun ist, und drängt nicht.
+    static let freigabeNoetigText = L10n.t(
+        "Dieses Konto braucht eine neue Freigabe deiner Bank. simplebanking öffnet die Bankseite nicht von selbst — tippe auf \u{201E}Neu verbinden\u{201C}, wenn du sie jetzt erteilen willst.",
+        "This account needs a fresh approval from your bank. simplebanking does not open the bank page on its own — choose \u{201C}Reconnect\u{201D} when you want to grant it.")
+
     static let freigabeLaeuftText = L10n.t(
         "Für dieses Konto läuft gerade schon eine Freigabe. Schließe sie in der Banking-App oder im Browser ab — oder warte einen Moment, dann geht es wieder.",
         "An approval is already running for this account. Finish it in your banking app or browser — or wait a moment and try again.")
@@ -2492,7 +2527,9 @@ enum YaxiService {
     private static func scaFehler(_ ergebnis: SCAErgebnis, schritt: String,
                                   von: Int, bis: Int) -> NSError {
         let text: String
-        if case .freigabeLaeuftBereits = ergebnis {
+        if case .freigabeNoetig = ergebnis {
+            text = "\(schritt): \(freigabeNoetigText)"
+        } else if case .freigabeLaeuftBereits = ergebnis {
             text = "\(schritt): \(freigabeLaeuftText)"
         } else {
             text = L10n.t("\(schritt): Freigabe konnte nicht abgeschlossen werden (Schritt \(von) von \(bis)). Bitte erneut verbinden.",
@@ -2502,10 +2539,34 @@ enum YaxiService {
                        userInfo: [NSLocalizedDescriptionKey: text])
     }
 
+    /// Wer diesen Bankabruf angestoßen hat.
+    ///
+    /// Entscheidet, ob eine Freigabe-Seite der Bank aufgehen darf. Gemeldet am
+    /// 01.10.2026: Ein Kunde mit abgelaufener ING-Zustimmung bekam mehrmals täglich
+    /// ungefragt die Anmeldeseite seiner Bank vorgesetzt — vom Zeitgeber, vom
+    /// Programmstart, vom Entsperren. Er hielt es für Phishing, und das war keine
+    /// übertriebene Sorge: Ein Browser, der von selbst auf eine Bank-Anmeldung springt,
+    /// sieht genau so aus.
+    ///
+    /// Die Vorgabe ist `.hintergrund`. Wer sie zu setzen vergisst, bekommt das
+    /// zurückhaltende Verhalten — nicht das aufdringliche.
+    enum Freigabeausloeser: Sendable, Equatable {
+        /// Der Nutzer hat unmittelbar davor etwas angeklickt: ↻, Herunterziehen,
+        /// „Neu verbinden", der Einrichtungsassistent. Eine Freigabe-Seite darf aufgehen.
+        case nutzerhandlung
+        /// Zeitgeber, Programmstart, Entsperren, Kontowechsel, CLI, Importeure. Hier
+        /// sitzt niemand davor, also öffnet sich nichts.
+        case hintergrund
+    }
+
     private enum SCAErgebnis {
         case erfolg(SCAOutcome)
         /// Nichts wurde an die Bank geschickt, oder der Nutzer hat abgebrochen.
         case abgebrochen
+        /// Die Bank verlangt eine Freigabe, und der Abruf lief im Hintergrund — es wurde
+        /// nichts geöffnet und nichts angefangen. Der Aufrufer merkt sich das Konto und
+        /// hört auf, es von selbst zu versuchen.
+        case freigabeNoetig
         /// Für dieses Konto läuft bereits eine Freigabe — die `Freigabewache` hat eine
         /// zweite Seite verhindert.
         ///
@@ -2577,7 +2638,8 @@ enum YaxiService {
         slotId: String,
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
-        depth: Int = 0
+        depth: Int = 0,
+        ausloeser: Freigabeausloeser = .hintergrund
     ) async -> SCAErgebnis {
         if depth > 5 {
             AppLogger.log("SCA: max depth exceeded", category: "YaxiService", level: "WARN")
@@ -2631,7 +2693,7 @@ enum YaxiService {
                 do {
                     let next = try await respond(context, preferred.key)
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
                 } catch {
                     AppLogger.log("SCA respond error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
                     return .unklar
@@ -2647,7 +2709,7 @@ enum YaxiService {
                         context: context,
                         delay: TimeInterval(delay),
                         client: client, ticket: ticket, slotId: slotId,
-                        confirm: confirm, respond: respond, depth: depth
+                        confirm: confirm, respond: respond, depth: depth, ausloeser: ausloeser
                     )
                 } else {
                     // Ohne `pollingDelay` **nicht** pollen. Hier standen früher feste 5 s
@@ -2700,7 +2762,7 @@ enum YaxiService {
                     do {
                         let next = try await confirm(context)
                         return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                               confirm: confirm, respond: respond, depth: depth + 1)
+                                               confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
                     } catch {
                         AppLogger.log("SCA Confirmation: confirm nach Bestätigung fehlgeschlagen: \(String(reflecting: error))",
                                       category: "YaxiService", level: "ERROR")
@@ -2779,7 +2841,7 @@ enum YaxiService {
                 do {
                     let next = try await respond(context, userValue)
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
                 } catch {
                     // `localizedDescription` ist hier wertlos: `UnexpectedError(userMessage: nil)`
                     // beschreibt sich damit als nichts. Deshalb der volle Typ — und ein Trace,
@@ -2795,6 +2857,24 @@ enum YaxiService {
             }
 
         case .redirect(let url, let context):
+            // **Die Absperrung.** Im Hintergrund geht hier gar nichts auf.
+            //
+            // Gemeldet am 01.10.2026: Ein Kunde mit abgelaufener ING-Zustimmung bekam
+            // mehrmals täglich ungefragt die Anmeldeseite seiner Bank vorgesetzt — vom
+            // Zeitgeber alle vier Stunden, dazu bei jedem Programmstart, jedem Entsperren
+            // und jedem Kontowechsel. Er hielt es für Phishing. Zu Recht: Ein Browser,
+            // der von selbst auf eine Bank-Anmeldung springt, sieht genau so aus, und die
+            // Mitteilung dazu kam erst hinterher und nannte nicht einmal die Bank.
+            //
+            // Hier wird abgebrochen, nicht nur das Öffnen unterdrückt: Sonst liefe
+            // `pollRedirect` bis zu zehn Minuten auf eine Freigabe zu warten, die niemand
+            // erteilen kann, und hielte solange die `Freigabewache`.
+            guard ausloeser == .nutzerhandlung else {
+                AppLogger.log("SCA: Freigabe nötig, aber Abruf lief im Hintergrund — nichts geöffnet (slot=\(slotId.prefix(8)))",
+                              category: "YaxiService")
+                await meldeFreigabeNoetig(slotId: slotId)
+                return .freigabeNoetig
+            }
             // Läuft für dieses Konto schon eine Freigabe, wird **keine zweite Seite**
             // geöffnet. Siehe `Freigabewache`: Der Nutzer bestätigt gerade im Browser;
             // eine weitere Seite macht die begonnene nur wertlos.
@@ -2810,7 +2890,7 @@ enum YaxiService {
                                                 erwartetRueckleitung: false)
             let ergebnis = await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                               confirm: confirm, respond: respond,
-                                              callbackSignal: fenster?.fertig)
+                                              callbackSignal: fenster?.fertig, ausloeser: ausloeser)
             await fenster?.schliessen()
             // Freigabe **abwarten**, nicht in ein loses `Task` schieben. Hier stand
             // `defer { Task { … } }`: Der Vorgang endete, die Wache hielt das Konto noch,
@@ -2819,6 +2899,24 @@ enum YaxiService {
             return ergebnis
 
         case .redirectHandle(let handle, let context):
+            // **Die Absperrung.** Im Hintergrund geht hier gar nichts auf.
+            //
+            // Gemeldet am 01.10.2026: Ein Kunde mit abgelaufener ING-Zustimmung bekam
+            // mehrmals täglich ungefragt die Anmeldeseite seiner Bank vorgesetzt — vom
+            // Zeitgeber alle vier Stunden, dazu bei jedem Programmstart, jedem Entsperren
+            // und jedem Kontowechsel. Er hielt es für Phishing. Zu Recht: Ein Browser,
+            // der von selbst auf eine Bank-Anmeldung springt, sieht genau so aus, und die
+            // Mitteilung dazu kam erst hinterher und nannte nicht einmal die Bank.
+            //
+            // Hier wird abgebrochen, nicht nur das Öffnen unterdrückt: Sonst liefe
+            // `pollRedirect` bis zu zehn Minuten auf eine Freigabe zu warten, die niemand
+            // erteilen kann, und hielte solange die `Freigabewache`.
+            guard ausloeser == .nutzerhandlung else {
+                AppLogger.log("SCA: Freigabe nötig, aber Abruf lief im Hintergrund — nichts geöffnet (slot=\(slotId.prefix(8)))",
+                              category: "YaxiService")
+                await meldeFreigabeNoetig(slotId: slotId)
+                return .freigabeNoetig
+            }
             guard await Freigabewache.shared.beginnen(slotId) else {
                 AppLogger.log("SCA RedirectHandle: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
                               category: "YaxiService", level: "WARN")
@@ -2886,7 +2984,7 @@ enum YaxiService {
             }
             let result = await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                              confirm: confirm, respond: respond,
-                                             callbackSignal: callbackSignal)
+                                             callbackSignal: callbackSignal, ausloeser: ausloeser)
             callbackServer?.stop()
             await fenster?.schliessen()
             // Siehe `.redirect`: abwarten statt in ein loses `Task` schieben. Die Wache
@@ -2924,7 +3022,8 @@ enum YaxiService {
         slotId: String,
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
-        depth: Int
+        depth: Int,
+        ausloeser: Freigabeausloeser
     ) async -> SCAErgebnis {
         Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
         defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
@@ -2943,7 +3042,7 @@ enum YaxiService {
                 switch next {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
                 case .dialog(let input, _, _):
                     if case .confirmation(let newCtx, let newDelay) = input {
                         let ctxChanged = newCtx != ctx
@@ -2966,10 +3065,10 @@ enum YaxiService {
                         AppLogger.log("SCA poll[\(i)]: got non-confirmation dialog: \(input)", category: "YaxiService", level: "WARN")
                     }
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
                 default:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
                 }
             } catch {
                 consecutiveErrors += 1
@@ -2991,7 +3090,8 @@ enum YaxiService {
         slotId: String,
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
-        callbackSignal: AsyncStream<Void>? = nil
+        callbackSignal: AsyncStream<Void>? = nil,
+        ausloeser: Freigabeausloeser
     ) async -> SCAErgebnis {
         Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
         defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
@@ -3026,7 +3126,7 @@ enum YaxiService {
                 switch next {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond)
+                                           confirm: confirm, respond: respond, ausloeser: ausloeser)
                 case .dialog(let input, _, _):
                     // Eine Bestätigung mit unverändertem Kontext heißt „noch nicht
                     // fertig" — dafür ist diese Schleife da, sie läuft weiter.
@@ -3039,13 +3139,13 @@ enum YaxiService {
                     // fragt, war damit nicht bedienbar, und die chipTAN-Anzeige lief
                     // ins Leere.
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond)
+                                           confirm: confirm, respond: respond, ausloeser: ausloeser)
                 case .redirect, .redirectHandle:
                     // Ein zweiter Browserschritt. Bisher wurde nur der Kontext
                     // übernommen und weitergepollt — die neue Seite hat nie jemand
                     // geöffnet, also konnte die Freigabe nicht fertig werden.
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond)
+                                           confirm: confirm, respond: respond, ausloeser: ausloeser)
                 }
             } catch {
                 consecutiveErrors += 1
@@ -3306,6 +3406,31 @@ enum YaxiService {
         }
         sendSCANotification()
         return fenster
+    }
+
+    /// Sagt Bescheid, **statt** eine Seite zu öffnen — und nennt die Bank beim Namen.
+    ///
+    /// Die alte Mitteilung kam erst **nach** dem Öffnen und lautete nur „Bitte im Browser
+    /// bestätigen". Wer nicht wusste, dass simplebanking gerade einen Abruf gemacht
+    /// hatte, sah einen Browser, der von selbst auf eine Bank-Anmeldung springt, und
+    /// danach einen Hinweis, der die Bank nicht einmal benennt. Genau diese Reihenfolge
+    /// hat ein Kunde am 01.10.2026 zu Recht als phishing-verdächtig gemeldet.
+    private static func meldeFreigabeNoetig(slotId: String) async {
+        let bank = await onMainRunLoop {
+            MultibankingStore.shared.slots.first(where: { $0.id == slotId })?.displayName
+        }
+        let name = bank?.nilIfEmpty ?? L10n.t("Deine Bank", "Your bank")
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = L10n.t("\(name): neue Freigabe nötig", "\(name): new approval needed")
+            content.body = L10n.t(
+                "simplebanking ruft dieses Konto vorerst nicht mehr ab und hat nichts geöffnet. Öffne simplebanking und wähle \u{201E}Neu verbinden\u{201C}, wenn du die Freigabe erteilen willst.",
+                "simplebanking has stopped fetching this account for now and opened nothing. Open simplebanking and choose \u{201C}Reconnect\u{201D} when you want to grant the approval.")
+            content.sound = .default
+            center.add(UNNotificationRequest(identifier: "freigabe-\(slotId)", content: content, trigger: nil))
+        }
     }
 
     private static func sendSCANotification() {

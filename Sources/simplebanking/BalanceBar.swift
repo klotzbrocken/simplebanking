@@ -2061,7 +2061,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         // Manual refresh always clears the SCA backoff — user explicitly wants to retry.
         scaBackoffUntil = nil
-        Task { await refreshAsync() }
+        // Hier hat jemand geklickt und steht davor: Eine Freigabe-Seite darf aufgehen.
+        // Das ist der einzige Weg zurück für ein Konto, dessen Zustimmung abgelaufen ist
+        // — ohne ihn bliebe es für immer stillgelegt.
+        Task { await refreshAsync(ausloeser: .nutzerhandlung) }
     }
 
     // MARK: - Geld senden
@@ -5332,7 +5335,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// dann verantwortlich, selbst `checkNewBookings` aufzurufen. Wichtig
     /// für `refreshFromCLI()`, das den TX-Fetch sequentiell selbst macht —
     /// sonst rennen zwei TX-Fetches parallel gegen den HBCI-Mutex.
-    private func refreshAsync(suppressTransactionsFetch: Bool = false) async {
+    /// - Parameter ausloeser: Entscheidet, ob eine Freigabe-Seite der Bank aufgehen darf.
+    ///   Vorgabe ist `.hintergrund` — wer sie zu setzen vergisst, bekommt das
+    ///   zurückhaltende Verhalten. `.nutzerhandlung` setzt nur, wer unmittelbar auf eine
+    ///   Bedienung reagiert.
+    private func refreshAsync(suppressTransactionsFetch: Bool = false,
+                              ausloeser: YaxiService.Freigabeausloeser = .hintergrund) async {
         // eBon-Slot (REWE/dm): kein YAXI/HBCI. Anzeige kommt aus lokal gespeicherten Bons.
         if let active = MultibankingStore.shared.activeSlot, active.isReceiptSlot {
             applyREWEDisplay(slotId: active.id)
@@ -5458,7 +5466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         llmAPIKeyPresent = activeKey != nil
 
         do {
-            let resp = try await YaxiService.fetchBalances(userId: userId, password: password)
+            let resp = try await YaxiService.fetchBalances(userId: userId, password: password, ausloeser: ausloeser)
 
             // Bail if the slot changed while we were awaiting the network response
             guard slotEpoch == epochAtStart else {
@@ -5466,6 +5474,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
 
             if resp.ok, let booked = resp.booked {
+                // Der Abruf lief durch — eine etwaige fällige Freigabe ist erledigt, das
+                // Konto darf wieder von selbst abrufen.
+                Self.freigabeErledigt(slotId: YaxiService.activeSlotId)
                 // Wenn die Bank den Kontostand inkl. Dispokredit liefert (z.B. C24),
                 // ziehen wir den Dispo ab. Primärer Auslöser ist der API-Flag
                 // `creditLimitIncluded` aus der YAXI/Routex-Response; die per-Slot-Einstellung
@@ -5543,6 +5554,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 AppLogger.log("Saldo: Konto nicht in der Zustimmung — alter Stand bleibt stehen, slot=\(YaxiService.activeSlotId.prefix(8))",
                               category: "Network", level: "WARN")
                 recordCLIRefreshError("Konto nicht in der Zustimmung")
+            } else if resp.freigabeNoetig == true {
+                // Der Abruf lief im Hintergrund und hätte eine Freigabe gebraucht. Es
+                // wurde nichts geöffnet; das Konto wird vermerkt und vom Zeitgeber
+                // künftig ausgelassen, bis der Nutzer selbst neu verbindet.
+                Self.merkeFreigabeFaellig(slotId: YaxiService.activeSlotId)
+                txVM.errorNeedsReconnect = true
+                statusItem.button?.toolTip = YaxiService.freigabeNoetigText
+                AppLogger.log("Freigabe fällig — Konto stillgelegt, nichts geöffnet (slot=\(YaxiService.activeSlotId.prefix(8)))",
+                              category: "Network", level: "WARN")
+                recordCLIRefreshError("Freigabe erforderlich")
             } else if resp.scaRequired == true {
                 // SCA redirect timed out or was missed. State has been cleared (server + Swift).
                 // Pause auto-refresh for 1 hour so we don't burn through the bank's daily
@@ -7799,6 +7820,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     /// Automatischer Refresh (Timer): nur Anzeige aktualisieren. eBon-Slots
     /// öffnen hier KEIN Login-Fenster — das tut nur der manuelle `refresh()`.
+    /// Vermerkt, dass dieses Konto eine neue Bank-Freigabe braucht.
+    ///
+    /// Idempotent: Ein bereits gesetztes Datum bleibt stehen, damit „seit wann" auch dann
+    /// stimmt, wenn mehrere Abrufe nacheinander daran scheitern.
+    static func merkeFreigabeFaellig(slotId: String) {
+        var einstellungen = BankSlotSettingsStore.load(slotId: slotId)
+        guard einstellungen.freigabeFaelligSeit == nil else { return }
+        einstellungen.freigabeFaelligSeit = Date()
+        BankSlotSettingsStore.save(einstellungen, slotId: slotId)
+    }
+
+    /// Nimmt den Vermerk zurück — nach einer erteilten Freigabe.
+    static func freigabeErledigt(slotId: String) {
+        var einstellungen = BankSlotSettingsStore.load(slotId: slotId)
+        guard einstellungen.freigabeFaelligSeit != nil else { return }
+        einstellungen.freigabeFaelligSeit = nil
+        BankSlotSettingsStore.save(einstellungen, slotId: slotId)
+        AppLogger.log("Freigabe erledigt — Konto wieder im automatischen Abruf (slot=\(slotId.prefix(8)))",
+                      category: "Auth")
+    }
+
     @objc private func autoRefresh() {
         // Sperrschutz: nach abgelehnten Zugangsdaten kein automatischer Versuch mehr.
         // Der manuelle Abruf bleibt erlaubt — das ist eine bewusste Nutzerentscheidung,
@@ -7806,6 +7848,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let slotId = MultibankingStore.shared.activeSlot?.id ?? "legacy"
         guard !credentialsRejectedSlotIds.contains(slotId) else {
             AppLogger.log("Auto-Refresh übersprungen (Zugangsdaten abgelehnt)", category: "Auth")
+            return
+        }
+        // Dasselbe für ein Konto, dessen Zustimmung abgelaufen ist. Ein unbeaufsichtigter
+        // Versuch kann dort nur in einer Freigabe-Aufforderung enden, und genau die soll
+        // der Nutzer nicht ungefragt vorgesetzt bekommen. Anders als oben überlebt dieser
+        // Zustand den Programmstart — sonst öffnete schon der nächste Start wieder etwas.
+        if let seit = BankSlotSettingsStore.load(slotId: slotId).freigabeFaelligSeit {
+            AppLogger.log("Auto-Refresh übersprungen (Freigabe fällig seit \(seit)) slot=\(slotId.prefix(8))",
+                          category: "Auth")
             return
         }
         Task { await refreshAsync() }

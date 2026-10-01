@@ -37,6 +37,26 @@ struct BankSlotSettings: Codable {
     /// Optionale Ziel-IBAN — wenn leer, fragt das Auszahl-Modal danach bevor TransferSheet öffnet.
     var savingsAccountIban: String?
 
+    // MARK: - Freigabe fällig (2.0.9)
+
+    /// Seit wann dieses Konto eine neue Bank-Freigabe braucht. `nil` heißt: alles in Ordnung.
+    ///
+    /// Solange hier ein Datum steht, lässt der Zeitgeber dieses Konto aus — wie bei
+    /// abgelehnten Zugangsdaten, und aus demselben Grund: Ein unbeaufsichtigter Versuch,
+    /// der ohnehin nur in einer Freigabe-Aufforderung enden kann, nützt niemandem.
+    ///
+    /// Gemeldet am 01.10.2026: Ein Kunde mit abgelaufener ING-Zustimmung bekam mehrmals
+    /// täglich ungefragt die Anmeldeseite seiner Bank vorgesetzt. Der Zustand lebte bis
+    /// dahin nur im Speicher (`credentialsRejectedSlotIds`, `scaBackoffUntil`) und war
+    /// nach jedem Programmstart vergessen — weshalb schon der nächste Start wieder eine
+    /// Seite öffnete.
+    ///
+    /// Er steht hier und nicht in `BankSlot`: Dort hängt die Kontoliste dran, und ein
+    /// Dekodierfehler sähe aus wie „alle Konten weg". `BankSlotSettings` ist ohnehin je
+    /// Konto, verträgt neue Felder (alle haben Vorgaben) und wird von
+    /// `MultibankingStore.purgePerSlotData` mit aufgeräumt.
+    var freigabeFaelligSeit: Date?
+
     /// Read-Range für UI-Listen, CSV-Export, Kategorisierung etc. — alles, was lokale DB-Daten
     /// liest (nicht Bank-Fetches). `max(fetchDays, lastImportedDays ?? 0)`. Auto-Sync und
     /// Bank-Fetches nutzen weiterhin `fetchDays` direkt (90-Cap).
@@ -111,6 +131,9 @@ struct BankSlotSettings: Codable {
         roundupStepCents             = (try? c.decodeIfPresent(Int.self, forKey: .roundupStepCents)) ?? 100
         savingsAccountName           = try? c.decodeIfPresent(String.self, forKey: .savingsAccountName)
         savingsAccountIban           = try? c.decodeIfPresent(String.self, forKey: .savingsAccountIban)
+        // Wer hier ein Feld vergisst, bekommt keinen Fehler, sondern stille Amnesie:
+        // Gespeichert wird es (der Encoder ist synthetisiert), gelesen nie.
+        freigabeFaelligSeit          = try? c.decodeIfPresent(Date.self, forKey: .freigabeFaelligSeit)
     }
 }
 

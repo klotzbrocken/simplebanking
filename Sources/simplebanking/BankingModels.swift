@@ -41,6 +41,13 @@ struct BalancesResponse: Codable, Sendable {
     /// falschen Kontonamen ist schlimmer als kein Betrag: Der Slot behauptete etwas
     /// über ein Konto, das die Bank gar nicht geliefert hatte.
     var kontoNichtInZustimmung: Bool? = nil
+    /// Die Bank verlangt eine Freigabe, und der Abruf lief im Hintergrund — es wurde
+    /// nichts geöffnet.
+    ///
+    /// Gemeldet am 01.10.2026: Bis dahin ging in diesem Fall ungefragt die Anmeldeseite
+    /// der Bank auf, mehrmals täglich. Jetzt bleibt der Abruf stehen und sagt es hiermit;
+    /// der Aufrufer merkt sich das Konto und hört auf, es von selbst zu versuchen.
+    var freigabeNoetig: Bool? = nil
 }
 
 struct TransactionsResponse: Codable, Sendable {
@@ -120,6 +127,13 @@ struct TransactionsResponse: Codable, Sendable {
     let error: String?
     let userMessage: String?
     let scaRequired: Bool?
+    /// Die Bank verlangt eine Freigabe, und der Abruf lief im Hintergrund — es wurde
+    /// nichts geöffnet.
+    ///
+    /// Gemeldet am 01.10.2026: Bis dahin ging in diesem Fall ungefragt die Anmeldeseite
+    /// der Bank auf, mehrmals täglich. Jetzt bleibt der Abruf stehen und sagt es hiermit;
+    /// der Aufrufer merkt sich das Konto und hört auf, es von selbst zu versuchen.
+    var freigabeNoetig: Bool? = nil
 }
 
 extension String {
