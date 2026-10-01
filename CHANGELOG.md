@@ -1,8 +1,10 @@
 # Changelog — simplebanking
 
-## [2.0.8]
+## [2.0.9]
 
 ### Behoben
+
+- **simplebanking öffnet keine Bankseite mehr von selbst** — ist die Zustimmung einer Bank abgelaufen, sprang bisher ungefragt die Anmeldeseite des Instituts auf: beim turnusmäßigen Abruf, bei jedem Programmstart, bei jedem Entsperren. Bei der Voreinstellung summierte sich das auf rund sechs Mal am Tag, und wer nicht wusste, dass gerade ein Abruf lief, sah einen Browser, der von allein auf eine Bank-Anmeldung springt — von Phishing nicht zu unterscheiden. *Gemeldet von einem Nutzer, der genau das zu Recht beanstandet hat.* Jetzt gilt: Eine Bankseite geht nur auf, wenn du unmittelbar davor etwas angeklickt hast. Im Hintergrund bleibt der Abruf stehen, das Konto wird vermerkt und bis auf Weiteres nicht mehr von selbst abgerufen, und du bekommst eine Mitteilung, die **die Bank beim Namen nennt** und sagt, dass nichts geöffnet wurde. Saldo und Umsätze bleiben mit dem letzten bekannten Stand sichtbar. Ein Klick auf „Aktualisieren" nimmt den Faden wieder auf.
 
 - **Hamburger Sparkasse trug das Logo von comdirect** — die Zuordnung über die Bankleitzahl ging bei Hamburger Instituten von der Vorwahl aus, und die sagt nur, wo eine Bank sitzt. Jetzt entscheidet die Institutsgruppe, die in der Bankleitzahl selbst steht. Betraf auch die Hamburger Volksbank.
 - **Ein eigenes Händler-Logo konnte von einem laufenden Abruf überschrieben werden** — wer während eines Abrufs ein eigenes Logo setzte, sah Sekunden später wieder das aus dem Netz. Dasselbe konnte gleich beim Start passieren, ohne jedes Zutun: Eigene Logos wurden nebenher geladen, der Abruf entschied währenddessen am noch leeren Speicher. Beides behoben; eigene Logos haben Vorrang, wie es beim Leeren des Zwischenspeichers längst der Fall war.

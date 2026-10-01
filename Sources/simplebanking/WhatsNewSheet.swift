@@ -267,8 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
-        case "2.0.8":
-            return v208
+        case "2.0.9":
+            return v209
         case "2.0.7":
             return v207
         case "2.0.6":
@@ -288,10 +288,20 @@ enum WhatsNewContent {
         }
     }
 
-    /// 2.0.8. Drei Punkte, die jemand merkt: eine Buchung, die zweimal dasteht, ein
+    /// 2.0.9. Vier Punkte, die jemand merkt: eine Buchung, die zweimal dasteht, ein
     /// eigenes Logo, das verschwand, und eine Sicherung, die mehr verschwieg als sie
     /// sagte. Der Rest der Runde ist Innenarbeit und steht im Änderungsprotokoll.
-    private static let v208: [WhatsNewItem] = [
+    private static let v209: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "hand.raised",
+            tint: .sbBlueStrong,
+            title: L10n.t("Keine Bankseite mehr ohne dein Zutun",
+                          "No bank page opens without you"),
+            description: L10n.t(
+                "Ist die Zustimmung einer Bank abgelaufen, sprang bisher ungefragt deren Anmeldeseite auf — beim turnusmäßigen Abruf, beim Programmstart, beim Entsperren. Das ist vorbei: Eine Bankseite geht nur auf, wenn du unmittelbar davor etwas angeklickt hast. Im Hintergrund bleibt der Abruf stehen, du bekommst eine Mitteilung mit dem Namen der Bank, und Saldo und Umsätze bleiben sichtbar. \u{201E}Aktualisieren\u{201C} nimmt den Faden wieder auf.",
+                "When a bank's consent had expired, its login page used to open unasked — on the scheduled fetch, at startup, on unlock. No longer: a bank page opens only if you clicked something right before. In the background the fetch simply stops, you get a notification naming the bank, and your balance and transactions stay visible. \u{201C}Refresh\u{201D} picks it up again."
+            )
+        ),
         WhatsNewItem(
             icon: "doc.on.doc",
             tint: .sbBlueStrong,
