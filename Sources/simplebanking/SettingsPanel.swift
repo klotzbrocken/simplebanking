@@ -889,6 +889,16 @@ struct SettingsView: View {
                             EmptyView()
                         }
                     }
+                    // Ohne diese Zeile bestimmt das **breiteste** Element die Breite des
+                    // gesamten Inhalts. Passt es nicht ins Fenster, zentriert SwiftUI den
+                    // zu breiten Inhalt — und dann wird links abgeschnitten, was niemand
+                    // mehr lesen kann. Gemessen am 01.10.2026: 593 pt Inhalt in einem
+                    // 520 pt breiten Fenster, 36,5 pt links weg, quer durch alle Karten.
+                    //
+                    // Mit `maxWidth: .infinity` nimmt der Inhalt die angebotene Breite und
+                    // bleibt linksbündig. Ein einzelnes zu breites Element ragt dann rechts
+                    // heraus statt die ganze Seite zu verschieben.
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(20)
                     .id("settingsTop")
                 }
@@ -1819,7 +1829,12 @@ struct SettingsView: View {
                                         Text(t("Schrittweite", "Step size"))
                                             .font(ThemeFonts.body(size: 12))
                                             .foregroundColor(.secondary)
-                                            .frame(width: 185, alignment: .leading)
+                                            // Die Beschriftungsspalte ist hier **nicht**
+                                            // fest: Die Segmentsteuerung daneben kann nicht
+                                            // schmaler als 336 pt, und 185 + 8 + 336 = 529
+                                            // passt in keine 480 pt. Genau diese Zeile hat
+                                            // die ganze Seite auseinandergedrückt.
+                                            .frame(maxWidth: 185, alignment: .leading)
                                         Picker("", selection: Binding(
                                             get: { currentSlotSettings.roundupStepCents },
                                             set: { newValue in
