@@ -572,7 +572,7 @@ struct SubscriptionsView: View {
                         if let onExclude {
                             Divider()
                             Button(role: .destructive, action: onExclude) {
-                                Label("Kein Abo / Vertrag", systemImage: "hand.raised.slash")
+                                Label("Kein Abo / Vertrag (gilt auch für Fixkosten)", systemImage: "hand.raised.slash")
                             }
                         }
                     } label: {

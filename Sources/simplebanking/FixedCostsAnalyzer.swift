@@ -896,7 +896,7 @@ struct FixedCostsView: View {
                             )
                             .contextMenu {
                                 Button { exclude(item.groupKey) } label: {
-                                    Label("Kein Fixkost — entfernen", systemImage: "hand.raised.slash")
+                                    Label("Keine Fixkosten (gilt auch für Abos & Verträge)", systemImage: "hand.raised.slash")
                                 }
                             }
                         }
@@ -934,7 +934,7 @@ struct FixedCostsView: View {
                                     )
                                     .contextMenu {
                                         Button { exclude(item.groupKey) } label: {
-                                            Label("Kein Fixkost — entfernen", systemImage: "hand.raised.slash")
+                                            Label("Keine Fixkosten (gilt auch für Abos & Verträge)", systemImage: "hand.raised.slash")
                                         }
                                     }
                                     .transition(.opacity.combined(with: .move(edge: .top)))
