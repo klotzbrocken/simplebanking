@@ -336,107 +336,6 @@ final class DiagnosticSession: ObservableObject {
 
     // MARK: - Summary + attachments
 
-    /// Schlüsselt „Monatliche Fixkosten" und „Noch offen" nach Posten auf — mit Beträgen.
-    ///
-    /// Gehört ausdrücklich **hierher** und nicht ins laufende Protokoll. Dort stehen die
-    /// Posten zwar schon, aber ohne Betrag und ohne vollen Namen: Zusammen ergäben die
-    /// beiden ein vollständiges Fixkostenprofil in einer Datei, die bei jeder Fehlersuche
-    /// mitgeschickt wird. Diesen Bericht erzeugt der Nutzer bewusst.
-    ///
-    /// Anlass (01.10.2026): Eine gemeldete Summe ließ sich von außen nicht nachrechnen —
-    /// weder vom Nutzer noch bei der Fehlersuche. Jetzt steht neben jedem Posten, warum er
-    /// zählt: wie oft er vorkam, über wie viele Monate, mit welcher Konfidenz. Die beiden
-    /// Schwellen stehen darunter, damit man den Zusammenhang sieht, ohne den Quelltext zu
-    /// kennen.
-    private func fixkostenAbschnitt(probes: [SlotProbe]) -> String {
-        var s = "── Fixkosten je Konto ───────────────────────\n"
-        s += "Grundlage sind die letzten 90 Tage dieses Kontos — dieselbe Quelle wie die Anzeige.\n"
-        s += "Erkannt wird ab 2 Buchungen; in „Noch offen\" zählt alles ab Konfidenz 0,60.\n"
-        s += "Gerechnet wird mit dem Durchschnittsbetrag, nicht mit der letzten Zahlung.\n"
-        s += "Offen ist ein Posten, wenn er in diesem Zyklus noch nicht gebucht ist und\n"
-        s += "seine nächste Fälligkeit in den Zyklus fällt.\n"
-
-        for p in probes {
-            s += "\n[\(p.bankName)]\n"
-            let cfg = BankSlotSettingsStore.load(slotId: p.slotId)
-            // Genau dieselbe Quelle wie die Anzeige: 90 Tage, ein Slot, `primary`
-            // (`BalanceBar.recomputeLeftToPay`). Das ist kein Detail — mein erster
-            // Entwurf nahm `loadAllTransactions()` über die ganze Historie und kam
-            // deshalb auf andere Vorkommen, andere Konfidenzen und andere Händler als
-            // die Zahl, die er erklären sollte. Ein Bericht, der eine zweite Rechnung
-            // aufstellt, ist schlimmer als keiner.
-            let buchungen = (try? TransactionsDatabase.loadUnifiedTransactions(
-                slots: [p.slotId], days: 90, bankId: "primary")) ?? []
-            guard !buchungen.isEmpty else {
-                s += "  (keine Buchungen der letzten 90 Tage in der lokalen Datenbank)\n"
-                continue
-            }
-            // Ebenfalls wie die Anzeige: ohne `bankname`. Mit Bankname fallen Posten
-            // heraus, die in der Anzeige mitzählen.
-            let zahlungen = FixedCostsAnalyzer.analyze(transactions: buchungen)
-            // Mit der real erkannten Gehalts-Gutschrift, nicht nur mit dem nominalen Tag.
-            // Ohne sie zeigt der Bericht einen anderen Zyklus als die Anzeige — und
-            // erklärt damit eine Zahl, die so nirgends steht.
-            let gehaltseingang = AppDelegate.mostRecentSalaryArrival(in: buchungen, today: Date())
-            let (start, ende) = LeftToPayCalculator.cycleBounds(salaryDay: cfg.effectiveSalaryDay,
-                                                               actualSalaryArrival: gehaltseingang)
-            let offen = LeftToPayCalculator.countedPayments(payments: zahlungen,
-                                                            cycleStart: start, cycleEnd: ende)
-            let offeneSchluessel = Set(offen.map(\.groupKey))
-
-            s += "  Gehaltstag:  \(cfg.effectiveSalaryDay)   Gehaltseingang erkannt: "
-                + (gehaltseingang.map(kurzDatum) ?? "keiner") + "\n"
-            s += "  Zyklus:      \(kurzDatum(start)) – \(kurzDatum(ende))\n"
-            s += String(format: "  Monatlich:   %.2f €   davon noch offen: %.2f €\n",
-                        zahlungen.reduce(0) { $0 + $1.averageAmount },
-                        offen.reduce(0) { $0 + $1.averageAmount })
-            s += "  ---------------------------------------------------------------\n"
-            s += "  offen  fällig      Betrag      Vork.  Monate  Konf.  zuletzt     Händler\n"
-            let heute = Calendar.current.startOfDay(for: Date())
-            var ueberfaellig = 0.0
-            for z in zahlungen.sorted(by: { $0.averageAmount > $1.averageAmount }) {
-                let istOffen = offeneSchluessel.contains(z.groupKey)
-                // Nächste Fälligkeit — und ob sie innerhalb des Zyklus schon vorbei ist,
-                // ohne dass etwas kam. Das darf so sein (ein paar Tage Verzug). Posten,
-                // deren Termin schon vor dem Zyklus verstrich, zählen seit dem 01.10.2026
-                // gar nicht mehr mit — sie stehen hier mit „--" und ihrem alten Termin.
-                var faellig = "—"
-                if let last = Self.isoTagFormatter.date(from: z.lastDate) {
-                    let naechste = LeftToPayCalculator.nextExpected(last: last, frequency: z.frequency)
-                    faellig = kurzDatum(naechste)
-                    if istOffen && naechste < heute {
-                        faellig += "!"
-                        ueberfaellig += z.averageAmount
-                    }
-                }
-                s += String(format: "  %@  %-11@ %9.2f €  %4d×  %5d   %.2f   %@  %@\n",
-                            istOffen ? "ja " : "-- ", faellig as NSString,
-                            z.averageAmount, z.occurrences, z.months, z.confidence,
-                            z.lastDate, z.merchant)
-            }
-            if ueberfaellig > 0 {
-                s += String(format: "  ! = Termin liegt in der Vergangenheit, es kam nichts — zusammen %.2f €\n",
-                            ueberfaellig)
-            }
-        }
-        return s + "\n"
-    }
-
-    /// `RecurringPayment.lastDate` ist ein reines Tagesdatum („2026-09-14").
-    private static let isoTagFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone.current
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    private func kurzDatum(_ d: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "dd.MM.yyyy"
-        return f.string(from: d)
-    }
-
     private func writeSummary(probes: [SlotProbe], finishedAt: Date) -> URL {
         let url = AppLogger.logDirectoryURL.appendingPathComponent("diagnostic-summary-\(id).txt")
         var s = ""
@@ -473,9 +372,6 @@ final class DiagnosticSession: ObservableObject {
             s += "  Last-Sync:   \(lastSyncLabel(slotId: p.slotId))\n"
         }
         s += "\n"
-
-        // ── Fixkosten ──
-        s += fixkostenAbschnitt(probes: probes)
 
         // ── Traces ──
         let traces = newTraceFiles()
