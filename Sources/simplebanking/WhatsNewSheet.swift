@@ -290,7 +290,7 @@ enum WhatsNewContent {
 
     /// 2.0.9. Fünf Punkte, die jemand merkt: eine Buchung, die zweimal dasteht, ein
     /// eigenes Logo, das verschwand, eine Sicherung, die mehr verschwieg als sie sagte,
-    /// und eine Summe, die zu hoch war. Der Rest der Runde ist Innenarbeit und steht im
+    /// und eine Summe, die um die Hälfte zu hoch war. Der Rest der Runde ist Innenarbeit und steht im
     /// Änderungsprotokoll.
     private static let v209: [WhatsNewItem] = [
         WhatsNewItem(
@@ -326,11 +326,11 @@ enum WhatsNewContent {
         WhatsNewItem(
             icon: "calendar.badge.minus",
             tint: .sbGreenStrong,
-            title: L10n.t("\u{201E}Noch offen\u{201C} rechnet eingestellte Abos nicht mehr mit",
-                          "\u{201C}Still to pay\u{201D} no longer counts dead subscriptions"),
+            title: L10n.t("\u{201E}Noch offen\u{201C} war zu hoch",
+                          "\u{201C}Still to pay\u{201D} was too high"),
             description: L10n.t(
-                "Ein Abo, dessen Abbuchung schon vor dem laufenden Gehaltszyklus ausblieb, stand weiter in \u{201E}Noch offen\u{201C} — und mit jedem Monat kam eines dazu. Die Summe lag dadurch dauerhaft zu hoch. Gez\u{00E4}hlt wird jetzt nur, was in diesem Zyklus f\u{00E4}llig ist; ein paar Tage Verzug z\u{00E4}hlen weiter mit. Der Diagnose-Bericht zeigt auf Wunsch jeden einzelnen Posten mit Betrag, H\u{00E4}ufigkeit und n\u{00E4}chstem Termin.",
-                "A subscription whose charge had already failed to appear before the current salary cycle still counted as outstanding — and every month added another one, so the figure stayed permanently too high. Only what falls due in this cycle is counted now; a few days late still counts. The diagnostic report lists every single item with its amount, frequency and next due date."
+                "Drei Dinge rechneten die Summe nach oben. Ein Einkauf \u{00FC}ber PayPal, Klarna oder Mollie wurde als Abo beim Zahlungsdienstleister gez\u{00E4}hlt, wenn im Verwendungszweck kein Shop stand \u{2014} zwei fremde Eink\u{00E4}ufe ergaben so einen \u{201E}monatlichen\u{201C} Posten \u{00FC}ber mehrere hundert Euro. Zwei Buchungen galten als regelm\u{00E4}\u{00DF}ig, auch wenn die Betr\u{00E4}ge um das Doppelte auseinanderlagen; jetzt m\u{00FC}ssen sie nahezu gleich sein. Und ein Abo, dessen Abbuchung schon vor dem laufenden Gehaltszyklus ausblieb, lief ewig weiter mit. Der Diagnose-Bericht zeigt die Summe jetzt Posten f\u{00FC}r Posten mit Betrag, H\u{00E4}ufigkeit und n\u{00E4}chstem Termin.",
+                "Three things pushed the figure up. A purchase made through PayPal, Klarna or Mollie was counted as a subscription to the payment processor whenever the remittance info named no shop \u{2014} two unrelated purchases could become a \u{201C}monthly\u{201D} item of several hundred euros. Two bookings counted as regular even when the amounts differed by a factor of two; they now have to be near-identical. And a subscription whose charge had already failed to appear before the current salary cycle kept counting forever. The diagnostic report now breaks the figure down item by item with amount, frequency and next due date."
             )
         ),
         WhatsNewItem(

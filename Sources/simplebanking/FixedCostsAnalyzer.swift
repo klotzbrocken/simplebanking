@@ -150,6 +150,12 @@ enum FixedCostsAnalyzer {
         for (groupKey, txList) in grouped {
             // Remove IBAN suffix from display name
             let merchant = groupKey.contains("|") ? String(groupKey.split(separator: "|").first ?? "") : groupKey
+            // Bleibt als Händler der Zahlungsdienstleister selbst übrig, ist aus dem
+            // Verwendungszweck kein echter Empfänger zu holen gewesen. Dann liegen in
+            // einer Gruppe beliebige fremde Einkäufe — verschiedene Shops, verschiedene
+            // Beträge, verschiedene Termine. Daraus eine Fixkostenposition zu bilden
+            // ist immer falsch, egal wie gleichmäßig die Beträge zufällig aussehen.
+            if istDurchlaufposten(merchant) { continue }
             if let payment = analyzeRecurrence(merchant: merchant, groupKey: groupKey, transactions: txList) {
                 recurring.append(payment)
             }
@@ -205,6 +211,40 @@ enum FixedCostsAnalyzer {
     
     // MARK: - Payment Processor Detection
     
+    /// Namen, hinter denen **kein** Empfänger steht, sondern nur die Durchleitung.
+    ///
+    /// Geprüft wird der **aufgelöste** Händlername. Steht hier noch der Dienstleister,
+    /// hat `MerchantResolver` im Verwendungszweck nichts gefunden — „PayPal Europe …
+    /// Ihr Einkauf bei " ohne Namen dahinter ist der häufigste Fall. Der Shop selbst
+    /// ist davon nicht betroffen: Wird er erkannt, heißt die Gruppe nach ihm („Google",
+    /// „Anthropic") und zählt normal mit.
+    private static let durchlaufpostenNamen: Set<String> = [
+        "paypal", "paypal europe", "pp europe",
+        "klarna", "klarna bank", "klarna ab", "sofort", "sofortueberweisung",
+        "mollie", "stichting mollie",
+        "adyen", "stripe", "sumup", "zettle", "izettle",
+        "amazon payments", "amazon pay",
+        "google pay", "apple pay",
+        "concardis", "nexi", "unzer", "payone", "worldline", "six payment services",
+        "shopify payments", "ratepay", "billpay", "paysafe", "skrill", "wirecard",
+    ]
+
+    /// Trifft auf „PayPal", „PayPal Europe" und „Stichting Mollie" zu, nicht auf
+    /// „Paypalooza GmbH" oder „Apple" (ohne „Pay").
+    static func istDurchlaufposten(_ merchant: String) -> Bool {
+        let name = merchant.lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9 ]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return false }
+        return durchlaufpostenNamen.contains { needle in
+            name == needle
+                || name.hasPrefix(needle + " ")
+                || name.hasSuffix(" " + needle)
+                || name.contains(" " + needle + " ")
+        }
+    }
+
     private static func isPayPal(_ name: String) -> Bool {
         let lower = name.lowercased()
         return lower.contains("paypal") || lower.contains("pp.") || lower.contains("pp *")
@@ -589,7 +629,21 @@ enum FixedCostsAnalyzer {
         // Beim Dauerauftrag dieselbe Toleranz wie bei bekannten Marken: eine
         // Mieterhöhung oder Nebenkostenanpassung darf die Erkennung nicht kippen,
         // wenn die Bank die Wiederkehr ohnehin bestätigt.
-        let varianceLimit = (isKnownMerchant || isStandingOrder) ? 0.50 : 0.35
+        var varianceLimit = (isKnownMerchant || isStandingOrder) ? 0.50 : 0.35
+        // Bei genau zwei Buchungen ist dieses Maß fast blind. Für zwei Werte ist
+        // `max |x - avg| / avg` identisch mit |a-b|/(a+b) — die Schranke 0,35 lässt
+        // damit einen **Faktor 2,08** zwischen beiden Beträgen zu.
+        //
+        // Gemeldet am 01.10.2026: Zwei fremde PayPal-Einkäufe über 350,00 € und 609,59 €
+        // ergaben so eine „monatliche Fixkostenposition" von 479,80 € — allein die
+        // Hälfte der angezeigten Summe. Zwei Beträge belegen keine Regelmäßigkeit;
+        // sie müssen dafür nahezu gleich sein.
+        //
+        // Bekannte Marken behalten etwas Luft, weil eine Preiserhöhung beim zweiten
+        // Mal ein echter Fall ist (6,99 € → 7,99 € liegt bei 0,067).
+        if transactions.count == 2 && !isStandingOrder {
+            varianceLimit = isKnownMerchant ? 0.15 : 0.10
+        }
         guard amountVariance < varianceLimit else { return nil }
 
         // Count distinct months and years
