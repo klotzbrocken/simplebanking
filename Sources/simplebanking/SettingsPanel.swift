@@ -1608,6 +1608,17 @@ struct SettingsView: View {
                             }
 
                             // Gehaltseingang — mehrzeilig (chip buttons + optional day picker)
+                            //
+                            // `maxWidth: .infinity` ist hier nicht Kosmetik. Alle anderen
+                            // Zeilen der Karte sind `SettingsRow` und ziehen sich über
+                            // einen `Spacer` auf die volle Breite; dieser Block war der
+                            // einzige, dessen Breite am Inhalt hing. Und der Inhalt
+                            // wechselt: Bei „Individuell" steht darunter ein Tagesmenü,
+                            // bei „Anfang" und „Mitte" nur eine kurze Zeile. Beim
+                            // Umschalten blieb die Karte auf der alten Breite stehen, und
+                            // der Text stand am Rand oder darüber hinaus — ein
+                            // Bankwechsel baute die Ansicht neu auf und „reparierte" es
+                            // scheinbar. Gemeldet am 01.10.2026.
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(t("Gehaltseingang", "Salary incoming day"))
                                     .font(ThemeFonts.body(size: 13, weight: .medium))
@@ -1663,6 +1674,7 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(12)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))

@@ -35,11 +35,37 @@ struct RecurringAssignments: Codable, Equatable {
 
     // MARK: Canonical key
 
+    /// Basen, die gar keinen Händler benennen.
+    ///
+    /// Beide Schreibweisen kommen vor: `MerchantResolver.unknownMerchant` liefert
+    /// „Unbekannt", `FixedCostsAnalyzer.normalizeMerchant` „(Unbekannt)", wenn nach dem
+    /// Aufräumen nichts übrig bleibt.
+    private static let namenloseBasen: Set<String> = ["unbekannt", "(unbekannt)"]
+
     /// Merchant base of an engine groupKey / merchantKey, normalized.
     /// `"Telekom|12345678"` → `"telekom"`, `"Netflix|agg"` → `"netflix"`.
+    ///
+    /// **Ausnahme: namenlose Basen behalten ihren Zusatz.**
+    ///
+    /// Das Zusammenfassen auf die Basis ist für echte Händler richtig und gewollt — es
+    /// ist der Grund, warum eine Korrektur in den Fixkosten auch bei den Abos gilt. Bei
+    /// „Unbekannt" trägt die Basis aber überhaupt keine Unterscheidung; alles, was zwei
+    /// solche Gruppen trennt, steckt im Zusatz (die letzten acht Stellen der IBAN, von
+    /// **beiden** Engines nach derselben Regel gebildet). Wird er weggeschnitten, teilen
+    /// sich wildfremde Zahlungen einen Eintrag.
+    ///
+    /// Gemeldet am 01.10.2026: „Unbekannt nach Verbindlichkeiten verschieben" verschob
+    /// zwei Posten auf einmal. Der engine-übergreifende Abgleich bleibt erhalten, weil
+    /// beide Engines für namenlose Gruppen denselben Zusatz erzeugen
+    /// (`FixedCostsAnalyzer` :135, `SubscriptionDetector` :148).
     static func canonicalKey(_ groupOrMerchantKey: String) -> String {
-        let base = groupOrMerchantKey.split(separator: "|", maxSplits: 1).first.map(String.init) ?? groupOrMerchantKey
-        return base.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let teile = groupOrMerchantKey.split(separator: "|", maxSplits: 1)
+        let basis = (teile.first.map(String.init) ?? groupOrMerchantKey)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard namenloseBasen.contains(basis), teile.count > 1 else { return basis }
+        let zusatz = String(teile[1]).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return zusatz.isEmpty ? basis : "\(basis)|\(zusatz)"
     }
 
     // MARK: Persistence
