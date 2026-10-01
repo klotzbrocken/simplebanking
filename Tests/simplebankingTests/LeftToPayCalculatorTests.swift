@@ -125,14 +125,33 @@ final class LeftToPayCalculatorTests: XCTestCase {
         XCTAssertEqual(sum, 0, accuracy: 0.01)
     }
 
-    /// Overdue payments count: next expected = March 20, today = April 14,
-    /// cycleStart = March 28 → already-paid guard uses March 20 < March 28 so not excluded;
-    /// next expected March 20 < cycleEnd April 28 → counted.
-    func test_compute_overduePayment_counted() {
+    /// Geändert am 01.10.2026. Dieser Test hielt bis 2.0.9 das Gegenteil fest — und sein
+    /// eigener Kommentar nannte den Grund, warum das falsch war: Nächster Termin 20.03.,
+    /// Zyklus beginnt am 28.03. Der Termin liegt also im **vorigen** Zyklus und verstrich
+    /// dort, ohne dass etwas abgebucht wurde. Der Posten stand trotzdem in „Noch offen“,
+    /// und zwar für immer: Das Prädikat verlangte nur „Termin ≤ Zyklusende".
+    ///
+    /// Am echten Konto waren das drei Abos über 80,16 € in einer Summe von 1240,52 €.
+    /// Die Abgrenzung zum Verzug steht in `ErloschenePostenTests`.
+    func test_compute_terminImVorigenZyklus_zaehltNicht() {
         let today = day(2026, 4, 14)
-        let overdue = recurring(merchant: "Overdue Co", amount: 99, lastDate: "2026-02-20", frequency: .monthly)
+        let erloschen = recurring(merchant: "Overdue Co", amount: 99, lastDate: "2026-02-20", frequency: .monthly)
         let sum = LeftToPayCalculator.compute(
-            payments: [overdue],
+            payments: [erloschen],
+            salaryDay: 28,
+            today: today
+        )
+        XCTAssertEqual(sum, 0, accuracy: 0.01)
+    }
+
+    /// Die Gegenprobe zum vorigen Test, damit „überfällig" nicht pauschal herausfällt:
+    /// Zuletzt 02.03. → nächster Termin 02.04., im Zyklus 28.03.–28.04. und heute (14.04.)
+    /// vorbei, ohne dass etwas kam. Das kann schlicht Verzug sein und zählt weiter mit.
+    func test_compute_imZyklusUeberfaellig_zaehltMit() {
+        let today = day(2026, 4, 14)
+        let verzug = recurring(merchant: "Overdue Co", amount: 99, lastDate: "2026-03-02", frequency: .monthly)
+        let sum = LeftToPayCalculator.compute(
+            payments: [verzug],
             salaryDay: 28,
             today: today
         )

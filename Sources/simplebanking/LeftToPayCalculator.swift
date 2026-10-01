@@ -40,8 +40,16 @@ enum LeftToPayCalculator {
 
     /// Die konkreten Posten, die `compute` aufsummiert — für Diagnose/Aufschlüsselung.
     /// Selbe Prädikate wie `compute`: nicht-irregulär, Confidence ≥ 0.6, in diesem
-    /// Zyklus noch nicht gebucht (last < cycleStart) und nächste Fälligkeit ≤ cycleEnd
-    /// (überfällige zählen bewusst mit).
+    /// Zyklus noch nicht gebucht (last < cycleStart) und nächste Fälligkeit **in diesem
+    /// Zyklus** (cycleStart ≤ nächste Fälligkeit ≤ cycleEnd).
+    ///
+    /// Innerhalb des Zyklus überfällig zählt weiter mit: Ein Posten, der am 25. erwartet
+    /// war und am 1. noch fehlt, kann schlicht ein paar Tage spät sein.
+    ///
+    /// Vor dem Zyklus überfällig zählt **nicht** mit — und genau das fehlte. Ein Abo,
+    /// dessen Termin schon im vorigen Zyklus verstrich, ohne dass etwas kam, ist
+    /// gekündigt, umgezogen oder eingestellt; es wird nicht mehr abgebucht. Bis 2.0.9
+    /// standen solche Posten dauerhaft in „Noch offen“ — mit jedem Monat einer mehr.
     static func countedPayments(
         payments: [RecurringPayment],
         salaryDay: Int,
@@ -70,7 +78,8 @@ enum LeftToPayCalculator {
                   let last = isoFormatter.date(from: p.lastDate),
                   last < cStart                                   // noch nicht in diesem Zyklus gebucht
             else { return false }
-            return nextExpected(last: last, frequency: p.frequency) <= cEnd
+            let faellig = nextExpected(last: last, frequency: p.frequency)
+            return faellig >= cStart && faellig <= cEnd
         }
     }
 

@@ -288,9 +288,10 @@ enum WhatsNewContent {
         }
     }
 
-    /// 2.0.9. Vier Punkte, die jemand merkt: eine Buchung, die zweimal dasteht, ein
-    /// eigenes Logo, das verschwand, und eine Sicherung, die mehr verschwieg als sie
-    /// sagte. Der Rest der Runde ist Innenarbeit und steht im Änderungsprotokoll.
+    /// 2.0.9. Fünf Punkte, die jemand merkt: eine Buchung, die zweimal dasteht, ein
+    /// eigenes Logo, das verschwand, eine Sicherung, die mehr verschwieg als sie sagte,
+    /// und eine Summe, die zu hoch war. Der Rest der Runde ist Innenarbeit und steht im
+    /// Änderungsprotokoll.
     private static let v209: [WhatsNewItem] = [
         WhatsNewItem(
             icon: "hand.raised",
@@ -320,6 +321,16 @@ enum WhatsNewContent {
             description: L10n.t(
                 "Ein Logo, das du selbst gesetzt hast, konnte kurz darauf wieder durch eines aus dem Netz ersetzt werden — manchmal gleich beim Start, ohne dass du etwas getan hattest. Eigene Logos haben jetzt Vorrang. Nebenbei: Die Hamburger Sparkasse trug das Zeichen von comdirect.",
                 "A logo you set yourself could be replaced by one from the internet moments later — sometimes right at startup, without you doing anything. Your own logos now take precedence. Also: Hamburger Sparkasse was showing comdirect's mark."
+            )
+        ),
+        WhatsNewItem(
+            icon: "calendar.badge.minus",
+            tint: .sbGreenStrong,
+            title: L10n.t("\u{201E}Noch offen\u{201C} rechnet eingestellte Abos nicht mehr mit",
+                          "\u{201C}Still to pay\u{201D} no longer counts dead subscriptions"),
+            description: L10n.t(
+                "Ein Abo, dessen Abbuchung schon vor dem laufenden Gehaltszyklus ausblieb, stand weiter in \u{201E}Noch offen\u{201C} — und mit jedem Monat kam eines dazu. Die Summe lag dadurch dauerhaft zu hoch. Gez\u{00E4}hlt wird jetzt nur, was in diesem Zyklus f\u{00E4}llig ist; ein paar Tage Verzug z\u{00E4}hlen weiter mit. Der Diagnose-Bericht zeigt auf Wunsch jeden einzelnen Posten mit Betrag, H\u{00E4}ufigkeit und n\u{00E4}chstem Termin.",
+                "A subscription whose charge had already failed to appear before the current salary cycle still counted as outstanding — and every month added another one, so the figure stayed permanently too high. Only what falls due in this cycle is counted now; a few days late still counts. The diagnostic report lists every single item with its amount, frequency and next due date."
             )
         ),
         WhatsNewItem(

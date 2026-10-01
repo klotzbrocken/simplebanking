@@ -352,6 +352,8 @@ final class DiagnosticSession: ObservableObject {
         var s = "── Fixkosten je Konto ───────────────────────\n"
         s += "Erkannt wird ab 2 Buchungen; in „Noch offen\" zählt alles ab Konfidenz 0,60.\n"
         s += "Gerechnet wird mit dem Durchschnittsbetrag, nicht mit der letzten Zahlung.\n"
+        s += "Offen ist ein Posten, wenn er in diesem Zyklus noch nicht gebucht ist und\n"
+        s += "seine nächste Fälligkeit in den Zyklus fällt.\n"
 
         for p in probes {
             s += "\n[\(p.bankName)]\n"
@@ -393,9 +395,10 @@ final class DiagnosticSession: ObservableObject {
             var ueberfaellig = 0.0
             for z in zahlungen.sorted(by: { $0.averageAmount > $1.averageAmount }) {
                 let istOffen = offeneSchluessel.contains(z.groupKey)
-                // Nächste Fälligkeit — und ob sie schon vorbei ist, ohne dass etwas kam.
-                // Genau diese Posten blähen die offene Summe auf: Die Regel verlangt nur
-                // „nächster Termin vor Zyklusende", nicht „Termin liegt noch vor uns".
+                // Nächste Fälligkeit — und ob sie innerhalb des Zyklus schon vorbei ist,
+                // ohne dass etwas kam. Das darf so sein (ein paar Tage Verzug). Posten,
+                // deren Termin schon vor dem Zyklus verstrich, zählen seit dem 01.10.2026
+                // gar nicht mehr mit — sie stehen hier mit „--" und ihrem alten Termin.
                 var faellig = "—"
                 if let last = Self.isoTagFormatter.date(from: z.lastDate) {
                     let naechste = LeftToPayCalculator.nextExpected(last: last, frequency: z.frequency)
