@@ -350,6 +350,7 @@ final class DiagnosticSession: ObservableObject {
     /// kennen.
     private func fixkostenAbschnitt(probes: [SlotProbe]) -> String {
         var s = "── Fixkosten je Konto ───────────────────────\n"
+        s += "Grundlage sind die letzten 90 Tage dieses Kontos — dieselbe Quelle wie die Anzeige.\n"
         s += "Erkannt wird ab 2 Buchungen; in „Noch offen\" zählt alles ab Konfidenz 0,60.\n"
         s += "Gerechnet wird mit dem Durchschnittsbetrag, nicht mit der letzten Zahlung.\n"
         s += "Offen ist ein Posten, wenn er in diesem Zyklus noch nicht gebucht ist und\n"
@@ -358,21 +359,21 @@ final class DiagnosticSession: ObservableObject {
         for p in probes {
             s += "\n[\(p.bankName)]\n"
             let cfg = BankSlotSettingsStore.load(slotId: p.slotId)
-            // `loadAllTransactions` liest **immer** den gerade aktiven Slot
-            // (`WHERE slot_id = activeSlotId`) — ein nachträgliches `filter` auf die
-            // Slot-ID bringt daher für jedes andere Konto eine leere Liste. Im ersten
-            // Entwurf stand genau das, und drei von vier Konten meldeten „keine
-            // Buchungen", obwohl sie welche hatten.
-            let vorher = TransactionsDatabase.activeSlotId
-            TransactionsDatabase.activeSlotId = p.slotId
-            let geladen = (try? TransactionsDatabase.loadAllTransactions()) ?? []
-            TransactionsDatabase.activeSlotId = vorher
-            let buchungen = geladen.compactMap { $0.toTransaction() }
+            // Genau dieselbe Quelle wie die Anzeige: 90 Tage, ein Slot, `primary`
+            // (`BalanceBar.recomputeLeftToPay`). Das ist kein Detail — mein erster
+            // Entwurf nahm `loadAllTransactions()` über die ganze Historie und kam
+            // deshalb auf andere Vorkommen, andere Konfidenzen und andere Händler als
+            // die Zahl, die er erklären sollte. Ein Bericht, der eine zweite Rechnung
+            // aufstellt, ist schlimmer als keiner.
+            let buchungen = (try? TransactionsDatabase.loadUnifiedTransactions(
+                slots: [p.slotId], days: 90, bankId: "primary")) ?? []
             guard !buchungen.isEmpty else {
-                s += "  (keine Buchungen in der lokalen Datenbank)\n"
+                s += "  (keine Buchungen der letzten 90 Tage in der lokalen Datenbank)\n"
                 continue
             }
-            let zahlungen = FixedCostsAnalyzer.analyze(transactions: buchungen, bankname: p.bankName)
+            // Ebenfalls wie die Anzeige: ohne `bankname`. Mit Bankname fallen Posten
+            // heraus, die in der Anzeige mitzählen.
+            let zahlungen = FixedCostsAnalyzer.analyze(transactions: buchungen)
             // Mit der real erkannten Gehalts-Gutschrift, nicht nur mit dem nominalen Tag.
             // Ohne sie zeigt der Bericht einen anderen Zyklus als die Anzeige — und
             // erklärt damit eine Zahl, die so nirgends steht.
