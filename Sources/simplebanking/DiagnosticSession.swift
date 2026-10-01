@@ -336,6 +336,60 @@ final class DiagnosticSession: ObservableObject {
 
     // MARK: - Summary + attachments
 
+    /// Schlüsselt „Monatliche Fixkosten" und „Noch offen" nach Posten auf — mit Beträgen.
+    ///
+    /// Gehört ausdrücklich **hierher** und nicht ins laufende Protokoll. Dort stehen die
+    /// Posten zwar schon, aber ohne Betrag und ohne vollen Namen: Zusammen ergäben die
+    /// beiden ein vollständiges Fixkostenprofil in einer Datei, die bei jeder Fehlersuche
+    /// mitgeschickt wird. Diesen Bericht erzeugt der Nutzer bewusst.
+    ///
+    /// Anlass (01.10.2026): Eine gemeldete Summe ließ sich von außen nicht nachrechnen —
+    /// weder vom Nutzer noch bei der Fehlersuche. Jetzt steht neben jedem Posten, warum er
+    /// zählt: wie oft er vorkam, über wie viele Monate, mit welcher Konfidenz. Die beiden
+    /// Schwellen stehen darunter, damit man den Zusammenhang sieht, ohne den Quelltext zu
+    /// kennen.
+    private func fixkostenAbschnitt(probes: [SlotProbe]) -> String {
+        var s = "── Fixkosten je Konto ───────────────────────\n"
+        s += "Erkannt wird ab 2 Buchungen; in „Noch offen\" zählt alles ab Konfidenz 0,60.\n"
+        s += "Gerechnet wird mit dem Durchschnittsbetrag, nicht mit der letzten Zahlung.\n"
+
+        for p in probes {
+            s += "\n[\(p.bankName)]\n"
+            let cfg = BankSlotSettingsStore.load(slotId: p.slotId)
+            guard let buchungen = try? TransactionsDatabase.loadAllTransactions()
+                .filter({ $0.slotId == p.slotId })
+                .compactMap({ $0.toTransaction() }), !buchungen.isEmpty else {
+                s += "  (keine Buchungen in der lokalen Datenbank)\n"
+                continue
+            }
+            let zahlungen = FixedCostsAnalyzer.analyze(transactions: buchungen, bankname: p.bankName)
+            let (start, ende) = LeftToPayCalculator.cycleBounds(salaryDay: cfg.effectiveSalaryDay)
+            let offen = LeftToPayCalculator.countedPayments(payments: zahlungen,
+                                                            cycleStart: start, cycleEnd: ende)
+            let offeneSchluessel = Set(offen.map(\.groupKey))
+
+            s += "  Gehaltstag:  \(cfg.effectiveSalaryDay)   Zyklus: \(kurzDatum(start)) – \(kurzDatum(ende))\n"
+            s += String(format: "  Monatlich:   %.2f €   davon noch offen: %.2f €\n",
+                        zahlungen.reduce(0) { $0 + $1.averageAmount },
+                        offen.reduce(0) { $0 + $1.averageAmount })
+            s += "  ---------------------------------------------------------------\n"
+            s += "  offen  Betrag      Vork.  Monate  Konf.  zuletzt     Händler\n"
+            for z in zahlungen.sorted(by: { $0.averageAmount > $1.averageAmount }) {
+                s += String(format: "  %@  %9.2f €  %4d×  %5d   %.2f   %@  %@\n",
+                            offeneSchluessel.contains(z.groupKey) ? "ja " : "-- ",
+                            z.averageAmount, z.occurrences, z.months, z.confidence,
+                            z.lastDate, z.merchant)
+            }
+        }
+        return s + "\n"
+    }
+
+    private func kurzDatum(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "dd.MM.yyyy"
+        return f.string(from: d)
+    }
+
     private func writeSummary(probes: [SlotProbe], finishedAt: Date) -> URL {
         let url = AppLogger.logDirectoryURL.appendingPathComponent("diagnostic-summary-\(id).txt")
         var s = ""
@@ -372,6 +426,9 @@ final class DiagnosticSession: ObservableObject {
             s += "  Last-Sync:   \(lastSyncLabel(slotId: p.slotId))\n"
         }
         s += "\n"
+
+        // ── Fixkosten ──
+        s += fixkostenAbschnitt(probes: probes)
 
         // ── Traces ──
         let traces = newTraceFiles()
