@@ -3754,7 +3754,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Signale (SALA-Purpose oder GEHALT/LOHN im Verwendungszweck) — bewusst keine
     /// „größter Eingang"-Heuristik, die den Zyklus fälschlich verschieben könnte.
     /// Spiegelt die Signal-Logik aus `PaycheckRightZoneView.detectedIncome`.
-    nonisolated private static func mostRecentSalaryArrival(
+    /// Auch von der Bank-Diagnose gebraucht: Ihre Aufschlüsselung muss denselben Zyklus
+    /// zeigen wie die Anzeige, sonst erklärt sie eine andere Zahl als die gemeldete.
+    nonisolated static func mostRecentSalaryArrival(
         in txs: [TransactionsResponse.Transaction], today: Date
     ) -> Date? {
         let cal = Calendar.current

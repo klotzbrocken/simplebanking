@@ -356,33 +356,76 @@ final class DiagnosticSession: ObservableObject {
         for p in probes {
             s += "\n[\(p.bankName)]\n"
             let cfg = BankSlotSettingsStore.load(slotId: p.slotId)
-            guard let buchungen = try? TransactionsDatabase.loadAllTransactions()
-                .filter({ $0.slotId == p.slotId })
-                .compactMap({ $0.toTransaction() }), !buchungen.isEmpty else {
+            // `loadAllTransactions` liest **immer** den gerade aktiven Slot
+            // (`WHERE slot_id = activeSlotId`) — ein nachträgliches `filter` auf die
+            // Slot-ID bringt daher für jedes andere Konto eine leere Liste. Im ersten
+            // Entwurf stand genau das, und drei von vier Konten meldeten „keine
+            // Buchungen", obwohl sie welche hatten.
+            let vorher = TransactionsDatabase.activeSlotId
+            TransactionsDatabase.activeSlotId = p.slotId
+            let geladen = (try? TransactionsDatabase.loadAllTransactions()) ?? []
+            TransactionsDatabase.activeSlotId = vorher
+            let buchungen = geladen.compactMap { $0.toTransaction() }
+            guard !buchungen.isEmpty else {
                 s += "  (keine Buchungen in der lokalen Datenbank)\n"
                 continue
             }
             let zahlungen = FixedCostsAnalyzer.analyze(transactions: buchungen, bankname: p.bankName)
-            let (start, ende) = LeftToPayCalculator.cycleBounds(salaryDay: cfg.effectiveSalaryDay)
+            // Mit der real erkannten Gehalts-Gutschrift, nicht nur mit dem nominalen Tag.
+            // Ohne sie zeigt der Bericht einen anderen Zyklus als die Anzeige — und
+            // erklärt damit eine Zahl, die so nirgends steht.
+            let gehaltseingang = AppDelegate.mostRecentSalaryArrival(in: buchungen, today: Date())
+            let (start, ende) = LeftToPayCalculator.cycleBounds(salaryDay: cfg.effectiveSalaryDay,
+                                                               actualSalaryArrival: gehaltseingang)
             let offen = LeftToPayCalculator.countedPayments(payments: zahlungen,
                                                             cycleStart: start, cycleEnd: ende)
             let offeneSchluessel = Set(offen.map(\.groupKey))
 
-            s += "  Gehaltstag:  \(cfg.effectiveSalaryDay)   Zyklus: \(kurzDatum(start)) – \(kurzDatum(ende))\n"
+            s += "  Gehaltstag:  \(cfg.effectiveSalaryDay)   Gehaltseingang erkannt: "
+                + (gehaltseingang.map(kurzDatum) ?? "keiner") + "\n"
+            s += "  Zyklus:      \(kurzDatum(start)) – \(kurzDatum(ende))\n"
             s += String(format: "  Monatlich:   %.2f €   davon noch offen: %.2f €\n",
                         zahlungen.reduce(0) { $0 + $1.averageAmount },
                         offen.reduce(0) { $0 + $1.averageAmount })
             s += "  ---------------------------------------------------------------\n"
-            s += "  offen  Betrag      Vork.  Monate  Konf.  zuletzt     Händler\n"
+            s += "  offen  fällig      Betrag      Vork.  Monate  Konf.  zuletzt     Händler\n"
+            let heute = Calendar.current.startOfDay(for: Date())
+            var ueberfaellig = 0.0
             for z in zahlungen.sorted(by: { $0.averageAmount > $1.averageAmount }) {
-                s += String(format: "  %@  %9.2f €  %4d×  %5d   %.2f   %@  %@\n",
-                            offeneSchluessel.contains(z.groupKey) ? "ja " : "-- ",
+                let istOffen = offeneSchluessel.contains(z.groupKey)
+                // Nächste Fälligkeit — und ob sie schon vorbei ist, ohne dass etwas kam.
+                // Genau diese Posten blähen die offene Summe auf: Die Regel verlangt nur
+                // „nächster Termin vor Zyklusende", nicht „Termin liegt noch vor uns".
+                var faellig = "—"
+                if let last = Self.isoTagFormatter.date(from: z.lastDate) {
+                    let naechste = LeftToPayCalculator.nextExpected(last: last, frequency: z.frequency)
+                    faellig = kurzDatum(naechste)
+                    if istOffen && naechste < heute {
+                        faellig += "!"
+                        ueberfaellig += z.averageAmount
+                    }
+                }
+                s += String(format: "  %@  %-11@ %9.2f €  %4d×  %5d   %.2f   %@  %@\n",
+                            istOffen ? "ja " : "-- ", faellig as NSString,
                             z.averageAmount, z.occurrences, z.months, z.confidence,
                             z.lastDate, z.merchant)
+            }
+            if ueberfaellig > 0 {
+                s += String(format: "  ! = Termin liegt in der Vergangenheit, es kam nichts — zusammen %.2f €\n",
+                            ueberfaellig)
             }
         }
         return s + "\n"
     }
+
+    /// `RecurringPayment.lastDate` ist ein reines Tagesdatum („2026-09-14").
+    private static let isoTagFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone.current
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
 
     private func kurzDatum(_ d: Date) -> String {
         let f = DateFormatter()
