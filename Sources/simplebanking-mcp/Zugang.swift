@@ -37,7 +37,8 @@ enum Zugang {
         switch name {
         case "get_accounts", "get_balance":                     return .konten
         case "get_transactions":                                return .umsaetze
-        case "get_spending_summary", "get_monthly_overview":    return .auswertung
+        case "get_spending_summary", "get_monthly_overview",
+             "get_fixed_costs", "get_subscriptions":            return .auswertung
         case "prepare_transfer":                                return .ueberweisung
         default:                                                return nil
         }

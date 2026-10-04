@@ -55,6 +55,33 @@ struct BankingTools {
                     "account_id": prop("string", "Filter by account slot ID (optional, returns all accounts if omitted)")
                 ]
             ),
+            tool(
+                name: "get_fixed_costs",
+                description: """
+                Recurring fixed costs per account, with the amount still expected before the \
+                next salary arrives. Computed by the simplebanking app during its last refresh \
+                and read from a snapshot here, so every account carries an `updated_at` \
+                timestamp — mention it if the data looks stale. `open_this_cycle` marks the \
+                items counted towards `open_total_eur`.
+                """,
+                properties: [
+                    "account_id": prop("string", "Filter by account slot ID (optional)")
+                ]
+            ),
+            tool(
+                name: "get_subscriptions",
+                description: """
+                Detected subscriptions and contracts per account, grouped the same way as the \
+                app's \"Abos & Verträge\" view, including the user's own corrections. Each entry \
+                carries its tab (abos, vertraege, sparen, verbindlichkeiten), the next expected \
+                charge and, where known, a cancellation link. Read from the same snapshot as \
+                get_fixed_costs — check `updated_at`.
+                """,
+                properties: [
+                    "account_id": prop("string", "Filter by account slot ID (optional)"),
+                    "tab":        prop("string", "Filter by tab: abos, vertraege, sparen, verbindlichkeiten (optional)")
+                ]
+            ),
         ]
         // Ohne simplesend-Lizenz existiert das Werkzeug nicht — es wird nicht
         // angeboten und nicht nur abgelehnt. Ein sichtbares Werkzeug, das „nein" sagt,
@@ -126,6 +153,8 @@ struct BankingTools {
         case "get_spending_summary": return getSpendingSummary(args: args)
         case "get_monthly_overview": return getMonthlyOverview(args: args)
         case "get_balance":          return getBalance(args: args)
+        case "get_fixed_costs":      return auswertung(args: args, feld: "fixed_costs")
+        case "get_subscriptions":    return auswertung(args: args, feld: "subscriptions")
         case "prepare_transfer":
             // Zweite Prüfung, obwohl die Liste das Werkzeug ohne Lizenz gar nicht
             // nennt: Die Liste ist eine Auskunft, keine Sperre.
@@ -557,6 +586,58 @@ struct BankingTools {
         guard sqlite3_column_type(stmt, index) != SQLITE_NULL,
               let ptr = sqlite3_column_text(stmt, index) else { return nil }
         return String(cString: ptr)
+    }
+
+    // MARK: - Fixkosten und Abos
+
+    /// Beide Werkzeuge lesen dieselbe Datei; sie unterscheiden sich nur im Feld.
+    ///
+    /// Gerechnet wird hier **nichts**. Der Server kennt weder `FixedCostsAnalyzer` noch
+    /// `SubscriptionDetector` — die liegen im App-Ziel und hängen an SwiftUI. Sie
+    /// hierher zu kopieren hieße, zwei Auswertungen zu pflegen, die auseinanderlaufen.
+    /// Stattdessen legt die App ihr Ergebnis ab, und das kommt von hier heraus.
+    private static func auswertung(args: [String: Any], feld: String) -> (String, Bool) {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("simplebanking", isDirectory: true)
+            .appendingPathComponent("auswertung.json")
+        guard let url,
+              let daten = try? Data(contentsOf: url),
+              let wurzel = try? JSONSerialization.jsonObject(with: daten) as? [String: Any],
+              let slots = wurzel["slots"] as? [String: Any], !slots.isEmpty else {
+            return (errorJSON("No analysis available yet. Open the simplebanking app once so it can refresh — the data is computed there, not here."), true)
+        }
+
+        let nurKonto = (args["account_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nurReiter = (args["tab"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        var ausgabe: [[String: Any]] = []
+        for (slotId, roh) in slots.sorted(by: { $0.key < $1.key }) {
+            if let nurKonto, !nurKonto.isEmpty, nurKonto != slotId { continue }
+            guard let konto = roh as? [String: Any] else { continue }
+            var eintraege = konto[feld] as? [[String: Any]] ?? []
+            if let nurReiter, !nurReiter.isEmpty {
+                eintraege = eintraege.filter { ($0["tab"] as? String)?.lowercased() == nurReiter }
+            }
+            var block: [String: Any] = [
+                "account_id": slotId,
+                "bank_name": konto["bank_name"] as? String ?? "",
+                "updated_at": konto["updated_at"] as? String ?? "",
+                feld: eintraege
+            ]
+            // Zyklus und Summen gehören zur Fixkostenfrage; bei Abos wären sie nur
+            // Rauschen, das ein Modell in eine Aussage über „noch offen" umdeutet.
+            if feld == "fixed_costs" {
+                for schluessel in ["salary_day", "cycle_start", "cycle_end",
+                                   "monthly_total_eur", "open_total_eur"] {
+                    block[schluessel] = konto[schluessel] ?? NSNull()
+                }
+            }
+            ausgabe.append(block)
+        }
+        if ausgabe.isEmpty {
+            return (errorJSON("No account matched. Use get_accounts for valid account IDs."), true)
+        }
+        return (jsonString(["accounts": ausgabe]), false)
     }
 
     // MARK: - prepare_transfer

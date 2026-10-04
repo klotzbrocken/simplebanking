@@ -3836,6 +3836,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let seedSnapshot = demoSeed
         let isUnified = txVM.isUnifiedMode
         let allSlots = MultibankingStore.shared.slots.map { $0.id }
+        // Namen hier abgreifen: Der Store lebt auf dem MainActor, der
+        // Schnappschuss unten wird detached geschrieben.
+        let slotNamen = Dictionary(MultibankingStore.shared.slots.map { ($0.id, $0.displayName) },
+                                   uniquingKeysWith: { a, _ in a })
         let activeIdx = MultibankingStore.shared.activeIndex
         // Für das Veränderungs-Abzeichen: Der Saldo lebt auf dem MainActor, die Rechnung
         // läuft unten detached. Hier abgreifen, statt drüben darauf zuzugreifen.
@@ -3969,6 +3973,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         )
                     }
                     total += counted.reduce(0) { $0 + $1.averageAmount }
+
+                    // Stand für die MCP-Werkzeuge ablegen. Hier und nirgends sonst:
+                    // Alles, was sie brauchen, liegt in diesem Durchlauf schon vor, und
+                    // eine zweite Rechnung soll es nicht geben.
+                    MCPSchnappschuss.schreibe(
+                        slotId: slot,
+                        bankName: slotNamen[slot],
+                        gehaltstag: cfg.effectiveSalaryDay,
+                        zyklusStart: cycS, zyklusEnde: cycE,
+                        zahlungen: payments, offen: counted, historie: history)
                 }
             }
 
@@ -3986,6 +4000,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 }
                 (balanceChange, balanceChangeEuro) = BalanceChange.ausHistorie(
                     gesamt, stand: balanceSnapshot, bezug: .vormonat())
+            }
+
+            // Die übrigen Konten für die MCP-Werkzeuge nachziehen. Die Anzeige braucht
+            // nur das aktive (oder im Aggregat alle) — ein Agent, der nach „meinen
+            // Fixkosten" fragt, bekäme sonst eines von vier Konten und merkt es nicht.
+            //
+            // Bewusst **hinter** der Anzeige und ohne Einfluss auf sie: Dieser Teil darf
+            // langsam sein. Im Demo-Modus gar nicht, da gibt es keine echten Konten.
+            if !isDemo {
+                let bereitsGeschrieben = Set(isUnified ? allSlots : [activeSlot])
+                for slot in allSlots where !bereitsGeschrieben.contains(slot) {
+                    if Task.isCancelled { break }
+                    let history = (try? TransactionsDatabase.loadUnifiedTransactions(
+                        slots: [slot], days: 90, bankId: "primary")) ?? []
+                    guard !history.isEmpty else { continue }
+                    let cfg = BankSlotSettingsStore.load(slotId: slot)
+                    let payments = FixedCostsAnalyzer.analyze(transactions: history)
+                    let (cycS, cycE) = LeftToPayCalculator.cycleBounds(
+                        salaryDay: cfg.effectiveSalaryDay,
+                        actualSalaryArrival: Self.mostRecentSalaryArrival(in: history, today: Date()))
+                    MCPSchnappschuss.schreibe(
+                        slotId: slot, bankName: slotNamen[slot],
+                        gehaltstag: cfg.effectiveSalaryDay,
+                        zyklusStart: cycS, zyklusEnde: cycE,
+                        zahlungen: payments,
+                        offen: LeftToPayCalculator.countedPayments(
+                            payments: payments, cycleStart: cycS, cycleEnd: cycE),
+                        historie: history)
+                }
             }
 
             if Task.isCancelled { return }

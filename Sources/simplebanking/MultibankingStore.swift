@@ -244,6 +244,9 @@ final class MultibankingStore: ObservableObject {
         CredentialsStore.deleteSlotFile(slotId: slotId, legacyPolicy: .delete)
         // Slot-Einstellungen (Gehaltstag, Schwellen, Budget …).
         BankSlotSettingsStore.delete(slotId: slotId)
+        // Auswertungs-Schnappschuss für die MCP-Werkzeuge. Bliebe er stehen, sähe ein
+        // Agent Händlernamen und Beträge eines Kontos, das der Nutzer gelöscht hat.
+        MCPSchnappschuss.entferne(slotId: slotId)
         // UserDefaults pro-slot-suffixed keys — Schreibweise über dieselben Builder,
         // die beim Schreiben verwendet werden.
         let defaults = UserDefaults.standard
