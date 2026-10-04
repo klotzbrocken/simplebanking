@@ -6,7 +6,7 @@ struct SimplebankingCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "sb",
         abstract: "Read-only CLI für simplebanking. Liest den lokalen Cache, ohne die Menüleisten-App zu brauchen.",
-        version: "1.4.0",
+        version: "1.5.0",
         subcommands: [
             BalanceCommand.self,
             AccountsCommand.self,
@@ -15,7 +15,9 @@ struct SimplebankingCLI: ParsableCommand {
             TodayCommand.self,
             WeekCommand.self,
             MonthCommand.self,
-            RefreshCommand.self
+            RefreshCommand.self,
+            FixkostenCommand.self,
+            AbosCommand.self
         ],
         defaultSubcommand: BalanceCommand.self
     )
@@ -25,6 +27,40 @@ struct SimplebankingCLI: ParsableCommand {
 
     mutating func validate() throws {
         ANSIColor.configure(ColorMode(rawValue: color) ?? .auto)
+    }
+}
+
+// MARK: - Auswertung
+
+struct FixkostenCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "fixed",
+        abstract: "Fixkosten je Konto und was bis zum nächsten Gehalt noch offen ist."
+    )
+    @Option(name: .shortAndLong, help: "Slot-ID zum Filtern.")
+    var slot: String?
+    @Flag(name: .long, help: "Nur Posten, die in diesem Zyklus noch offen sind.")
+    var open = false
+    @Flag(name: .long, help: "JSON-Output statt Text.")
+    var json = false
+    func run() throws {
+        try Auswertung.zeigeFixkosten(slot: slot, nurOffene: open, json: json)
+    }
+}
+
+struct AbosCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "subs",
+        abstract: "Erkannte Abos und Verträge, mit nächster Fälligkeit und Kündigungslink."
+    )
+    @Option(name: .shortAndLong, help: "Slot-ID zum Filtern.")
+    var slot: String?
+    @Option(name: .long, help: "Reiter: abos | vertraege | sparen | verbindlichkeiten.")
+    var tab: String?
+    @Flag(name: .long, help: "JSON-Output statt Text.")
+    var json = false
+    func run() throws {
+        try Auswertung.zeigeAbos(slot: slot, reiter: tab, json: json)
     }
 }
 
