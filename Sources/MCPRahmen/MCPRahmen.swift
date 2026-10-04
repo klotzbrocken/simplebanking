@@ -62,3 +62,29 @@ public enum MCPRahmen {
         return .success(laenge)
     }
 }
+
+/// Ob die simplesend-Lizenz als aktiv gilt — die reine Rechnung.
+///
+/// Liegt hier und nicht im Server-Ziel, weil ein Executable mit `main.swift` sich aus
+/// einem Testziel nicht importieren lässt. `Lizenz` im MCP-Ziel ruft das hier auf und
+/// besorgt nur die Eingabe.
+///
+/// Maßstab ist derselbe wie in der App ohne Netz: Die letzte Server-Bestätigung liegt im
+/// Gnadenfenster. Den Schlüssel selbst liest der Server bewusst **nicht** — er steht im
+/// Schlüsselbund, und ein zweites Binary, das ihn anfasst, löst eine Freigabe-Abfrage
+/// aus. Nötig ist er auch nicht: Den Zeitstempel setzt die App nur nach einer
+/// erfolgreichen Bestätigung und löscht ihn mit dem Schlüssel zusammen.
+public enum LizenzFenster {
+    /// 14 Tage, wie `LicenseConfig.offlineGracePeriod`.
+    public static let gnadenfenster: TimeInterval = 14 * 24 * 60 * 60
+
+    public static func istAktiv(bestaetigtAm: Date?,
+                                jetzt: Date = Date(),
+                                fenster: TimeInterval = gnadenfenster) -> Bool {
+        guard let bestaetigtAm else { return false }
+        let alter = jetzt.timeIntervalSince(bestaetigtAm)
+        // Negatives Alter heißt: der Zeitstempel liegt in der Zukunft. Uhr verstellt
+        // oder Datum zurückgedreht — das zählt als abgelaufen, nicht als frisch.
+        return alter >= 0 && alter < fenster
+    }
+}

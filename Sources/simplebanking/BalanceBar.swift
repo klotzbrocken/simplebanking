@@ -1965,19 +1965,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             MainActor.assumeIsolated { self?.refresh() }
         }
 
-        // Der Entwurfs-Wächter läuft NICHT mehr.
+        // Entwurfs-Wächter für `prepare_transfer`. Er läuft nur mit aktiver
+        // simplesend-Lizenz — ohne sie gibt es das MCP-Werkzeug nicht, und ohne
+        // Erzeuger wäre der Wächter eine offene Tür: Jeder lokale Prozess, der eine
+        // JSON-Datei in `transfer-drafts/` legt, ließe einen vorausgefüllten
+        // Überweisungsdialog aufgehen. Bestätigung und Freigabe bräuchte es weiterhin
+        // — aber der erste Schritt wäre fremdbestimmt.
         //
-        // Sein einziger Erzeuger war das MCP-Werkzeug `prepare_transfer`, und das ist
-        // entfernt — Überweisungen über einen Agenten sind ausdrücklich nicht gewollt.
-        // Ohne Erzeuger wäre der Wächter nicht nur totes Gewicht, sondern eine offene
-        // Tür: Jeder lokale Prozess, der eine JSON-Datei in `transfer-drafts/` legt,
-        // hätte damit einen vorausgefüllten Überweisungsdialog aufpoppen lassen können.
-        // Bestätigung und Freigabe hätte es weiterhin gebraucht — aber der erste Schritt
-        // wäre fremdbestimmt gewesen.
-        //
-        // TransferDraftStore und TransferDraftWatcher bleiben als Dateien liegen, falls
-        // je eine Quelle unter eigener Kontrolle dazukommt (etwa die Rechnungserkennung).
-        // Gestartet wird nichts.
+        // Die zweite Schranke ist der Schalter „Entwürfe annehmen" (Voreinstellung
+        // aus), den `processPendingDrafts` prüft.
+        if LicenseManager.shared.isLicensedOrDemo {
+            TransferDraftWatcher.shared.start()
+        }
 
         // Live-Update: simplesendVisible-Toggle (Einstellungen → Verhalten oder
         // Checkbox im UpsellSheet) blendet den Statusbar-Menüeintrag sofort

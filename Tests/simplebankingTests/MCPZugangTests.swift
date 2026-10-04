@@ -35,21 +35,25 @@ final class MCPZugangTests: XCTestCase {
 
     // MARK: Voreinstellungen
 
-    /// **Der Server ist ausschließlich lesend.** Es darf keinen Bereich geben, der etwas
-    /// schreibt oder vorbereitet — `prepare_transfer` wurde bewusst entfernt, weil
-    /// Überweisungen über einen Agenten nicht gewollt sind. Kommt je wieder ein
-    /// schreibender Bereich dazu, muss das eine bewusste Entscheidung sein und dieser
-    /// Test fallen.
-    func test_esGibtKeinenSchreibendenBereich() {
+    /// Umgekehrt zum Stand von 08/2026: Damals hielt dieser Test fest, dass es **keinen**
+    /// schreibenden Bereich gibt. Am 04.10.2026 kam `prepare_transfer` auf Zuruf zurück —
+    /// gebunden an eine aktive simplesend-Lizenz. Der Test bleibt die Stelle, an der
+    /// auffällt, wenn sich daran etwas ändert.
+    func test_derSchreibendeBereichIstGenauEiner() {
         let namen = Set(MCPClientStore.Zugangsbereich.allCases.map(\.rawValue))
-        XCTAssertEqual(namen, ["accounts", "transactions", "analysis"])
-        XCTAssertFalse(namen.contains("transfer"))
+        XCTAssertEqual(namen, ["accounts", "transactions", "analysis", "transfer"])
     }
 
-    /// Alle Bereiche sind lesend, also standardmäßig an. Wer einzelne abwählt, gibt
-    /// einem Client bewusst weniger.
-    func test_alleBereicheSindStandardmaessigAn() {
-        for bereich in MCPClientStore.Zugangsbereich.allCases {
+    /// Der wichtigste Test der Runde. Lesen ist voreingestellt, Überweisungsentwürfe
+    /// sind es nicht — wer sie erlaubt, muss den Haken selbst setzen. Stünde hier `true`,
+    /// bekäme jeder neu eingerichtete Agent die eine Fähigkeit, mit der sich etwas
+    /// anrichten lässt, ungefragt dazu.
+    func test_ueberweisungIstNichtVoreingestellt() {
+        XCTAssertFalse(MCPClientStore.Zugangsbereich.ueberweisung.standardmaessigAn)
+    }
+
+    func test_lesendeBereicheSindStandardmaessigAn() {
+        for bereich in MCPClientStore.Zugangsbereich.allCases where bereich != .ueberweisung {
             XCTAssertTrue(bereich.standardmaessigAn, bereich.rawValue)
         }
     }

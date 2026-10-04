@@ -70,6 +70,12 @@ final class TransferDraftWatcher {
         // alle Drafts verwerfen und kein Sheet öffnen — verhindert dass ein im
         // Hintergrund laufender MCP-Client (z.B. Claude.app) ungewollt
         // TransferSheets öffnet.
+        // Ohne aktive simplesend-Lizenz gibt es kein `prepare_transfer`. Liegt dann
+        // trotzdem eine Datei da, kommt sie nicht von uns — verwerfen.
+        guard LicenseManager.shared.isLicensedOrDemo else {
+            for e in entries { TransferDraftStore.consume(url: e.url) }
+            return
+        }
         let mcpDraftsEnabled = (UserDefaults.standard.object(forKey: "mcpDraftsEnabled") as? Bool) ?? false
         guard mcpDraftsEnabled else {
             for e in entries { TransferDraftStore.consume(url: e.url) }

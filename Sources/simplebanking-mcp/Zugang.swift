@@ -3,9 +3,16 @@ import CryptoKit
 
 // MARK: - Wer darf was
 //
-// Der Server ist ausschließlich lesend — `prepare_transfer` wurde mit dieser Änderung
-// entfernt. Die Bereiche schränken darüber hinaus ein, WAS ein einzelner Client lesen
-// darf: Wer nur Summen auswerten soll, braucht keine Verwendungszwecke mit Klarnamen.
+// Der Server liest — mit **einer** Ausnahme: `prepare_transfer` legt einen
+// Überweisungsentwurf an. Ausgelöst wird davon nichts; der Entwurf landet in einer
+// Datei, die App füllt damit ihren Überweisungsdialog vor, und bestätigen und freigeben
+// muss weiterhin ein Mensch. Trotzdem ist es der einzige Weg, auf dem ein Agent etwas
+// anstößt, das Geld bewegen kann — deshalb hängt er an drei Bedingungen gleichzeitig:
+// eigener Bereich, der standardmäßig **aus** ist; aktive simplesend-Lizenz; und der
+// Wächter in der App, der nur mit Lizenz läuft.
+//
+// Die Bereiche schränken darüber hinaus ein, WAS ein einzelner Client lesen darf: Wer
+// nur Summen auswerten soll, braucht keine Verwendungszwecke mit Klarnamen.
 //
 // **Der Zugang wird über Merkmale entschieden, die die App vergibt.** Sie legt eine
 // Registrierung an, der Server liest sie. Der Token selbst steht dort NICHT — nur sein
@@ -22,6 +29,7 @@ enum Zugang {
         case konten        = "accounts"
         case umsaetze      = "transactions"
         case auswertung    = "analysis"
+        case ueberweisung  = "transfer"
     }
 
     /// Welches Werkzeug welchen Bereich braucht.
@@ -30,6 +38,7 @@ enum Zugang {
         case "get_accounts", "get_balance":                     return .konten
         case "get_transactions":                                return .umsaetze
         case "get_spending_summary", "get_monthly_overview":    return .auswertung
+        case "prepare_transfer":                                return .ueberweisung
         default:                                                return nil
         }
     }
@@ -48,16 +57,17 @@ enum Zugang {
 
     /// Was der aufrufende Client darf.
     ///
-    /// **Ohne Token gibt es alle Bereiche.** Das ist vertretbar, seit der Server
-    /// ausschließlich liest: Bestehende Einrichtungen sollen nach einem Update nicht
-    /// wortlos aufhören zu funktionieren, und mehr als Lesen kann hier niemand.
-    /// Die Bereiche sind dafür da, einem einzelnen Client *weniger* zu geben — nicht
-    /// dafür, eine Schranke gegen den Rechner selbst zu bauen, der den Server startet.
+    /// **Ohne Token gibt es die lesenden Bereiche, aber keine Überweisung.** Bestehende
+    /// Einrichtungen sollen nach einem Update nicht wortlos aufhören zu arbeiten — Lesen
+    /// bleibt also. Die eine Fähigkeit, mit der sich Schaden anrichten ließe, bekommt
+    /// niemand nebenbei: Ein Entwurf, den der Nutzer nie wollte, ist nicht rückgängig zu
+    /// machen, indem man ihn wegklickt — er stand da.
     static func befund(umgebung: [String: String] = ProcessInfo.processInfo.environment,
                        jetzt: Date = Date()) -> Befund {
         guard let token = umgebung[tokenVariable]?.trimmingCharacters(in: .whitespacesAndNewlines),
               !token.isEmpty else {
-            return Befund(bereiche: Set(Bereich.allCases), altbestand: true, clientName: nil)
+            return Befund(bereiche: [.konten, .umsaetze, .auswertung],
+                          altbestand: true, clientName: nil)
         }
         guard let eintrag = eintrag(fuerToken: token) else {
             return Befund(bereiche: [], altbestand: false, clientName: nil)

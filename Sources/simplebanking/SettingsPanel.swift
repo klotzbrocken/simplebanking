@@ -3341,8 +3341,8 @@ struct SettingsView: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.accentColor)
                 Text(t(
-                    "Zugriff auf deine Daten von außen — für Agenten, Terminal und Raycast. Alles davon ist ausschließlich lesend.",
-                    "Access to your data from outside — for agents, terminal and Raycast. All of it is read-only."
+                    "Zugriff auf deine Daten von außen — für Agenten, Terminal und Raycast. Lesend, bis Du es ausdrücklich änderst.",
+                    "Access to your data from outside — for agents, terminal and Raycast. Read-only until you explicitly change it."
                 ))
                 .font(ThemeFonts.body(size: 11))
                 .foregroundColor(.secondary)
@@ -3446,8 +3446,8 @@ struct SettingsView: View {
                 // Server nur liest. Das gehört gesagt — sonst hält man die leere Liste
                 // für einen Fehler.
                 Label(t(
-                    "Noch kein Zugang vergeben. Claude Desktop und die Kommandozeile arbeiten trotzdem — der Server ist ausschließlich lesend. Ein Zugang lohnt sich, wenn du einem Agenten weniger geben willst als alles.",
-                    "No access granted yet. Claude Desktop and the command line still work — the server is read-only. Grant one when you want to give an agent less than everything."
+                    "Noch kein Zugang vergeben. Claude Desktop und die Kommandozeile arbeiten trotzdem — ohne Zugang aber nur lesend. Ein Zugang lohnt sich, wenn du einem Agenten weniger geben willst als alles — oder Überweisungsentwürfe erlauben.",
+                    "No access granted yet. Claude Desktop and the command line still work — but read-only without one. Grant one when you want to give an agent less than everything, or to allow transfer drafts."
                 ), systemImage: "info.circle")
                 .font(ThemeFonts.body(size: 11))
                 .foregroundColor(.secondary)
@@ -4123,12 +4123,22 @@ struct SettingsView: View {
             Divider().padding(.vertical, 4)
 
             Label(t(
-                "Der Zugang ist ausschließlich lesend. Überweisungen lassen sich über MCP weder auslösen noch vorbereiten.",
-                "Access is read-only. Transfers can neither be initiated nor prepared via MCP."
+                "Überweisungen löst über MCP niemand aus. Mehr als ein Entwurf geht nicht, und auch der nur mit simplesend-Lizenz, eigens erteiltem Bereich und dem Schalter unten — bestätigen und freigeben musst immer Du.",
+                "Nothing initiates a transfer via MCP. A draft is the most that can happen, and only with a simplesend licence, an explicitly granted scope and the switch below — you always confirm and approve it yourself."
             ), systemImage: "lock.shield")
             .font(ThemeFonts.body(size: 11))
             .foregroundColor(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
+            SettingsToggleRow(
+                title: t("Überweisungsentwürfe annehmen", "Accept transfer drafts"),
+                subtitle: t(
+                    "Ein Agent mit dem Bereich „Überweisungsentwürfe\u{201C} kann den Überweisungsdialog vorausgefüllt öffnen. Aus = Entwürfe werden verworfen.",
+                    "An agent holding the \u{201C}transfer drafts\u{201D} scope can open the transfer dialog pre-filled. Off = drafts are discarded."
+                ),
+                isOn: $mcpDraftsEnabled
+            )
+            .disabled(!LicenseManager.shared.isLicensedOrDemo)
         }
         // Stabilen Symlink-Pfad anlegen, sobald der Nutzer den MCP-Bereich öffnet —
         // so zeigt die angezeigte/kopierte Config direkt auf den beständigen Pfad.
