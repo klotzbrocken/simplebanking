@@ -531,8 +531,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     private var isMouseOverBalanceMode: Bool { false }
 
+    /// Die Maske bildet nach, was sie verdeckt: In der Leiste steht der Saldo **ohne**
+    /// Nachkommastellen. „•••.••" las sich wie ein Dezimalpunkt und damit wie eine
+    /// englische Schreibweise; „•.•••" passt zu „1.234".
     private func hiddenBalanceMaskTitle() -> String {
-        "•••.•• €"
+        "•.••• €"
     }
 
     private func configuredColorScheme() -> ColorScheme? {
@@ -639,18 +642,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             case "CHF": symbol = "₣"
             default: symbol = currency
             }
-            let absAmt = abs(amount)
-            let formatted: String
-            if absAmt >= 1000 {
-                formatted = String(format: "%.0f", absAmt)
-                    .reversed()
-                    .enumerated()
-                    .map { $0.offset > 0 && $0.offset % 3 == 0 ? ".\(String($0.element))" : String($0.element) }
-                    .reversed()
-                    .joined()
-            } else {
-                formatted = String(format: "%.0f", absAmt)
-            }
+            let formatted = Self.ganzzahlFormatter.string(
+                from: NSNumber(value: abs(amount).rounded())) ?? "0"
             return amount < 0 ? "-\(symbol) \(formatted)" : "\(symbol) \(formatted)"
         }
         let shown = sorted.prefix(2)
@@ -681,18 +674,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
             let balText: String
             if let b = balance {
-                let absAmt = abs(b)
-                let formatted: String
-                if absAmt >= 1000 {
-                    formatted = String(format: "%.0f", absAmt)
-                        .reversed()
-                        .enumerated()
-                        .map { $0.offset > 0 && $0.offset % 3 == 0 ? ".\(String($0.element))" : String($0.element) }
-                        .reversed()
-                        .joined()
-                } else {
-                    formatted = String(format: "%.0f", absAmt)
-                }
+                let formatted = Self.ganzzahlFormatter.string(
+                    from: NSNumber(value: abs(b).rounded())) ?? "0"
                 balText = b < 0 ? "-\(symbol) \(formatted)" : "\(symbol) \(formatted)"
             } else {
                 balText = "--"
@@ -879,7 +862,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                                zeichen: aktuellesBewegungszeichen())
             } else {
                 // Long: logo + (optional) emoji + Mask
-                setButtonTitle(button, "\(p)\(hiddenEmoji)•••.•• ",
+                setButtonTitle(button, "\(p)\(hiddenEmoji)•.••• ",
                                zeichen: aktuellesBewegungszeichen())
             }
             setzeBreite(isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo))
@@ -1314,6 +1297,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         formatter.maximumFractionDigits = 2
         formatter.minimumFractionDigits = 2
         return formatter
+    }()
+
+    /// Ganze Beträge mit Tausenderpunkt, **ohne** Währungszeichen — das setzen die
+    /// Aufrufer selbst, weil im Aggregat mehrere Währungen nebeneinander stehen.
+    ///
+    /// Gemeldet am 04.10.2026: Hier stand eine von Hand gebaute Gruppierung, die den
+    /// Punkt eine Stelle zu früh setzte — aus 12345 wurde „1.2345", aus 1234567 sogar
+    /// „.123.4567" mit führendem Punkt. Der Grund war eine Umkehrung zu viel: Das
+    /// Trennzeichen wurde im rückwärts gelesenen Text **vor** die Ziffer gesetzt und
+    /// landete nach dem Zurückdrehen davor statt dahinter.
+    static let ganzzahlFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        f.minimumFractionDigits = 0
+        return f
     }()
 
     private static let eurWholeNumberFormatter: NumberFormatter = {
