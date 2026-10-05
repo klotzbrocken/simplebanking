@@ -60,10 +60,13 @@ fi
 # Universal binary: separat bauen, dann mit lipo zusammenführen.
 #
 # `--product simplebanking` ist hier nicht kosmetisch: Ohne die Einschränkung baut SwiftPM
-# alle Produkte in einem Rutsch, und weil `-Xswiftc` für jedes Modul gilt, schreiben CLI,
-# MCP und rewe-poc in dieselbe Const-Values-Datei. Wer zuletzt fertig wird, gewinnt — und
-# das Metadaten-Bundle wäre mal vollständig, mal leer. CLI und MCP baut das Skript ohnehin
+# alle Produkte in einem Rutsch, und weil `-Xswiftc` für jedes Modul gilt, schreiben CLI
+# und MCP in dieselbe Const-Values-Datei. Wer zuletzt fertig wird, gewinnt — und das
+# Metadaten-Bundle wäre mal vollständig, mal leer. CLI und MCP baut das Skript ohnehin
 # weiter unten einzeln.
+#
+# Der REWE-Prüfstand war hier früher der dritte Mitschreiber; er ist seit dem 05.10.2026
+# ein eigenes Paket (`scripts/REWEPoc/Package.swift`) und taucht gar nicht mehr auf.
 swift build --build-system native -c release --arch arm64 --product simplebanking "${INTENTS_FLAGS[@]}"
 swift build --build-system native -c release --arch x86_64 --product simplebanking
 

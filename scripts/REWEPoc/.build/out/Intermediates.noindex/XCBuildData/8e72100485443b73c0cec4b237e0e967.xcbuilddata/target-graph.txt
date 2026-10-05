@@ -1,0 +1,4 @@
+Target dependency graph (2 targets)
+Target 'AllExcludingTests' in project 'Aggregate'
+➜ Explicit dependency on target 'rewe-poc-product' in project 'rewe-poc'
+Target 'rewe-poc-product' in project 'rewe-poc' (no dependencies)

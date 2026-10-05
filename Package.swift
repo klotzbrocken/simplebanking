@@ -14,8 +14,13 @@ let package = Package(
     products: [
         .executable(name: "simplebanking", targets: ["simplebanking"]),
         .executable(name: "simplebanking-mcp", targets: ["simplebanking-mcp"]),
-        .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"]),
-        .executable(name: "rewe-poc", targets: ["rewe-poc"])
+        .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"])
+        // Der REWE-Prüfstand gehört bewusst **nicht** mehr hierher, siehe
+        // `scripts/REWEPoc/Package.swift`. Ein `executableTarget` bekommt von
+        // SwiftPM immer ein implizites Produkt — „Ziel, aber kein Produkt" gibt es
+        // nicht. Also baute jedes `swift build` ihn mit, und weil `-Xswiftc` für
+        // jedes Modul gilt, schrieben CLI, MCP und der Prüfstand in dieselbe
+        // Const-Values-Datei.
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
@@ -83,19 +88,6 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
             path: "Sources/simplebanking-cli"
-        ),
-        // Phase-0-PoC für die REWE-eBon-Integration: isoliertes Tool, das per
-        // WKWebView den REWE-Login zeigt, im JS-Kontext die Receipts-API +
-        // eine eBon-PDF abruft und mit ReceiptParser den Warenkorb extrahiert.
-        // Berührt die Hauptapp nicht.
-        .executableTarget(
-            name: "rewe-poc",
-            path: "Scripts/REWEPoc",
-            linkerSettings: [
-                .linkedFramework("AppKit"),
-                .linkedFramework("WebKit"),
-                .linkedFramework("PDFKit")
-            ]
         ),
         .testTarget(
             name: "simplebankingTests",

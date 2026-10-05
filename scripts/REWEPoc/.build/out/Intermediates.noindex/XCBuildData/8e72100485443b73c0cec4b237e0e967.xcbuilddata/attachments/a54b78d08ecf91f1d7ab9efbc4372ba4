@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/rewe-poc-primary.dia",
+    "emit-module-dependencies" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/rewe-poc-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/rewe-poc-primary-emit-module.dia",
+    "pch" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/rewe-poc-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/rewe-poc-primary.swiftdeps"
+  },
+  "/Users/maik/simplebanking/scripts/REWEPoc/ReceiptParser.swift" : {
+    "const-values" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser.swiftconstvalues",
+    "dependencies" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser.d",
+    "diagnostics" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser.dia",
+    "index-unit-output-path" : "/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser.o",
+    "llvm-bc" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser.bc",
+    "object" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser.o",
+    "swift-dependencies" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser.swiftdeps",
+    "swiftmodule" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/ReceiptParser~partial.swiftmodule"
+  },
+  "/Users/maik/simplebanking/scripts/REWEPoc/main.swift" : {
+    "const-values" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main.swiftconstvalues",
+    "dependencies" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main.d",
+    "diagnostics" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main.dia",
+    "index-unit-output-path" : "/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main.o",
+    "llvm-bc" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main.bc",
+    "object" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main.o",
+    "swift-dependencies" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main.swiftdeps",
+    "swiftmodule" : "/Users/maik/simplebanking/scripts/REWEPoc/.build/out/Intermediates.noindex/rewe-poc.build/Debug/rewe-poc-p.build/Objects-normal/arm64/main~partial.swiftmodule"
+  }
+}
