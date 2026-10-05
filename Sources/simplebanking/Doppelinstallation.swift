@@ -134,10 +134,6 @@ enum Doppelinstallation {
     }
 
     #if DEBUG
-    @MainActor
-    static func hinweisVergessen(defaults: UserDefaults = .standard) {
-        defaults.removeObject(forKey: gezeigtKey)
-    }
     #endif
 }
 

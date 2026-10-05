@@ -24,31 +24,6 @@ enum TransferRecipientKind: String, Sendable, Equatable {
         }
     }
 
-    /// Verwendungszweck-Vorschläge basierend auf dem Empfänger-Typ.
-    var purposeSuggestions: [String] {
-        switch self {
-        case .versicherung:
-            return [L10n.t("Beitrag Mai", "Premium May"),
-                    L10n.t("Vertrag-Nr.", "Policy no."),
-                    L10n.t("Rate",        "Installment")]
-        case .online:
-            return [L10n.t("Bestellung",  "Order"),
-                    L10n.t("Rückzahlung", "Refund")]
-        case .abo:
-            return [L10n.t("Rechnung Mai", "Invoice May"),
-                    L10n.t("Kunden-Nr.",   "Customer no.")]
-        case .vermieter:
-            return [L10n.t("Miete Mai",   "Rent May"),
-                    L10n.t("Nebenkosten", "Utilities")]
-        case .privat:
-            return [L10n.t("Miete Mai",   "Rent May"),
-                    L10n.t("Geburtstag",  "Birthday"),
-                    L10n.t("Taschengeld", "Allowance"),
-                    L10n.t("Ausgleich",   "Settlement"),
-                    L10n.t("Sparen",      "Savings")]
-        }
-    }
-
     /// Klassifikation aus Namens-Patterns. Bewusst grob & deterministisch —
     /// für die UI-Akzente ist „grob richtig" gut genug.
     static func classify(name: String) -> TransferRecipientKind {

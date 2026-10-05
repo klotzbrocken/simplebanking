@@ -154,11 +154,6 @@ final class ErrorReportStore: ObservableObject {
         present(report)
     }
 
-    /// Pending-Report verwerfen (z.B. User schließt Sheet, Setup wiederholt).
-    func clearPending() {
-        pendingReport = nil
-    }
-
     // MARK: - Internals
 
     private func present(_ report: PendingErrorReport) {

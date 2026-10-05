@@ -44,9 +44,6 @@ struct RecurringPayment: Identifiable {
     let category: PaymentCategory
     let confidence: Double         // 0..1, how confident we are this is a fixed cost
     
-    var formattedAmount: String {
-        FixedCostsFormatters.currencyEURFormatter.string(from: NSNumber(value: averageAmount)) ?? "\(averageAmount) €"
-    }
 }
 
 enum PaymentFrequency: String {
@@ -245,146 +242,6 @@ enum FixedCostsAnalyzer {
         }
     }
 
-    private static func isPayPal(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower.contains("paypal") || lower.contains("pp.") || lower.contains("pp *")
-    }
-    
-    private static func isKlarna(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower.contains("klarna") || lower.contains("sofort")
-    }
-    
-    private static func isAmazonPay(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower.contains("amazon payments") || lower.contains("amazon pay") || 
-               (lower.contains("amazon") && lower.contains("pay"))
-    }
-    
-    private static func isGooglePay(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower.contains("google pay") || lower.contains("google *") || 
-               lower.hasPrefix("google ")
-    }
-    
-    private static func isApple(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower.contains("apple") || lower.contains("itunes") || lower.contains("app store")
-    }
-    
-    // MARK: - Merchant Extraction from Remittance
-    
-    private static func extractPayPalMerchant(_ remittance: String) -> String? {
-        // Common PayPal patterns:
-        // "PAYPAL *NETFLIX" → Netflix
-        // "PP.1234.PP . SPOTIFY, Ihr Einkauf bei SPOTIFY" → Spotify
-        // "PayPal Europe PODIGEE GMBH" → Podigee
-        
-        let patterns: [(regex: String, group: Int)] = [
-            (#"(?i)paypal\s*\*\s*([A-Za-z0-9][A-Za-z0-9\s\-\.]+)"#, 1),
-            (#"(?i)pp\s*\.\s*\d+\s*\.?\s*pp\s*\.?\s*([A-Za-z]+)"#, 1),
-            (#"(?i)ihr\s+einkauf\s+bei\s+([A-Za-z0-9][A-Za-z0-9\s\-\.]+)"#, 1),
-            (#"(?i)paypal.*?([A-Z][A-Z0-9\s]{2,}(?:GMBH|AG|INC|LLC|LTD)?)"#, 1),
-            (#"(?i)([A-Za-z]+)\s+vielen\s+dank"#, 1),
-        ]
-        
-        for (pattern, group) in patterns {
-            if let match = firstMatch(remittance, pattern: pattern, group: group) {
-                let cleaned = cleanMerchantName(match)
-                if !cleaned.isEmpty && cleaned.count >= 3 {
-                    return cleaned
-                }
-            }
-        }
-        
-        // Fallback: look for known services in remittance
-        return findKnownService(in: remittance)
-    }
-    
-    private static func extractKlarnaMerchant(_ remittance: String) -> String? {
-        // Klarna patterns:
-        // "KLARNA *ABOUT YOU" → About You
-        // "Klarna AB Rechnung 12345 ZARA" → Zara
-        
-        let patterns: [(regex: String, group: Int)] = [
-            (#"(?i)klarna\s*\*\s*([A-Za-z0-9][A-Za-z0-9\s\-\.]+)"#, 1),
-            (#"(?i)klarna.*rechnung.*?([A-Z][A-Za-z]+)"#, 1),
-        ]
-        
-        for (pattern, group) in patterns {
-            if let match = firstMatch(remittance, pattern: pattern, group: group) {
-                let cleaned = cleanMerchantName(match)
-                if !cleaned.isEmpty && cleaned.count >= 3 {
-                    return cleaned
-                }
-            }
-        }
-        
-        return findKnownService(in: remittance)
-    }
-    
-    private static func extractAmazonPayMerchant(_ remittance: String) -> String? {
-        let patterns: [(regex: String, group: Int)] = [
-            (#"(?i)amazon\s*\*?\s*([A-Za-z0-9][A-Za-z0-9\s\-]+)"#, 1),
-        ]
-        
-        for (pattern, group) in patterns {
-            if let match = firstMatch(remittance, pattern: pattern, group: group) {
-                let cleaned = cleanMerchantName(match)
-                if !cleaned.isEmpty && cleaned.count >= 3 && cleaned.lowercased() != "payments" {
-                    return cleaned
-                }
-            }
-        }
-        
-        return findKnownService(in: remittance)
-    }
-    
-    private static func extractGoogleMerchant(_ remittance: String) -> String? {
-        let patterns: [(regex: String, group: Int)] = [
-            (#"(?i)google\s*\*?\s*([A-Za-z0-9][A-Za-z0-9\s\-]+)"#, 1),
-        ]
-        
-        for (pattern, group) in patterns {
-            if let match = firstMatch(remittance, pattern: pattern, group: group) {
-                let cleaned = cleanMerchantName(match)
-                if !cleaned.isEmpty && cleaned.count >= 3 {
-                    return cleaned
-                }
-            }
-        }
-        
-        return findKnownService(in: remittance) ?? "Services"
-    }
-    
-    private static func extractAppleMerchant(_ remittance: String) -> String? {
-        // Apple.com/bill patterns often include the service
-        let patterns: [(regex: String, group: Int)] = [
-            (#"(?i)apple\.com/bill\s*([A-Za-z\+]+)"#, 1),
-            (#"(?i)itunes\.com/bill\s*([A-Za-z\+]+)"#, 1),
-        ]
-        
-        for (pattern, group) in patterns {
-            if let match = firstMatch(remittance, pattern: pattern, group: group) {
-                let cleaned = cleanMerchantName(match)
-                if !cleaned.isEmpty && cleaned.count >= 2 {
-                    return cleaned
-                }
-            }
-        }
-        
-        // Check for known Apple services
-        let appleServices = ["icloud", "apple music", "apple tv", "apple one", "apple arcade", "fitness+"]
-        let lower = remittance.lowercased()
-        for service in appleServices {
-            if lower.contains(service) {
-                return service.capitalized
-            }
-        }
-        
-        return nil
-    }
-    
     // MARK: - Known Services Detection
     
     private static let knownServices: [(pattern: String, name: String, category: PaymentCategory)] = [
@@ -498,16 +355,6 @@ enum FixedCostsAnalyzer {
         ("twitch", "Twitch", .streaming),
     ]
     
-    private static func findKnownService(in text: String) -> String? {
-        let lower = text.lowercased()
-        for (pattern, name, _) in knownServices {
-            if lower.contains(pattern) {
-                return name
-            }
-        }
-        return nil
-    }
-    
     static func categoryForMerchant(_ merchant: String) -> PaymentCategory {
         if merchant == Bankgebuehren.bezeichnung { return .bankFees }
         let lower = merchant.lowercased()
@@ -517,34 +364,6 @@ enum FixedCostsAnalyzer {
             }
         }
         return .other
-    }
-    
-    // MARK: - Helper Functions
-    
-    private static func firstMatch(_ text: String, pattern: String, group: Int) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
-        let range = NSRange(text.startIndex..., in: text)
-        guard let match = regex.firstMatch(in: text, options: [], range: range) else { return nil }
-        guard group < match.numberOfRanges else { return nil }
-        let groupRange = match.range(at: group)
-        guard groupRange.location != NSNotFound,
-              let swiftRange = Range(groupRange, in: text) else { return nil }
-        return String(text[swiftRange])
-    }
-    
-    private static func cleanMerchantName(_ name: String) -> String {
-        var cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Remove common suffixes
-        let suffixes = ["gmbh", "ag", "inc", "llc", "ltd", "co kg", "ug", "se", "e.v."]
-        for suffix in suffixes {
-            if cleaned.lowercased().hasSuffix(" \(suffix)") {
-                cleaned = String(cleaned.dropLast(suffix.count + 1))
-            }
-        }
-        // Capitalize nicely
-        return cleaned.split(separator: " ")
-            .map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }
-            .joined(separator: " ")
     }
     
     private static func normalizeMerchant(_ name: String) -> String {

@@ -27,9 +27,6 @@ enum BankLogoCatalog {
     private static let loaded: (entries: [String: Entry], schema: String?) = loadFromBundle()
     private static var entries: [String: Entry] { loaded.entries }
 
-    /// Schema-Version aus dem `$schema`-Feld (zur Diagnose, nicht funktional genutzt).
-    static var schemaURL: String? { loaded.schema }
-
     private static func loadFromBundle() -> (entries: [String: Entry], schema: String?) {
         // Katalog über BankCatalogResource auflösen (nicht-trappend), NICHT über
         // den SwiftPM-`Bundle.module`-Accessor — der crasht im von Hand gebauten

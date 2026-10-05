@@ -449,10 +449,6 @@ enum CredentialsStore {
         try save(creds, masterPassword: masterPassword)
     }
 
-    static func hasAPIKey(masterPassword: String) throws -> Bool {
-        try loadAPIKey(masterPassword: masterPassword) != nil
-    }
-
     /// Returns true if the active provider has a key stored.
     static func hasActiveProviderKey(masterPassword: String) throws -> Bool {
         try loadAPIKey(forProvider: AIProvider.active, masterPassword: masterPassword) != nil

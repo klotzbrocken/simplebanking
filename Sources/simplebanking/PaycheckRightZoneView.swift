@@ -326,65 +326,6 @@ struct SalaryProgressCalculator {
         return max(0, min(1, balance / Double(mediumThreshold)))
     }
 
-    /// Legacy budget-burn fraction — kept for reference, no longer used by the ring.
-    static func ringFraction(salaryDay: Int, transactions: [TransactionsResponse.Transaction], salaryAmount: Int = 0) -> Double {
-        let cal = Calendar.current
-        let p = Self.progress(salaryDay: salaryDay)
-        let currentStart = cal.startOfDay(for: p.lastSalaryDate)
-
-        // Derive previous period start
-        let periodMonthFirst = cal.date(from: cal.dateComponents([.year, .month], from: p.lastSalaryDate))!
-        let prevMonthFirst   = cal.date(byAdding: .month, value: -1, to: periodMonthFirst)!
-        let clampedDay       = min(salaryDay, cal.range(of: .day, in: .month, for: prevMonthFirst)?.count ?? 28)
-        var prevComps        = cal.dateComponents([.year, .month], from: prevMonthFirst)
-        prevComps.day        = clampedDay
-        let prevStart        = cal.startOfDay(for: cal.date(from: prevComps)!)
-
-        func txStartOfDay(_ tx: TransactionsResponse.Transaction) -> Date? {
-            let d = tx.bookingDate ?? tx.valueDate ?? ""
-            guard d.count >= 10 else { return nil }
-            let parts = d.prefix(10).split(separator: "-")
-            guard parts.count == 3,
-                  let y = Int(parts[0]), let m = Int(parts[1]), let day = Int(parts[2]) else { return nil }
-            return cal.date(from: DateComponents(year: y, month: m, day: day)).map { cal.startOfDay(for: $0) }
-        }
-
-        var currentIncome = 0.0, currentExpenses = 0.0, prevIncome = 0.0
-        for tx in transactions {
-            guard let d = txStartOfDay(tx) else { continue }
-
-            // Use AmountParser (via parsedAmount) — handles German format "3.450,00" correctly
-            let raw = tx.parsedAmount
-
-            // Multi-signal income detection: amount sign OR category OR SEPA code OR keywords
-            let cat = tx.category?.lowercased() ?? ""
-            let purpose = tx.purposeCode?.uppercased() ?? ""
-            let rem = (tx.remittanceInformation ?? []).joined(separator: " ").uppercased()
-            let add = tx.additionalInformation?.uppercased() ?? ""
-            // Exclude common refund patterns before the amount-threshold check so
-            // Erstattungen / Retouren / tax returns don't inflate the salary reference.
-            let isRefund = rem.contains("ERSTATTUNG") || rem.contains("RETOURE")
-                || rem.contains("REFUND") || rem.contains("RÜCKZAHLUNG")
-                || add.contains("ERSTATTUNG") || add.contains("RETOURE")
-            let isIncomeTx = (raw >= 1000 && !isRefund)
-                || cat.contains("gehalt") || cat.contains("einkommen")
-                || purpose == "SALA"
-                || rem.contains("GEHALT") || rem.contains("LOHN")
-                || add.contains("GEHALT") || add.contains("LOHN")
-
-            if d >= currentStart {
-                if isIncomeTx { currentIncome += abs(raw) }
-                else if raw < 0 { currentExpenses += abs(raw) }
-            } else if d >= prevStart {
-                if isIncomeTx { prevIncome += abs(raw) }
-            }
-        }
-
-        let autoIncome = currentIncome > 0 ? currentIncome : prevIncome
-        let refIncome = salaryAmount > 0 ? Double(salaryAmount) : autoIncome
-        guard refIncome > 0 else { return 0 }
-        return max(0, min(1, (refIncome - currentExpenses) / refIncome))
-    }
 }
 
 // MARK: - DotsGridWidthKey

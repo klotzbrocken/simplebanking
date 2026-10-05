@@ -495,19 +495,4 @@ enum AssignmentRules {
 
 /// Maps the 9-case recurring taxonomy onto the 14-case per-transaction taxonomy.
 extension PaymentCategory {
-    var asTransactionCategory: TransactionCategory {
-        switch self {
-        case .streaming, .software, .telecom: return .abosDigital
-        case .insurance:                      return .versicherungen
-        case .utilities:                      return .wohnenKredit
-        case .membership:                     return .freizeit
-        case .finance:                        return .sparen
-        // Bewusst `.sonstiges` und nicht `.sparen`: Eine Kontoführungsgebühr ist das
-        // Gegenteil von Sparen. Eine eigene Buchungskategorie dafür wäre ein größerer
-        // Eingriff (Kategorisierer, Farben, Bestandsdaten) und ist es nicht wert.
-        case .bankFees:                       return .sonstiges
-        case .transport:                      return .mobilitaet
-        case .other:                          return .sonstiges
-        }
-    }
 }

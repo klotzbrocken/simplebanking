@@ -1209,18 +1209,6 @@ enum TransactionsDatabase {
         }
     }
 
-    static func setFlagged(txID: String, slotId: String, bankId: String = "primary", value: Bool) throws {
-        try migrate(bankId: bankId)
-        let queue = try makeQueue(bankId: bankId)
-        let now = currentTimestamp()
-        try queue.write { db in
-            try db.execute(
-                sql: "UPDATE transactions SET is_flagged = ?, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
-                arguments: [value ? 1 : 0, now, txID, slotId]
-            )
-        }
-    }
-
     static func setReminderId(txID: String, slotId: String, bankId: String = "primary", reminderId: String?) throws {
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)

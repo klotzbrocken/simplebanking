@@ -123,9 +123,6 @@ enum YaxiService {
         }()
 
         private static func suffix(for slotId: String) -> String { slotId == "legacy" ? "" : ".\(slotId)" }
-        private static func udKey(_ base: String, slotId: String) -> String {
-            "simplebanking.yaxi.\(base)\(suffix(for: slotId))"
-        }
         private static func kcAccount(_ base: String, slotId: String) -> String {
             "\(base)\(suffix(for: slotId)).kc3"
         }
@@ -530,23 +527,6 @@ enum YaxiService {
         )
     }
 
-    static func configureBackend(iban: String) async -> Bool {
-        let normalized = iban
-            .replacingOccurrences(of: " ", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .uppercased()
-        guard !normalized.isEmpty else { return false }
-        let d = UserDefaults.standard
-        d.set(normalized, forKey: ibanKey)
-        d.removeObject(forKey: connectionIdKey)
-        d.removeObject(forKey: credModelFullKey)
-        d.removeObject(forKey: credModelUserIdKey)
-        d.removeObject(forKey: credModelNoneKey)
-        d.removeObject(forKey: connectionNameKey)
-        await sessionStore.clearAll()
-        return true
-    }
-
     /// Live bank search using the YAXI search API.
     /// Query is split into individual terms (one per word ≥ 2 chars) as recommended by YAXI docs.
     static func searchBanks(query: String) async -> [ConnectionInfo] {
@@ -585,18 +565,6 @@ enum YaxiService {
         d.set(info.credentials.none,   forKey: credModelNoneKey)
         d.set(info.displayName,        forKey: connectionNameKey)
         AppLogger.log("storeConnectionInfo: connId=\(info.id.description.prefix(8)) name=\(info.displayName)", category: "YaxiService")
-    }
-
-    /// Clears connection state without storing an IBAN (for accounts() flow).
-    static func clearConnectionState() async {
-        let d = UserDefaults.standard
-        d.removeObject(forKey: ibanKey)
-        d.removeObject(forKey: connectionIdKey)
-        d.removeObject(forKey: credModelFullKey)
-        d.removeObject(forKey: credModelUserIdKey)
-        d.removeObject(forKey: credModelNoneKey)
-        d.removeObject(forKey: connectionNameKey)
-        await sessionStore.clearAll()
     }
 
     /// Clears only session data (connectionData + in-memory sessions) without touching
@@ -1551,11 +1519,6 @@ enum YaxiService {
         return nil
     }
 
-    static func clearSessionState() async {
-        await sessionStore.clearAll()
-        AppLogger.log("Cleared YAXI session state", category: "YaxiService")
-    }
-
     /// Clears all session data (UserDefaults) for a specific slot.
     /// Call this when permanently deleting a slot.
     static func clearSessionData(forSlotId slotId: String) async {
@@ -2432,10 +2395,6 @@ enum YaxiService {
         f.timeZone = TimeZone.current
         return f
     }()
-
-    private static func dateString(_ date: Date) -> String {
-        isoDateFormatter.string(from: date)
-    }
 
     /// Verdichtet `bankTransactionCodes` zu EINEM Text, der in eine Spalte passt.
     ///
@@ -3501,7 +3460,6 @@ actor RedirectCoordinator {
     }
 
     #if DEBUG
-    func zuruecksetzenFuerTests() { geoeffnet = [:] }
     #endif
 }
 

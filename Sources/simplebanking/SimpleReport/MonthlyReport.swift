@@ -21,13 +21,6 @@ struct ReportMonth: Equatable, Hashable {
         return ReportMonth(year: y, month: m)
     }
 
-    var shortLabel: String {
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "de_DE")
-        df.dateFormat = "MMM yyyy"
-        return df.string(from: dateInMonth).uppercased()
-    }
-
     var longLabel: String {
         let df = DateFormatter()
         df.locale = Locale(identifier: "de_DE")

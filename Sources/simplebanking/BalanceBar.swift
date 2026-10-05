@@ -1032,27 +1032,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         updateHiddenBalanceTooltip()
     }
 
-    private func cachedBackendConnectionDisplayName() -> String? {
-        let fm = FileManager.default
-        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        let stateURL = appSupport
-            .appendingPathComponent("com.maik.simplebanking", isDirectory: true)
-            .appendingPathComponent("state.json")
-
-        guard let data = try? Data(contentsOf: stateURL),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return nil
-        }
-
-        let value = (json["connectionDisplayName"] as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value, !value.isEmpty else { return nil }
-        return value
-    }
-
     /// Single source of truth: applies a BankSlot's identity to both AppStorage globals and txVM.
     /// Call this at startup and on every slot switch — NOT during data refresh.
     private func applySlotToViewModel(_ slot: BankSlot) {
@@ -2599,11 +2578,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
-    // Called from SetupFlowPanel outcome — activates single demo
-    @objc private func toggleDemoMode() {
-        if !demoMode { setDemoSingle() } else { setDemoOff() }
-    }
-
     @objc private func setDemoSingle() {
         let wasMulti = isMultiDemo
         if wasMulti { tearDownDemoSlots() }
@@ -2880,11 +2854,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         demoPreviousSlots = []
     }
 
-    @objc private func toggleSupportDiagnostics() {
-        AppLogger.setEnabled(!appLoggingEnabled)
-        applyLocalizedMenuTitles()
-    }
-
     @objc private func sendDiagnosticReport() {
         DispatchQueue.global(qos: .userInitiated).async {
             let logsDir = AppLogger.logDirectoryURL
@@ -3133,13 +3102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 item.isEnabled = true
             }
         }
-    }
-
-    @objc private func hideNow() {
-        // manual hide always hides immediately
-        hideBalance()
-        // keep timer behavior consistent after manual hide/unhide
-        applyHideTimer()
     }
 
     @objc private func setHideOff() { hideIndex = 0; restartHideTimer() }
@@ -4050,14 +4012,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 self.txVM.balanceChange = balanceChange
                 self.txVM.balanceChangeEuro = balanceChangeEuro
             }
-        }
-    }
-
-    private func toggleBalanceVisibility() {
-        if isHiddenBalance {
-            unhideNow()
-        } else {
-            hideBalance()
         }
     }
 
@@ -5366,10 +5320,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // wirkt (sonst brauchte es zwei Klicks).
             DispatchQueue.main.async { [weak self] in self?.refreshFlyoutIfVisible() }
         }
-    }
-
-    @objc private func showTransactions() {
-        Task { await openTransactionsPanel() }
     }
 
     /// Refresht den Kontostand und triggert optional einen TX-Fetch.
@@ -6810,14 +6760,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
-    // MARK: - Task 3: Add account wizard
-
-    private func runSetupWizardForAddingAccount() {
-        DispatchQueue.main.async { [weak self] in
-            self?._runSetupWizardForAddingAccount()
-        }
-    }
-
     private func _runSetupWizardForAddingAccount() {
         let previousSlot = MultibankingStore.shared.activeSlot
 
@@ -8055,18 +7997,6 @@ private struct FlyoutSlotSegmentedControl: View {
 
 }
 
-/// Liquid-glass backdrop — blurs the desktop behind the popover (behindWindow).
-private struct FlyoutVibrancyBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.material = .popover
-        v.blendingMode = .behindWindow
-        v.state = .active
-        return v
-    }
-    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
-}
-
 private struct StatusBalanceFlyoutCardView: View {
     @AppStorage("balanceMoodEmojiEnabled") private var emojiEnabled: Bool = false
     let balanceText: String
@@ -8266,39 +8196,6 @@ private struct StatusBalanceFlyoutCardView: View {
         f.maximumFractionDigits = 0
         return f
     }()
-
-    private func leftToPayLabel(_ amount: Double) -> String {
-        let formatted = Self.leftToPayFormatter.string(from: NSNumber(value: amount))
-            ?? "\(Int(amount)) €"
-        return L10n.t("Noch offen: \(formatted)", "Still to pay: \(formatted)")
-    }
-
-    /// "Verfügbar: 1.184,56 €" — nur wenn `availableBalance` gesetzt ist (= es gibt vorgemerkte
-    /// Ausgaben). Bewusst eine eigene, ruhige Mini-Zeile statt eines neuen Subtitle-Toggle-Modes.
-    private var availableBalanceLine: String? {
-        guard let avail = availableBalance else { return nil }
-        let f = NumberFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.numberStyle = .currency
-        f.currencyCode = (currency?.isEmpty == false) ? currency! : "EUR"
-        f.maximumFractionDigits = 2
-        let formatted = f.string(from: NSNumber(value: avail)) ?? String(format: "%.2f €", avail)
-        return L10n.t("Nach Vormerkungen: \(formatted)", "After pending: \(formatted)")
-    }
-
-    @ViewBuilder
-    private var availableBalanceSubline: some View {
-        if let line = availableBalanceLine {
-            Text(line)
-                .font(.system(size: 11, weight: .regular))
-                .foregroundColor(Color(NSColor.tertiaryLabelColor))
-                .lineLimit(1)
-                .help(L10n.t(
-                    "Gebuchter Saldo abzüglich vorgemerkter Ausgaben (ohne vorgemerkte Eingänge).",
-                    "Booked balance minus pending debits (pending credits excluded)."
-                ))
-        }
-    }
 
     @AppStorage("balanceSubtitleStyle.flyout") private var flyoutSubtitleStyle: Int = 0
 

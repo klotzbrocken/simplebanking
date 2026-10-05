@@ -237,8 +237,6 @@ struct AppTheme: Identifiable, Equatable {
     }
 
     var accentColor: NSColor { Self.color(from: accentHex, fallback: .controlAccentColor) }
-    var positiveColor: NSColor { Self.color(from: positiveHex, fallback: .systemGreen) }
-    var negativeColor: NSColor { Self.color(from: negativeHex, fallback: .systemRed) }
     var positiveLightColor: NSColor { Self.color(from: positiveLightHex ?? positiveHex, fallback: .systemGreen) }
     var positiveDarkColor: NSColor  { Self.color(from: positiveDarkHex  ?? positiveHex, fallback: .systemGreen) }
     var negativeLightColor: NSColor { Self.color(from: negativeLightHex ?? negativeHex, fallback: .systemRed) }

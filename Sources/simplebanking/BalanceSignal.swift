@@ -24,9 +24,6 @@ struct BalanceSignalStyle {
     let statusTextDE: String
     let statusTextEN: String
 
-    var localizedStatusText: String {
-        L10n.t(statusTextDE, statusTextEN)
-    }
 }
 
 /// Temperatur-„Wash" nach Kontostand (Prototyp 4b/1c): 160°-Verlauf hinter dem

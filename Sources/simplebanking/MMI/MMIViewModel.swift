@@ -32,10 +32,6 @@ final class MMIViewModel: ObservableObject {
         )
     }
 
-    // Diff-Badges
-    var scoreDiff:       Double { displayed.score       - real.score }
-    var savingsRateDiff: Double { displayed.savingsRate - real.savingsRate }
-
     // MARK: Load
 
     /// Monoton wachsendes Token — nur das Ergebnis des jüngsten `load()` wird angewendet.

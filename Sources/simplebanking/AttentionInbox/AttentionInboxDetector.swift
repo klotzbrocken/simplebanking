@@ -25,15 +25,6 @@ enum AttentionCardType {
         }
     }
 
-    /// 1 = kritisch (rot), 2 = ungewöhnlich (orange), 3 = info (blau)
-    var defaultPriority: Int {
-        switch self {
-        case .salaryMissing, .possibleDuplicate:      return 1
-        case .subscriptionPriceIncrease,
-             .unusuallyHighExpense, .newDirectDebit:  return 2
-        case .newMerchant, .categorySpike, .reminder: return 3
-        }
-    }
 }
 
 struct AttentionCard: Identifiable {

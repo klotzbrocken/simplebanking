@@ -104,10 +104,6 @@ struct TransferSheet: View {
         get { focusField == .name }
         nonmutating set { focusField = newValue ? .name : (focusField == .name ? nil : focusField) }
     }
-    private var ibanFocused: Bool {
-        get { focusField == .iban }
-        nonmutating set { focusField = newValue ? .iban : (focusField == .iban ? nil : focusField) }
-    }
     private var amountFocused: Bool {
         get { focusField == .amount }
         nonmutating set { focusField = newValue ? .amount : (focusField == .amount ? nil : focusField) }

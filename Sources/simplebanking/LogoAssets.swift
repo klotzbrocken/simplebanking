@@ -12,12 +12,6 @@ enum LogoAssets {
         return URL(string: "https://commons.wikimedia.org/wiki/Special:FilePath/\(filename)?width=\(width)")
     }
 
-    /// Wikimedia-Commons-Seite (für Attribution / Lizenzinfo)
-    static func pageURL(for displayName: String) -> URL? {
-        guard let filename = logos[displayName] else { return nil }
-        return URL(string: "https://commons.wikimedia.org/wiki/File:\(filename)")
-    }
-
     static var allDisplayNames: [String] {
         Array(logos.keys)
     }

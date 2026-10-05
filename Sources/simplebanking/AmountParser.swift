@@ -41,10 +41,6 @@ enum AmountParser {
         return Double(filtered)
     }
 
-    /// Same as parseCurrencyDisplayOrNil but falls back to 0.
-    static func parseCurrencyDisplay(_ raw: String?) -> Double {
-        parseCurrencyDisplayOrNil(raw) ?? 0
-    }
 }
 
 extension TransactionsResponse.Transaction {

@@ -47,9 +47,6 @@ enum SavingsBookmarks {
         UserDefaults.standard.set(bookmarks, forKey: key)
     }
 
-    static func allBookmarked() -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
-    }
 }
 
 // MARK: - Transaction Detail View

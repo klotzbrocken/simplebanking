@@ -111,13 +111,6 @@ struct MMIComponents {
         return min(max(raw, -1), 1)
     }
 
-    /// BF = Kontostand normiert gegen 3-Monats-Reserve, geclampt [0, 1]
-    /// (für Ring-Visuals; der Score nutzt die Funktion `bufferScore` direkt)
-    var bufferFactor: Double {
-        guard bufferMonths > 0 else { return 0 }
-        return min(bufferMonths / 3.0, 1.0)
-    }
-
     /// Reichweite des Kontostands in Monaten gegen den durchschnittlichen Burn.
     var bufferMonths: Double {
         let monthlyExp = expenses / max(periodMonths, 1)

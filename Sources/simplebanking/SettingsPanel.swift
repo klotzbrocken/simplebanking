@@ -337,66 +337,12 @@ struct SettingsView: View {
         L10n.t(de, en)
     }
 
-    private var isDefaultThemeSelected: Bool {
-        themeId == ThemeManager.defaultThemeID
-    }
-
     private var normalizedBalanceSignalThresholds: BalanceSignalThresholds {
         BalanceSignal.normalizedThresholds(
             deepOverdraft: balanceSignalDeepOverdraftThreshold,
             low: balanceSignalLowUpperBound,
             medium: balanceSignalMediumUpperBound,
             veryGood: balanceSignalVeryGoodLowerBound
-        )
-    }
-
-    private var balanceSignalDeepBinding: Binding<Int> {
-        Binding(
-            get: { balanceSignalDeepOverdraftThreshold },
-            set: { newValue in
-                // Strikt negativ klemmen, sonst gibt es keinen „leichten Überzug"-Bereich.
-                balanceSignalDeepOverdraftThreshold = min(-1, newValue)
-            }
-        )
-    }
-
-    private var balanceSignalLowBinding: Binding<Int> {
-        Binding(
-            get: { balanceSignalLowUpperBound },
-            set: { newValue in
-                let normalizedLow = max(0, newValue)
-                balanceSignalLowUpperBound = normalizedLow
-                if balanceSignalMediumUpperBound <= normalizedLow {
-                    balanceSignalMediumUpperBound = normalizedLow + 1
-                }
-                if balanceSignalVeryGoodLowerBound <= balanceSignalMediumUpperBound {
-                    balanceSignalVeryGoodLowerBound = balanceSignalMediumUpperBound + 1
-                }
-            }
-        )
-    }
-
-    private var balanceSignalMediumBinding: Binding<Int> {
-        Binding(
-            get: { balanceSignalMediumUpperBound },
-            set: { newValue in
-                let minAllowed = max(0, balanceSignalLowUpperBound) + 1
-                let normalizedMedium = max(minAllowed, newValue)
-                balanceSignalMediumUpperBound = normalizedMedium
-                if balanceSignalVeryGoodLowerBound <= normalizedMedium {
-                    balanceSignalVeryGoodLowerBound = normalizedMedium + 1
-                }
-            }
-        )
-    }
-
-    private var balanceSignalVeryGoodBinding: Binding<Int> {
-        Binding(
-            get: { balanceSignalVeryGoodLowerBound },
-            set: { newValue in
-                let minAllowed = balanceSignalMediumUpperBound + 1
-                balanceSignalVeryGoodLowerBound = max(minAllowed, newValue)
-            }
         )
     }
 
@@ -638,10 +584,6 @@ struct SettingsView: View {
 
     private var appBuildString: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
-    }
-
-    private var appBuildTimestamp: String {
-        Bundle.main.object(forInfoDictionaryKey: "SBBuildTimestamp") as? String ?? "-"
     }
 
     private var appBuildDateFormatted: String {

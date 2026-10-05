@@ -199,14 +199,6 @@ final class TransactionsViewModel: ObservableObject {
         return (raw, dot, compact)
     }
 
-    private func searchableText(for transaction: TransactionsResponse.Transaction) -> String {
-        Self.computeSearchableText(transaction)
-    }
-
-    private func buildSearchIndexText(for transaction: TransactionsResponse.Transaction) -> String {
-        Self.computeSearchIndexText(transaction)
-    }
-
     /// Off-main-fähige Variante — nur read-only Resolver + pure String-Ops.
     /// `cadenceMap` (optional) macht die Intervall-Regel-Kategorisierung timing-unabhängig:
     /// statt des globalen Live-Cache wird die Cadence DIESES Snapshots explizit genutzt.
@@ -340,11 +332,6 @@ final class TransactionsViewModel: ObservableObject {
             return uniqueDateCache.count
         }
         return max(1, Int(ceil(Double(filteredTransactions.count) / Double(pageSize))))
-    }
-
-    var currentDateLabel: String {
-        guard page < uniqueDateCache.count else { return "" }
-        return uniqueDateCache[page]
     }
 
     var currentPageItems: [TransactionsResponse.Transaction] {

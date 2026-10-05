@@ -2168,10 +2168,6 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         }
     }
 
-    @objc private func openYaxiWebsite() {
-        NSWorkspace.shared.open(URL(string: "https://yaxi.tech")!)
-    }
-
     @objc private func openEbonHelp() {
         NSWorkspace.shared.open(URL(string: "https://www.simplebanking.de/ebons")!)
     }

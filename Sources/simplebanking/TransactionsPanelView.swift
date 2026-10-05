@@ -805,10 +805,6 @@ private struct TransactionsPanelView: View {
     // MARK: - REWE eBon (Balance-Card + Einkaufsliste im Panel)
 
     private func reweEuro(_ c: Int) -> String { String(format: "%.2f €", Double(c) / 100) }
-    private func reweDate(_ iso: String) -> String {
-        let p = String(iso.prefix(10)).split(separator: "-")
-        return p.count == 3 ? "\(p[2]).\(p[1]).\(p[0])" : String(iso.prefix(10))
-    }
     private var reweMonthCents: Int {
         let cal = Calendar.current; let now = Date()
         let ym = String(format: "%04d-%02d", cal.component(.year, from: now), cal.component(.month, from: now))
@@ -1170,38 +1166,6 @@ private struct TransactionsPanelView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
-    }
-
-    @ViewBuilder
-    private func bankNavLogoView(_ logo: NSImage?, brandId: String?, chevron: String) -> some View {
-        HStack(alignment: .center, spacing: 3) {
-            // Left chevron — always reserved so logo stays in fixed position
-            Image(systemName: "chevron.left")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 12, height: 18)
-                .opacity(chevron == "chevron.left" ? 1 : 0)
-            // Logo — always at same position
-            let invert = activeColorScheme == .dark && BankLogoAssets.isDark(brandId: brandId ?? "")
-            if let logo {
-                if invert {
-                    Image(nsImage: logo).resizable().scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                        .colorInvert()
-                } else {
-                    Image(nsImage: logo).resizable().scaledToFit()
-                        .frame(width: 18, height: 18)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                }
-            } else {
-                Color.clear.frame(width: 18, height: 18)
-            }
-            // Right chevron — always reserved
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 12, height: 18)
-                .opacity(chevron == "chevron.right" ? 1 : 0)
-        }
     }
 
     /// Renders the header line next to the bank logo, replacing the old "Aktualisiert …" text.
@@ -2899,41 +2863,6 @@ private struct TransactionsPanelView: View {
         return limit * (1 - exp(-raw * k / limit))
     }
 
-    private func switchToNextSlot() {
-        let store = multibankingStore
-
-        if vm.unifiedModeEnabled {
-            vm.unifiedModeEnabled = false
-            accountNav.onSwitchToIndex?(0)
-        } else {
-            let next = store.activeIndex + 1
-            if next < store.slots.count {
-                accountNav.onSwitchToIndex?(next)
-            } else {
-                // Wrap → unified mode
-                vm.unifiedModeEnabled = true
-            }
-        }
-    }
-
-    private func switchToPrevSlot() {
-        let store = multibankingStore
-
-        if vm.unifiedModeEnabled {
-            // Unified → last individual slot
-            vm.unifiedModeEnabled = false
-            accountNav.onSwitchToIndex?(store.slots.count - 1)
-        } else {
-            let prev = store.activeIndex - 1
-            if prev >= 0 {
-                accountNav.onSwitchToIndex?(prev)
-            } else {
-                // Wrap → unified mode
-                vm.unifiedModeEnabled = true
-            }
-        }
-    }
-
     // MARK: - Roundup View Toggle
 
     private func toggleRoundupView() {
@@ -4477,11 +4406,6 @@ final class AccountNavModel: ObservableObject {
         panel.level = isPinned ? .floating : .normal
     }
 
-    fileprivate func togglePin() {
-        isPinned.toggle()
-        toolbarDelegate?.refreshPinButton()
-    }
-
     init(vm: TransactionsViewModel, onRefresh: @escaping () async -> Void = {}, onSettings: (() -> Void)? = nil,
          onOpenDashboard: ((DashboardTab) -> Void)? = nil) {
         self.vm = vm
@@ -4665,10 +4589,6 @@ final class AccountNavModel: ObservableObject {
         panel.toolbar = nil
     }
 
-    // Clippy-Easter-Egg in v1.5.0 entfernt — Header-Click ist jetzt no-op.
-    @objc private func onBankHeaderClicked(_ sender: NSClickGestureRecognizer) {
-        guard sender.state == .ended else { return }
-    }
 }
 
 extension Notification.Name {
@@ -4819,96 +4739,6 @@ struct ReminderPickerSheet: View {
         }
         .padding(24)
         .frame(width: 360)
-    }
-}
-
-// MARK: - Filter Menu Button (NSViewRepresentable)
-
-private struct FilterMenuButton: NSViewRepresentable {
-    let activeFilter: TxFilter
-    let showCategories: Bool
-    let onSelect: (TxFilter) -> Void
-    let onToggleCategories: () -> Void
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton()
-        button.isBordered = false
-        button.imagePosition = .imageOnly
-        button.target = context.coordinator
-        button.action = #selector(Coordinator.clicked(_:))
-        return button
-    }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.activeFilter = activeFilter
-        context.coordinator.showCategories = showCategories
-        context.coordinator.onSelect = onSelect
-        context.coordinator.onToggleCategories = onToggleCategories
-        let name = activeFilter == .all
-            ? "line.3.horizontal.decrease"
-            : "line.3.horizontal.decrease.circle.fill"
-        if let img = NSImage(systemSymbolName: name, accessibilityDescription: nil) {
-            img.isTemplate = true
-            button.image = img
-        }
-        button.contentTintColor = .labelColor
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    @MainActor final class Coordinator: NSObject {
-        var activeFilter: TxFilter = .all
-        var showCategories: Bool = false
-        var onSelect: (TxFilter) -> Void = { _ in }
-        var onToggleCategories: () -> Void = {}
-
-        // Tag-Offset: Filter-Items 0…(n-1), Kategorien-Toggle = 1000
-        private let categoriesTag = 1000
-
-        @objc func clicked(_ sender: NSButton) {
-            let menu = NSMenu()
-            for filter in TxFilter.allCases {
-                let item = NSMenuItem(title: filter.label, action: #selector(itemSelected(_:)), keyEquivalent: "")
-                item.target = self
-                item.tag = filter.rawValue
-                if let img = NSImage(systemSymbolName: filter.icon, accessibilityDescription: nil) {
-                    img.isTemplate = true
-                    item.image = img
-                }
-                if activeFilter == filter { item.state = .on }
-                menu.addItem(item)
-            }
-
-            // Kategorien-Toggle — visuell abgehoben durch Separator
-            menu.addItem(.separator())
-            let catItem = NSMenuItem(
-                title: showCategories
-                    ? NSLocalizedString("Kategorien ausblenden", comment: "")
-                    : NSLocalizedString("Kategorien anzeigen", comment: ""),
-                action: #selector(itemSelected(_:)),
-                keyEquivalent: ""
-            )
-            catItem.target = self
-            catItem.tag = categoriesTag
-            catItem.state = showCategories ? .on : .off
-            if let img = NSImage(systemSymbolName: "tag", accessibilityDescription: nil) {
-                img.isTemplate = true
-                catItem.image = img
-            }
-            menu.addItem(catItem)
-
-            let bounds = sender.bounds
-            menu.popUp(positioning: nil, at: NSPoint(x: bounds.minX, y: bounds.maxY), in: sender)
-        }
-
-        @objc func itemSelected(_ sender: NSMenuItem) {
-            if sender.tag == categoriesTag {
-                onToggleCategories()
-                return
-            }
-            guard let filter = TxFilter(rawValue: sender.tag) else { return }
-            onSelect(filter)
-        }
     }
 }
 

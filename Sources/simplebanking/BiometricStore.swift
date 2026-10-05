@@ -217,17 +217,6 @@ enum BiometricStore {
 
     private static let autoUnlockAccount = "master-password-auto"
 
-    /// Prüft ob ein Auto-Unlock-Passwort gespeichert ist (kein Prompt).
-    static var hasAutoUnlockPassword: Bool {
-        let query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: autoUnlockAccount,
-            kSecReturnData: false
-        ]
-        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
-    }
-
     /// Speichert das Passwort für Auto-Unlock (lesbar ohne biometrischen Prompt).
     static func saveForAutoUnlock(password: String) throws {
         guard let data = password.data(using: .utf8) else { return }
