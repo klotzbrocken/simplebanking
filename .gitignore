@@ -1,5 +1,7 @@
 .DS_Store
 /.build
+# Auch das Nebenpaket (REWE-Prüfstand) legt seinen Bauordner an.
+.build/
 /Packages
 xcuserdata/
 DerivedData/
