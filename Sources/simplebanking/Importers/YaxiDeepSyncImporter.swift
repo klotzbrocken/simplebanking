@@ -46,7 +46,8 @@ enum YaxiDeepSyncImporter {
                 password: creds.password,
                 from: from,
                 callSource: .silent
-            )
+            ,
+                ausloeser: .nutzerhandlung)
         } catch {
             throw ImportError.fetchFailed(error.localizedDescription)
         }

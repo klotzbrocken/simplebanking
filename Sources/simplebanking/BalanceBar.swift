@@ -5553,6 +5553,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // wurde nichts geöffnet; das Konto wird vermerkt und vom Zeitgeber
                 // künftig ausgelassen, bis der Nutzer selbst neu verbindet.
                 Self.merkeFreigabeFaellig(slotId: YaxiService.activeSlotId)
+                // Beides, nicht nur das Flag: Die Fehlerzeile über der Umsatzliste
+                // hängt an `if let err = vm.error`. Ohne Text rendert sie nicht — und
+                // mit ihr fehlt der Knopf „Erneut verbinden", der der einzige Weg
+                // zurück ist, weil der Zeitgeber das Konto ab jetzt auslässt.
+                txVM.error = YaxiService.freigabeNoetigText
                 txVM.errorNeedsReconnect = true
                 statusItem.button?.toolTip = YaxiService.freigabeNoetigText
                 AppLogger.log("Freigabe fällig — Konto stillgelegt, nichts geöffnet (slot=\(YaxiService.activeSlotId.prefix(8)))",
@@ -5805,7 +5810,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Pfade gegeneinander — innerhalb desselben Pfads müssen wir die Calls
             // ebenfalls serialisieren. Balance zuerst (ist schnell ~1-3s), Transactions
             // danach (~5-30s) — UX gefühlt gleich, weil der Saldo früh sichtbar wird.
-            let balancesResp = try? await YaxiService.fetchBalances(userId: userId, password: password)
+            // `.nutzerhandlung`, und das ist keine Formalie: Durch diesen Pfad läuft
+            // alles, was der Nutzer selbst anfasst — die Umsatzliste öffnen,
+            // Pull-to-Refresh, der ↻ im Listenkopf. Stand hier der Vorgabewert
+            // `.hintergrund`, lehnte die Freigabe-Schranke ab, und ein Konto mit
+            // abgelaufener Zustimmung ließ sich über die Liste nicht mehr
+            // wiederbeleben (gemeldet am 16.10.2026).
+            let balancesResp = try? await YaxiService.fetchBalances(
+                userId: userId, password: password, ausloeser: .nutzerhandlung)
             guard slotEpoch == epochAtStart else {
                 txVM.isLoading = false
                 return
@@ -5849,7 +5861,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 updateStatusBalanceTitle()
             }
 
-            let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
+            let resp = try await YaxiService.fetchTransactions(
+                userId: userId, password: password, from: from, ausloeser: .nutzerhandlung)
 
             // Bail if the slot changed while we were awaiting the network response
             guard slotEpoch == epochAtStart else {
@@ -6060,7 +6073,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Gleicher Pattern wie in refreshAsync und openTransactionsPanel.
         let epochAtStart = slotEpoch
         do {
-            let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from)
+            // `checkNewBookings` läuft als Nachlauf jedes Abrufs, auch des zeitgesteuerten.
+            // Hier darf nie eine Bankseite aufgehen — der Nutzer hat nichts angeklickt.
+            let resp = try await YaxiService.fetchTransactions(userId: userId, password: password, from: from,
+                ausloeser: .hintergrund)
             // Bail wenn Slot mid-await gewechselt hat — Ergebnis gehört zum alten Slot.
             guard slotEpoch == epochAtStart else { return }
             guard (resp.ok ?? false), let tx = resp.transactions, !tx.isEmpty else { return }
@@ -7391,7 +7407,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 try await YaxiService.fetchAccounts(
                     userId: result.userId, password: result.password,
                     alwaysTrace: true, callSource: .setupWarmup
-                )
+                ,
+                    ausloeser: .nutzerhandlung)
             }
             let selectableAccounts = discoveredAccounts.filter { account in
                 let iban = account.iban?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -7433,7 +7450,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     password: result.password,
                     alwaysTrace: true,
                     callSource: .setupWarmup
-                )
+                ,
+                    ausloeser: .nutzerhandlung)
             }
             if !warmupBalances.ok {
                 let techMsg = warmupBalances.error?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -7461,7 +7479,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     from: warmupFrom,
                     alwaysTrace: true,
                     callSource: .setupWarmup
-                )
+                ,
+                    ausloeser: .nutzerhandlung)
             }
 
             if !(warmupTransactions.ok ?? false) {
@@ -7476,7 +7495,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     try await YaxiService.fetchBalances(
                         userId: result.userId, password: result.password,
                         alwaysTrace: true, callSource: .setupWarmup
-                    )
+                    ,
+                        ausloeser: .nutzerhandlung)
                 }
                 warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions_retry", timeout: 720, logger: diagnosticsLogger,
                                                                      succeeded: { $0.ok == true }) {
@@ -7486,7 +7506,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         from: warmupFrom,
                         alwaysTrace: true,
                         callSource: .setupWarmup
-                    )
+                    ,
+                        ausloeser: .nutzerhandlung)
                 }
             }
 

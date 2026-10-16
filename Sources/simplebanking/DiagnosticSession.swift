@@ -250,11 +250,15 @@ final class DiagnosticSession: ObservableObject {
         let balanceStart = Date()
         let balanceResult: ProbeResult
         do {
+            // Ausdrücklich `.hintergrund`, obwohl der Nutzer die Diagnose selbst startet:
+            // Sie soll berichten, dass eine Freigabe fällig ist — nicht mitten im Bericht
+            // eine Bankseite öffnen.
             let response = try await YaxiService.fetchBalances(
                 userId: creds.userId, password: creds.password,
                 alwaysTrace: true,
                 callSource: .diagnostic
-            )
+            ,
+                ausloeser: .hintergrund)
             let dur = msSince(balanceStart)
             if response.ok {
                 balanceResult = .ok(durationMs: dur)
@@ -301,7 +305,8 @@ final class DiagnosticSession: ObservableObject {
                 userId: creds.userId, password: creds.password,
                 from: from30d, alwaysTrace: true,
                 callSource: .diagnostic
-            )
+            ,
+                ausloeser: .hintergrund)
             let dur = msSince(txStart)
             if response.ok ?? false {
                 txResult = .ok(durationMs: dur)
