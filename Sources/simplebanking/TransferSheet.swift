@@ -80,6 +80,14 @@ struct TransferSheet: View {
 
     // Empfänger informieren (Mail-Quittung)
     @State private var informRecipient: Bool = false
+    /// Echtzeit erzwingen statt sie nur zu versuchen.
+    ///
+    /// Aus heißt **nicht** „langsam": Die Voreinstellung `.defaultSEPACreditTransfer`
+    /// versucht ohnehin zuerst Echtzeit und fällt still zurück, wenn die Bank nicht kann.
+    /// An heißt „lieber abbrechen als heimlich normal überweisen" — für Zahlungen, bei
+    /// denen die Gewissheit wichtiger ist als das Durchkommen. Bewusst nicht gespeichert:
+    /// Das ist eine Entscheidung je Überweisung, keine Einstellung.
+    @State private var echtzeitErzwingen: Bool = false
     @State private var recipientEmail: String = ""
 
     // Scheduling
@@ -375,6 +383,7 @@ struct TransferSheet: View {
                 betragSection
                 verwendungszweckSection
                 flowCardSection
+                echtzeitSection
                 informRecipientSection
                 if let err = bodyError {
                     Text(err)
@@ -1049,6 +1058,35 @@ struct TransferSheet: View {
     /// Optional: Empfänger bekommt nach erfolgreichem Send eine E-Mail mit
     /// PDF-Quittung. Mail-Compose öffnet im System-Mail-Client; nichts wird
     /// ohne explizite Bestätigung versendet.
+    /// „Echtzeit erzwingen" — bewusst als Ausnahme formuliert, nicht als Hauptweg.
+    /// Normal wird Echtzeit ohnehin versucht; dieser Schalter macht aus dem Versuch eine
+    /// Bedingung und nimmt in Kauf, dass die Bank ablehnt.
+    @ViewBuilder
+    private var echtzeitSection: some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: $echtzeitErzwingen) { EmptyView() }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
+                .disabled(scheduledDate != nil)
+            Text(L10n.t("Nur als Echtzeitüberweisung senden",
+                        "Send only as instant transfer"))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.sbTextPrimary)
+            Spacer()
+            if scheduledDate != nil {
+                Text(L10n.t("nicht bei Termin", "not for scheduled"))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.sbTextSecondary)
+            } else if echtzeitErzwingen {
+                Text(L10n.t("bricht ab, wenn die Bank es nicht kann",
+                            "fails if the bank cannot"))
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.sbTextSecondary)
+            }
+        }
+    }
+
     @ViewBuilder
     private var informRecipientSection: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1842,7 +1880,12 @@ struct TransferSheet: View {
                 request: request,
                 userId: userId,
                 password: password,
-                requestedExecutionDate: scheduledDate
+                requestedExecutionDate: scheduledDate,
+                // Bei einer Terminüberweisung ergibt Echtzeit keinen Sinn — das Datum
+                // bestimmt den Tag, nicht die Sekunde.
+                produkt: (echtzeitErzwingen && scheduledDate == nil)
+                    ? .sepaInstantCreditTransfer
+                    : .defaultSEPACreditTransfer
             )
             await MainActor.run {
                 // Hat der Nutzer das Warten beendet, meldet der Dienst einen Fehlschlag —

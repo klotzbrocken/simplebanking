@@ -21,8 +21,14 @@ struct BalancesResponse: Codable, Sendable {
     struct Balance: Codable, Sendable {
         let amount: String
         let currency: String
+        /// Welcher Lesart die Bank diesen Betrag zuordnet. **Nicht** zwingend „Booked":
+        /// `Saldoauswahl` nimmt den aktuellsten brauchbaren Stand, und das kann ein
+        /// `Available` sein, wenn der gebuchte Saldo vom Vortag stammt.
         let balanceType: String?
         let creditLimitIncluded: Bool?
+        /// Wann dieser Stand gilt, sofern die Bank es sagt. Für die Auswahl entscheidend
+        /// und der einzige Weg, einen alten Saldo als alt zu erkennen.
+        var dateTime: Date? = nil
     }
 
     let ok: Bool

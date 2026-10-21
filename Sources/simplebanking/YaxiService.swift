@@ -1824,15 +1824,28 @@ enum YaxiService {
     ///   `UnexpectedError`/`ProviderError` ist `mayHaveBeenExecuted=true`,
     ///   weil die Bank den Transfer trotzdem ausgeführt haben kann
     ///   (laut YAXI-Doku) — die UI muss das ehrlich kommunizieren.
-    /// `requestedExecutionDate` ist optional. nil = sofort (SEPA Instant).
-    /// Routex/YAXI nimmt einen `Date` und überträgt ihn als ISO-Date an die
-    /// Bank. Wochenende/Feiertage werden serverseitig validiert; im
-    /// Fehlerfall kommt ein `.failed`-Outcome mit der Bank-Begründung zurück.
+    /// `requestedExecutionDate` ist optional und steuert **nur den Termin**, nicht die
+    /// Geschwindigkeit. Hier stand bis zum 21.10.2026 „nil = sofort (SEPA Instant)" — das
+    /// war schlicht falsch und hat die Fehlersuche in die Irre geführt. Routex/YAXI nimmt
+    /// einen `Date` und überträgt ihn als ISO-Date an die Bank; Wochenende und Feiertage
+    /// werden serverseitig geprüft.
+    ///
+    /// Über die Geschwindigkeit entscheidet `produkt`, und das ist Pflicht. Die
+    /// Voreinstellung `.defaultSEPACreditTransfer` versucht laut SDK zuerst Echtzeit und
+    /// fällt auf die normale Überweisung zurück, wenn die Bank sie nicht kann — ohne
+    /// Fehler. Vorher stand hier fest `.sepaCreditTransfer`, also **immer** die langsame
+    /// Variante, auch bei Banken wie der ING, die Echtzeit standardmäßig beherrschen.
+    /// Gemeldet am 20.10.2026 als „Überweisungen brauchen ein bis zwei Tage".
+    ///
+    /// `.sepaInstantCreditTransfer` erzwingt Echtzeit und liefert `UnsupportedProduct`,
+    /// wenn die Bank nicht kann — für Fälle, in denen die Gewissheit wichtiger ist als
+    /// das Durchkommen.
     static func sendTransfer(
         request: TransferRequest,
         userId: String,
         password: String,
-        requestedExecutionDate: Date? = nil
+        requestedExecutionDate: Date? = nil,
+        produkt: PaymentProduct = .defaultSEPACreditTransfer
     ) async throws -> TransferOutcome {
         // Demo-Mode: kein Routex-Call, Mock-Erfolg. Stays consistent mit
         // dem Demo-Mode-Pattern in BalanceBar / MCP / CLI.
@@ -1851,7 +1864,8 @@ enum YaxiService {
                 request: request,
                 userId: userId,
                 password: password,
-                requestedExecutionDate: requestedExecutionDate
+                requestedExecutionDate: requestedExecutionDate,
+                produkt: produkt
             )
         }
         guard let outcome = result else {
@@ -1872,7 +1886,8 @@ enum YaxiService {
         request: TransferRequest,
         userId: String,
         password: String,
-        requestedExecutionDate: Date?
+        requestedExecutionDate: Date?,
+        produkt: PaymentProduct
     ) async throws -> TransferOutcome {
         let connIdKey = connectionIdKey(for: slotSnapshot)
         let model = loadCredentialsModel(slotId: slotSnapshot)
@@ -1948,7 +1963,7 @@ enum YaxiService {
                 resp = try await client.transfer(
                 ticket: ticket,
                 credentials: creds,
-                product: .sepaCreditTransfer,
+                product: produkt,
                 details: details,
                 debtorAccount: quellkonto,
                 debtorName: nil,
@@ -1967,7 +1982,7 @@ enum YaxiService {
                     resp = try await client.transfer(
                 ticket: ticket,
                 credentials: credsNoUserId,
-                product: .sepaCreditTransfer,
+                product: produkt,
                 details: details,
                 debtorAccount: quellkonto,
                 debtorName: nil,
@@ -1992,7 +2007,7 @@ enum YaxiService {
                     resp = try await client.transfer(
                 ticket: ticket,
                 credentials: credsNoCD,
-                product: .sepaCreditTransfer,
+                product: produkt,
                 details: details,
                 debtorAccount: quellkonto,
                 debtorName: nil,
@@ -2275,13 +2290,11 @@ enum YaxiService {
             allBalances = allEntries.first?.balances ?? []
         }
 
-        // Priority: Booked > Available > Expected (matches canonical YAXI-MoneyMoney
-        // reference in `mapping/balance.lua`). `Booked` is the authoritative posted balance.
-        // At some banks `Available` = booked + overdraft line (Dispokredit) — misleading
-        // as "Kontostand". Hence Booked first.
-        let booked = allBalances.first(where: { $0.balanceType == .booked })
-            ?? allBalances.first(where: { $0.balanceType == .available })
-            ?? allBalances.first
+        // Die Auswahl steckt in `Saldoauswahl` — dort steht auch, warum die frühere
+        // Rangfolge „Booked vor Available" falsch war. Kurz: Die Postbank liefert als
+        // `Booked` den Tagesabschluss des Vortags und daneben ein aktuelleres
+        // `Available`; die Reihenfolge der Einträge ist nicht zugesichert.
+        let booked = Saldoauswahl.waehle(aus: allBalances) ?? allBalances.first
         let expected = allBalances.first(where: { $0.balanceType == .expected })
 
         return BalancesResponse(
@@ -2301,7 +2314,11 @@ enum YaxiService {
             amount: (b.amount as NSDecimalNumber).stringValue,
             currency: b.currency,
             balanceType: balanceTypeName(b.balanceType),
-            creditLimitIncluded: b.creditLimitIncluded
+            creditLimitIncluded: b.creditLimitIncluded,
+            // Bis 21.10.2026 hier weggeworfen. Genau deshalb konnte ein Saldo vom Vortag
+            // unbemerkt stehen bleiben: Es gab keine Stelle, an der sein Alter überhaupt
+            // noch ablesbar gewesen wäre.
+            dateTime: b.dateTime
         )
     }
 

@@ -148,7 +148,24 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .unsupportedProduct(_, let msg):
+        case .unsupportedProduct(let grund, let msg):
+            // Seit 21.10.2026 kann dieser Fehler zwei verschiedene Dinge heißen, seit die
+            // Überweisung ein Produkt mitschickt: Entweder taugt das Konto nicht — oder
+            // die Bank kann schlicht keine Echtzeitüberweisung, und der Nutzer hat sie
+            // erzwungen. „Anderes Konto wählen" wäre dann ein irreführender Rat.
+            let istEchtzeit = "\(grund as Any?)".localizedCaseInsensitiveContains("instant")
+                || (msg ?? "").localizedCaseInsensitiveContains("instant")
+            if istEchtzeit {
+                return UserMessage(
+                    title: L10n.t("Echtzeit geht bei dieser Bank nicht",
+                                  "Instant transfer unavailable at this bank"),
+                    detail: msg,
+                    suggestion: L10n.t(
+                        "Schalte „Nur als Echtzeitüberweisung senden\u{201C} aus — dann geht sie als normale Überweisung raus.",
+                        "Turn off \u{201C}Send only as instant transfer\u{201D} and it goes out as a regular transfer."),
+                    isRetryable: false
+                )
+            }
             return UserMessage(
                 title: L10n.t("Konto wird nicht unterstützt", "Account type unsupported"),
                 detail: msg,
