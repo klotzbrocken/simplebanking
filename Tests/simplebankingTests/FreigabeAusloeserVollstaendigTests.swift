@@ -22,19 +22,10 @@ final class FreigabeAusloeserVollstaendigTests: XCTestCase {
     /// Die drei Dienste, die eine Freigabe auslösen können.
     private let dienste = ["fetchBalances", "fetchTransactions", "fetchAccounts"]
 
-    private var quellenverzeichnis: URL {
-        // …/Tests/simplebankingTests/<diese Datei> → …/Sources/simplebanking
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // simplebankingTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // Paketwurzel
-            .appendingPathComponent("Sources/simplebanking")
-    }
-
     /// Alle Aufrufstellen mit Datei, Zeile und dem vollständigen Klammerausdruck.
     private func aufrufstellen() throws -> [(datei: String, zeile: Int, dienst: String, argumente: String)] {
         let fm = FileManager.default
-        guard let lauf = fm.enumerator(at: quellenverzeichnis, includingPropertiesForKeys: nil) else {
+        guard let lauf = fm.enumerator(at: Quelltext.verzeichnis, includingPropertiesForKeys: nil) else {
             return []
         }
         var gefunden: [(String, Int, String, String)] = []
@@ -88,7 +79,7 @@ final class FreigabeAusloeserVollstaendigTests: XCTestCase {
     /// Gegenprobe, damit der Test oben nicht aus Versehen leer durchläuft: Der Pfad, der
     /// den Fehler ausgelöst hat, muss ihn ausdrücklich auf `.nutzerhandlung` setzen.
     func test_dieUmsatzlisteGiltAlsNutzerhandlung() throws {
-        let quelle = try String(contentsOf: quellenverzeichnis
+        let quelle = try String(contentsOf: Quelltext.verzeichnis
             .appendingPathComponent("BalanceBar.swift"), encoding: .utf8)
         let panel = try XCTUnwrap(quelle.range(of: "private func openTransactionsPanel"))
         // Bis zum nächsten `private func` auf derselben Ebene schauen.
@@ -104,7 +95,7 @@ final class FreigabeAusloeserVollstaendigTests: XCTestCase {
 
     /// Und die andere Richtung: Der Nachlauf nach einem Abruf darf **nie** etwas öffnen.
     func test_derNachlaufBleibtHintergrund() throws {
-        let quelle = try String(contentsOf: quellenverzeichnis
+        let quelle = try String(contentsOf: Quelltext.verzeichnis
             .appendingPathComponent("BalanceBar.swift"), encoding: .utf8)
         let fn = try XCTUnwrap(quelle.range(of: "private func checkNewBookings"))
         let rest = quelle[fn.upperBound...]

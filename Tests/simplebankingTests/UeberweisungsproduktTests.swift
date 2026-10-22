@@ -19,12 +19,7 @@ final class UeberweisungsproduktTests: XCTestCase {
     /// alte, immer langsame Wahl; `.sepaInstantCreditTransfer` würde bei jeder Bank ohne
     /// Echtzeit abbrechen. Dazwischen liegt die richtige Antwort.
     func test_voreinstellungVersuchtEchtzeitUndFaelltZurueck() throws {
-        let quelle = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent().deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/simplebanking/YaxiService.swift"),
-            encoding: .utf8)
+        let quelle = try Quelltext.datei("YaxiService.swift")
 
         XCTAssertTrue(quelle.contains("produkt: PaymentProduct = .defaultSEPACreditTransfer"),
                       "Die Voreinstellung muss Echtzeit versuchen und still zurückfallen.")
@@ -38,12 +33,7 @@ final class UeberweisungsproduktTests: XCTestCase {
 
     /// Der Kommentar, der die Fehlersuche gekostet hat, darf nicht zurückkommen.
     func test_derFalscheKommentarIstWeg() throws {
-        let quelle = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent().deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/simplebanking/YaxiService.swift"),
-            encoding: .utf8)
+        let quelle = try Quelltext.datei("YaxiService.swift")
         // Auf die Behauptung prüfen, nicht auf den Wortlaut: Der heutige Kommentar
         // zitiert den alten Satz, um zu erklären, warum er falsch war.
         XCTAssertFalse(quelle.contains("/// `requestedExecutionDate` ist optional. nil = sofort"),
@@ -62,12 +52,7 @@ final class UeberweisungsproduktTests: XCTestCase {
     /// Sekunde. Der Schalter wird bei gesetztem Termin gesperrt, und der Aufruf verlangt
     /// zusätzlich `scheduledDate == nil`, damit beides nicht auseinanderlaufen kann.
     func test_terminUndEchtzeitSchliessenEinanderAus() throws {
-        let quelle = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent().deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("Sources/simplebanking/TransferSheet.swift"),
-            encoding: .utf8)
+        let quelle = try Quelltext.datei("TransferSheet.swift")
         XCTAssertTrue(quelle.contains("(echtzeitErzwingen && scheduledDate == nil)"))
         XCTAssertTrue(quelle.contains(".disabled(scheduledDate != nil)"))
     }

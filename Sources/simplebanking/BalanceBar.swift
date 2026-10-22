@@ -287,10 +287,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         set { UserDefaults.standard.set(newValue, forKey: "hideIndex") }
     }
     @AppStorage(AppLogger.enabledKey) private var appLoggingEnabled: Bool = false
-    // Menüleiste-Breite ist seit v1.5.0 fest auf "lang"; kein User-Setting mehr.
-    // Konstante bleibt damit die `isShort = menubarStyle == 1` Auswertung
-    // korrekt zu false reduziert (Compiler optimiert das raus).
-    private let menubarStyle: Int = 0
     @AppStorage("balanceMoodEmojiEnabled") private var balanceMoodEmojiEnabled: Bool = false
     @AppStorage("refreshInterval") private var refreshInterval: Int = 240
     @AppStorage("showNotifications") private var showNotifications: Bool = true

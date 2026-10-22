@@ -184,7 +184,6 @@ struct SettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
     @AppStorage("showNotifications") private var showNotifications: Bool = true
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
-    // menubarStyle in v1.5.0 entfernt — feste Breite ist fix.
     @AppStorage("loadTransactionsOnStart") private var loadTransactionsOnStart: Bool = false
     @AppStorage("globalHotkeyEnabled") private var globalHotkeyEnabled: Bool = true
     @AppStorage("globalHotkeyKeyCode") private var globalHotkeyKeyCode: Int = 1      // kVK_ANSI_S

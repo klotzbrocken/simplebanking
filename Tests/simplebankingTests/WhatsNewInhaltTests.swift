@@ -19,12 +19,9 @@ final class WhatsNewInhaltTests: XCTestCase {
     /// Gelesen wird `build-app.sh`, nicht `Bundle.main`: Im Testlauf ist das Bundle der
     /// XCTest-Runner, dessen Version („16.0") mit der App nichts zu tun hat.
     func test_auszuliefernedeVersionHatHighlights() throws {
-        let repo = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // simplebankingTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // Repo-Wurzel
-        let skript = try String(contentsOf: repo.appendingPathComponent("build-app.sh"),
-                                encoding: .utf8)
+        let skript = try String(
+            contentsOf: Quelltext.paketwurzel.appendingPathComponent("build-app.sh"),
+            encoding: .utf8)
         let zeile = try XCTUnwrap(
             skript.split(separator: "\n").first { $0.hasPrefix("VERSION_BASE=") },
             "VERSION_BASE steht nicht mehr in build-app.sh — dieser Test braucht einen neuen Anker."

@@ -22,15 +22,6 @@ import XCTest
 // Ein Kommentar hat sie nicht gehalten. Dieser Test hält sie.
 final class ModalHopRegelTests: XCTestCase {
 
-    private func quelle(_ datei: String) throws -> String {
-        let wurzel = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()   // simplebankingTests
-            .deletingLastPathComponent()   // Tests
-            .deletingLastPathComponent()   // Repo-Wurzel
-        return try String(contentsOf: wurzel.appendingPathComponent("Sources/simplebanking/\(datei)"),
-                          encoding: .utf8)
-    }
-
     /// Zeilen mit echtem Code, Kommentarzeilen fallen raus — in denen steht die Regel
     /// ja gerade beschrieben.
     private func codezeilen(_ text: String) -> [(nr: Int, inhalt: String)] {
@@ -44,7 +35,7 @@ final class ModalHopRegelTests: XCTestCase {
     }
 
     func test_yaxiService_nutztKeinMainActorRun() throws {
-        let treffer = codezeilen(try quelle("YaxiService.swift"))
+        let treffer = codezeilen(try Quelltext.datei("YaxiService.swift"))
             .filter { $0.inhalt.contains("MainActor.run") }
 
         XCTAssertTrue(treffer.isEmpty,
@@ -56,7 +47,7 @@ final class ModalHopRegelTests: XCTestCase {
 
     /// Dasselbe für die zweite Datei, die während der modalen Sitzung arbeitet.
     func test_freigabefenster_nutztKeinMainActorRun() throws {
-        let treffer = codezeilen(try quelle("Freigabefenster.swift"))
+        let treffer = codezeilen(try Quelltext.datei("Freigabefenster.swift"))
             .filter { $0.inhalt.contains("MainActor.run") }
         XCTAssertTrue(treffer.isEmpty,
                       "MainActor.run in Freigabefenster.swift, Zeile(n) "
@@ -66,7 +57,7 @@ final class ModalHopRegelTests: XCTestCase {
     /// Gegenprobe: Der Ersatz ist auch wirklich im Einsatz. Ohne diese Prüfung bestünde
     /// der Test oben auch dann, wenn jemand die Aufrufe ersatzlos strichen hätte.
     func test_onMainRunLoop_wirdBenutzt() throws {
-        let text = try quelle("YaxiService.swift")
+        let text = try Quelltext.datei("YaxiService.swift")
         let aufrufe = codezeilen(text).filter { $0.inhalt.contains("onMainRunLoop {") }
         XCTAssertGreaterThanOrEqual(aufrufe.count, 5,
                                     "Die Hops auf den Hauptthread sind verschwunden statt umgestellt.")

@@ -48,16 +48,6 @@ enum LicenseConfig {
     /// Quelle: Polar-Dashboard → Organization Settings.
     static let polarOrganizationId: String = "2f70b809-473d-4d9b-9be6-8209fcd45973"
 
-    /// Polar Product-ID (UUID4). Aktuell informativ — die Validate-API
-    /// braucht sie nicht zwingend, kann aber via `benefit_id`/Webhook-
-    /// Filterung in Zukunft genutzt werden.
-    static let polarProductId: String = "d515bd79-04b0-4bfb-b4f3-4902828c5f36"
-
-    /// Polar Benefit-ID (UUID4) für den License-Keys-Benefit. Aktuell rein
-    /// informativ — könnte später bei Validate als `benefit_id` mitgeschickt
-    /// werden, falls die App mehrere Polar-Benefits unterscheiden muss.
-    static let polarBenefitId: String = "61be8931-30e1-462b-bd46-af590ebc19e3"
-
     /// Polar API-Base. Wenn auf Sandbox geschaltet, läuft die Validation
     /// gegen `sandbox-api.polar.sh` — nützlich für Tester-Builds, ohne
     /// echte Lizenzen zu „verbrauchen". Default: Production.
