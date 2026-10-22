@@ -49,6 +49,40 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.0.9</title>
+            <pubDate>Thu, 22 Oct 2026 11:55:32 +0200</pubDate>
+            <sparkle:version>20261022732</sparkle:version>
+            <sparkle:shortVersionString>2.0.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.0.9/simplebanking-2.0.9.dmg" length="32319508" type="application/octet-stream" sparkle:edSignature="0k2Qxble5+rz+sMruZDkL1eWzqgnujKHunHg4b1AWXCyp/Uwo3mooNGJYQ41QoyPvVxkrQOeJk8CVtiU57QwAQ=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.0.9</h2>
+                <p>2.0.8 ist hier mit eingefaltet.</p>
+                <h3>Neu</h3>
+                <ul>
+                    <li><strong>Fixkosten und Abos über MCP und Kommandozeile.</strong> Claude Desktop und andere Assistenten können die Listen abfragen, im Terminal gibt es <code>sb fixed</code> und <code>sb subs</code>. Gerechnet wird weiterhin nur in der App — beide lesen deren Ergebnis, damit nicht zwei Auswertungen auseinanderlaufen.</li>
+                    <li><strong>„Überweisung vorbereiten" ist im MCP zurück.</strong> Legt eine Zahlung zum Prüfen an, ohne sie zu senden; abgeschickt wird sie nur von dir in der App. Mit aktiver simplesend-Lizenz.</li>
+                </ul>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>simplebanking öffnet keine Bankseite mehr von selbst.</strong> War die Zustimmung einer Bank abgelaufen, sprang ungefragt deren Anmeldeseite auf — beim turnusmäßigen Abruf, beim Start, beim Entsperren, bei der Voreinstellung rund sechs Mal am Tag. Wer nicht wusste, dass gerade ein Abruf lief, sah einen Browser, der von allein auf eine Bank-Anmeldung springt. Jetzt geht eine Bankseite nur auf, wenn du unmittelbar davor etwas angeklickt hast; im Hintergrund bleibt der Abruf stehen und du bekommst eine Mitteilung, die die Bank beim Namen nennt. Saldo und Umsätze bleiben sichtbar.</li>
+                    <li><strong>Überweisungen gingen immer als langsame SEPA-Überweisung raus</strong> — ein bis zwei Tage, auch bei Banken, die Echtzeit beherrschen. Jetzt wird Echtzeit versucht, mit stillem Rückfall, wo die Bank sie nicht kann.</li>
+                    <li><strong>Der Kontostand konnte hinter dem der Banking-App zurückhängen.</strong> Liefert eine Bank mehrere Salden, nahm die App den ersten gebuchten — bei der Postbank den Tagesabschluss des Vortags, während daneben ein aktuellerer lag. Jetzt entscheidet das Datum.</li>
+                    <li><strong>Aus der Umsatzliste führte kein Weg mehr zu einer Freigabe.</strong> Stand „Freigabe erforderlich" über der Liste, galten das ↻ und das Herunterziehen als Hintergrundabruf — und ein anderer Knopf gab es nicht. Beide zählen jetzt als dein Zutun.</li>
+                    <li><strong>„Noch offen" war um die Hälfte zu hoch.</strong> Einkäufe über PayPal, Klarna oder Mollie wurden als Abo beim Zahlungsdienstleister gezählt, zwei Buchungen mit sehr unterschiedlichen Beträgen galten als regelmäßig, und eingestellte Abos liefen ewig weiter mit.</li>
+                    <li><strong>Zwei gleiche Buchungen am selben Tag teilten sich Notiz, Beleg und Markierung.</strong> Jede Zeile trägt jetzt ihre eigene Kennung — auch im Export und bei den gemerkten Sparraten. Gemerktes bleibt gemerkt.</li>
+                    <li><strong>Ein eigenes Händler-Logo konnte von einem laufenden Abruf überschrieben werden.</strong> Eigene Logos haben jetzt Vorrang. Nebenbei: Die Hamburger Sparkasse trug das Zeichen von comdirect.</li>
+                    <li><strong>Eine Sicherung konnte stillschweigend unvollständig sein.</strong> Die Meldung nennt jetzt, was ausgelassen wurde; eine unlesbare Bankverbindung bricht die Sicherung ab statt still zu fehlen, und das Einspielen prüft vorher den freien Platz.</li>
+                    <li><strong>Zwei Anzeigefehler:</strong> der Tausenderpunkt in der Menüleiste saß eine Stelle zu weit links, und in den Einstellungen lief Text links aus dem Fenster.</li>
+                </ul>
+                <p>Alle Änderungen im <a href="https://github.com/klotzbrocken/simplebanking/blob/main/CHANGELOG.md">Änderungsprotokoll</a>.</p>
+            ]]></description>
+        </item>
+        <item>
             <title>2.0.7</title>
             <pubDate>Fri, 25 Sep 2026 16:28:00 +0200</pubDate>
             <sparkle:version>20260925704</sparkle:version>
