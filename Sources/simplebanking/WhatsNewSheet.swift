@@ -288,10 +288,11 @@ enum WhatsNewContent {
         }
     }
 
-    /// 2.0.9. Fünf Punkte, die jemand merkt: eine Buchung, die zweimal dasteht, ein
-    /// eigenes Logo, das verschwand, eine Sicherung, die mehr verschwieg als sie sagte,
-    /// und eine Summe, die um die Hälfte zu hoch war. Der Rest der Runde ist Innenarbeit und steht im
-    /// Änderungsprotokoll.
+    /// 2.0.9. Zehn Punkte, weil 2.0.8 hier mit eingefaltet ist und die Runde lang wurde.
+    /// Die Auswahlregel bleibt dieselbe: nur, was jemand auch merkt — eine Überweisung, die
+    /// zwei Tage brauchte, ein Kontostand hinter dem der Banking-App, eine Freigabe, zu der
+    /// kein Weg mehr führte, eine Buchung, die zweimal dasteht, eine Summe, die um die Hälfte
+    /// zu hoch war. Der Rest der Runde ist Innenarbeit und steht im Änderungsprotokoll.
     private static let v209: [WhatsNewItem] = [
         WhatsNewItem(
             icon: "hand.raised",
@@ -301,6 +302,36 @@ enum WhatsNewContent {
             description: L10n.t(
                 "Ist die Zustimmung einer Bank abgelaufen, sprang bisher ungefragt deren Anmeldeseite auf — beim turnusmäßigen Abruf, beim Programmstart, beim Entsperren. Das ist vorbei: Eine Bankseite geht nur auf, wenn du unmittelbar davor etwas angeklickt hast. Im Hintergrund bleibt der Abruf stehen, du bekommst eine Mitteilung mit dem Namen der Bank, und Saldo und Umsätze bleiben sichtbar. \u{201E}Aktualisieren\u{201C} nimmt den Faden wieder auf.",
                 "When a bank's consent had expired, its login page used to open unasked — on the scheduled fetch, at startup, on unlock. No longer: a bank page opens only if you clicked something right before. In the background the fetch simply stops, you get a notification naming the bank, and your balance and transactions stay visible. \u{201C}Refresh\u{201D} picks it up again."
+            )
+        ),
+        WhatsNewItem(
+            icon: "bolt.horizontal",
+            tint: .sbBlueStrong,
+            title: L10n.t("\u{00DC}berweisungen gehen wieder in Echtzeit",
+                          "Transfers go out in real time again"),
+            description: L10n.t(
+                "Jede \u{00DC}berweisung wurde als gew\u{00F6}hnliche SEPA-\u{00DC}berweisung verschickt \u{2014} ein bis zwei Tage \u{2014}, auch bei Banken, die Echtzeit beherrschen; im Aufruf stand das langsame Produkt fest verdrahtet. Jetzt wird Echtzeit versucht und still auf die gew\u{00F6}hnliche \u{00DC}berweisung zur\u{00FC}ckgefallen, wo die Bank sie nicht kann. Wer Echtzeit ausdr\u{00FC}cklich anfordert, bekommt wie bisher eine klare Absage statt einer langsamen Zahlung.",
+                "Every transfer went out as an ordinary SEPA transfer \u{2014} one to two days \u{2014} even at banks that do real time; the slow product was hard-wired into the call. Real time is now attempted, falling back silently to the ordinary transfer where the bank cannot do it. Ask for real time explicitly and you still get a clear refusal rather than a slow payment."
+            )
+        ),
+        WhatsNewItem(
+            icon: "clock.badge.exclamationmark",
+            tint: .sbBlueStrong,
+            title: L10n.t("Der Kontostand hing hinter der Banking-App zur\u{00FC}ck",
+                          "The balance lagged behind your banking app"),
+            description: L10n.t(
+                "Liefert eine Bank mehrere Salden, nahm simplebanking den ersten gebuchten \u{2014} bei der Postbank den Tagesabschluss von gestern, w\u{00E4}hrend daneben ein aktuellerer Stand lag. Jetzt entscheidet das Datum: der j\u{00FC}ngste Saldo, der nicht in der Zukunft liegt und keine Dispo-Linie enth\u{00E4}lt. Die Ums\u{00E4}tze waren immer richtig, nur die Zahl dar\u{00FC}ber nicht.",
+                "When a bank returns several balances, simplebanking took the first booked one \u{2014} at Postbank yesterday's closing figure, while a more recent one sat right beside it. The date now decides: the newest balance that is not in the future and carries no overdraft line. The transactions were always right; only the figure above them was not."
+            )
+        ),
+        WhatsNewItem(
+            icon: "arrow.clockwise.circle",
+            tint: .sbGreenStrong,
+            title: L10n.t("Freigabe aus der Umsatzliste holen",
+                          "Getting an approval from the transaction list"),
+            description: L10n.t(
+                "Stand \u{201E}Freigabe erforderlich\u{201C} \u{00FC}ber der Umsatzliste, f\u{00FC}hrte von dort kein Weg mehr zur Bank: Das \u{21BB} und das Herunterziehen galten als Hintergrundabruf, und der \u{00F6}ffnet \u{2014} siehe oben \u{2014} bewusst keine Bankseite. Beides z\u{00E4}hlt jetzt als dein Zutun, und die Meldung sagt, dass ein Klick auf Aktualisieren gen\u{00FC}gt.",
+                "With \u{201C}Approval required\u{201D} above the transaction list, there was no way from there back to the bank: the \u{21BB} and pull-to-refresh counted as a background fetch, and those \u{2014} see above \u{2014} deliberately open no bank page. Both now count as your own action, and the message says a click on refresh is all it takes."
             )
         ),
         WhatsNewItem(
@@ -331,6 +362,26 @@ enum WhatsNewContent {
             description: L10n.t(
                 "Drei Dinge rechneten die Summe nach oben. Ein Einkauf \u{00FC}ber PayPal, Klarna oder Mollie wurde als Abo beim Zahlungsdienstleister gez\u{00E4}hlt, wenn im Verwendungszweck kein Shop stand \u{2014} zwei fremde Eink\u{00E4}ufe ergaben so einen \u{201E}monatlichen\u{201C} Posten \u{00FC}ber mehrere hundert Euro. Zwei Buchungen galten als regelm\u{00E4}\u{00DF}ig, auch wenn die Betr\u{00E4}ge um das Doppelte auseinanderlagen; jetzt m\u{00FC}ssen sie nahezu gleich sein. Und ein Abo, dessen Abbuchung schon vor dem laufenden Gehaltszyklus ausblieb, lief ewig weiter mit.",
                 "Three things pushed the figure up. A purchase made through PayPal, Klarna or Mollie was counted as a subscription to the payment processor whenever the remittance info named no shop \u{2014} two unrelated purchases could become a \u{201C}monthly\u{201D} item of several hundred euros. Two bookings counted as regular even when the amounts differed by a factor of two; they now have to be near-identical. And a subscription whose charge had already failed to appear before the current salary cycle kept counting forever."
+            )
+        ),
+        WhatsNewItem(
+            icon: "textformat.123",
+            tint: .sbOrangeStrong,
+            title: L10n.t("Zwei Anzeigefehler",
+                          "Two display bugs"),
+            description: L10n.t(
+                "In der Men\u{00FC}leiste sa\u{00DF} der Tausenderpunkt eine Stelle zu weit links \u{2014} aus 12.345 wurde 1.2345, bei siebenstelligen Betr\u{00E4}gen stand sogar ein Punkt vorneweg. Und in den Einstellungen lief Text links aus dem Fenster, sobald eine einzige Zeile zu breit war; sie riss die ganze Spalte mit.",
+                "In the menu bar the thousands separator sat one digit too far left \u{2014} 12,345 came out as 1,2345, and seven-digit amounts even started with a separator. And in settings, text ran off the left edge of the window as soon as a single row was too wide; it dragged the whole column along."
+            )
+        ),
+        WhatsNewItem(
+            icon: "terminal",
+            tint: .sbBlueStrong,
+            title: L10n.t("Fixkosten und Abos f\u{00FC}r Assistenten und Terminal",
+                          "Fixed costs and subscriptions for assistants and the terminal"),
+            description: L10n.t(
+                "Claude und andere Assistenten k\u{00F6}nnen jetzt Fixkosten und Abos abfragen, auf der Kommandozeile gibt es daf\u{00FC}r \u{201E}sb fixed\u{201C} und \u{201E}sb subs\u{201C}. Gerechnet wird weiterhin nur in der App \u{2014} beide lesen deren Ergebnis, damit nicht zwei Auswertungen auseinanderlaufen. Und \u{201E}\u{00DC}berweisung vorbereiten\u{201C} ist zur\u{00FC}ck: Es legt eine Zahlung zum Pr\u{00FC}fen an, ohne sie zu senden, und steht mit aktiver simplesend-Lizenz bereit.",
+                "Claude and other assistants can now ask for your fixed costs and subscriptions; on the command line that is \u{201C}sb fixed\u{201D} and \u{201C}sb subs\u{201D}. The figures are still computed only in the app \u{2014} both read its result, so two analyses cannot drift apart. And \u{201C}prepare transfer\u{201D} is back: it drafts a payment for you to check without sending it, and is available with an active simplesend licence."
             )
         ),
         WhatsNewItem(
