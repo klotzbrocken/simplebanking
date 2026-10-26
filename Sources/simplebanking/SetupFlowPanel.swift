@@ -9,7 +9,10 @@ enum SetupProgress: Sendable {
     case authenticating
     /// Bank verlangt einen Tipp-Code (TAN/PIN) — KEINE App-Freigabe.
     case enteringCode
-    case requestingApproval
+    /// Push-/App-Freigabe. `bankhinweis` ist der Satz der Bank selbst, `verfahren`
+    /// der Name, den sie ihrem Verfahren gibt — beides kann fehlen, dann bleibt es
+    /// beim allgemeinen Text.
+    case requestingApproval(bankhinweis: String?, verfahren: String?)
     case fetchingBalance
     case requestingTransactionApproval
     case fetchingTransactions
@@ -35,8 +38,14 @@ enum SetupProgress: Sendable {
         case .enteringCode:
             return L10n.t("Bitte gib den von der Bank angeforderten Code in das Feld ein",
                           "Please enter the code requested by your bank")
-        case .requestingApproval:
-            return L10n.t("Banking-App öffnen und Freigabe bestätigen", "Open your banking app and confirm the approval")
+        case .requestingApproval(let bankhinweis, let verfahren):
+            // Der Satz der Bank zuerst: Sie weiß, wie ihre App heißt und was dort zu
+            // tun ist. Erst danach unser Ersatz mit dem Verfahrensnamen.
+            if let eigener = bankhinweis?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !eigener.isEmpty, eigener.count <= 200 {
+                return eigener
+            }
+            return Verfahrensname.hinweis(verfahren: verfahren)
         default:
             return L10n.t("Bitte warten…", "Please wait…")
         }
@@ -58,7 +67,9 @@ enum SetupProgress: Sendable {
 /// Fortschrittstext passend setzt (Code-Eingabe vs. App-Freigabe).
 enum SCAMethodHint: Sendable {
     case fieldInput        // Tipp-TAN/PIN → „Code eingeben"
-    case decoupledApproval // Push/Decoupled → „Banking-App öffnen…"
+    /// Push/Decoupled → „Banking-App öffnen…". Trägt mit, was die Bank dazu
+    /// geschickt hat; vorher wurde beides verworfen.
+    case decoupledApproval(bankhinweis: String?, verfahren: String?)
 }
 
 struct SetupConnectOptions: Sendable {

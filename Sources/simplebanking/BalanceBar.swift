@@ -7344,7 +7344,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         defer { YaxiService.setupPhaseReporter = nil }
 
         YaxiService.scaMethodReporter = { hint in
-            onProgress?(hint == .fieldInput ? .enteringCode : .requestingApproval)
+            switch hint {
+            case .fieldInput:
+                onProgress?(.enteringCode)
+            case .decoupledApproval(let bankhinweis, let verfahren):
+                onProgress?(.requestingApproval(bankhinweis: bankhinweis, verfahren: verfahren))
+            }
         }
         defer { YaxiService.scaMethodReporter = nil }
 

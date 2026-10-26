@@ -16,29 +16,32 @@ final class SCAProgressTextTests: XCTestCase {
 
     func test_requestingApproval_keepsAppMessage() {
         // Push/Decoupled-Bank: Hinweis auf die Banking-App muss erhalten bleiben.
-        XCTAssertTrue(SetupProgress.requestingApproval.subtitle.lowercased().contains("app"))
+        XCTAssertTrue(SetupProgress.requestingApproval(bankhinweis: nil, verfahren: nil).subtitle.lowercased().contains("app"))
     }
 
     func test_authenticating_isNeutral() {
         let p = SetupProgress.authenticating
         XCTAssertFalse(p.subtitle.lowercased().contains("app"))
         XCTAssertFalse(p.subtitle.lowercased().contains("code"))
-        XCTAssertNotEqual(p.subtitle, SetupProgress.requestingApproval.subtitle)
+        XCTAssertNotEqual(p.subtitle, SetupProgress.requestingApproval(bankhinweis: nil, verfahren: nil).subtitle)
         XCTAssertNotEqual(p.subtitle, SetupProgress.enteringCode.subtitle)
     }
 
     func test_distinctIconsForMethods() {
-        XCTAssertNotEqual(SetupProgress.enteringCode.iconName, SetupProgress.requestingApproval.iconName)
-        XCTAssertNotEqual(SetupProgress.authenticating.iconName, SetupProgress.requestingApproval.iconName)
+        XCTAssertNotEqual(SetupProgress.enteringCode.iconName, SetupProgress.requestingApproval(bankhinweis: nil, verfahren: nil).iconName)
+        XCTAssertNotEqual(SetupProgress.authenticating.iconName, SetupProgress.requestingApproval(bankhinweis: nil, verfahren: nil).iconName)
     }
 
     /// Spiegelt die Mapping-Logik aus `performSetupConnection`: field → enteringCode,
     /// decoupled → requestingApproval.
     func test_methodHintMapping() {
         func progress(for hint: SCAMethodHint) -> SetupProgress {
-            hint == .fieldInput ? .enteringCode : .requestingApproval
+            switch hint {
+            case .fieldInput: return .enteringCode
+            case .decoupledApproval(let h, let v): return .requestingApproval(bankhinweis: h, verfahren: v)
+            }
         }
         XCTAssertEqual(progress(for: .fieldInput).displayText, SetupProgress.enteringCode.displayText)
-        XCTAssertEqual(progress(for: .decoupledApproval).subtitle, SetupProgress.requestingApproval.subtitle)
+        XCTAssertEqual(progress(for: .decoupledApproval(bankhinweis: nil, verfahren: nil)).subtitle, SetupProgress.requestingApproval(bankhinweis: nil, verfahren: nil).subtitle)
     }
 }

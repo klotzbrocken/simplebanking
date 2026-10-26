@@ -17,7 +17,32 @@ struct ImportSheet: View {
     let requestMasterPassword: () -> String?
     let onClose: () -> Void
 
-    @State private var selection: ImportSource = .deepSync180
+    @State private var selection: ImportSource
+
+    /// Woher der Slot seine Umsätze bekommt. Entscheidet, ob „von der Bank laden"
+    /// überhaupt angeboten wird und wer den Abruf macht.
+    private enum Herkunft { case bank, paypal, belege }
+
+    private var herkunft: Herkunft {
+        guard let slot = MultibankingStore.shared.slots.first(where: { $0.id == slotId }) else {
+            return .bank
+        }
+        if slot.isPayPal { return .paypal }
+        if slot.isReceiptSlot { return .belege }
+        return .bank
+    }
+
+    init(slotId: String, bankDisplayName: String,
+         requestMasterPassword: @escaping () -> String?, onClose: @escaping () -> Void) {
+        self.slotId = slotId
+        self.bankDisplayName = bankDisplayName
+        self.requestMasterPassword = requestMasterPassword
+        self.onClose = onClose
+        // Ein Bon-Slot hat keine Bank, die man abrufen könnte — bei ihm steht die
+        // Vorauswahl auf der ersten Option, die es dort wirklich gibt.
+        let belege = MultibankingStore.shared.slots.first(where: { $0.id == slotId })?.isReceiptSlot ?? false
+        _selection = State(initialValue: belege ? .ofxFile : .deepSync180)
+    }
     @State private var isRunning: Bool = false
     @State private var statusMessage: String? = nil
     @State private var result: ImportResult? = nil
@@ -83,17 +108,29 @@ struct ImportSheet: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.secondary)
 
-            radio(.deepSync180,
-                  title: t("180 Tage von der Bank laden", "Load 180 days from bank"),
-                  subtitle: t("Ca. 6 Monate Historie. Ggf. TAN-Bestätigung nötig.",
-                              "About 6 months of history. May require TAN confirmation."))
+            // Bon-Slots (REWE/dm/Amazon) haben keine Bank-Schnittstelle. Die Optionen
+            // standen dort trotzdem und liefen zwangsläufig in einen Fehler.
+            if herkunft != .belege {
+                let quelle = herkunft == .paypal ? t("von PayPal laden", "from PayPal")
+                                                 : t("von der Bank laden", "from bank")
+                let hinweis = herkunft == .paypal
+                    ? t("Ca. 6 Monate Historie. Keine Freigabe nötig.",
+                        "About 6 months of history. No approval needed.")
+                    : t("Ca. 6 Monate Historie. Ggf. TAN-Bestätigung nötig.",
+                        "About 6 months of history. May require TAN confirmation.")
+                radio(.deepSync180,
+                      title: t("180 Tage \(quelle)", "Load 180 days \(quelle)"),
+                      subtitle: hinweis)
 
-            radio(.deepSync365,
-                  title: t("365 Tage von der Bank laden", "Load 365 days from bank"),
-                  subtitle: t("Volles Jahr. Ggf. TAN-Bestätigung nötig.",
+                radio(.deepSync365,
+                      title: t("365 Tage \(quelle)", "Load 365 days \(quelle)"),
+                      subtitle: herkunft == .paypal
+                          ? t("Volles Jahr. Keine Freigabe nötig.", "Full year. No approval needed.")
+                          : t("Volles Jahr. Ggf. TAN-Bestätigung nötig.",
                               "Full year. May require TAN confirmation."))
 
-            Divider().padding(.vertical, 2)
+                Divider().padding(.vertical, 2)
+            }
 
             radio(.ofxFile,
                   title: t("OFX-Datei importieren", "Import OFX file"),
@@ -255,14 +292,15 @@ struct ImportSheet: View {
         }
 
         isRunning = true
-        statusMessage = t("Lade \(days) Tage von der Bank…",
-                          "Loading \(days) days from the bank…")
+        statusMessage = herkunft == .paypal
+            ? t("Lade \(days) Tage von PayPal…", "Loading \(days) days from PayPal…")
+            : t("Lade \(days) Tage von der Bank…", "Loading \(days) days from the bank…")
         do {
-            let r = try await YaxiDeepSyncImporter.importHistory(
-                slotId: slotId,
-                days: days,
-                masterPassword: pw
-            )
+            let r = herkunft == .paypal
+                ? try await PayPalDeepSyncImporter.importHistory(
+                    slotId: slotId, days: days, masterPassword: pw)
+                : try await YaxiDeepSyncImporter.importHistory(
+                    slotId: slotId, days: days, masterPassword: pw)
             // Persistiere die Import-Tiefe, damit die UI nach dem Deep-Sync auch
             // wirklich alle 180/365 Tage anzeigt (Auto-Sync bleibt bei fetchDays-Cap).
             var s = BankSlotSettingsStore.load(slotId: slotId)

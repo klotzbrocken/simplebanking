@@ -2615,7 +2615,8 @@ enum YaxiService {
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         depth: Int = 0,
-        ausloeser: Freigabeausloeser = .hintergrund
+        ausloeser: Freigabeausloeser = .hintergrund,
+        verfahren: String? = nil
     ) async -> SCAErgebnis {
         if depth > 5 {
             AppLogger.log("SCA: max depth exceeded", category: "YaxiService", level: "WARN")
@@ -2666,10 +2667,15 @@ enum YaxiService {
                         category: "YaxiService", level: "WARN")
                 }
                 AppLogger.log("SCA Selection: picking '\(preferred.key)'", category: "YaxiService")
+                // Der Name, den die Bank dem Verfahren gibt („s-pushTAN"), wanderte
+                // bisher nur ins Protokoll. Der Nutzer stand vor „Banking-App öffnen"
+                // und musste raten, welche App gemeint ist.
+                let gewaehltesVerfahren = Verfahrensname.lesbar(aus: preferred.label) ?? verfahren
                 do {
                     let next = try await respond(context, preferred.key)
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser,
+                                           verfahren: gewaehltesVerfahren)
                 } catch {
                     AppLogger.log("SCA respond error: \(error.localizedDescription)", category: "YaxiService", level: "ERROR")
                     return .unklar
@@ -2677,7 +2683,7 @@ enum YaxiService {
 
             case .confirmation(let context, let pollingDelaySecs):
                 // Push/Decoupled-Freigabe → Setup-UI auf „Banking-App öffnen…" stellen.
-                scaMethodReporter?(.decoupledApproval)
+                scaMethodReporter?(.decoupledApproval(bankhinweis: dialogMsg, verfahren: verfahren))
                 if let delay = pollingDelaySecs {
                     // YAXI: pollingDelay set → poll until confirmed
                     AppLogger.log("SCA Confirmation: polling delay=\(delay)s", category: "YaxiService")
@@ -2685,7 +2691,8 @@ enum YaxiService {
                         context: context,
                         delay: TimeInterval(delay),
                         client: client, ticket: ticket, slotId: slotId,
-                        confirm: confirm, respond: respond, depth: depth, ausloeser: ausloeser
+                        confirm: confirm, respond: respond, depth: depth, ausloeser: ausloeser,
+                        verfahren: verfahren
                     )
                 } else {
                     // Ohne `pollingDelay` **nicht** pollen. Hier standen früher feste 5 s
@@ -2738,7 +2745,8 @@ enum YaxiService {
                     do {
                         let next = try await confirm(context)
                         return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                               confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
+                                               confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser,
+                                           verfahren: verfahren)
                     } catch {
                         AppLogger.log("SCA Confirmation: confirm nach Bestätigung fehlgeschlagen: \(String(reflecting: error))",
                                       category: "YaxiService", level: "ERROR")
@@ -2817,7 +2825,8 @@ enum YaxiService {
                 do {
                     let next = try await respond(context, userValue)
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser,
+                                           verfahren: verfahren)
                 } catch {
                     // `localizedDescription` ist hier wertlos: `UnexpectedError(userMessage: nil)`
                     // beschreibt sich damit als nichts. Deshalb der volle Typ — und ein Trace,
@@ -2866,7 +2875,7 @@ enum YaxiService {
                                                 erwartetRueckleitung: false)
             let ergebnis = await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                               confirm: confirm, respond: respond,
-                                              callbackSignal: fenster?.fertig, ausloeser: ausloeser)
+                                              callbackSignal: fenster?.fertig, ausloeser: ausloeser, verfahren: verfahren)
             await fenster?.schliessen()
             // Freigabe **abwarten**, nicht in ein loses `Task` schieben. Hier stand
             // `defer { Task { … } }`: Der Vorgang endete, die Wache hielt das Konto noch,
@@ -2960,7 +2969,7 @@ enum YaxiService {
             }
             let result = await pollRedirect(context: context, client: client, ticket: ticket, slotId: slotId,
                                              confirm: confirm, respond: respond,
-                                             callbackSignal: callbackSignal, ausloeser: ausloeser)
+                                             callbackSignal: callbackSignal, ausloeser: ausloeser, verfahren: verfahren)
             callbackServer?.stop()
             await fenster?.schliessen()
             // Siehe `.redirect`: abwarten statt in ein loses `Task` schieben. Die Wache
@@ -2999,7 +3008,8 @@ enum YaxiService {
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         depth: Int,
-        ausloeser: Freigabeausloeser
+        ausloeser: Freigabeausloeser,
+        verfahren: String? = nil
     ) async -> SCAErgebnis {
         Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
         defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
@@ -3018,7 +3028,8 @@ enum YaxiService {
                 switch next {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser,
+                                           verfahren: verfahren)
                 case .dialog(let input, _, _):
                     if case .confirmation(let newCtx, let newDelay) = input {
                         let ctxChanged = newCtx != ctx
@@ -3041,10 +3052,12 @@ enum YaxiService {
                         AppLogger.log("SCA poll[\(i)]: got non-confirmation dialog: \(input)", category: "YaxiService", level: "WARN")
                     }
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser,
+                                           verfahren: verfahren)
                 default:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser,
+                                           verfahren: verfahren)
                 }
             } catch {
                 consecutiveErrors += 1
@@ -3067,7 +3080,8 @@ enum YaxiService {
         confirm: @escaping @Sendable (ConfirmationContext) async throws -> SCACommon,
         respond: @escaping @Sendable (InputContext, String) async throws -> SCACommon,
         callbackSignal: AsyncStream<Void>? = nil,
-        ausloeser: Freigabeausloeser
+        ausloeser: Freigabeausloeser,
+        verfahren: String? = nil
     ) async -> SCAErgebnis {
         Task { @MainActor in YaxiService.onTanStateChanged?(true, slotId) }
         defer { Task { @MainActor in YaxiService.onTanStateChanged?(false, slotId) } }
@@ -3102,7 +3116,7 @@ enum YaxiService {
                 switch next {
                 case .result:
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, ausloeser: ausloeser, verfahren: verfahren)
                 case .dialog(let input, _, _):
                     // Eine Bestätigung mit unverändertem Kontext heißt „noch nicht
                     // fertig" — dafür ist diese Schleife da, sie läuft weiter.
@@ -3115,13 +3129,13 @@ enum YaxiService {
                     // fragt, war damit nicht bedienbar, und die chipTAN-Anzeige lief
                     // ins Leere.
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, ausloeser: ausloeser, verfahren: verfahren)
                 case .redirect, .redirectHandle:
                     // Ein zweiter Browserschritt. Bisher wurde nur der Kontext
                     // übernommen und weitergepollt — die neue Seite hat nie jemand
                     // geöffnet, also konnte die Freigabe nicht fertig werden.
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
-                                           confirm: confirm, respond: respond, ausloeser: ausloeser)
+                                           confirm: confirm, respond: respond, ausloeser: ausloeser, verfahren: verfahren)
                 }
             } catch {
                 consecutiveErrors += 1
