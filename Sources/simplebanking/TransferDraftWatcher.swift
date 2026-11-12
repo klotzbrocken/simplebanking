@@ -27,6 +27,56 @@ final class TransferDraftWatcher {
     private var dirHandle: Int32 = -1
     private var source: DispatchSourceFileSystemObject?
 
+    // MARK: - Das Reopen, das zur Übernahme gehört
+    //
+    // Gemeldet am 07.11.2026 von einem Nutzer, der sich eine eigene
+    // Raycast-Erweiterung gebaut hat: Sie liest eine im Finder markierte Rechnung aus,
+    // legt den Entwurf hier ab und ruft danach `open -g -a simplebanking`. Neben
+    // simplesend ging aber auch die Umsatzliste auf, selbst wenn sie zuvor geschlossen
+    // war.
+    //
+    // Nicht `NSApp.activate` weiter unten — das holt die App nach vorn und öffnet kein
+    // geschlossenes Fenster. `open -a` schickt an eine **laufende** App ein
+    // Reopen-Ereignis, und `applicationShouldHandleReopen` öffnet darauf die
+    // Umsatzliste. Das ist die Zusage „Klick aufs Dock-Symbol öffnet die Umsatzliste" —
+    // nur klickt im Menüleisten-Betrieb niemand auf ein Dock-Symbol, und das Ereignis
+    // kommt trotzdem.
+    //
+    // Der Nutzer kann sein `open` weglassen, solange die App läuft; muss sie erst
+    // starten, kommt das Reopen zwangsläufig. Darum entscheidet die Regel hier.
+
+    /// Wann zuletzt ein Entwurf übernommen wurde.
+    private(set) static var letzteUebernahme: Date?
+
+    /// Wie lange nach einer Übernahme ein Reopen noch dazugehört.
+    ///
+    /// Großzügig gewählt: Zu kurz heißt, der gemeldete Fehler kommt sporadisch zurück;
+    /// zu lang heißt, ein Dock-Klick in denselben Sekunden tut nichts — und wer gerade
+    /// eine Überweisung vor sich hat, klickt nicht daneben.
+    static let reopenFenster: TimeInterval = 5
+
+    /// Gehört dieses Reopen zu einer Entwurfsübernahme?
+    ///
+    /// `entwurfLiegtAn` fängt die umgekehrte Reihenfolge: Die Erweiterung schreibt die
+    /// Datei und ruft dann `open`, aber ob der Wächter oder das Reopen zuerst dran ist,
+    /// ist nicht zugesichert. Ohne diese Hälfte wäre der Fehler nur seltener, nicht weg.
+    static func gehoertZurEntwurfsuebernahme(uebernahme: Date?,
+                                             entwurfLiegtAn: Bool,
+                                             jetzt: Date = Date()) -> Bool {
+        if entwurfLiegtAn { return true }
+        guard let uebernahme else { return false }
+        return jetzt.timeIntervalSince(uebernahme) < reopenFenster
+    }
+
+    /// Dieselbe Regel, mit dem Zustand von jetzt.
+    static func reopenGehoertZuEntwurf(jetzt: Date = Date()) -> Bool {
+        gehoertZurEntwurfsuebernahme(
+            uebernahme: letzteUebernahme,
+            entwurfLiegtAn: !TransferDraftStore.loadAllWithURLs(now: jetzt).isEmpty,
+            jetzt: jetzt
+        )
+    }
+
     private init() {}
 
     /// Idempotent — bei zweitem Aufruf passiert nichts.
@@ -92,6 +142,10 @@ final class TransferDraftWatcher {
         for e in entries.dropFirst() {
             TransferDraftStore.consume(url: e.url)
         }
+
+        // Vor dem Aktivieren merken: Das Reopen aus dem `open -a` des Erzeugers kann
+        // unmittelbar danach eintreffen.
+        Self.letzteUebernahme = Date()
 
         NSApp.activate(ignoringOtherApps: true)
         NotificationCenter.default.post(

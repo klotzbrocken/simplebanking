@@ -27,12 +27,6 @@ enum Kontobewegungszeichen: String, Equatable {
         }
     }
 
-    /// Alle Hinweistexte — damit der Tooltip beim Verschwinden des Zeichens nur
-    /// den eigenen Text zurücknimmt und keine fremden überschreibt.
-    static var alleHinweise: [String] {
-        [Kontobewegungszeichen.eingang, .abgang, .fremdesKonto].map { $0.hinweis }
-    }
-
     var hinweis: String {
         switch self {
         case .eingang:
@@ -42,6 +36,43 @@ enum Kontobewegungszeichen: String, Equatable {
         case .fremdesKonto:
             return L10n.t("Bewegung auf einem anderen Konto", "Activity on another account")
         }
+    }
+}
+
+/// Was gerade rechts außen in der Menüleiste steht — genau eins oder nichts.
+///
+/// Zwei Dinge wollen diesen einen Platz: die Kontobewegung und der Hinweis auf
+/// eine neue Fassung. Beide nebeneinander wären zwei Zeichen hinter einer Zahl
+/// und damit unlesbar, also entscheidet `Leistenzeichenwahl`.
+struct Leistenzeichen: Equatable {
+    let glyph: String
+    /// `true` → Systemakzentfarbe („hier ist etwas zu tun"). `false` → ohne eigene
+    /// Farbe, das Zeichen erbt damit die der Menüleiste und bleibt in Hell wie
+    /// Dunkel sichtbar.
+    let akzent: Bool
+    let hinweis: String
+}
+
+enum Leistenzeichenwahl {
+    /// Glyph des Update-Hinweises. Kein SF-Symbol: siehe die Begründung oben bei
+    /// `Kontobewegungszeichen.glyph`.
+    static let updateGlyph = "⟳"
+
+    /// **Geld geht vor Software.** Das Bewegungszeichen löscht sich selbst, sobald
+    /// der Nutzer hinsieht — es ist am nächsten Tag wieder da. Der Update-Hinweis
+    /// bleibt dagegen stehen, bis aktualisiert wurde, und verdeckte damit über Tage
+    /// das Signal, für das es die App überhaupt gibt. Also hat die Bewegung Vorrang;
+    /// das Update wartet, bis sie weg ist, und steht ohnehin im Flyout.
+    static func zeichen(bewegung: Kontobewegungszeichen?, updateVersion: String?) -> Leistenzeichen? {
+        if let bewegung {
+            return Leistenzeichen(glyph: bewegung.glyph, akzent: false, hinweis: bewegung.hinweis)
+        }
+        guard let updateVersion, !updateVersion.isEmpty else { return nil }
+        return Leistenzeichen(
+            glyph: updateGlyph,
+            akzent: true,
+            hinweis: L10n.t("Version \(updateVersion) ist verfügbar",
+                            "Version \(updateVersion) is available"))
     }
 }
 

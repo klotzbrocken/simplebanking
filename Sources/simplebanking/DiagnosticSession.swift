@@ -193,12 +193,18 @@ final class DiagnosticSession: ObservableObject {
             await MainActor.run { self.probes = collected }
         }
 
+        // Summary schreiben + Mail-Attachements zusammenstellen
+        //
+        // **Vor** `finalize()`, und das ist kein Zufall: `finalize` schaltet den Logger
+        // zurück, und die Zusammenfassung nennt dessen Zustand. Umgekehrt stand in jedem
+        // Bericht „Logger: AUS", auch wenn während der Messung geloggt wurde — der
+        // Bericht beschrieb seine eigenen Bedingungen falsch.
+        let finishedAt = Date()
+        let summaryURL = writeSummary(probes: collected, finishedAt: finishedAt)
+
         // Slot-Restore
         await finalize()
 
-        // Summary schreiben + Mail-Attachements zusammenstellen
-        let finishedAt = Date()
-        let summaryURL = writeSummary(probes: collected, finishedAt: finishedAt)
         let attachments = collectMailAttachments(summaryURL: summaryURL)
 
         let report = Report(
@@ -466,10 +472,15 @@ final class DiagnosticSession: ObservableObject {
         return "€ \(f.string(from: NSNumber(value: raw)) ?? "\(raw)")"
     }
 
+    /// Wann der gespeicherte Saldo geholt wurde.
+    ///
+    /// Stand hier bis 06.11.2026 **immer** „nie": Gelesen wurde
+    /// `simplebanking.lastBalanceFetch.<slotId>` als `Date`, geschrieben aber
+    /// `simplebanking.cachedBalanceAt.<slotId>` als Sekundenwert. Anderer Schlüssel,
+    /// anderer Typ, und nichts schlug fehl — die Zeile log einfach. Seither gibt es für
+    /// den Zeitpunkt nur einen Zugang: `Saldoalter`.
     private func lastSyncLabel(slotId: String) -> String {
-        guard let date = UserDefaults.standard.object(forKey: "simplebanking.lastBalanceFetch.\(slotId)") as? Date else {
-            return "nie"
-        }
+        guard let date = Saldoalter.zeitpunkt(slotId: slotId) else { return "nie" }
         let f = DateFormatter()
         f.locale = Locale(identifier: "de_DE")
         f.dateFormat = "yyyy-MM-dd HH:mm"

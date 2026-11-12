@@ -57,6 +57,19 @@ struct BankSlotSettings: Codable {
     /// `MultibankingStore.purgePerSlotData` mit aufgeräumt.
     var freigabeFaelligSeit: Date?
 
+    // MARK: - TAN-Verfahren (2.1.0)
+
+    /// Das vom Nutzer gewählte TAN-Verfahren — `nil` heißt: die App entscheidet wie
+    /// bisher (`Tanverfahren.geraten`). Der Schlüssel ist, was die Bank erwartet.
+    var tanVerfahrenSchluessel: String?
+    /// Die Beschriftung desselben Verfahrens. Nur zum Wiedererkennen, falls die Bank
+    /// ihre Schlüssel ändert — siehe `Tanverfahren`.
+    var tanVerfahrenName: String?
+    /// Was diese Bank zuletzt angeboten hat, Schlüssel → Beschriftung. Die Liste
+    /// entsteht nur aus einer echten Freigabe-Rückfrage; vorher lässt sich nichts
+    /// auswählen, weil die App die Verfahren einer Bank nicht kennt.
+    var tanVerfahrenAngebote: [String: String] = [:]
+
     /// Read-Range für UI-Listen, CSV-Export, Kategorisierung etc. — alles, was lokale DB-Daten
     /// liest (nicht Bank-Fetches). `max(fetchDays, lastImportedDays ?? 0)`. Auto-Sync und
     /// Bank-Fetches nutzen weiterhin `fetchDays` direkt (90-Cap).
@@ -134,6 +147,9 @@ struct BankSlotSettings: Codable {
         // Wer hier ein Feld vergisst, bekommt keinen Fehler, sondern stille Amnesie:
         // Gespeichert wird es (der Encoder ist synthetisiert), gelesen nie.
         freigabeFaelligSeit          = try? c.decodeIfPresent(Date.self, forKey: .freigabeFaelligSeit)
+        tanVerfahrenSchluessel       = try? c.decodeIfPresent(String.self, forKey: .tanVerfahrenSchluessel)
+        tanVerfahrenName             = try? c.decodeIfPresent(String.self, forKey: .tanVerfahrenName)
+        tanVerfahrenAngebote         = (try? c.decodeIfPresent([String: String].self, forKey: .tanVerfahrenAngebote)) ?? [:]
     }
 }
 

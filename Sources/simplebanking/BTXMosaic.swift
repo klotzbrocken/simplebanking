@@ -51,6 +51,9 @@ enum BTXMosaic {
              .sparen,
              .umbuchung,
              .sonstiges:                return (.bank, "#0033b0")   // neutral, Blau
+        // Eigene Kategorien kennt die BTX-Vorlage nicht — neutraler Bank-Block, wie
+        // die README ihn ausdrücklich als Rückfall vorsieht.
+        default:                        return (.bank, "#0033b0")
         }
     }
 }

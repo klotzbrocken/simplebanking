@@ -1,4 +1,5 @@
 import AppKit
+import MoneyMoneyForm
 import SwiftUI
 import Foundation
 import RoutexClient
@@ -13,8 +14,12 @@ enum SetupProgress: Sendable {
     /// der Name, den sie ihrem Verfahren gibt — beides kann fehlen, dann bleibt es
     /// beim allgemeinen Text.
     case requestingApproval(bankhinweis: String?, verfahren: String?)
-    case fetchingBalance
-    case requestingTransactionApproval
+    /// `konto` ist der Name, den die Bank dem gewählten Konto gibt — er steht erst ab
+    /// hier fest (die Kontenauswahl liegt davor). Ohne ihn stand im Fortschritt nur der
+    /// Schritt, und wer wie am 07.11.2026 gemeldet knapp vier Minuten auf eine
+    /// Redirect-Bank wartet, sieht nicht, worauf.
+    case fetchingBalance(konto: String?)
+    case requestingTransactionApproval(konto: String?)
     case fetchingTransactions
     case savingCredentials
 
@@ -24,17 +29,33 @@ enum SetupProgress: Sendable {
         case .authenticating: return L10n.t("Sicherheitsfreigabe…", "Security check…")
         case .enteringCode: return L10n.t("Code eingeben", "Enter code")
         case .requestingApproval: return L10n.t("Freigabe angefordert…", "Approval requested…")
-        case .fetchingBalance: return L10n.t("Kontostand wird abgerufen…", "Fetching balance…")
-        case .requestingTransactionApproval: return L10n.t("Umsätze werden geladen…", "Loading transactions…")
+        case .fetchingBalance(let konto):
+            return Self.mitKonto(L10n.t("Kontostand wird abgerufen…", "Fetching balance…"), konto)
+        case .requestingTransactionApproval(let konto):
+            return Self.mitKonto(L10n.t("Umsätze werden geladen…", "Loading transactions…"), konto)
         case .fetchingTransactions: return L10n.t("Umsätze werden geladen…", "Loading transactions…")
         case .savingCredentials: return L10n.t("Daten werden gespeichert…", "Saving data…")
         }
     }
 
+    /// Hängt den Kontonamen an, wenn die Bank einen geliefert hat. Lange Namen bleiben
+    /// draußen: Die Zeile ist eine Zeile, und der Schritt ist die Hauptsache.
+    private static func mitKonto(_ text: String, _ konto: String?) -> String {
+        guard let name = konto?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty, name.count <= 30 else { return text }
+        return text.replacingOccurrences(of: "…", with: "") + " — " + name + "…"
+    }
+
     var subtitle: String {
         switch self {
         case .authenticating:
-            return L10n.t("Bitte folge den Anweisungen deiner Bank", "Please follow your bank's instructions")
+            return L10n.t("Schritt 1 von 3 · Bitte folge den Anweisungen deiner Bank",
+                          "Step 1 of 3 · Please follow your bank's instructions")
+        case .fetchingBalance:
+            return L10n.t("Schritt 2 von 3 · Bitte warten…", "Step 2 of 3 · Please wait…")
+        case .requestingTransactionApproval:
+            return L10n.t("Schritt 3 von 3 · Das kann einige Minuten dauern",
+                          "Step 3 of 3 · This can take a few minutes")
         case .enteringCode:
             return L10n.t("Bitte gib den von der Bank angeforderten Code in das Feld ein",
                           "Please enter the code requested by your bank")
@@ -102,6 +123,13 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private enum Step {
         case welcome
         case masterPassword
+        /// „MoneyMoney gefunden — übernehmen?" samt Kennwortfeld. Nur wenn die
+        /// Datenbank am üblichen Ort liegt; sonst führt der Assistent wie bisher
+        /// direkt in die Banksuche.
+        case moneymoneyAngebot
+        /// Die Konten aus MoneyMoney, die YAXI erreichen kann — und mit Begründung
+        /// die, die es nicht kann.
+        case moneymoneyKonten
         case bankSearch
         case credentials
         case connecting
@@ -118,9 +146,12 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private let panel: NSPanel
     private let rootStack = NSStackView()
     private let connectAction: ConnectAction
-    private let panelWidth: CGFloat = 460
-    private let panelHeight: CGFloat = 520
-    private let fieldWidth: CGFloat = 380
+    // Dieselbe Größe wie der Folge-Assistent (`InitialSetupExtensionPanel`): Beide
+    // Fenster gehören zu einer Einrichtung und standen vorher 20 × 40 pt auseinander
+    // — beim Übergang sprang das Fenster. Gemeldet am 11.11.2026.
+    private let panelWidth: CGFloat = InitialSetupExtensionPanel.fensterBreite
+    private let panelHeight: CGFloat = InitialSetupExtensionPanel.fensterHoehe
+    private let fieldWidth: CGFloat = InitialSetupExtensionPanel.fensterBreite - 80
 
     private var step: Step = .welcome
     private var selectedConnection: ConnectionInfo?          // selected YAXI bank
@@ -140,6 +171,42 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private var outcome: SetupWizardOutcome = .cancelled
     var collectedNickname: String? = nil              // optional per-account short label
     private weak var nicknameTextField: NSTextField?
+
+    // MoneyMoney-Import
+    private let mmKennwortField = NSSecureTextField(string: "")
+    private let mmMeldungLabel = NSTextField(labelWithString: "")
+    private let mmSpinner = NSProgressIndicator()
+    private weak var mmLesenBtn: NSButton?
+    private var mmTreffer: [MoneyMoneyTreffer] = []
+    private var mmAbsagen: [MoneyMoneyAbsage] = []
+    private var mmVerbindungen: [String: ConnectionInfo] = [:]
+    private var mmCheckboxes: [NSButton] = []
+    private var mmTask: Task<Void, Never>? = nil
+    /// Selbst gewählte MoneyMoney-Datei; `nil` heißt „der übliche Ort".
+    ///
+    /// Gebraucht, sobald die Datenbank nicht dort liegt, wo der Container sie
+    /// erwartet — eine aus einer Sicherung geholte Kopie, eine zweite Datei, oder
+    /// MoneyMoney aus einer Quelle, die woanders ablegt. Gemeldet am 11.11.2026.
+    private var mmDatenbank: URL?
+    private let mmDateiLabel = NSTextField(labelWithString: "")
+    /// Der Auszug bleibt für diesen Lauf im Speicher: Der Verlauf wird erst nach der
+    /// Zwei-Faktor-Anmeldung und dem ersten Abruf übernommen, und bis dahin soll der
+    /// Nutzer sein MoneyMoney-Kennwort nicht ein zweites Mal tippen. Gespeichert
+    /// wird er nicht — in der Quelldatei liegt die Bank-PIN.
+    private var mmAuszug: MoneyMoneyAuszug? = nil
+    /// Hat der Nutzer den Import auf der ersten Seite gewählt?
+    ///
+    /// Bis zum 11.11.2026 kam der Schritt **immer**, sobald eine MoneyMoney-Datenbank
+    /// auf dem Rechner lag. Das ist ein Angebot, das sich niemand ausgesucht hat, und
+    /// es steht zwischen dem Nutzer und dem, weswegen er die App geöffnet hat. Jetzt
+    /// ist er ein dritter Weg auf der Willkommensseite, neben „Sicherung einspielen".
+    private var mmGewaehlt = false
+    /// Was aus MoneyMoney wurde — steht auf der Erfolgsseite, sobald es feststeht.
+    /// Ohne diese Zeile läuft der Import vollständig unsichtbar ab, und der Nutzer
+    /// erfährt nie, ob sein Verlauf angekommen ist.
+    /// Die IBANs, die der Nutzer im Kontoauswahl-Schritt angekreuzt hat. Erst wenn
+    /// die Verbindung steht, werden die zugehörigen Vorhaben-Einträge abgehakt.
+    private var mmZuletztGewaehlteIbans: Set<String> = []
 
     // Master password step controls
     private let masterPassField = NSSecureTextField(string: "")
@@ -598,6 +665,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         switch step {
         case .welcome: fraction = 0
         case .masterPassword: fraction = 0.14
+        case .moneymoneyAngebot: fraction = 0.19
+        case .moneymoneyKonten: fraction = 0.23
         case .bankSearch: fraction = 0.28
         case .credentials: fraction = 0.42
         case .connecting: fraction = 0.57
@@ -636,6 +705,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             renderWelcomeStep()
         case .masterPassword:
             renderMasterPasswordStep()
+        case .moneymoneyAngebot:
+            renderMoneyMoneyAngebotStep()
+        case .moneymoneyKonten:
+            renderMoneyMoneyKontenStep()
         case .bankSearch:
             renderSearchStep()
         case .credentials:
@@ -699,6 +772,19 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         restoreButton.font = .systemFont(ofSize: 12)
         restoreButton.isHidden = !erststart
 
+        // Vierter Weg, genauso unauffällig und aus demselben Grund: Wer von
+        // MoneyMoney kommt, will seinen Verlauf mitnehmen. Wer nicht, soll davon
+        // nicht aufgehalten werden. Nur beim Erststart und nur, wenn hier überhaupt
+        // eine MoneyMoney-Datenbank liegt.
+        let mmAngebot = erststart && MoneyMoneyLesepfad.istVorhanden
+        let mmButton = NSButton(title: t("Aus MoneyMoney übernehmen …",
+                                         "Import from MoneyMoney …"),
+                                target: self, action: #selector(onWelcomeMoneyMoney))
+        mmButton.bezelStyle = .inline
+        mmButton.isBordered = false
+        mmButton.contentTintColor = .controlAccentColor
+        mmButton.font = .systemFont(ofSize: 12)
+
         rootStack.addArrangedSubview(iconBox)
         rootStack.addArrangedSubview(title)
         rootStack.addArrangedSubview(tagline)
@@ -707,6 +793,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         rootStack.addArrangedSubview(connectButton)
         rootStack.addArrangedSubview(demoButton)
         if erststart { rootStack.addArrangedSubview(restoreButton) }
+        if mmAngebot { rootStack.addArrangedSubview(mmButton) }
 
         rootStack.setCustomSpacing(16, after: iconBox)
         rootStack.setCustomSpacing(10, after: demoButton)
@@ -822,6 +909,387 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let confirm = masterConfirmField.stringValue
         let ready = pass.count >= 6 && !confirm.isEmpty && pass == confirm
         masterNextBtn?.isEnabled = ready
+    }
+
+    // MARK: - MoneyMoney-Import
+
+    private func renderMoneyMoneyAngebotStep() {
+        mmTask?.cancel()
+        mmTask = nil
+        rootStack.alignment = .leading
+        rootStack.spacing = 12
+
+        let iconBox = iconContainer(size: 40, cornerRadius: 12, bg: NSColor(white: 0.5, alpha: 0.12),
+                                    icon: "square.and.arrow.down", iconSize: 18, tint: .labelColor)
+
+        let title = NSTextField(labelWithString: t("Aus MoneyMoney übernehmen.", "Bring your MoneyMoney data."))
+        title.font = .systemFont(ofSize: 19, weight: .semibold)
+
+        let offene = MoneyMoneyVorhaben.offene.count
+        let untertitel = NSTextField(wrappingLabelWithString: offene > 0
+            ? t("Aus einem früheren Durchgang sind noch \(offene) Konten offen. Gib Dein MoneyMoney-Kennwort ein, um weiterzumachen.",
+                "\(offene) accounts are still pending from an earlier run. Enter your MoneyMoney password to continue.")
+            : t("Auf diesem Mac liegt eine MoneyMoney-Datenbank. simplebanking kann die Konten, den Umsatzverlauf und die erste Ebene Deiner Kategorien übernehmen.",
+                "There is a MoneyMoney database on this Mac. simplebanking can take over your accounts, transaction history and the first level of your categories."))
+        untertitel.font = .systemFont(ofSize: 13)
+        untertitel.textColor = .secondaryLabelColor
+        untertitel.preferredMaxLayoutWidth = fieldWidth
+
+        mmKennwortField.placeholderString = t("MoneyMoney-Kennwort", "MoneyMoney password")
+        mmKennwortField.stringValue = ""
+        mmKennwortField.target = self
+        mmKennwortField.action = #selector(onMoneyMoneyLesen)
+        mmKennwortField.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+
+        // Was der Nutzer wissen muss, bevor er ein Kennwort tippt — und zwar alles
+        // drei: dass es nicht gespeichert wird, dass nur gelesen wird, und dass
+        // MoneyMoney dafür nicht laufen muss — es sollte aber auch nicht gerade
+        // schreiben: Liegt ein `-journal` neben der Datei, lässt sie sich nicht
+        // nur-lesend öffnen. Darum steht hier jetzt „beende MoneyMoney" statt
+        // „MoneyMoney muss nicht geöffnet sein": Der zweite Satz war wahr und
+        // führte trotzdem in die Irre.
+        let hinweis = infoBox(icon: "lock.open", t(
+            "Wir speichern dieses Kennwort nicht und schreiben nichts in MoneyMoney zurück — es wird nur gelesen. Beende MoneyMoney vorher, sonst ist die Datenbank gerade in Arbeit.",
+            "We do not store this password and write nothing back to MoneyMoney — it is only read. Quit MoneyMoney first, otherwise its database is busy."))
+
+        mmMeldungLabel.stringValue = ""
+        mmMeldungLabel.isHidden = true
+        mmMeldungLabel.font = .systemFont(ofSize: 12)
+        mmMeldungLabel.textColor = .systemRed
+        mmMeldungLabel.maximumNumberOfLines = 3
+        mmMeldungLabel.preferredMaxLayoutWidth = fieldWidth
+
+        mmSpinner.style = .spinning
+        mmSpinner.controlSize = .small
+        mmSpinner.isDisplayedWhenStopped = false
+        mmSpinner.stopAnimation(nil)
+
+        let buttonRow = horizontalButtons(
+            backTitle: t("Überspringen", "Skip"),
+            backAction: #selector(onMoneyMoneyUeberspringen),
+            primaryTitle: t("Lesen", "Read"),
+            primaryAction: #selector(onMoneyMoneyLesen),
+            primaryEnabled: true
+        )
+        mmLesenBtn = buttonRow.primary
+        buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+
+        // Gleicher, zurückhaltender Stil wie „Sicherung einspielen …" auf der
+        // Startseite: ein Weg für den Sonderfall, der den Normalfall nicht aufhält.
+        let dateiBtn = NSButton(title: t("Andere Datenbank wählen …", "Choose another database …"),
+                                target: self, action: #selector(onMoneyMoneyDateiWaehlen))
+        dateiBtn.bezelStyle = .inline
+        dateiBtn.isBordered = false
+        dateiBtn.contentTintColor = .controlAccentColor
+        dateiBtn.font = .systemFont(ofSize: 12)
+
+        mmDateiLabel.font = .systemFont(ofSize: 11)
+        mmDateiLabel.textColor = .secondaryLabelColor
+        mmDateiLabel.lineBreakMode = .byTruncatingMiddle
+        mmDateiLabel.preferredMaxLayoutWidth = fieldWidth
+        zeigeMoneyMoneyDatei()
+
+        [iconBox, title, untertitel, mmKennwortField, mmMeldungLabel, mmSpinner,
+         hinweis, dateiBtn, mmDateiLabel,
+         flexSpacer(), buttonRow.stack].forEach { rootStack.addArrangedSubview($0) }
+        rootStack.setCustomSpacing(14, after: iconBox)
+        rootStack.setCustomSpacing(4, after: title)
+        rootStack.setCustomSpacing(16, after: untertitel)
+        rootStack.setCustomSpacing(8, after: mmKennwortField)
+        rootStack.setCustomSpacing(12, after: hinweis)
+        rootStack.setCustomSpacing(2, after: dateiBtn)
+
+        mmKennwortField.nextKeyView = buttonRow.primary
+        buttonRow.primary.nextKeyView = buttonRow.back
+        buttonRow.back.nextKeyView = mmKennwortField
+        panel.initialFirstResponder = mmKennwortField
+        DispatchQueue.main.async { [weak self] in
+            self?.panel.makeFirstResponder(self?.mmKennwortField)
+        }
+    }
+
+    private func renderMoneyMoneyKontenStep() {
+        rootStack.alignment = .leading
+        rootStack.spacing = 12
+
+        let title = NSTextField(labelWithString: t("Konten übernehmen", "Accounts to bring over"))
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+
+        let bankanzahl = MoneyMoneyAuswahl.nachBank(mmTreffer).count
+        let untertitel = NSTextField(wrappingLabelWithString: mmTreffer.isEmpty
+            ? t("Zu keinem Deiner MoneyMoney-Konten gibt es einen Open-Banking-Zugang. Richte Deine Bank wie gewohnt ein.",
+                "None of your MoneyMoney accounts has an Open Banking connection. Set up your bank the usual way.")
+            : t("Für jede Bank folgt gleich eine Anmeldung mit Zwei-Faktor — ohne die kann simplebanking nichts abrufen. Der Verlauf kommt danach.",
+                "Each bank needs a two-factor sign-in next — without it simplebanking cannot fetch anything. The history follows afterwards."))
+        untertitel.font = .systemFont(ofSize: 13)
+        untertitel.textColor = .secondaryLabelColor
+        untertitel.preferredMaxLayoutWidth = fieldWidth
+
+        mmCheckboxes = []
+        let liste = NSStackView()
+        liste.orientation = .vertical
+        liste.alignment = .leading
+        liste.spacing = 6
+
+        for treffer in mmTreffer {
+            let name = treffer.konto.name?.trimmingCharacters(in: .whitespaces) ?? ""
+            var teile = [treffer.bankname]
+            if !name.isEmpty, name != treffer.bankname { teile.append(name) }
+            teile.append(treffer.konto.iban)
+            let box = NSButton(checkboxWithTitle: teile.joined(separator: " · "), target: nil, action: nil)
+            box.state = .on
+            liste.addArrangedSubview(box)
+            mmCheckboxes.append(box)
+        }
+
+        // Die Begründung gehört auf den Schirm, nicht ins Logbuch: Ein Umsteiger,
+        // dem ein Konto fehlt, sucht den Fehler sonst bei sich.
+        if !mmAbsagen.isEmpty {
+            let zeilen = mmAbsagen.map { absage -> String in
+                let bezeichnung = absage.konto.name?.trimmingCharacters(in: .whitespaces)
+                let kennung = (bezeichnung?.isEmpty == false ? bezeichnung : nil)
+                    ?? (absage.konto.iban.isEmpty ? t("Konto ohne IBAN", "account without IBAN") : absage.konto.iban)
+                return "• \(kennung) — \(absage.satz)"
+            }
+            let absageLabel = NSTextField(wrappingLabelWithString:
+                t("Übergangen:", "Skipped:") + "\n" + zeilen.joined(separator: "\n"))
+            absageLabel.font = .systemFont(ofSize: 11)
+            absageLabel.textColor = .tertiaryLabelColor
+            absageLabel.preferredMaxLayoutWidth = fieldWidth
+            liste.addArrangedSubview(absageLabel)
+        }
+
+        let behaelter: NSView
+        if mmTreffer.count + mmAbsagen.count > 4 {
+            let scroll = NSScrollView()
+            scroll.hasVerticalScroller = true
+            scroll.documentView = liste
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+            liste.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                liste.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor),
+                liste.trailingAnchor.constraint(equalTo: scroll.contentView.trailingAnchor),
+                liste.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
+            ])
+            scroll.heightAnchor.constraint(equalToConstant: 150).isActive = true
+            scroll.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+            behaelter = scroll
+        } else {
+            behaelter = liste
+        }
+
+        let buttonRow = horizontalButtons(
+            backTitle: t("Zurück", "Back"),
+            backAction: #selector(onMoneyMoneyKontenZurueck),
+            primaryTitle: mmTreffer.isEmpty ? t("Weiter", "Continue") : t("Übernehmen", "Bring over"),
+            primaryAction: #selector(onMoneyMoneyKontenWeiter),
+            primaryEnabled: true
+        )
+        buttonRow.stack.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+
+        var teile: [NSView] = [title, untertitel, behaelter]
+        if bankanzahl > 1 {
+            let bankhinweis = NSTextField(wrappingLabelWithString: t(
+                "\(bankanzahl) Banken — simplebanking fragt sie eine nach der anderen. Brich ruhig ab, der Rest bleibt gemerkt.",
+                "\(bankanzahl) banks — simplebanking asks for them one at a time. Feel free to stop; the rest is remembered."))
+            bankhinweis.font = .systemFont(ofSize: 11)
+            bankhinweis.textColor = .secondaryLabelColor
+            bankhinweis.preferredMaxLayoutWidth = fieldWidth
+            teile.append(bankhinweis)
+        }
+        teile.append(contentsOf: [flexSpacer(), buttonRow.stack])
+        teile.forEach { rootStack.addArrangedSubview($0) }
+        rootStack.setCustomSpacing(4, after: title)
+        rootStack.setCustomSpacing(14, after: untertitel)
+    }
+
+    // MARK: - Actions: MoneyMoney-Import
+
+    @objc private func onMoneyMoneyUeberspringen() {
+        mmTask?.cancel()
+        mmTask = nil
+        mmAuszug = nil
+        mmKennwortField.stringValue = ""
+        render(step: .bankSearch)
+    }
+
+    @objc private func onMoneyMoneyDateiWaehlen() {
+        let dialog = NSOpenPanel()
+        dialog.message = t("MoneyMoney-Datenbank auswählen (MoneyMoney.sqlite)",
+                           "Choose the MoneyMoney database (MoneyMoney.sqlite)")
+        dialog.prompt = t("Wählen", "Choose")
+        dialog.canChooseDirectories = false
+        dialog.allowsMultipleSelection = false
+        // Nicht auf `.sqlite` einschränken: Dieselbe Datei trägt je nach Herkunft
+        // auch `.sqlite3` oder gar keine Endung, und ein Dialog, der die gesuchte
+        // Datei ausgraut, ist schlimmer als einer, der zu viel zeigt.
+        dialog.allowsOtherFileTypes = true
+        dialog.directoryURL = MoneyMoneyLesepfad.ueblicherOrt.deletingLastPathComponent()
+        guard dialog.runModal() == .OK, let gewaehlt = dialog.url else { return }
+        mmDatenbank = gewaehlt
+        mmMeldungLabel.isHidden = true
+        zeigeMoneyMoneyDatei()
+    }
+
+    private func zeigeMoneyMoneyDatei() {
+        guard let mmDatenbank else {
+            mmDateiLabel.stringValue = ""
+            mmDateiLabel.isHidden = true
+            return
+        }
+        mmDateiLabel.stringValue = mmDatenbank.path(percentEncoded: false)
+        mmDateiLabel.isHidden = false
+    }
+
+    @objc private func onMoneyMoneyLesen() {
+        let kennwort = mmKennwortField.stringValue
+        guard !kennwort.isEmpty else {
+            zeigeMoneyMoneyMeldung(t("Bitte das MoneyMoney-Kennwort eingeben.",
+                                     "Please enter your MoneyMoney password."))
+            return
+        }
+        guard mmTask == nil else { return }
+        // Hier gelesen, nicht im Task: `mmDatenbank` gehört dem Hauptakteur.
+        let datei = mmDatenbank ?? MoneyMoneyLesepfad.ueblicherOrt
+        mmMeldungLabel.isHidden = true
+        mmLesenBtn?.isEnabled = false
+        mmSpinner.startAnimation(nil)
+        zeigeMoneyMoneyStand(t("Datenbank wird gelesen …", "Reading the database …"))
+
+        AppLogger.log("MoneyMoney-Import: Lesen angefordert", category: "MoneyMoney")
+
+        // `Task.detached` und nicht `Task { }`: Der Assistent läuft modal, und ein
+        // Task, der den Haupt-Actor erbt, wird dort nie eingeplant. Siehe
+        // `Hauptthread` — dieselbe Falle hat diesen Import einen halben Tag lang
+        // wie einen Hänger aussehen lassen.
+        mmTask = Task.detached(priority: .userInitiated) { [weak self] in
+            // Eine starke, aber kurzlebige Momentaufnahme: Die verschachtelten
+            // Rückrufe dürfen die schwache Bindung nicht erneut einfangen, und der
+            // Task endet in Sekunden. `@MainActor`-Klassen sind `Sendable`.
+            let fenster = self
+            // Egal auf welchem Weg dieser Task endet — Rad aus, Knopf wieder
+            // klickbar. Vorher führte jeder stille `return` (abgebrochen, Fenster
+            // weg) in eine Oberfläche, die für immer lud: ein Rad, ein grauer
+            // Knopf und kein Weg zurück.
+            defer {
+                Hauptthread.sprung {
+                    MainActor.assumeIsolated {
+                        fenster?.mmTask = nil
+                        fenster?.mmSpinner.stopAnimation(nil)
+                        fenster?.mmLesenBtn?.isEnabled = true
+                    }
+                }
+            }
+            do {
+                // Der Helfer ist ein eigener Prozess und blockiert, solange er liest.
+                let begonnen = Date()
+                let auszug = try MoneyMoneyLesepfad.auszug(datenbank: datei, kennwort: kennwort)
+                AppLogger.log("MoneyMoney-Import: gelesen in "
+                              + String(format: "%.1f", Date().timeIntervalSince(begonnen))
+                              + "s — Konten \(auszug.konten.count), "
+                              + "Umsätze \(auszug.umsaetze.count), "
+                              + "Kategorien \(auszug.kategorien.count)",
+                              category: "MoneyMoney")
+                guard !Task.isCancelled else { return }
+                await Hauptthread.lauf { [weak self] in
+                    self?.zeigeMoneyMoneyStand(L10n.t("Banken werden geprüft …",
+                                                      "Checking banks …"))
+                }
+
+                // Je Bank eine YAXI-Abfrage. Bis zum 11.11.2026 stand dabei nur ein
+                // drehendes Rad: Wer nicht weiß, ob es noch läuft, hält es für
+                // hängend — zu Recht, denn zu sehen war kein Unterschied.
+                let aufgeteilt = await MoneyMoneyEinrichtung.aufteilung(auszug) {
+                    gefragt, insgesamt in
+                    Hauptthread.sprung {
+                        MainActor.assumeIsolated {
+                            fenster?.zeigeMoneyMoneyStand(
+                                L10n.t("Bank \(gefragt) von \(insgesamt) wird geprüft …",
+                                       "Checking bank \(gefragt) of \(insgesamt) …"))
+                        }
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                AppLogger.log("MoneyMoney-Import: \(aufgeteilt.treffer.count) übernehmbar, "
+                              + "\(aufgeteilt.absagen.count) nicht", category: "MoneyMoney")
+
+                await Hauptthread.lauf { [weak self] in
+                    guard let self else { return }
+                    self.mmMeldungLabel.isHidden = true
+                    self.mmAuszug = auszug
+                    self.mmTreffer = aufgeteilt.treffer
+                    self.mmAbsagen = aufgeteilt.absagen
+                    self.mmVerbindungen = aufgeteilt.verbindungen
+                    self.mmKennwortField.stringValue = ""
+                    self.render(step: .moneymoneyKonten)
+                }
+            } catch {
+                AppLogger.log("MoneyMoney-Import: Lesen fehlgeschlagen (\(error))",
+                              category: "MoneyMoney", level: "WARN")
+                guard !Task.isCancelled else { return }
+                let text = (error as? LocalizedError)?.errorDescription
+                    ?? L10n.t("Die MoneyMoney-Datenbank konnte nicht gelesen werden.",
+                              "The MoneyMoney database could not be read.")
+                await Hauptthread.lauf { [weak self] in
+                    self?.zeigeMoneyMoneyMeldung(text)
+                }
+            }
+        }
+    }
+
+    @objc private func onMoneyMoneyKontenZurueck() {
+        mmAuszug = nil
+        render(step: .moneymoneyAngebot)
+    }
+
+    @objc private func onMoneyMoneyKontenWeiter() {
+        let gewaehlt = zip(mmCheckboxes, mmTreffer)
+            .filter { $0.0.state == .on }
+            .map { $0.1 }
+
+        // Der Auszug muss den Assistenten überleben, nicht nur die Auswahl: Die
+        // Freigabe kann Minuten dauern, läuft über mehrere Banken und überdauert
+        // einen Programmneustart. Ohne Ablage hätte der Nutzer beim Fortsetzen die
+        // Warteschlange und keine Daten — und müsste sein MoneyMoney-Kennwort ein
+        // zweites Mal eingeben.
+        if let mmAuszug { MoneyMoneyAblage.legen(mmAuszug) }
+
+        // Das Vorhaben ist die Warteschlange. Sie überlebt diesen Lauf, damit ein
+        // Abbruch bei Bank drei von fünf kein Sonderfall ist.
+        MoneyMoneyVorhaben.anlegen(gewaehlt.map {
+            MoneyMoneyVorhabenEintrag(iban: $0.konto.iban,
+                                      verbindungsId: $0.verbindungsId,
+                                      bankname: $0.bankname,
+                                      kontoSchluessel: $0.konto.schluessel)
+        })
+
+        // Erste offene Bank: Die Banksuche wird nicht übersprungen, sie ist
+        // beantwortet — YAXI hat die Verbindung zur IBAN selbst genannt. Der
+        // Zurück-Weg aus dem Zugangsdaten-Schritt führt trotzdem dorthin, falls die
+        // Zuordnung bei mehreren Verbindungen zur gleichen Bank daneben lag.
+        guard let naechste = MoneyMoneyVorhaben.naechsteBank,
+              let verbindung = mmVerbindungen[naechste.verbindungsId] else {
+            render(step: .bankSearch)
+            return
+        }
+        selectedConnection = verbindung
+        onSearchContinue()
+    }
+
+    private func zeigeMoneyMoneyMeldung(_ text: String) {
+        mmMeldungLabel.textColor = .systemRed
+        mmMeldungLabel.stringValue = text
+        mmMeldungLabel.isHidden = false
+        NSSound.beep()
+    }
+
+    /// Dasselbe Feld, aber als Stand und nicht als Fehler: grau statt rot und
+    /// ohne Ton. Ein zweites Label wäre eine zweite Stelle, die man beim nächsten
+    /// Schritt vergisst zu leeren.
+    private func zeigeMoneyMoneyStand(_ text: String) {
+        mmMeldungLabel.textColor = .secondaryLabelColor
+        mmMeldungLabel.stringValue = text
+        mmMeldungLabel.isHidden = false
     }
 
     // MARK: - Bank Search
@@ -1161,6 +1629,9 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let selected = accountPickerCheckboxes.enumerated().compactMap { (i, btn) in
             btn.state == .on ? (accountPickerAccounts.indices.contains(i) ? accountPickerAccounts[i] : nil) : nil
         }
+        // Gemerkt, nicht abgehakt: Der Nutzer hat die Konten gewählt, aber der
+        // Slot entsteht erst danach. Abgehakt wird beim Erfolg.
+        mmZuletztGewaehlteIbans = Set(selected.compactMap { $0.iban })
         let cont = accountPickerContinuation
         accountPickerContinuation = nil
         if selected.isEmpty {
@@ -1475,7 +1946,11 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let buttonRow = horizontalButtons(
             backTitle: t("Zurück", "Back"),
             backAction: #selector(onOnboardingBack),
-            primaryTitle: t("Los geht's!", "Let's go!"),
+            // „Los geht's!" nur, wenn danach wirklich los geht. Beim Erstlauf folgt
+            // der Assistent für Gehaltstag, Dock und simplesend — dann ist es
+            // „Weiter". Gemeldet am 11.11.2026.
+            primaryTitle: InitialSetupExtensionPanel.folgtNoch
+                ? t("Weiter", "Next") : t("Los geht's!", "Let's go!"),
             primaryAction: #selector(onOnboardingNext(_:)),
             primaryEnabled: true
         )
@@ -1743,6 +2218,15 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     // MARK: - Actions: Welcome
 
     @objc private func onWelcomeConnect() {
+        mmGewaehlt = false
+        render(step: .masterPassword)
+    }
+
+    /// Derselbe Weg wie „Jetzt verbinden", nur mit dem Import dazwischen: Das
+    /// Hauptkennwort muss **vorher** stehen, denn ohne es gibt es keine Zugangsdaten
+    /// und ohne die keinen Slot, in den der Verlauf später gehört.
+    @objc private func onWelcomeMoneyMoney() {
+        mmGewaehlt = true
         render(step: .masterPassword)
     }
 
@@ -1874,7 +2358,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
             return
         }
         collectedMasterPassword = pass
-        render(step: .bankSearch)
+        // Nur wenn der Nutzer den Import auf der ersten Seite gewählt hat. Die
+        // bloße Anwesenheit einer MoneyMoney-Datenbank ist kein Auftrag.
+        let mmMoeglich = mmGewaehlt && MoneyMoneyLesepfad.istVorhanden
+        render(step: mmMoeglich ? .moneymoneyAngebot : .bankSearch)
     }
 
     // MARK: - Actions: Bank Search
@@ -2332,14 +2819,10 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
     // MARK: - Connect Result Handling
 
-    nonisolated private static func enqueueOnMainRunLoop(_ block: @escaping () -> Void) {
-        // NSApp.runModal() runs the run loop in NSModalPanelRunLoopMode.
-        // Neither CFRunLoopPerformBlock(commonModes) nor DispatchQueue.main.async
-        // fire in that mode — both are registered for common modes only.
-        // RunLoop.perform(inModes:block:) fires once in the first matching mode,
-        // so including .modalPanel ensures callbacks reach the main thread during
-        // the modal session.
-        RunLoop.main.perform(inModes: [.default, .modalPanel], block: block)
+    /// Der Grund steht jetzt in `Hauptthread` — dort, wo auch alle anderen ihn
+    /// finden, die aus dem modalen Assistenten heraus Arbeit starten.
+    nonisolated private static func enqueueOnMainRunLoop(_ block: @escaping @Sendable () -> Void) {
+        Hauptthread.sprung(block)
     }
 
     private func handleConnectSuccess(_ bank: DiscoveredBank, masterPassword: String) {
@@ -2347,6 +2830,35 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         latestDiagnosticsLogURL = nil
         completedBank = bank
         collectedMasterPassword = masterPassword
+
+        // Jetzt steht die Bank, also kann das Vorhaben fortschreiben. Über die IBAN,
+        // weil der Nutzer im Kontoauswahl-Schritt abwählen darf; und die ganze Bank
+        // dazu, damit ein Eintrag, den er nicht mehr wollte, nicht für immer offen
+        // bleibt und der Assistent bei jedem Start erneut danach fragt.
+        if !MoneyMoneyVorhaben.offene.isEmpty {
+            // Welche Konten dieser Bank der Verlauf betrifft.
+            //
+            // Zuerst die Kontoauswahl des Assistenten — dort darf der Nutzer
+            // abwählen. Sie erscheint aber **nicht immer**: Nennt die Bank nur ein
+            // Konto, fragt der Verbindungsweg gar nicht, und dann stand hier eine
+            // leere Menge. Der Verlauf blieb aus — ohne Fehler, ohne Zeile im
+            // Protokoll. Gemessen am 11.11.2026: Bank verbunden, 233 Buchungen vom
+            // Abruf, die 1.800 aus MoneyMoney nie angekommen.
+            let uebernommene = MoneyMoneyVorhaben.zuUebernehmen(
+                gewaehlt: mmZuletztGewaehlteIbans,
+                bankKennung: bank.id,
+                offene: MoneyMoneyVorhaben.offene)
+            MoneyMoneyVorhaben.abhaken(ibans: uebernommene)
+            if let verbindungsId = bank.id {
+                MoneyMoneyVorhaben.bankAbhaken(verbindungsId: verbindungsId)
+            }
+            mmZuletztGewaehlteIbans = []
+            // Der Verlauf selbst wird NICHT hier nachgetragen: Den Slot, in den er
+            // gehört, legt erst der Aufrufer an, nachdem `runModal` zurückgekehrt
+            // ist. Ein Nachtrag an dieser Stelle fand nie einen Slot. Die Ablage
+            // und das Vorhaben überleben den Assistenten, `MoneyMoneyNachtrag`
+            // holt es danach.
+        }
         // Always show page 0 (success + nickname input) — for second account it's the only page.
         render(step: .onboarding(page: 0))
     }

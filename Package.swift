@@ -14,7 +14,12 @@ let package = Package(
     products: [
         .executable(name: "simplebanking", targets: ["simplebanking"]),
         .executable(name: "simplebanking-mcp", targets: ["simplebanking-mcp"]),
-        .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"])
+        .executable(name: "simplebanking-cli", targets: ["simplebanking-cli"]),
+        // Liest eine MoneyMoney-Datenbank (SQLCipher) und schreibt sie als Plist.
+        // Eigener Prozess, weil SQLCipher dieselben `sqlite3_*`-Symbole exportiert
+        // wie das System-SQLite, an dem GRDB hängt — und weil in derselben Datei
+        // die Bank-PIN des Nutzers liegt.
+        .executable(name: "simplebanking-mmimport", targets: ["simplebanking-mmimport"])
         // Der REWE-Prüfstand gehört bewusst **nicht** mehr hierher, siehe
         // `scripts/REWEPoc/Package.swift`. Ein `executableTarget` bekommt von
         // SwiftPM immer ein implizites Produkt — „Ziel, aber kein Produkt" gibt es
@@ -25,8 +30,12 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.0.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.0.0"),
-        .package(url: "https://github.com/yaxitech/routex-client-swift", from: "0.5.0"),
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0")
+        .package(url: "https://github.com/yaxitech/routex-client-swift", from: "0.6.0"),
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        // SQLite mit SQLCipher als C-Quellen (MIT). Nur `simplebanking-mmimport`
+        // hängt daran — NIE die App, das Testziel oder die CLI, sonst liegen zwei
+        // Implementierungen derselben Symbole in einem Binary.
+        .package(url: "https://github.com/skiptools/swift-sqlcipher", from: "1.13.0")
     ],
     targets: [
         .executableTarget(
@@ -35,7 +44,8 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "RoutexClient", package: "routex-client-swift"),
-                .product(name: "RoutexRefresh", package: "routex-client-swift")
+                .product(name: "RoutexRefresh", package: "routex-client-swift"),
+                "MoneyMoneyForm"
             ],
             exclude: [
                 // Entitlements-Dateien werden von build-app.sh zur Signing-Zeit verwendet,
@@ -89,11 +99,34 @@ let package = Package(
             ],
             path: "Sources/simplebanking-cli"
         ),
+        // Drahtform und Leseregeln des MoneyMoney-Imports. Eigenes Ziel aus
+        // demselben Grund wie `MCPRahmen`: Der Helfer ist ein Executable mit
+        // `main.swift` und lässt sich aus dem Testziel nicht importieren. Hier hängt
+        // bewusst NICHTS dran — zieht dieses Ziel GRDB oder SQLCipher mit, liegen
+        // beide SQLite-Implementierungen im Testbinary.
+        .target(
+            name: "MoneyMoneyForm",
+            path: "Sources/MoneyMoneyForm"
+        ),
+        .executableTarget(
+            name: "simplebanking-mmimport",
+            dependencies: [
+                "MoneyMoneyForm",
+                .product(name: "SQLCipher", package: "swift-sqlcipher")
+            ],
+            path: "Sources/simplebanking-mmimport",
+            // `sqlite3_key` steht in sqlite3.h hinter `SQLITE_HAS_CODEC`. Das Paket
+            // setzt das Define nicht selbst, sondern erwartet es beim Verbraucher —
+            // seine eigenen Ziele `SQLCipherTests` und `SQLiteDB` machen es genauso.
+            // Ohne das Define übersetzt alles, nur die Schlüsselfunktionen fehlen.
+            cSettings: [.define("SQLITE_HAS_CODEC")]
+        ),
         .testTarget(
             name: "simplebankingTests",
             dependencies: [
                 "simplebanking",
                 "MCPRahmen",
+                "MoneyMoneyForm",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ],
             path: "Tests/simplebankingTests"

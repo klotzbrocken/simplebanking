@@ -103,7 +103,7 @@ fi
 OUTDIR="$ROOT/SimpleBankingBuild"
 APP="$OUTDIR/simplebanking.app"
 ICON_SRC="${ICON_SRC:-$ROOT/Resources/icon_full_black.png}"
-VERSION_BASE="${VERSION_BASE:-2.0.9}"
+VERSION_BASE="${VERSION_BASE:-2.2.0}"
 
 mkdir -p "$OUTDIR"
 rm -rf "$APP"
@@ -284,6 +284,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>SUFeedURL</key><string>${SPARKLE_FEED_URL}</string>
   <key>SUPublicEDKey</key><string>${SPARKLE_PUBLIC_KEY}</string>
+  <!-- Ohne diesen Schlüssel fragt Sparkle beim ersten Start, ob es automatisch
+       nachsehen darf. Die Frage hat sich erledigt, seit die Prüfung nichts mehr
+       aufpoppen lässt: Sie färbt nur ein Zeichen in der Leiste ein und legt ein
+       Band ins Flyout (gentle reminders, siehe UpdateChecker). Vorher erfuhr nur
+       von einer neuen Fassung, wer von sich aus ins Menü sah — deshalb lief
+       draußen noch 2.0.7, als 2.0.9 seit zwei Wochen bereitlag. -->
+  <key>SUEnableAutomaticChecks</key><true/>
   <key>NSRemindersUsageDescription</key><string>simplebanking erstellt Erinnerungen für Buchungen in der Reminders-App.</string>
   <key>CFBundleURLTypes</key>
   <array>
@@ -320,21 +327,53 @@ lipo -create -output "$CLI_UNIVERSAL" "$CLI_ARM64" "$CLI_X86"
 cp "$CLI_UNIVERSAL" "$APP/Contents/MacOS/simplebanking-cli"
 echo "CLI bundled: $(lipo -archs "$CLI_UNIVERSAL")"
 
-# Embed Sparkle.framework (built by SPM)
-SPARKLE_FW_SRC="$(find "$ROOT/.build/apple/Products/Release" -name "Sparkle.framework" -maxdepth 4 2>/dev/null | head -1 || true)"
+# Build simplebanking-mmimport (liest die MoneyMoney-Datenbank, SQLCipher)
+#
+# Eigenes Programm und nicht Teil der App, weil es nicht geht: SQLCipher
+# definiert 292 `sqlite3_*`-Symbole, von denen GRDB 82 aus
+# /usr/lib/libsqlite3.dylib bezieht. Der Versuch scheitert schon vor dem Linker,
+# weil swift-sqlcipher ein GRDB-taugliches `grdb.h` mitbringt, das mit GRDBs
+# eigenem `CSQLite/shim.h` kollidiert (`redefinition of
+# '_enableDoubleQuotedStringLiterals'`). Gemessen am 11.11.2026, nicht vermutet.
+#
+# `MoneyMoneyLesepfad.helfer` sucht ihn neben `Bundle.main.executableURL` —
+# fehlt er hier, findet die App im gebauten Bundle nichts und der Import
+# scheitert mit „Helfer nicht gefunden", nicht mit einem Baufehler.
+swift build --build-system native -c release --arch arm64 --product simplebanking-mmimport
+swift build --build-system native -c release --arch x86_64 --product simplebanking-mmimport
+MM_ARM64="$ROOT/.build/arm64-apple-macosx/release/simplebanking-mmimport"
+MM_X86="$ROOT/.build/x86_64-apple-macosx/release/simplebanking-mmimport"
+MM_UNIVERSAL="$ROOT/.build/universal/simplebanking-mmimport"
+lipo -create -output "$MM_UNIVERSAL" "$MM_ARM64" "$MM_X86"
+cp "$MM_UNIVERSAL" "$APP/Contents/MacOS/simplebanking-mmimport"
+echo "MoneyMoney-Helfer bundled: $(lipo -archs "$MM_UNIVERSAL")"
+
+# Embed Sparkle.framework
+#
+# Die Suche lief früher per `find … | head -1` über eine UNGEORDNETE Menge, in der
+# auch zwei Debug-Kopien liegen (.build/out/Products/Debug, .build/*/debug) — welche
+# davon im DMG landet, war Zufall. Und der Rückfallzweig schloss mit `grep -v artifacts`
+# ausgerechnet die kanonische Scheibe aus. Deshalb jetzt eine feste Reihenfolge, und
+# **Abbruch**, wenn keine Release-Kopie da ist: Ein Release ohne Sparkle kann nicht
+# aktualisieren, und das fällt erst beim Kunden auf.
+SPARKLE_XC="$ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+SPARKLE_FW_SRC=""
+for cand in "$SPARKLE_XC" \
+            "$ROOT/.build/apple/Products/Release/Sparkle.framework" \
+            "$ROOT/.build/arm64-apple-macosx/release/Sparkle.framework"; do
+    if [[ -d "$cand" ]]; then SPARKLE_FW_SRC="$cand"; break; fi
+done
 if [[ -z "$SPARKLE_FW_SRC" ]]; then
-    SPARKLE_FW_SRC="$(find "$ROOT/.build" -name "Sparkle.framework" -maxdepth 8 2>/dev/null | { grep -v 'checkouts' || true; } | { grep -v 'artifacts' || true; } | head -1 || true)"
+    echo "FEHLER: keine Release-Kopie von Sparkle.framework gefunden." >&2
+    echo "        'swift package resolve' holt sie; ohne sie kann die App nicht aktualisieren." >&2
+    exit 1
 fi
-if [[ -n "$SPARKLE_FW_SRC" && -d "$SPARKLE_FW_SRC" ]]; then
-    rm -rf "$APP/Contents/Frameworks/Sparkle.framework"
-    cp -R "$SPARKLE_FW_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
-    # Add rpath so the binary finds Sparkle.framework at runtime inside the bundle
-    install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/simplebanking" 2>/dev/null || true
-    echo "Embedded Sparkle.framework from $SPARKLE_FW_SRC"
-else
-    echo "Warning: Sparkle.framework not found in build output — update checking will not work."
-    echo "Run 'swift package resolve' to download Sparkle, then rebuild."
-fi
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework"
+cp -R "$SPARKLE_FW_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
+# Add rpath so the binary finds Sparkle.framework at runtime inside the bundle
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/simplebanking" 2>/dev/null || true
+echo "Embedded Sparkle.framework from $SPARKLE_FW_SRC"
+echo "  Architekturen: $(lipo -archs "$APP/Contents/Frameworks/Sparkle.framework/Sparkle" 2>/dev/null || echo unbekannt)"
 
 # App-Intents-Metadaten ins Bundle. Muss vor dem Signieren passieren — die Signatur
 # versiegelt Contents/Resources, ein späteres Nachlegen bräche sie.

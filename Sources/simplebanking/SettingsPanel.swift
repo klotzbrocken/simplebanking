@@ -9,10 +9,15 @@ extension Notification.Name {
     /// „Zugangsdaten ändern…" (Einstellungen bzw. Fehlerzeile der Umsatzliste)
     /// → Dialog in `BalanceBar.changeBankCredentials`.
     static let changeBankCredentials = Notification.Name("simplebanking.changeBankCredentials")
+    /// „Eigene Kategorien verwalten" aus der Detailansicht heraus.
+    static let kategorienVerwalten = Notification.Name("simplebanking.kategorienVerwalten")
     /// Einstellungen → Allgemein → „Nach Updates suchen" → `BalanceBar.checkForUpdates`.
     static let checkForUpdatesRequested = Notification.Name("simplebanking.checkForUpdatesRequested")
     /// Einstellungen → Allgemein → „simplebanking beenden" → `BalanceBar.quit`.
     static let quitRequested = Notification.Name("simplebanking.quitRequested")
+    /// „Freigabe neu anstoßen" (TAN-Zeile der Umsatzliste bzw. Statusmenü)
+    /// → `BalanceBar.freigabeNeuAnstossen`.
+    static let freigabeNeuAnstossen = Notification.Name("simplebanking.freigabeNeuAnstossen")
 }
 
 // Breite des Gehaltseingang-Pickers ("31. des Monats") — via Font-Metriken + Button-Chrome
@@ -256,6 +261,24 @@ struct SettingsView: View {
     /// Wird gesetzt, wenn aus dem Flyout-„+" heraus direkt zum Quick-Send-Vorlagen-Editor
     /// (im Konten-Tab) gescrollt werden soll.
     @State private var scrollToQuickSend: Bool = false
+    /// Sprung zur Kategorienkarte — sie steht unten im Finanzen-Reiter, und das „+"
+    /// in der Buchungsansicht meint genau sie, nicht den Reiter.
+    @State private var scrollToKategorien: Bool = false
+
+    // Kategorien (global, nicht pro Konto — siehe Eigenkategorien)
+    @State private var neueKategorie: String = ""
+    @State private var neuesKategoriesymbol: String = "tag"
+    @State private var kategorieEinwand: String?
+    /// Namen im Bearbeiten, je `rawValue`. Nicht direkt in den Laden geschrieben: Bei
+    /// einer eigenen Kategorie **ist** der Name die Identität, ein Umbenennen pro
+    /// Tastendruck würde sie bei jedem Buchstaben neu anlegen.
+    @State private var kategorieEntwuerfe: [String: String] = [:]
+    @State private var kategorieZumLoeschen: TransactionCategory?
+    /// Zähler, der die Liste neu zeichnet. Die Kategorien liegen in UserDefaults, nicht
+    /// in einem ObservableObject — ohne den Zähler bliebe die Liste nach dem Anlegen stehen.
+    @State private var kategorienStand: Int = 0
+    /// Für welche Kategorie die Farbauswahl offen steht (`rawValue`).
+    @State private var farbwahlFuer: String?
     @State private var showResetConfirmation: Bool = false
     @State private var slotToDelete: BankSlot? = nil
     @State private var showSlotDeleteConfirmation: Bool = false
@@ -851,6 +874,19 @@ struct SettingsView: View {
                 .onChange(of: selectedTab) { _ in
                     proxy.scrollTo("settingsTop", anchor: .top)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .kategorienVerwalten)) { _ in
+                    selectedTab = 2
+                    scrollToKategorien = true
+                }
+                .onChange(of: scrollToKategorien) { shouldScroll in
+                    guard shouldScroll else { return }
+                    // Wie beim Quick-Send-Sprung: erst rendern lassen, sonst findet
+                    // der Anker nichts, und der Sprung nach oben gewinnt.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                        withAnimation { proxy.scrollTo("kategorienKarte", anchor: .top) }
+                        scrollToKategorien = false
+                    }
+                }
                 .onChange(of: scrollToQuickSend) { shouldScroll in
                     guard shouldScroll else { return }
                     // Kurzer Delay, damit der Konten-Tab gerendert ist, bevor zum Anker gescrollt wird.
@@ -881,6 +917,12 @@ struct SettingsView: View {
             if !didInitialMerchantRefresh {
                 didInitialMerchantRefresh = true
                 refreshMerchantResolutionData(pipelineEnabled: effectiveMerchantPipelineEnabled)
+            }
+            // Erst-Öffnung aus dem „+" neben „Kategorie": direkt auf die Karte.
+            if UserDefaults.standard.bool(forKey: "settingsScrollToKategorien") {
+                UserDefaults.standard.removeObject(forKey: "settingsScrollToKategorien")
+                selectedTab = 2
+                scrollToKategorien = true
             }
             // Erst-Öffnung aus dem Flyout-„+": direkt zum Quick-Send-Vorlagen-Editor scrollen.
             if UserDefaults.standard.bool(forKey: "settingsScrollToQuickSend") {
@@ -1537,6 +1579,40 @@ struct SettingsView: View {
                                 }
                             }
 
+                            // TAN-Verfahren. Bis 2.1.0 hat die App die Rückfrage der Bank
+                            // immer selbst beantwortet (Push/App zuerst, sonst der erste
+                            // Eintrag) — wer chipTAN am Schreibtisch nutzen wollte, kam
+                            // nie dazu. Die Liste kann nur zeigen, was die Bank in einer
+                            // echten Freigabe angeboten hat; vorher kennt die App die
+                            // Verfahren dieser Bank nicht.
+                            if !slot.isReceiptSlot && slot.source != .paypal {
+                                SettingsRow(
+                                    title: t("TAN-Verfahren", "TAN method"),
+                                    subtitle: currentSlotSettings.tanVerfahrenAngebote.isEmpty
+                                        ? t("Automatisch. Die Verfahren Deiner Bank erscheinen hier, sobald sie bei einer Freigabe danach gefragt hat.",
+                                            "Automatic. Your bank's methods appear here once it has asked for one during an approval.")
+                                        : t("Welches Verfahren die App wählt, wenn die Bank danach fragt. Automatisch heißt: App-Freigabe, falls die Bank eine anbietet.",
+                                            "Which method the app picks when the bank asks. Automatic means app approval if the bank offers one.")
+                                ) {
+                                    AccountMenuPicker(
+                                        items: [(title: t("Automatisch", "Automatic"), value: "")]
+                                            + Tanverfahren.sortiert(currentSlotSettings.tanVerfahrenAngebote)
+                                                .map { (title: $0.beschriftung, value: $0.schluessel) },
+                                        selection: Binding(
+                                            get: { currentSlotSettings.tanVerfahrenSchluessel ?? "" },
+                                            set: { neu in
+                                                currentSlotSettings.tanVerfahrenSchluessel = neu.isEmpty ? nil : neu
+                                                currentSlotSettings.tanVerfahrenName = neu.isEmpty
+                                                    ? nil
+                                                    : currentSlotSettings.tanVerfahrenAngebote[neu]
+                                                saveCurrentSlotSettings()
+                                            }
+                                        ),
+                                        width: _settingsGehaltsPickerWidth
+                                    )
+                                }
+                            }
+
                             SettingsRow(
                                 title: t("Auto-Sync-Zeitraum", "Auto-sync range"),
                                 subtitle: t(
@@ -2051,6 +2127,256 @@ struct SettingsView: View {
         ausfuehren(ueberschreiben: false)
     }
 
+    // MARK: - Kategorien
+
+    /// Eigene Kategorien anlegen und eingebaute umbenennen.
+    ///
+    /// *Gemeldet am 10.11.2026 von einem Tester, der von MoneyMoney kommt:* Dort pflegt
+    /// er einen eigenen Kategoriebaum, hier gab es 14 feste. Die Liste steht in den
+    /// Finanzen und nicht pro Konto, weil eine Kategorie über alle Konten hinweg gilt —
+    /// sonst hätte dieselbe Buchung je Konto eine andere.
+    private var kategorienCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsSectionHeader(title: t("Kategorien", "Categories"), icon: "tag")
+
+            Text(t("Eigene Kategorien anlegen, eingebaute umbenennen. Name ändern und Eingabetaste drücken. Bestehende Zuordnungen bleiben erhalten — auch bei einer umbenannten Kategorie.",
+                   "Add your own categories, rename the built-in ones. Change a name and press Return. Existing assignments are preserved, renamed categories included."))
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Zwei Spalten: Bei inzwischen vierzehn eingebauten plus eigenen füllte
+            // die einspaltige Liste das Fenster und ließ rechts die halbe Breite leer.
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
+                                GridItem(.flexible(), spacing: 12)],
+                      alignment: .leading, spacing: 8) {
+                ForEach(TransactionCategory.allCases, id: \.self) { kategorie in
+                    kategorieZeile(kategorie)
+                }
+            }
+
+            Divider().padding(.vertical, 2)
+
+            HStack(spacing: 8) {
+                symbolMenue(auswahl: neuesKategoriesymbol) { neuesKategoriesymbol = $0 }
+                TextField(t("Neue Kategorie", "New category"), text: $neueKategorie)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .frame(width: 180)
+                    .onSubmit { kategorieAnlegen() }
+                Button(t("Hinzufügen", "Add")) { kategorieAnlegen() }
+                    .disabled(Kategorienamen.bereinigt(neueKategorie) == nil)
+                Spacer(minLength: 0)
+            }
+
+            if let kategorieEinwand {
+                Text(kategorieEinwand)
+                    .font(ThemeFonts.body(size: 11))
+                    .foregroundColor(.red)
+            }
+        }
+        // `id` auf dem Inhalt, nicht auf der Karte: Die Karte trägt am Aufrufort
+        // die Sprungmarke `"kategorienKarte"`, und zwei `.id` übereinander machen
+        // nicht klar, welche der ScrollViewReader meint.
+        .id(kategorienStand)
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
+        .confirmationDialog(
+            t("Kategorie löschen?", "Delete category?"),
+            isPresented: Binding(get: { kategorieZumLoeschen != nil },
+                                 set: { if !$0 { kategorieZumLoeschen = nil } })
+        ) {
+            Button(t("Löschen", "Delete"), role: .destructive) {
+                if let ziel = kategorieZumLoeschen {
+                    Eigenkategorien.loeschen(name: ziel.rawValue)
+                    kategorienStand += 1
+                }
+                kategorieZumLoeschen = nil
+            }
+            Button(t("Abbrechen", "Cancel"), role: .cancel) { kategorieZumLoeschen = nil }
+        } message: {
+            Text(t("Buchungen mit dieser Kategorie fallen auf die automatische Zuordnung zurück. Die Buchungen selbst bleiben unberührt.",
+                   "Transactions in this category fall back to automatic assignment. The transactions themselves are untouched."))
+        }
+    }
+
+    private func kategorieZeile(_ kategorie: TransactionCategory) -> some View {
+        HStack(spacing: 8) {
+            // Das Symbol trägt die Farbe der Kategorie: So steht in der Übersicht
+            // neben jedem Namen, wie die Kapsel in der Umsatzzeile aussehen wird —
+            // und nicht nur im Menü, das man dafür erst öffnen müsste.
+            if kategorie.istEigene {
+                symbolMenue(auswahl: kategorie.icon,
+                            farbe: Kategoriefarbe.ton(fuer: kategorie).grundfarbe) {
+                    Eigenkategorien.symbolSetzen(eigene: kategorie.rawValue, symbol: $0)
+                    kategorienStand += 1
+                }
+            } else {
+                Image(systemName: kategorie.icon)
+                    .frame(width: 22, alignment: .center)
+                    .foregroundColor(Kategoriefarbe.ton(fuer: kategorie).grundfarbe)
+            }
+
+            farbmenue(kategorie)
+
+            TextField("", text: Binding(
+                get: { kategorieEntwuerfe[kategorie.rawValue] ?? kategorie.displayName },
+                set: { kategorieEntwuerfe[kategorie.rawValue] = $0 }
+            ))
+            .textFieldStyle(RoundedBorderTextFieldStyle())
+            .frame(minWidth: 110)
+            .onSubmit { kategorieUmbenennen(kategorie) }
+
+            if kategorie.istEigene {
+                Button {
+                    kategorieZumLoeschen = kategorie
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help(t("Kategorie löschen", "Delete category"))
+            } else if kategorie.istUmbenannt {
+                Button(t("Zurücksetzen", "Reset")) {
+                    Eigenkategorien.umbenennen(eingebaut: kategorie.rawValue, auf: nil)
+                    kategorieEntwuerfe[kategorie.rawValue] = nil
+                    kategorieEinwand = nil
+                    kategorienStand += 1
+                }
+                .buttonStyle(.plain)
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.sbBlueMid)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// Die Farbe der Kategorie — gewählt aus der Palette, nicht frei gemischt.
+    ///
+    /// Ein `ColorPicker` wäre weniger Code und die falsche Freiheit: Grün, Orange und
+    /// Rot gehören der Saldo-Stimmung und den Beträgen, eine Kapsel in diesen Farben
+    /// läse sich als Warnung. Die Palette hält die Regel ein, und weil gespeichert
+    /// wird, welcher **Ton** gewählt wurde und nicht welcher Hex-Wert, erreicht ein
+    /// späterer Feinschliff an der Palette auch den, der sie schon gewählt hat.
+    private func farbmenue(_ kategorie: TransactionCategory) -> some View {
+        let aktuell = Kategoriefarbe.ton(fuer: kategorie)
+        return Button {
+            farbwahlFuer = kategorie.rawValue
+        } label: {
+            Circle()
+                .fill(aktuell.grundfarbe)
+                .frame(width: 14, height: 14)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .frame(width: 22)
+        .contentShape(Rectangle())
+        .help(t("Farbe wählen", "Choose a colour"))
+        .accessibilityLabel(Text(t("Farbe: \(aktuell.bezeichnung)",
+                                   "Colour: \(aktuell.bezeichnung)")))
+        .popover(isPresented: Binding(
+            get: { farbwahlFuer == kategorie.rawValue },
+            set: { offen in
+                if !offen, farbwahlFuer == kategorie.rawValue { farbwahlFuer = nil }
+            }), arrowEdge: .bottom) {
+                farbauswahl(kategorie, aktuell: aktuell)
+            }
+    }
+
+    /// Ein Popover und kein Menü.
+    ///
+    /// Zweimal versucht, zweimal nicht angekommen: Ein `Label` mit SF-Symbol zeichnet
+    /// macOS im Menü als Schablone, also einfarbig; ein eigenes Bild mit
+    /// `isTemplate = false` erschien gar nicht — weder am Umschalter noch am Knopf
+    /// (gemessen am 12.11.2026). Ein Menü zeichnet, was AppKit es zeichnen lässt.
+    /// Ein Popover zeichnet Ansichten, und damit ist der farbige Punkt vor dem Namen
+    /// keine Hoffnung mehr, sondern ein Kreis.
+    private func farbauswahl(_ kategorie: TransactionCategory,
+                             aktuell: Kategoriefarbe.Ton) -> some View {
+        let selbstGewaehlt = Eigenkategorien.farbe(fuer: kategorie) != nil
+        return VStack(alignment: .leading, spacing: 1) {
+            ForEach(Kategoriefarbe.palette) { ton in
+                farbzeile(ton, gewaehlt: ton.id == aktuell.id && selbstGewaehlt) {
+                    Eigenkategorien.farbeSetzen(kategorie, farbe: ton.id)
+                    kategorienStand += 1
+                    farbwahlFuer = nil
+                }
+            }
+            if selbstGewaehlt {
+                Divider().padding(.vertical, 3)
+                Button(t("Automatisch", "Automatic")) {
+                    Eigenkategorien.farbeSetzen(kategorie, farbe: nil)
+                    kategorienStand += 1
+                    farbwahlFuer = nil
+                }
+                .buttonStyle(.plain)
+                .font(ThemeFonts.body(size: 11))
+                .foregroundColor(.sbBlueMid)
+                .padding(.horizontal, 6)
+            }
+        }
+        .padding(8)
+        .frame(width: 170)
+    }
+
+    private func farbzeile(_ ton: Kategoriefarbe.Ton, gewaehlt: Bool,
+                           waehlen: @escaping () -> Void) -> some View {
+        Button(action: waehlen) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(ton.grundfarbe)
+                    .frame(width: 12, height: 12)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(ton.grundfarbe, lineWidth: gewaehlt ? 1.5 : 0)
+                            .padding(-3)
+                    )
+                Text(ton.bezeichnung)
+                    .font(ThemeFonts.body(size: 12))
+                    .foregroundColor(.primary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func symbolMenue(auswahl: String, farbe: Color? = nil,
+                             setzen: @escaping (String) -> Void) -> some View {
+        Menu {
+            ForEach(Eigenkategorien.symbolvorschlaege, id: \.self) { symbol in
+                Button { setzen(symbol) } label: { Label(symbol, systemImage: symbol) }
+            }
+        } label: {
+            Image(systemName: auswahl).foregroundColor(farbe)
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 34)
+        .help(t("Symbol wählen", "Choose a symbol"))
+    }
+
+    private func kategorieAnlegen() {
+        let einwand = Eigenkategorien.anlegen(name: neueKategorie, symbol: neuesKategoriesymbol)
+        kategorieEinwand = einwand?.text
+        guard einwand == nil else { return }
+        neueKategorie = ""
+        neuesKategoriesymbol = "tag"
+        kategorienStand += 1
+    }
+
+    private func kategorieUmbenennen(_ kategorie: TransactionCategory) {
+        guard let entwurf = kategorieEntwuerfe[kategorie.rawValue] else { return }
+        let einwand = kategorie.istEigene
+            ? Eigenkategorien.umbenennen(eigene: kategorie.rawValue, auf: entwurf)
+            : Eigenkategorien.umbenennen(eingebaut: kategorie.rawValue, auf: entwurf)
+        kategorieEinwand = einwand?.text
+        guard einwand == nil else { return }
+        kategorieEntwuerfe[kategorie.rawValue] = nil
+        kategorienStand += 1
+    }
+
     private var financeSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
 
@@ -2176,6 +2502,11 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))
             }
+
+            // Kategorien zuletzt: Es ist die längste Karte des Reiters, und oben
+            // schob sie Kontoring und MMI aus dem Blickfeld — gemeldet am 11.11.2026.
+            kategorienCard
+                .id("kategorienKarte")
         }
     }
     

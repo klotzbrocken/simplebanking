@@ -25,7 +25,10 @@ private struct TransactionsPanelView: View {
     // Konfetti komplett raus in v1.5.0 — nur Ripple bleibt als Income-Effekt.
     @AppStorage(MerchantResolver.pipelineEnabledKey) private var effectiveMerchantPipelineEnabled: Bool = true
     @AppStorage(ThemeManager.storageKey) private var themeId: String = ThemeManager.defaultThemeID
-    @AppStorage("showTransactionCategories") private var showCategories: Bool = false
+    // Ab Werk an: Die Kategorie steht seit 2.2.0 als farbige Kapsel in der Zeile und
+    // ist der Grund, aus dem überhaupt kategorisiert wird. Ausgeschaltet war sie der
+    // Zustand, in dem niemand sie je zu sehen bekam.
+    @AppStorage("showTransactionCategories") private var showCategories: Bool = true
     @AppStorage("showFilterPills") private var showFilterPills: Bool = false
     /// Ist das Suchfeld eingeblendet?
     ///
@@ -223,8 +226,10 @@ private struct TransactionsPanelView: View {
             .foregroundColor(detail)
         }
         .buttonStyle(.plain)
-        .help(L10n.t("Tippen: letzte Buchung / Ausgaben diesen Monat",
-                     "Tap: last transaction / spending this month"))
+        .beschriftet(L10n.t("Anzeige wechseln", "Switch display"),
+                     wert: paypalSubtitleRange == 0 ? paypalLastBookingText : paypalMonthSpendText,
+                     hinweis: L10n.t("Tippen: letzte Buchung / Ausgaben diesen Monat",
+                                     "Tap: last transaction / spending this month"))
     }
 
     private var leftToPaySubtitle: some View {
@@ -944,7 +949,8 @@ private struct TransactionsPanelView: View {
                 .foregroundColor(themed ? Color.themedInk.opacity(0.85) : toggleColor)
             }
             .buttonStyle(.plain)
-            .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
+            .beschriftet(L10n.t("Zeitraum", "Range"),
+                         hinweis: L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         return HStack(alignment: .center, spacing: 0) {
@@ -1183,8 +1189,10 @@ private struct TransactionsPanelView: View {
             return L10n.t("Kontostand", "Balance")
         }()
         guard let date else { return name }
-        let hour = Calendar.current.component(.hour, from: date)
-        return L10n.t("\(name) · \(hour) Uhr", "\(name) · \(hour):00")
+        // Bis 06.11.2026 nur die Stunde („ING · 14 Uhr"). Damit war gestern 14 Uhr von
+        // vor einer Minute nicht zu unterscheiden — bei einem Abruftakt von vier Stunden
+        // die halbe Antwort auf „warum zeigt meine Bank etwas anderes?". Siehe `Saldoalter`.
+        return "\(name) · \(Saldoalter.beschriftung(date))"
     }
 
     private func formatDateDE(_ dateStr: String) -> String {
@@ -1493,7 +1501,8 @@ private struct TransactionsPanelView: View {
             Button { Task { await onRefresh() } } label: {
                 Image(systemName: ThemeChrome.symbol(for: .refresh))
             }
-            .help(L10n.t("Aktuelles Konto aktualisieren", "Refresh current account"))
+            .beschriftet(L10n.t("Aktualisieren", "Refresh"),
+                         hinweis: L10n.t("Aktuelles Konto aktualisieren", "Refresh current account"))
             Button {
                 onTogglePin?()
                 isPinnedLocal.toggle()
@@ -1501,11 +1510,11 @@ private struct TransactionsPanelView: View {
                 Image(systemName: ThemeChrome.symbol(for: .pin, active: isPinnedLocal))
                     .foregroundColor(isPinnedLocal ? Color.themeAccent : .secondary)
             }
-            .help(L10n.t("Oben halten", "Keep on top"))
+            .beschriftet(L10n.t("Oben halten", "Keep on top"), aktiv: isPinnedLocal)
             Button { onSettings?() } label: {
                 Image(systemName: ThemeChrome.symbol(for: .settings))
             }
-            .help(L10n.t("Einstellungen", "Settings"))
+            .beschriftet(L10n.t("Einstellungen", "Settings"))
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
@@ -1614,6 +1623,7 @@ private struct TransactionsPanelView: View {
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
+                    .beschriftet(L10n.t("Suche löschen", "Clear search"))
                 }
             }
             .padding(.horizontal, 8)
@@ -1671,9 +1681,11 @@ private struct TransactionsPanelView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
-            .help(sucheOffen
-                  ? L10n.t("Suche schließen", "Close search")
-                  : L10n.t("Suchen", "Search"))
+            .beschriftet(L10n.t("Suche", "Search"),
+                         hinweis: sucheOffen
+                             ? L10n.t("Suche schließen", "Close search")
+                             : L10n.t("Suchen", "Search"),
+                         aktiv: sucheOffen || vm.isSearchActive)
             // Suche und Filter sind zwei Schichten am selben Platz — die eine zu
             // öffnen schließt die andere (siehe `KopfSchichten`).
             Button(action: { filterOeffnenOderSchliessen() }) {
@@ -1688,9 +1700,11 @@ private struct TransactionsPanelView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
-            .help(showFilterPills
-                  ? L10n.t("Filter ausblenden", "Hide filters")
-                  : L10n.t("Filter einblenden", "Show filters"))
+            .beschriftet(L10n.t("Filter", "Filter"),
+                         hinweis: showFilterPills
+                             ? L10n.t("Filter ausblenden", "Hide filters")
+                             : L10n.t("Filter einblenden", "Show filters"),
+                         aktiv: showFilterPills || vm.activeFilter != .all)
             Button(action: { showCategories.toggle() }) {
                 if ThemeChrome.glyphControls {
                     Image(systemName: ThemeChrome.symbol(for: .categories, active: showCategories))
@@ -1701,9 +1715,11 @@ private struct TransactionsPanelView: View {
                 }
             }
             .buttonStyle(PlainButtonStyle())
-            .help(showCategories
-                  ? L10n.t("Kategorien ausblenden", "Hide categories")
-                  : L10n.t("Kategorien anzeigen", "Show categories"))
+            .beschriftet(L10n.t("Kategorien", "Categories"),
+                         hinweis: showCategories
+                             ? L10n.t("Kategorien ausblenden", "Hide categories")
+                             : L10n.t("Kategorien anzeigen", "Show categories"),
+                         aktiv: showCategories)
             if !vm.isUnifiedMode && !receiptActive && multibankingStore.activeSlot?.isPayPal != true {
                 Button(action: { toggleRoundupView() }) {
                     if ThemeChrome.glyphControls {
@@ -1715,8 +1731,10 @@ private struct TransactionsPanelView: View {
                     }
                 }
                 .buttonStyle(PlainButtonStyle())
-                .help(L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
-                             "Round-up view — show amounts rounded up (enables round-up for this account)"))
+                .beschriftet(L10n.t("Aufrunden", "Round up"),
+                             hinweis: L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
+                                             "Round-up view — show amounts rounded up (enables round-up for this account)"),
+                             aktiv: roundupView.isActive)
             }
         }
     }
@@ -1739,30 +1757,38 @@ private struct TransactionsPanelView: View {
             return AnyView(HStack(spacing: 14) {
                 ForEach(Array(multibankingStore.slots.enumerated()), id: \.offset) { idx, slot in
                     let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
-                    Text(slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName)
-                        .font(ThemeFonts.flyoutBody(size: 15))
-                        .textCase(.uppercase)
-                        .foregroundColor(isActive ? Color.themedAccent : Color.themedInk.opacity(0.85))
-                        .underline(isActive)
-                        .lineLimit(1)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
-                            accountNav.onSwitchToIndex?(idx)
-                        }
+                    Button {
+                        if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
+                        accountNav.onSwitchToIndex?(idx)
+                    } label: {
+                        Text(slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName)
+                            .font(ThemeFonts.flyoutBody(size: 15))
+                            .textCase(.uppercase)
+                            .foregroundColor(isActive ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                            .underline(isActive)
+                            .lineLimit(1)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isActive ? [.isSelected] : [])
+                    .id(Kachelkennung.konto(idx))
                 }
                 if multibankingStore.realSlotCount > 1 {
                     let unifiedActive = vm.unifiedModeEnabled
-                    Text(L10n.t("Alle", "All"))
-                        .font(ThemeFonts.flyoutBody(size: 15))
-                        .textCase(.uppercase)
-                        .foregroundColor(unifiedActive ? Color.themedAccent : Color.themedInk.opacity(0.85))
-                        .underline(unifiedActive)
-                        .contentShape(Rectangle())
-                        .onTapGesture { if !unifiedActive { vm.unifiedModeEnabled = true } }
+                    Button { if !unifiedActive { vm.unifiedModeEnabled = true } } label: {
+                        Text(L10n.t("Alle", "All"))
+                            .font(ThemeFonts.flyoutBody(size: 15))
+                            .textCase(.uppercase)
+                            .foregroundColor(unifiedActive ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                            .underline(unifiedActive)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .beschriftet(L10n.t("Alle Konten", "All accounts"), aktiv: unifiedActive)
+                    .id(Kachelkennung.alle)
                 }
-                Spacer(minLength: 0)
-            })
+            }
+            .kachelreihe(aktiv: aktiveKachel))
         }
         // Maße wie im Flyout (`FlyoutSlotSegmentedControl`) — dieselbe Bedienung, zwei
         // Flächen. Der **Bankname entfällt** auch hier; er steht darüber neben der Uhrzeit.
@@ -1774,39 +1800,58 @@ private struct TransactionsPanelView: View {
                 let isActive = !vm.unifiedModeEnabled && idx == multibankingStore.activeIndex
                 let beschriftung = slot.nickname?.isEmpty == false ? slot.nickname! : slot.displayName
                 if isActive {
-                    slotLogoTile(slot, size: KontoKachel.aktivLogo)
-                        .frame(width: aktivKante, height: aktivKante)
-                        .background(Capsule(style: .continuous).fill(activeFill))
-                        .help(beschriftung)
+                    // Auch die aktive Kachel ist ein Knopf, mit leerer Handlung: Ein
+                    // deaktiviertes Element überspringt VoiceOver, und dann erfährt
+                    // niemand, welches Konto gewählt ist — die Auswahl trugen bisher
+                    // allein Größe und Sättigung.
+                    Button { } label: {
+                        slotLogoTile(slot, size: KontoKachel.aktivLogo)
+                            .frame(width: aktivKante, height: aktivKante)
+                            .background(Capsule(style: .continuous).fill(activeFill))
+                    }
+                    .buttonStyle(.plain)
+                    .beschriftet(beschriftung, aktiv: true)
+                    .id(Kachelkennung.konto(idx))
                 } else {
-                    slotLogoTile(slot, size: KontoKachel.inaktivLogo)
-                        .opacity(KontoKachel.inaktivDeckkraft)
-                        .frame(width: inaktivKante, height: inaktivKante)
-                        .background(Capsule(style: .continuous).fill(inactiveFill))
-                        .contentShape(Capsule())
-                        .onTapGesture {
-                            if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
-                            accountNav.onSwitchToIndex?(idx)
-                        }
-                        .help(beschriftung)
+                    Button {
+                        if vm.unifiedModeEnabled { vm.unifiedModeEnabled = false }
+                        accountNav.onSwitchToIndex?(idx)
+                    } label: {
+                        slotLogoTile(slot, size: KontoKachel.inaktivLogo)
+                            .opacity(KontoKachel.inaktivDeckkraft)
+                            .frame(width: inaktivKante, height: inaktivKante)
+                            .background(Capsule(style: .continuous).fill(inactiveFill))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .beschriftet(beschriftung)
+                    .id(Kachelkennung.konto(idx))
                 }
             }
             if multibankingStore.realSlotCount > 1 {
                 let unifiedActive = vm.unifiedModeEnabled
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(unifiedActive ? tint : (themed ? Color.themedControlInk : Color(NSColor.secondaryLabelColor)))
-                    .frame(width: inaktivKante, height: inaktivKante)
-                    .background(Capsule(style: .continuous)
-                        .fill(unifiedActive ? activeFill : inactiveFill))
-                    .contentShape(Capsule())
-                    .onTapGesture { if !unifiedActive { vm.unifiedModeEnabled = true } }
-                    .help(L10n.t("Alle Konten", "All accounts"))
+                Button { if !unifiedActive { vm.unifiedModeEnabled = true } } label: {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(unifiedActive ? tint : (themed ? Color.themedControlInk : Color(NSColor.secondaryLabelColor)))
+                        .frame(width: inaktivKante, height: inaktivKante)
+                        .background(Capsule(style: .continuous)
+                            .fill(unifiedActive ? activeFill : inactiveFill))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .beschriftet(L10n.t("Alle Konten", "All accounts"), aktiv: unifiedActive)
+                .id(Kachelkennung.alle)
             }
-            Spacer(minLength: 0)
         }
         .animation(.easeInOut(duration: 0.2), value: multibankingStore.activeIndex)
-        .animation(.easeInOut(duration: 0.2), value: vm.unifiedModeEnabled))
+        .animation(.easeInOut(duration: 0.2), value: vm.unifiedModeEnabled)
+        .kachelreihe(aktiv: aktiveKachel))
+    }
+
+    /// Welche Kachel die Reihe in den Blick holt, wenn sie scrollt — siehe `Kachelreihe`.
+    private var aktiveKachel: Kachelkennung {
+        vm.unifiedModeEnabled ? .alle : .konto(multibankingStore.activeIndex)
     }
 
     var body: some View {
@@ -1944,11 +1989,16 @@ private struct TransactionsPanelView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .help(vm.errorNeedsCredentialUpdate
-                          ? L10n.t("Neuen Anmeldenamen / neue PIN hinterlegen", "Store new login name / PIN")
-                          : vm.errorNeedsReconnect
-                            ? L10n.t("Erneut verbinden und Freigabe bestätigen", "Reconnect and confirm authorization")
-                            : L10n.t("Aktualisieren", "Refresh"))
+                    .beschriftet(vm.errorNeedsCredentialUpdate
+                                     ? L10n.t("Zugangsdaten ändern", "Change credentials")
+                                     : vm.errorNeedsReconnect
+                                       ? L10n.t("Erneut verbinden", "Reconnect")
+                                       : L10n.t("Aktualisieren", "Refresh"),
+                                 hinweis: vm.errorNeedsCredentialUpdate
+                                     ? L10n.t("Neuen Anmeldenamen / neue PIN hinterlegen", "Store new login name / PIN")
+                                     : vm.errorNeedsReconnect
+                                       ? L10n.t("Erneut verbinden und Freigabe bestätigen", "Reconnect and confirm authorization")
+                                       : L10n.t("Aktualisieren", "Refresh"))
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
@@ -1966,6 +2016,22 @@ private struct TransactionsPanelView: View {
                     ProgressView()
                         .controlSize(.mini)
                         .scaleEffect(0.7)
+                    Spacer(minLength: 0)
+                    // Der Ausgang aus dem Warten. Ohne ihn kam niemand mehr an sein Konto,
+                    // dessen Freigabe-Fenster versehentlich geschlossen wurde — jede
+                    // Handlung prallte an der laufenden Warteschleife ab, nur ein
+                    // Programmneustart half (gemeldet am 06.11.2026). Nicht `onRefresh`:
+                    // Das ist genau der Weg, der hier abprallt.
+                    Button {
+                        NotificationCenter.default.post(name: .freigabeNeuAnstossen, object: nil)
+                    } label: {
+                        Text(L10n.t("Freigabe neu anstoßen", "Restart approval"))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.sbOrangeStrong)
+                    }
+                    .buttonStyle(.plain)
+                    .hinweis(L10n.t("Beendet das Warten und öffnet eine neue Freigabe. Die Bankverbindung bleibt bestehen.",
+                                    "Ends the wait and opens a new approval. Your bank connection stays intact."))
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
@@ -1992,6 +2058,7 @@ private struct TransactionsPanelView: View {
                             }
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .beschriftet(L10n.t("Filter aufheben", "Clear filter"))
                     }
                     Spacer()
                 }
@@ -2014,13 +2081,19 @@ private struct TransactionsPanelView: View {
                 if themed && !ThemeChrome.glyphControls {
                     HStack(spacing: 16) {
                         ForEach([(0, "Einkäufe", "Purchases"), (1, "Kategorien", "Categories")], id: \.0) { tag, de, en in
-                            Text(L10n.t(de, en))
-                                .font(ThemeFonts.flyoutBody(size: 15))
-                                .textCase(.uppercase)
-                                .foregroundColor(reweTab == tag ? Color.themedAccent : Color.themedInk.opacity(0.6))
-                                .underline(reweTab == tag)
-                                .contentShape(Rectangle())
-                                .onTapGesture { reweTab = tag }
+                            // Knopf statt Tippgeste: Eine `onTapGesture` erreicht weder
+                            // Tastatur noch VoiceOver, und der Zustand hing allein an
+                            // Farbe und Unterstreichung.
+                            Button { reweTab = tag } label: {
+                                Text(L10n.t(de, en))
+                                    .font(ThemeFonts.flyoutBody(size: 15))
+                                    .textCase(.uppercase)
+                                    .foregroundColor(reweTab == tag ? Color.themedAccent : Color.themedInk.opacity(0.6))
+                                    .underline(reweTab == tag)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(reweTab == tag ? [.isSelected] : [])
                         }
                         Spacer()
                     }
@@ -2138,6 +2211,11 @@ private struct TransactionsPanelView: View {
                                         }
                                     }
                                     .frame(width: lofi ? 0 : 16)
+                                    // Acht Punkt Farbe waren die **einzige** Auskunft
+                                    // darüber, dass eine Buchung neu ist.
+                                    .accessibilityLabel(Text(txIsUnread
+                                                             ? L10n.t("ungelesen", "unread")
+                                                             : ""))
 
                                     // Transaction card
                                     SwipeableTransactionRow(
@@ -2205,6 +2283,9 @@ private struct TransactionsPanelView: View {
                                         }
                                     }
                                     .frame(width: lofi ? 0 : 16)
+                                    .accessibilityLabel(Text(txHasReminder
+                                                             ? L10n.t("Erinnerung gesetzt", "reminder set")
+                                                             : ""))
                                 }
                                 .opacity(t.status == "pending" ? 0.65 : 1.0)
                                 // BTX-Ungelesen-Marker: eckiger Block in Leitfarbe am
@@ -2330,7 +2411,7 @@ private struct TransactionsPanelView: View {
                     }
                 }
                 .buttonStyle(PlainButtonStyle())
-                .help(L10n.t("Dashboard", "Dashboard"))
+                .beschriftet(L10n.t("Dashboard", "Dashboard"))
 
                 // Inbox mit Badge
                 if attentionInboxEnabled {
@@ -2366,7 +2447,10 @@ private struct TransactionsPanelView: View {
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("Attention Inbox", "Attention Inbox"))
+                    .beschriftet(L10n.t("Posteingang", "Attention Inbox"),
+                                 wert: attentionCards.isEmpty
+                                     ? ""
+                                     : L10n.t("\(attentionCards.count) offen", "\(attentionCards.count) open"))
                 }
 
                 // Mehr ▾ — links, neben der Glocke/Inbox
@@ -2450,7 +2534,7 @@ private struct TransactionsPanelView: View {
                         }
                     }
                     .buttonStyle(PlainButtonStyle())
-                    .help(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
+                    .beschriftet(L10n.t("simplesend: Geld senden", "simplesend: Send Money"))
                 }
             }
             // Der Rahmen liegt als Overlay INNEN auf und verbraucht keinen Layout-Platz.
@@ -2694,6 +2778,12 @@ private struct TransactionsPanelView: View {
                 vm.objectWillChange.send()
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("TransactionCategoriesChanged"))) { _ in
+                // Dieselbe Begründung wie beim Themewechsel weiter unten: Benennt der
+                // Nutzer eine Kategorie um oder legt eine an, ändert sich an den
+                // Eingaben einer Zeile **nichts** — den Namen liest jede Zeile selbst
+                // aus `Eigenkategorien`. SwiftUI übersähe die unveränderten Zeilen und
+                // zeigte den alten Namen weiter.
+                themeRevision &+= 1
                 vm.objectWillChange.send()
             }
             .onReceive(NotificationCenter.default.publisher(for: .bankTintChanged)) { _ in
@@ -3303,7 +3393,7 @@ private struct FilterPill: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(active ? L10n.t("Filter aufheben", "Clear filter") : filter.label)
+            .hinweis(active ? L10n.t("Filter aufheben", "Clear filter") : filter.label)
         } else {
             Button(action: onTap) {
                 HStack(spacing: 4) {
@@ -3331,9 +3421,9 @@ private struct FilterPill: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .help(active
-                  ? L10n.t("Filter aufheben", "Clear filter")
-                  : filter.label)
+            .hinweis(active
+                     ? L10n.t("Filter aufheben", "Clear filter")
+                     : filter.label)
         }
     }
 }
@@ -3364,6 +3454,40 @@ private struct TransactionRowNew: View {
     var onEnrichmentChangedWithRemover: (() -> Void)? = nil
     var onSelect: (() -> Void)? = nil
 
+    /// Die Kategorie als farbig getönte Kapsel.
+    ///
+    /// `displayName` und nicht `rawValue`: Dort stand „Mobilitaet" statt „Mobilität",
+    /// und eine in den Einstellungen umbenannte Kategorie zeigte weiter ihren alten,
+    /// internen Namen. Der `rawValue` ist die Speicherform, nicht der Text für
+    /// Menschen.
+    ///
+    /// Drei Theme-Fälle, dieselbe Unterscheidung wie bei der „Vorgemerkt"-Kapsel:
+    /// Lo-Fi (BTX) bekommt nur Text — die Semigrafik führt ihre eigenen Farben und
+    /// eine zweite Palette daneben wäre Bruch; ein Farb-Theme behält den Ton, aber
+    /// schwächer, damit er auf der Theme-Fläche nicht als Fremdkörper sitzt.
+    @ViewBuilder
+    private func kategoriePille() -> some View {
+        let ton = Kategoriefarbe.ton(fuer: category)
+        let dunkel = colorScheme == .dark
+        Text(category.displayName)
+            .font(ThemeFonts.rowBody(size: 10, weight: .semibold, lofiSize: 12))
+            .textCase(ThemeChrome.textCase)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .foregroundColor(lofi ? Color.themedInk.opacity(0.85)
+                             : themed ? Color.themedInk
+                             : ton.schrift(dunkel: dunkel))
+            .padding(.horizontal, lofi ? 0 : 7)
+            .padding(.vertical, lofi ? 0 : 2)
+            .background(
+                lofi ? nil
+                     : Capsule().fill(ton.grundfarbe.opacity(themed ? 0.12
+                                                             : dunkel ? 0.24 : 0.14))
+            )
+            .accessibilityLabel(Text(L10n.t("Kategorie \(category.displayName)",
+                                            "Category \(category.displayName)")))
+    }
+
     private var isPending: Bool { transaction.status == "pending" }
     /// „Vorgemerkt" als Kapsel zeigen. Eine Nutzereinstellung, keine Theme-Sache: Sie
     /// ändert nicht das Aussehen, sondern ob die Information überhaupt erscheint —
@@ -3375,6 +3499,7 @@ private struct TransactionRowNew: View {
     /// Fenster vom Notebook auf einen angeschlossenen Monitor, ändert sich der Wert
     /// und das Logo wird in der neuen Pixelzahl neu gerechnet.
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showDetail: Bool = false
 
     /// Eigene Beobachtung des Themes: die Zeile ist ein eigener View-Wert, dessen Body
@@ -3495,6 +3620,7 @@ private struct TransactionRowNew: View {
                                 Color(nsColor: AppTheme.color(from: BTXMosaic.style(for: category).hex,
                                                               fallback: .secondaryLabelColor))))
                             .frame(width: 20, height: 20)
+                            .accessibilityLabel(Text(category.displayName))
                     } else {
                         BTXMosaicIcon(category: category)
                     }
@@ -3504,17 +3630,18 @@ private struct TransactionRowNew: View {
                             .textCase(ThemeChrome.textCase)
                             .lineLimit(1)
                             .foregroundColor(themed ? .themedInk : .primary)
-                        if showCategories {
-                            Text(category.rawValue)
-                                .font(ThemeFonts.rowBody(size: 10, lofiSize: 13))
-                                .textCase(ThemeChrome.textCase)
-                                .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(Color.secondary.opacity(0.12)))
-                                .lineLimit(1)
-                        }
+                        // Im schmalen Flyout bleibt die Kapsel unter dem Namen —
+                        // inline wäre dort kein Platz. Im breiten Fenster steht sie
+                        // in der Zeile, siehe unten.
+                        if showCategories, !isWide { kategoriePille() }
                     }
+                }
+                if isWide, showCategories {
+                    // `fixedSize`: Gekürzt wird der Verwendungszweck, nie die
+                    // Kategorie — eine halbe Kategorie sagt nichts.
+                    kategoriePille()
+                        .fixedSize()
+                        .padding(.leading, 8)
                 }
                 if isWide {
                     let remittance = transaction.remittanceInformation?.first ?? ""
@@ -3541,11 +3668,15 @@ private struct TransactionRowNew: View {
                         Image(systemName: "paperclip")
                             .font(.system(size: 10))
                             .foregroundColor(Color(NSColor.tertiaryLabelColor))
+                            .accessibilityLabel(Text(attachmentCount == 1
+                                                     ? L10n.t("ein Beleg", "one attachment")
+                                                     : L10n.t("\(attachmentCount) Belege", "\(attachmentCount) attachments")))
                     }
                     if let note = userNote, !note.isEmpty {
                         Image(systemName: "pencil.line")
                             .font(.system(size: 10))
                             .foregroundColor(Color(NSColor.tertiaryLabelColor))
+                            .accessibilityLabel(Text(L10n.t("Notiz", "note")))
                     }
                 }
                 VStack(alignment: .trailing, spacing: 2) {
@@ -3657,6 +3788,11 @@ private struct TransactionRowNew: View {
         .onTapGesture(count: 1) {
             onSelect?()
         }
+        // Einfach- und Doppeltippen haben keine Tastaturentsprechung. Dieselben
+        // Closures, einmal als Standardaktion (VO+Leertaste) und einmal benannt im
+        // Aktionsmenü — kein zweiter Weg im Code.
+        .accessibilityAction { onSelect?() }
+        .accessibilityAction(named: Text(L10n.t("Details", "Details"))) { showDetail = true }
         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
             guard attachmentCount < 3 else { return false }
             let txID = TransactionRecord.fingerprint(for: transaction)
@@ -3942,6 +4078,10 @@ private struct SwipeableTransactionRow<Content: View>: View {
                 Spacer(minLength: 0)
             }
             .opacity(offset > 0 ? 1 : 0)
+            // Unsichtbar heißt für VoiceOver nicht abwesend: `.opacity(0)` lässt den
+            // Knopf im Baum, und so traf der Vorleser „Gelesen" und „Erinnern" auf
+            // **jeder** Zeile, während nichts davon zu sehen war.
+            .accessibilityHidden(offset <= 0)
 
             // Right action (swipe left reveals) — Reminder
             HStack(spacing: 0) {
@@ -3968,10 +4108,24 @@ private struct SwipeableTransactionRow<Content: View>: View {
                 .buttonStyle(.plain)
             }
             .opacity(offset < 0 ? 1 : 0)
+            .accessibilityHidden(offset >= 0)
 
             // Row content
             content()
                 .offset(x: offset)
+                // Die Wischgeste hat keine Tastaturentsprechung. Dieselben Closures
+                // stehen darum in VoiceOvers Aktionsmenü — kein zweiter Weg im Code,
+                // nur ein zweiter Zugang.
+                .accessibilityAction(named: Text(isUnread
+                                                 ? L10n.t("Als gelesen markieren", "Mark as read")
+                                                 : L10n.t("Als ungelesen markieren", "Mark as unread"))) {
+                    onToggleUnread()
+                }
+                .accessibilityAction(named: Text(hasReminder
+                                                 ? L10n.t("Erinnerung entfernen", "Remove reminder")
+                                                 : L10n.t("Erinnern", "Remind me"))) {
+                    onReminderAction()
+                }
                 .gesture(
                     DragGesture(minimumDistance: 12)
                         .onChanged { value in
@@ -4188,6 +4342,7 @@ private struct ChatOverlaySheet: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(PlainButtonStyle())
+                .beschriftet(L10n.t("Chat schließen", "Close chat"))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -4335,6 +4490,7 @@ private struct ChatOverlaySheet: View {
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
+                .beschriftet(L10n.t("Frage senden", "Send question"))
                 .disabled(!llmEnabled || isLoading || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, 16)
@@ -4412,7 +4568,9 @@ final class AccountNavModel: ObservableObject {
         self.onSettings = onSettings
         self.onOpenDashboard = onOpenDashboard
         self.accountNav = AccountNavModel()
-        panel = NSPanel(
+        // `Umsatzfenster` statt `NSPanel`: Nur wegen des Doppelklicks auf den
+        // oberen Streifen — siehe `Titelleistenzone`.
+        panel = Umsatzfenster(
             contentRect: NSRect(x: 0, y: 0, width: 348, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,

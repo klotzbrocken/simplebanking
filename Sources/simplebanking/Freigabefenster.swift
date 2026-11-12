@@ -79,10 +79,18 @@ final class Freigabefenster: NSObject, ASWebAuthenticationPresentationContextPro
                     AppLogger.log("Freigabefenster: Rückleitung angekommen", category: "YaxiService")
                     self.fertigContinuation?.yield()
                 } else if vomNutzerGeschlossen {
-                    // Fenster vom Nutzer geschlossen. Kein Abbruch: Die Freigabe kann in der
-                    // Banking-App längst erteilt sein, das Polling läuft weiter und der
-                    // Nutzer kann es über „Warten beenden" selbst stoppen.
-                    AppLogger.log("Freigabefenster: vom Nutzer geschlossen — Polling läuft weiter", category: "YaxiService")
+                    // Fenster vom Nutzer geschlossen. **Kein Abbruch**, und das bleibt so:
+                    // Wer das Fenster schließt, weil er gerade in der Banking-App
+                    // bestätigt, würde sonst eine erteilte Freigabe verlieren und eine
+                    // zweite brauchen.
+                    //
+                    // Bis 2.1.0 war das eine Falle, weil es keinen Ausgang gab: Das
+                    // Warten lief zehn Minuten weiter und blockierte dabei jede
+                    // Nutzerhandlung, nur ein Programmneustart half. Seit 2.1.0 gibt es
+                    // „Freigabe neu anstoßen" in der Umsatzliste und im Statusmenü —
+                    // siehe `Freigabewache.abbrechen`.
+                    AppLogger.log("Freigabefenster: vom Nutzer geschlossen — Warten läuft weiter, „Freigabe neu anstoßen“ beendet es",
+                                  category: "YaxiService")
                 } else if let fehlertext {
                     AppLogger.log("Freigabefenster: Sitzung endete mit Fehler: \(fehlertext)",
                                   category: "YaxiService", level: "WARN")

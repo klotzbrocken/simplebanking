@@ -20,6 +20,12 @@ import RoutexModels
 ///
 /// Die Reihenfolge der Einträge ist laut YAXI **nicht zugesichert**; sie darf also nichts
 /// entscheiden. Die Dispo-Sorge von früher fängt Stufe 2 ab, nicht die harte Rangfolge.
+///
+/// Zwei weitere Zusagen aus derselben Antwort: Mehrere `Booked` gibt es **nur** bei
+/// unterschiedlichem `creditLimitIncluded` — ein Gleichstand zweier gebuchter Salden ist
+/// also immer eine Dispo-Frage und von Stufe 2 erledigt. Und YAXI baut `primaryBalances`
+/// in die Pipeline, das dieselbe Regel auf deren Seite abbildet; sobald es da ist, kann
+/// diese Datei zur Weiche darauf werden.
 enum Saldoauswahl {
 
     /// Die von YAXI empfohlene Regel, in dieser Reihenfolge:
@@ -28,16 +34,25 @@ enum Saldoauswahl {
     ///    Beträge und taugt nicht als Kontostand)
     /// 2. `creditLimitIncluded != true` bevorzugen — ein Betrag mit eingerechneter
     ///    Dispo-Linie ist kein Kontostand
-    /// 3. den jüngsten `dateTime` wählen, der nicht in der Zukunft liegt
-    /// 4. bei Gleichstand `Booked` bevorzugen
+    /// 3. einen Stand bevorzugen, der nicht in der Zukunft liegt
+    /// 4. den jüngsten `dateTime` wählen
+    /// 5. bei Gleichstand `Booked` bevorzugen
+    ///
+    /// **Ein zukunftsdatierter Stand wird nachgeordnet, nicht verworfen.** Bis zum
+    /// 06.11.2026 flog er heraus, und das war an echten Daten falsch: Die ING stempelt
+    /// ihren Saldo mit **Ortszeit und kennzeichnet ihn als UTC** — gemessen am selben Tag,
+    /// Protokollzeile um 18:00:04 UTC, `dateTime` 19:00:04Z, also genau eine Stunde
+    /// voraus. Es war ihr einziger Saldo. Verworfen hieß: kein Kontostand, nur noch eine
+    /// Meldung — schlimmer als die Zahl, um die es ging.
+    ///
+    /// Dass es bis dahin niemandem auffiel, lag an einem `?? allBalances.first` beim
+    /// Aufrufer, das jeden verworfenen Saldo doch noch durchließ, und zwar nach
+    /// Feldreihenfolge. Diese Hintertür ist zu; dafür muss die Regel selbst tragen.
     static func waehle(aus salden: [Balance], jetzt: Date = Date()) -> Balance? {
-        // Stufe 1 und der Zukunfts-Ausschluss aus Stufe 3. Ein Stichdatum in der Zukunft
-        // ist entweder eine Vorausberechnung der Bank oder eine verstellte Uhr — als
-        // „aktueller Kontostand" taugt es in beiden Fällen nicht.
-        let infrage = salden.filter { s in
-            guard s.balanceType == .booked || s.balanceType == .available else { return false }
-            if let d = s.dateTime, d > jetzt { return false }
-            return true
+        // Stufe 1. Mehr schließt hier nichts aus — was die Bank liefert, soll nicht an
+        // einer Uhr scheitern, die um eine Zeitzone verstellt ist.
+        let infrage = salden.filter {
+            $0.balanceType == .booked || $0.balanceType == .available
         }
         guard !infrage.isEmpty else { return nil }
 
@@ -50,7 +65,15 @@ enum Saldoauswahl {
             let rechtsOhneDispo = rechts.creditLimitIncluded != true
             if linksOhneDispo != rechtsOhneDispo { return linksOhneDispo }
 
-            // Stufe 3 — jüngerer Stand zuerst. Ein Eintrag ohne Datum lässt sich nicht
+            // Stufe 3 — ein Stand aus der Gegenwart schlägt einen aus der Zukunft. Erst
+            // hier, nicht als Ausschluss: Eine Vorausberechnung der Bank taugt nicht als
+            // Kontostand, eine um eine Stunde verstellte Uhr macht den Betrag aber nicht
+            // falsch. Steht nur Zukunft zur Wahl, ist sie besser als nichts.
+            let linksZukunft = links.dateTime.map { $0 > jetzt } ?? false
+            let rechtsZukunft = rechts.dateTime.map { $0 > jetzt } ?? false
+            if linksZukunft != rechtsZukunft { return rechtsZukunft }
+
+            // Stufe 4 — jüngerer Stand zuerst. Ein Eintrag ohne Datum lässt sich nicht
             // einordnen und landet hinter jedem datierten; ganz verwerfen wäre falsch,
             // denn manche Banken liefern gar kein Datum, und dann ist er alles, was da ist.
             switch (links.dateTime, rechts.dateTime) {
@@ -60,7 +83,7 @@ enum Saldoauswahl {
             default:                        break
             }
 
-            // Stufe 4 — bei Gleichstand der gebuchte Saldo.
+            // Stufe 5 — bei Gleichstand der gebuchte Saldo.
             if links.balanceType != rechts.balanceType {
                 return links.balanceType == .booked
             }

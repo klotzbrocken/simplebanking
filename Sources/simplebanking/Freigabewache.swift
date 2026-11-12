@@ -17,6 +17,23 @@ import Foundation
 //
 // Diese Wache hält deshalb fest, für welche Konten gerade eine Freigabe aussteht. Sie
 // entscheidet nichts über die Freigabe selbst — sie sagt nur, ob schon eine läuft.
+//
+// MARK: - Und wie man aus dem Warten wieder herauskommt
+//
+// Gemeldet am 06.11.2026: Wer das Freigabe-Fenster versehentlich schließt, kommt bis zum
+// Programmneustart nicht mehr an sein Konto. Das Schließen ist absichtlich **kein**
+// Abbruch (siehe `Freigabefenster`) — die Freigabe kann in der Banking-App längst erteilt
+// sein. Danach wartet `pollRedirect` aber seine vollen zehn Minuten, und solange hält der
+// umgebende Aufruf `hbciSlotsInFlight`. An dieser Sperre scheitert dann **jede**
+// Nutzerhandlung: „Aktualisieren", das ↻, das Herunterziehen und der Klick auf das
+// Menüleisten-Symbol sind alle korrekt als Nutzerhandlung markiert und kommen trotzdem
+// nicht durch, weil sie eine Ebene höher abbrechen.
+//
+// Es gab nichts zum Abbrechen, weil niemand einen Griff auf die laufende Aufgabe hält —
+// bei Überweisungen gibt es „Warten beenden", beim Abruf nicht. Statt diesen Griff durch
+// ein halbes Dutzend Aufrufstellen zu fädeln, liegt die Abbruchmarke hier: Die beiden
+// Warteschleifen fragen sie ohnehin jede Runde ab, und `Task.isCancelled` prüfen sie
+// längst — es kam nur niemand hin.
 actor Freigabewache {
 
     static let shared = Freigabewache()
@@ -27,6 +44,7 @@ actor Freigabewache {
     static let hoechstdauer: TimeInterval = 300
 
     private var offen: [String: Date] = [:]
+    private var abbrueche: [String: Date] = [:]
 
     /// Beginnt einen Vorgang. `false`, wenn für dieses Konto schon einer läuft — dann darf
     /// **keine zweite Freigabe-Seite** geöffnet werden.
@@ -39,6 +57,30 @@ actor Freigabewache {
 
     func beenden(_ slotId: String) {
         offen.removeValue(forKey: slotId)
+        // Eine beendete Freigabe lässt keinen Abbruch zurück, der den nächsten Anlauf
+        // sofort wieder abräumt.
+        abbrueche.removeValue(forKey: slotId)
+    }
+
+    /// Der Nutzer will nicht länger warten. Die laufende Warteschleife sieht das in ihrer
+    /// nächsten Runde — also binnen fünf Sekunden — und kehrt zurück; erst damit geben die
+    /// `defer` der Aufrufer `hbciSlotsInFlight` und die Warteschlange frei.
+    ///
+    /// Gilt **auch für Konten ohne Eintrag** in `offen`: Der entkoppelte Weg („bitte in
+    /// der Banking-App bestätigen") meldet sich hier nie an, braucht den Ausgang aber
+    /// genauso.
+    func abbrechen(_ slotId: String, jetzt: Date = Date()) {
+        abbrueche[slotId] = jetzt
+    }
+
+    /// Fragt **und verbraucht** die Abbruchmarke — ein Abbruch wirkt einmal.
+    ///
+    /// Verbrauchend, damit die Reihenfolge nicht zählt: Stünde die Marke noch, wenn der
+    /// neue Anlauf beginnt, würde der sich selbst abräumen. Dass Prüfen und Entfernen
+    /// zusammen geschehen, erledigt der Aktor.
+    func nimmAbbruch(_ slotId: String, jetzt: Date = Date()) -> Bool {
+        aufraeumen(jetzt: jetzt)
+        return abbrueche.removeValue(forKey: slotId) != nil
     }
 
     func laeuft(_ slotId: String, jetzt: Date = Date()) -> Bool {
@@ -55,5 +97,8 @@ actor Freigabewache {
 
     private func aufraeumen(jetzt: Date) {
         offen = offen.filter { jetzt.timeIntervalSince($0.value) < Self.hoechstdauer }
+        // Dieselbe Grenze: Ein Abbruch, den nie eine Schleife abgeholt hat, war an keine
+        // gerichtet — nach fünf Minuten ist er gegenstandslos.
+        abbrueche = abbrueche.filter { jetzt.timeIntervalSince($0.value) < Self.hoechstdauer }
     }
 }

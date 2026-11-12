@@ -8,6 +8,21 @@ enum AICategorizationService {
         "umbuchung", "einkaufen", "transport", "versicherung", "sonstiges"
     ]
 
+    /// Übersetzt den Schlüssel aus der Antwort in eine Kategorie.
+    ///
+    /// Die Weißliste bleibt: Ohne sie schriebe jedes Wort, das das Modell erfindet, als
+    /// Kategorie in die Datenbank. Eigene Kategorien tragen keinen technischen
+    /// Schlüssel, sondern ihren Namen — der zählt genau dann, wenn er auf eine
+    /// bestehende eigene Kategorie trifft.
+    static func kategorie(fuerSchluessel schluessel: String, eigene: [String]) -> TransactionCategory? {
+        if validCategoryKeys.contains(schluessel) {
+            return TransactionCategory.from(jsonKey: schluessel)
+        }
+        let ziel = Kategorienamen.normalisiert(schluessel)
+        guard let treffer = eigene.first(where: { Kategorienamen.normalisiert($0) == ziel }) else { return nil }
+        return TransactionCategory(rawValue: treffer)
+    }
+
     /// Runs AI categorization if enabled. Designed for fire-and-forget background use.
     ///
     /// Fehler werden nicht mehr verschluckt, sondern protokolliert: Bis zum 11.09.2026
@@ -50,7 +65,8 @@ enum AICategorizationService {
             do {
                 let response = try await AIProviderService.complete(
                     provider: provider, apiKey: apiKey,
-                    systemPrompt: AIProviderService.CATEGORIZATION_SYSTEM_PROMPT,
+                    systemPrompt: AIProviderService.categorizationSystemPrompt(
+                        eigeneKategorien: Eigenkategorien.alle.map(\.name)),
                     userMessage: jsonText,
                     maxTokens: 600, temperature: 0.0)
                 zugeordnet += applyResult(response, slotId: slotId)
@@ -74,11 +90,11 @@ enum AICategorizationService {
         }
 
         var gesetzt = 0
+        let eigene = Eigenkategorien.alle.map(\.name)
         for item in array {
             guard let txID = item["id"],
                   let key = item["category"],
-                  validCategoryKeys.contains(key),
-                  let category = TransactionCategory.from(jsonKey: key)
+                  let category = kategorie(fuerSchluessel: key, eigene: eigene)
             else { continue }
             if (try? TransactionsDatabase.updateKategorie(txID: txID, slotId: slotId, kategorie: category.displayName)) != nil {
                 gesetzt += 1

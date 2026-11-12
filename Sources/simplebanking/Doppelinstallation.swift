@@ -65,6 +65,81 @@ enum Doppelinstallation {
         return vergleichen(laufend: bundle.bundleURL, registriert: registriert)
     }
 
+    // MARK: - Installationsort fürs Protokoll
+    //
+    // Ein Nutzer meldete am 05.11.2026, dass Aktualisierungen bei ihm „immer" scheitern
+    // und er jedes Mal die Vollversion von Hand holen muss. Fünf Fragen hätten die
+    // Ursache beantwortet — welche Build-Nummer er wirklich hat, woher die App läuft (aus
+    // „Downloads" oder vom gemounteten DMG **verweigert** Sparkle die Installation), ob
+    // eine zweite Kopie herumliegt, welche macOS anspricht, und ob die automatische
+    // Prüfung überhaupt an ist. Keine davon stand im Diagnosebericht, also musste er
+    // jede einzeln nachsehen.
+    //
+    // Darum diese Zeilen beim Start: Sie entscheiden nichts, sie stehen nur da — und
+    // zwar in **jedem** künftigen Bericht.
+
+    /// Wo eine Kopie liegt — in einem Wort.
+    ///
+    /// **Nicht der Pfad.** Zwei Gründe, und beide sind handfest: Der `LogSanitizer`
+    /// behandelt einen Pfad als langen opaken Token und ersetzt ihn vollständig
+    /// (`\b[A-Za-z0-9_\-+/=]{24,}\b` frisst `/Users/…/simplebanking.app` in einem Stück)
+    /// — die Zeile stand da und sagte nichts. Und ein Pfad trägt den Benutzernamen in
+    /// eine Datei, die per Mail zu uns kommt. Die Frage im Support ist ohnehin nicht
+    /// „welcher Pfad", sondern „welche Art von Ort": Aus „Downloads" und von einem
+    /// gemounteten DMG **verweigert Sparkle jede Installation**, aus der
+    /// App-Translocation ebenso.
+    static func ort(_ url: URL) -> String {
+        let pfad = normiert(url)
+        if pfad.contains("/AppTranslocation/") { return "App-Translocation" }
+        if pfad.hasPrefix("/Volumes/") { return "gemountetes Volume (DMG?)" }
+        if pfad.hasPrefix("/Applications/") { return "Programme" }
+        if pfad.hasPrefix(NSHomeDirectory() + "/Applications/") { return "Programme (Benutzer)" }
+        if pfad.hasPrefix(NSHomeDirectory() + "/Downloads/") { return "Downloads" }
+        if pfad.hasPrefix(NSHomeDirectory() + "/Desktop/") { return "Schreibtisch" }
+        if pfad.contains("/SimpleBankingBuild/") { return "Entwicklungs-Build" }
+        if pfad.hasPrefix(NSHomeDirectory()) { return "im Benutzerordner" }
+        return "anderer Ort"
+    }
+
+    /// Schreibt Fassung, Installationsort und Sparkle-Schalter ins Protokoll.
+    @MainActor
+    static func protokolliereInstallationsort(bundle: Bundle = .main,
+                                              defaults: UserDefaults = .standard) {
+        let info = bundle.infoDictionary ?? [:]
+        let kurz = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        AppLogger.log("Installation: \(kurz) (\(build)), Ort: \(ort(bundle.bundleURL))", category: "App")
+
+        // App-Translocation: macOS führt eine Kopie aus einem Wegwerf-Pfad aus, wenn sie
+        // noch nie im Finder bewegt wurde. Sparkle lehnt dort jede Installation ab.
+        if normiert(bundle.bundleURL).contains("/AppTranslocation/") {
+            AppLogger.log("Installation: läuft aus App-Translocation — Sparkle kann hier nicht installieren",
+                          category: "App", level: "WARN")
+        }
+
+        switch pruefen(bundle: bundle) {
+        case .andereKopieRegistriert(let bevorzugt):
+            AppLogger.log("Installation: macOS bevorzugt eine Kopie an anderem Ort: \(ort(bevorzugt))",
+                          category: "App", level: "WARN")
+        case .stimmigÜberein:
+            break
+        case .unbekannt:
+            AppLogger.log("Installation: keine LaunchServices-Registrierung auffindbar",
+                          category: "App")
+        }
+
+        // `SUEnableAutomaticChecks` steht in der Info.plist; der Nutzer kann es über
+        // Sparkles Erlaubnisfrage in den UserDefaults überschreiben. Beide nennen, denn
+        // ein „nein" von damals erklärt, warum später nie etwas kam.
+        let plistAuto = info["SUEnableAutomaticChecks"] as? Bool
+        let nutzerAuto = defaults.object(forKey: "SUEnableAutomaticChecks") as? Bool
+        AppLogger.log("Sparkle: autoCheck plist=\(plistAuto.map(String.init(describing:)) ?? "—") "
+                      + "nutzer=\(nutzerAuto.map(String.init(describing:)) ?? "—") "
+                      + "hasLaunchedBefore=\(defaults.bool(forKey: "SUHasLaunchedBefore")) "
+                      + "lastCheck=\(defaults.object(forKey: "SULastCheckTime").map(String.init(describing:)) ?? "—")",
+                      category: "App")
+    }
+
     // MARK: - Hinweis
 
     /// Merkt sich, für welche fremde Kopie schon gewarnt wurde. Kommt später eine
@@ -79,7 +154,9 @@ enum Doppelinstallation {
         guard case let .andereKopieRegistriert(bevorzugt) = pruefen(bundle: bundle) else { return }
 
         let laufend = bundle.bundleURL
-        AppLogger.log("Doppelinstallation: läuft aus \(normiert(laufend)), macOS bevorzugt \(normiert(bevorzugt))",
+        // Ort statt Pfad — siehe `ort(_:)`. Der Dialog darunter nennt dem Nutzer die
+        // vollen Pfade; der muss sie wissen, das Protokoll nicht.
+        AppLogger.log("Doppelinstallation: läuft aus \(ort(laufend)), macOS bevorzugt \(ort(bevorzugt))",
                       category: "App", level: "WARN")
 
         guard defaults.string(forKey: gezeigtKey) != normiert(bevorzugt) else { return }

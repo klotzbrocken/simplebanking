@@ -36,6 +36,7 @@ struct SubscriptionsView: View {
 
     @Environment(\.dismiss) private var dismiss
     @StateObject private var logoStore = SubscriptionLogoStore.shared
+    @ObservedObject private var dauerauftraege = DauerauftragStore.shared
 
     @State private var viewMode: SubViewMode = .liste
     @State private var activeTab: SubscriptionTab = .abos
@@ -156,8 +157,16 @@ struct SubscriptionsView: View {
 
     // MARK: Derived data
 
+    /// Erkannte Abos und abgerufene Daueraufträge in einer Liste.
+    ///
+    /// Bei einem Treffer gewinnt die Bank: Ihre Fassung kennt den vereinbarten Betrag
+    /// und den nächsten Termin, die Erkennung nur den Mittelwert der Vergangenheit.
     private var allCandidates: [SubscriptionCandidate] {
-        detectedCandidates.filter { !isExcluded($0.id) }
+        let vonDerBank = dauerauftraege.auftraege.map { $0.alsKandidat() }
+        let erkannt = detectedCandidates.filter { c in
+            !dauerauftraege.auftraege.contains { $0.passtZu(displayName: c.displayName) }
+        }
+        return (vonDerBank + erkannt).filter { !isExcluded($0.id) }
     }
 
     private func effectiveTab(_ c: SubscriptionCandidate) -> SubscriptionTab {
@@ -226,10 +235,42 @@ struct SubscriptionsView: View {
                     .buttonStyle(.plain)
                 }
                 Spacer(minLength: 0)
+
+                // Der Abruf bei der Bank kostet eine Freigabe, also nie von selbst.
+                Button { dauerauftraege.anfordern() } label: {
+                    HStack(spacing: 5) {
+                        if dauerauftraege.laeuft {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "calendar.badge.clock")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        Text("Daueraufträge")
+                            .font(.system(size: 12))
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(dauerauftraege.laeuft)
+                .help("Fragt die Daueraufträge bei der Bank ab — auch die, die noch nie gebucht wurden. Braucht eine Freigabe.")
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
             .padding(.bottom, 10)
+
+            if let meldung = dauerauftraege.meldung {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Text(meldung)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 10)
+            }
 
             Divider()
 
@@ -346,6 +387,7 @@ struct SubscriptionsView: View {
         // und ein veraltetes Ergebnis vor dem Schreiben verworfen.
         .task(id: reloadToken) {
             RecurringAssignments.migrateLegacyIfNeeded()
+            dauerauftraege.laden()
             let txSnapshot = transactions
             let result = await Task.detached(priority: .userInitiated) {
                 SubscriptionDetector.detect(in: txSnapshot)
@@ -531,7 +573,7 @@ struct SubscriptionsView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(dimmed ? .secondary : .primary)
                         HStack(spacing: 6) {
-                            Text("Zuletzt: \(SubscriptionsView.fmtDate(subscription.lastDate))")
+                            Text("\(subscription.vonDerBank ? "Nächste" : "Zuletzt"): \(SubscriptionsView.fmtDate(subscription.lastDate))")
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
                             if subscription.cadence == .monthly {

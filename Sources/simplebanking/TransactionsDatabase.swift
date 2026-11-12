@@ -602,8 +602,16 @@ enum TransactionsDatabase {
     /// solange sie bestehen), falsch für Datei-Importe: OFX/CAMT/Deep-Sync enthalten nie
     /// Vormerkungen — bis 2.0.3 löschte jeder Import stillschweigend alle Vormerkungen
     /// des Slots.
-    static func upsert(transactions: [TransactionsResponse.Transaction], slotId explicitSlotId: String? = nil, bankId: String = "primary", purgeStalePending: Bool = true) throws {
-        guard !transactions.isEmpty else { return }
+    /// Liefert die `tx_id`s in der Reihenfolge der übergebenen Buchungen.
+    ///
+    /// Gebraucht vom MoneyMoney-Import, der die Kategorie NACH dem Schreiben als
+    /// Override setzt und dafür die endgültigen Schlüssel braucht — samt der `#n`
+    /// für mehrfach gleiche Buchungen, die unten vergeben wird. Die Zählung hier
+    /// nachzubauen hieße, sie zweimal zu pflegen und beim nächsten Umbau
+    /// auseinanderlaufen zu lassen.
+    @discardableResult
+    static func upsert(transactions: [TransactionsResponse.Transaction], slotId explicitSlotId: String? = nil, bankId: String = "primary", purgeStalePending: Bool = true) throws -> [String] {
+        guard !transactions.isEmpty else { return [] }
 
         try migrate(bankId: bankId)
         let queue = try makeQueue(bankId: bankId)
@@ -761,6 +769,48 @@ enum TransactionsDatabase {
                         category: "Roundup", level: "ERROR"
                     )
                 }
+            }
+        }
+        return records.map(\.txID)
+    }
+
+    /// Das Buchungsdatum der ältesten Buchung eines Slots, oder `nil` bei leerem Slot.
+    ///
+    /// Das ist die **Naht** des MoneyMoney-Imports: Übernommen wird nur, was älter
+    /// ist. Ein Datum, kein Fingerprint — derselbe Umsatz aus MoneyMoney und aus dem
+    /// Bankabruf trifft denselben Fingerprint nur bei zeichengenau gleichem Text, und
+    /// ein Leerzeichen im Verwendungszweck genügt, damit er es nicht tut.
+    static func aeltesteBuchung(slotId: String, bankId: String = "primary") throws -> String? {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        return try queue.read { db in
+            try String.fetchOne(db, sql: """
+                SELECT min(buchungsdatum) FROM transactions
+                 WHERE slot_id = ? AND buchungsdatum IS NOT NULL AND buchungsdatum <> ''
+                """, arguments: [slotId])
+        }
+    }
+
+    /// Tag und Betrag jeder Buchung ab einem Datum — der Schlüssel, über den die
+    /// MoneyMoney-Kategorie eine Buchung wiederfindet, die die **Bank** geliefert hat.
+    ///
+    /// Nur diese drei Spalten: Für die Zuordnung braucht es nicht mehr, und ein
+    /// ganzer `TransactionRecord` je Zeile wäre bei einem Umsteiger mit Zehntausenden
+    /// Buchungen reine Last.
+    static func buchungsschluessel(slotId: String, ab datum: String,
+                                   bankId: String = "primary") throws
+        -> [(txID: String, tag: String, betrag: Double)] {
+        try migrate(bankId: bankId)
+        let queue = try makeQueue(bankId: bankId)
+        return try queue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT tx_id, buchungsdatum, betrag FROM transactions
+                 WHERE slot_id = ? AND buchungsdatum >= ? AND betrag IS NOT NULL
+                """, arguments: [slotId, datum]).compactMap { row in
+                guard let txID: String = row["tx_id"],
+                      let tag: String = row["buchungsdatum"],
+                      let betrag: Double = row["betrag"] else { return nil }
+                return (txID: txID, tag: tag, betrag: betrag)
             }
         }
     }
@@ -1676,6 +1726,23 @@ enum TransactionsDatabase {
         try queue.write { db in
             try db.execute(sql: "UPDATE transactions SET kategorie = ?, updated_at = ? WHERE tx_id = ? AND slot_id = ?",
                            arguments: [kategorie, now, txID, slotId])
+        }
+    }
+
+    /// Zieht eine Kategorie-Bezeichnung auf einen neuen Namen um.
+    ///
+    /// Gebraucht, wenn der Nutzer eine **eigene** Kategorie umbenennt: Dort ist der
+    /// Name die Identität, und er steht genau so in dieser Spalte. Ohne den Umzug
+    /// trügen die Buchungen weiter einen Namen, den es nicht mehr gibt, und fielen
+    /// still auf die automatische Kategorie zurück. Läuft über alle Konten — eine
+    /// Kategorie gilt kontenübergreifend.
+    static func kategorieUmbenennen(von alt: String, nach neu: String) throws {
+        guard alt != neu else { return }
+        let queue = try makeQueue()
+        let now = currentTimestamp()
+        try queue.write { db in
+            try db.execute(sql: "UPDATE transactions SET kategorie = ?, updated_at = ? WHERE kategorie = ?",
+                           arguments: [neu, now, alt])
         }
     }
 

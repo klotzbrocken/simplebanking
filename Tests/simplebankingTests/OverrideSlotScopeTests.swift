@@ -113,9 +113,14 @@ final class CategorizerOverrideSlotScopeTests: XCTestCase {
     }
 
     // MARK: - storage helpers (JSON-encoded Data unter overridesStorageKey)
+    //
+    // Über `TransactionCategorizer.defaults`, nicht `UserDefaults.standard`: Der
+    // Zuordnungsladen liegt im Testlauf in einer Wegwerf-Domain. Bis dahin schrieben
+    // diese Tests in die echten Zuordnungen des Nutzers — gemerkt hätte man es erst
+    // an einer Buchung, die plötzlich in der falschen Kategorie steht.
 
     private func readOverrides(storageKey: String) -> [String: String] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        guard let data = TransactionCategorizer.defaults.data(forKey: storageKey),
               let dict = try? JSONDecoder().decode([String: String].self, from: data) else {
             return [:]
         }
@@ -124,7 +129,7 @@ final class CategorizerOverrideSlotScopeTests: XCTestCase {
 
     private func writeOverrides(_ dict: [String: String], storageKey: String) {
         if let data = try? JSONEncoder().encode(dict) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            TransactionCategorizer.defaults.set(data, forKey: storageKey)
         }
     }
 }

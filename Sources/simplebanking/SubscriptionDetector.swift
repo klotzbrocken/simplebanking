@@ -25,6 +25,12 @@ struct SubscriptionCandidate: Identifiable {
     let category: PaymentCategory
     let matchedTransactions: [TransactionsResponse.Transaction]
 
+    /// Von der Bank abgerufener Dauerauftrag statt aus Buchungen erkannt.
+    ///
+    /// Ändert zwei Dinge in der Zeile: `lastDate` trägt dann die **nächste**
+    /// Ausführung, und der Betrag ist der vereinbarte, kein Mittelwert.
+    var vonDerBank = false
+
     var defaultTab: SubscriptionTab {
         switch category {
         case .finance:

@@ -97,6 +97,19 @@ enum YaxiTicketMaker {
         return try TransferTicket(issueTicket(service: "Transfer", data: nil, useTransferKey: licensed))
     }
 
+    /// Convenience: Dauerauftrags-Ticket. Laut YAXI-Doku
+    /// (`docs.yaxi.tech/standing-orders.html`) trägt das Ticket nur das Konto —
+    /// „The service does not support any specific client arguments."
+    ///
+    /// Kein Zeitraum, anders als bei den Umsätzen: Ein Dauerauftrag hat kein
+    /// Buchungsdatum, sondern einen Takt.
+    static func standingOrdersTicket(iban: String, currency: String = "EUR") throws -> StandingOrdersTicket {
+        let data: [String: Any] = [
+            "account": ["iban": iban, "currency": currency] as [String: Any]
+        ]
+        return try StandingOrdersTicket(issueTicket(service: "StandingOrders", data: data as Any))
+    }
+
     /// Convenience: Transactions ticket including account and date range in the payload.
     static func issueTransactionsTicket(iban: String, currency: String = "EUR", from: String? = nil, to: String? = nil) throws -> TransactionsTicket {
         var range: [String: Any] = [:]

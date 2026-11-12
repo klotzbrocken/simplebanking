@@ -1,5 +1,5 @@
 {
-  "originHash" : "e113056fdbcce5d880740e6b7fb267c8df1d516198ca6f996eb73352221c9c47",
+  "originHash" : "2bfc8113e01953c233960bc3f9bcfcd2284359b2e85fa775e259411c3fd34a03",
   "pins" : [
     {
       "identity" : "grdb.swift",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/yaxitech/routex-client-swift",
       "state" : {
-        "revision" : "2280087e9dd6a26a7f03fd451cc4d6b213b83ca3",
-        "version" : "0.5.0"
+        "revision" : "7841eeb2fba2b109f68a5768736bb318076108b6",
+        "version" : "0.6.0"
       }
     },
     {
@@ -53,6 +53,15 @@
       "state" : {
         "revision" : "47d3869a7291f085c1fb9fb1e6d3b97a793f45c6",
         "version" : "4.5.1"
+      }
+    },
+    {
+      "identity" : "swift-sqlcipher",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/skiptools/swift-sqlcipher",
+      "state" : {
+        "revision" : "882c3d63a2677ccada1e841e7f15ecc6222a6b79",
+        "version" : "1.13.0"
       }
     }
   ],

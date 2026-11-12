@@ -252,7 +252,10 @@ enum TransactionSearchEngine {
             "umbuchungen":    .umbuchung,
             "sonstiges":      .sonstiges,
         ]
-        return map[lower]
+        // Eigene Kategorien haben keine Kurzformen — nach ihnen wird mit ihrem Namen
+        // gesucht. Deckt außerdem umbenannte eingebaute ab: Wer „Mobilität" in „Auto"
+        // umbenennt, sucht danach auch so.
+        return map[lower] ?? TransactionCategory.from(displayName: lower)
     }
 
     // MARK: - Date Parsing

@@ -264,6 +264,23 @@ struct TransactionDetailView: View {
     }
 
     private func applyCategorySelection(_ newCategory: TransactionCategory) {
+        // Nichts tun, wenn nichts anders ist.
+        //
+        // **Warum das hier stehen muss.** `onAppear` setzt `selectedCategory` von
+        // seinem Vorgabewert `.sonstiges` auf die wirkliche Kategorie der Buchung.
+        // `onChange` feuert danach, und die Sperre `categorySelectionReady` ist zu
+        // diesem Zeitpunkt längst `true` — das bloße **Öffnen** der Detailansicht
+        // schrieb also einen Kategorie-Override und meldete
+        // `TransactionCategoriesChanged`. Die Umsatzliste zeichnet darauf komplett
+        // neu (`.id(themeRevision)`), die Zeile ist danach eine andere Ansicht, ihr
+        // `showDetail` steht wieder auf `false` — und das Fenster schloss sich
+        // sofort wieder. Gemeldet am 11.11.2026.
+        //
+        // Der stille Teil war der schlimmere: Jede angesehene Buchung bekam eine
+        // **manuell gesetzte** Kategorie, die keine automatische Verbesserung mehr
+        // überschreibt. Ansehen ist keine Entscheidung.
+        guard newCategory != TransactionCategorizer.category(for: transaction) else { return }
+
         let autoCategory = TransactionCategorizer.autoCategory(for: transaction)
         let txID = txFingerprint
         let capturedSlotId = txSlotId
@@ -698,9 +715,30 @@ struct TransactionDetailView: View {
                             )
 
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("Kategorie")
-                                    .font(.system(size: 11))
+                                HStack(spacing: 6) {
+                                    Text("Kategorie")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    // Der Weg zu den eigenen Kategorien — dort, wo
+                                    // man kategorisiert. Ein Menü kann keinen
+                                    // Eintrag mit Aktion tragen, also steht er
+                                    // daneben.
+                                    Button {
+                                        dismiss()
+                                        NotificationCenter.default.post(
+                                            name: .kategorienVerwalten, object: nil)
+                                    } label: {
+                                        Image(systemName: "plus.circle")
+                                            .font(.system(size: 11))
+                                    }
+                                    .buttonStyle(.plain)
                                     .foregroundColor(.secondary)
+                                    .help(L10n.t("Eigene Kategorien anlegen und umbenennen",
+                                                 "Add and rename your own categories"))
+                                    .accessibilityLabel(Text(L10n.t(
+                                        "Eigene Kategorien verwalten",
+                                        "Manage your own categories")))
+                                }
 
                                 Picker("", selection: $selectedCategory) {
                                     ForEach(TransactionCategory.allCases, id: \.self) { category in

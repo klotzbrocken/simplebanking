@@ -113,13 +113,40 @@ enum LicenseConfig {
     /// `?discount_code=<voucherDiscountCode>` an `purchaseURL`, solange
     /// der Voucher aktiv ist. Sonst Fallback auf `purchaseURL` ohne Param.
     static var effectiveVoucherPurchaseURL: URL {
-        guard isVoucherActive, let code = voucherDiscountCode,
-              var comps = URLComponents(url: purchaseURL, resolvingAgainstBaseURL: false)
+        purchaseURL(mitRabattcode: isVoucherActive ? voucherDiscountCode : nil)
+    }
+
+    // MARK: - Umsteigerrabatt
+
+    /// Rabattcode für Umsteiger von MoneyMoney. Wird im letzten Schritt der
+    /// Einrichtung gezeigt — aber nur, wenn wirklich übernommen wurde
+    /// (`MoneyMoneyVorhaben.umstiegErfolgt`).
+    ///
+    /// Zum Abtippen und **nicht** als `discount_code` an die URL gehängt: Der Code
+    /// soll auf der Bestellseite im Feld stehen, und ein Rabatt, den niemand gesehen
+    /// hat, ist kein Argument für den Umstieg.
+    static let umstiegDiscountCode: String = "MoneyMoney"
+
+    /// Was nach Abzug übrig bleibt. Zwei Zahlen und keine Rechnung im Text: Steht
+    /// der Abzug an einer Stelle und der Endpreis an einer zweiten, laufen sie beim
+    /// nächsten Preiswechsel auseinander.
+    static let umstiegRabatt: String = "€5"
+    static let umstiegDisplayPrice: String = "€10"
+
+    /// Checkout-URL mit angehängtem Umsteiger-Rabattcode.
+    ///
+    /// Der Code steht **zusätzlich** im Fenster zum Abtippen: Angehängt greift er
+    /// von selbst, sichtbar ist er das Dankeschön für den Umstieg — und wer den Kauf
+    /// später aus dem Menü nachholt, kommt über eine URL ohne Parameter und braucht
+    /// ihn dann wirklich.
+    static func purchaseURL(mitRabattcode code: String?) -> URL {
+        guard let code, !code.isEmpty,
+              var teile = URLComponents(url: purchaseURL, resolvingAgainstBaseURL: false)
         else { return purchaseURL }
-        var items = comps.queryItems ?? []
-        items.append(URLQueryItem(name: "discount_code", value: code))
-        comps.queryItems = items
-        return comps.url ?? purchaseURL
+        var abfrage = teile.queryItems ?? []
+        abfrage.append(URLQueryItem(name: "discount_code", value: code))
+        teile.queryItems = abfrage
+        return teile.url ?? purchaseURL
     }
 
     /// Offline-Grace-Period: wie lange darf die App ohne erfolgreiche

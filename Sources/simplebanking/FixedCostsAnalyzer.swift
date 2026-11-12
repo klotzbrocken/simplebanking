@@ -46,7 +46,7 @@ struct RecurringPayment: Identifiable {
     
 }
 
-enum PaymentFrequency: String {
+enum PaymentFrequency: String, Codable {
     case monthly = "Monatlich"
     case quarterly = "Vierteljährlich"
     case yearly = "Jährlich"

@@ -47,6 +47,23 @@ enum AIProviderService {
     No explanation. No markdown. No extra keys.
     """
 
+    /// Derselbe Prompt, erweitert um die Kategorien, die der Nutzer selbst angelegt hat.
+    ///
+    /// Ohne sie ordnet die KI weiter ausschließlich in die eingebauten ein — wer sich
+    /// eigene Kategorien anlegt, müsste jede Buchung von Hand zuweisen, und das ist
+    /// genau die Arbeit, die die Zuordnung abnehmen soll. Der Name geht als Schlüssel
+    /// hinaus und kommt als Schlüssel zurück; angenommen wird er nur, wenn er auf eine
+    /// bestehende eigene Kategorie trifft (`AICategorizationService.kategorie(fuerSchluessel:eigene:)`).
+    static func categorizationSystemPrompt(eigeneKategorien: [String]) -> String {
+        guard !eigeneKategorien.isEmpty else { return CATEGORIZATION_SYSTEM_PROMPT }
+        let liste = eigeneKategorien.map { "\"\($0)\"" }.joined(separator: ", ")
+        return CATEGORIZATION_SYSTEM_PROMPT + """
+
+        The user has defined additional categories: \(liste).
+        Use one of these exact names as the category value when it fits the transaction better than the keys above.
+        """
+    }
+
     static let QUERY_SYSTEM_PROMPT = """
     You are a personal finance assistant inside a German banking app called simplebanking.
     The user asks questions about their own transactions.

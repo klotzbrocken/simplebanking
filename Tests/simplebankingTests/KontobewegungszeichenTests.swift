@@ -159,3 +159,37 @@ final class SaldobewegungTests: XCTestCase {
         XCTAssertEqual(Saldobewegung.richtung(vorher: -100.00, jetzt: -150.00), false)
     }
 }
+
+// MARK: - Wer den einen Platz in der Leiste bekommt
+
+/// Bewegung und Update-Hinweis wollen beide dasselbe Zeichen rechts außen. Nur eins
+/// kann dort stehen, und die Regel dafür ist nicht naheliegend: Die Bewegung gewinnt,
+/// obwohl der Update-Hinweis die seltenere Meldung ist. Grund steht bei
+/// `Leistenzeichenwahl.zeichen`.
+final class LeistenzeichenwahlTests: XCTestCase {
+
+    func test_ohneBeidesStehtNichtsInDerLeiste() {
+        XCTAssertNil(Leistenzeichenwahl.zeichen(bewegung: nil, updateVersion: nil))
+    }
+
+    func test_bewegungGewinntGegenUpdate() {
+        let zeichen = Leistenzeichenwahl.zeichen(bewegung: .eingang, updateVersion: "2.1.0")
+        XCTAssertEqual(zeichen?.glyph, Kontobewegungszeichen.eingang.glyph)
+        XCTAssertEqual(zeichen?.hinweis, Kontobewegungszeichen.eingang.hinweis)
+        // Die Bewegung erbt die Farbe der Leiste — sonst wäre sie ein Handlungsaufruf.
+        XCTAssertEqual(zeichen?.akzent, false)
+    }
+
+    func test_ohneBewegungKommtDasUpdateZumZug() {
+        let zeichen = Leistenzeichenwahl.zeichen(bewegung: nil, updateVersion: "2.1.0")
+        XCTAssertEqual(zeichen?.glyph, Leistenzeichenwahl.updateGlyph)
+        XCTAssertEqual(zeichen?.akzent, true)
+        XCTAssertEqual(zeichen?.hinweis.contains("2.1.0"), true)
+    }
+
+    /// Eine leere Fassungsnummer ist kein Update. Sie kann vorkommen: Sparkles
+    /// `displayVersionString` kommt aus dem Appcast, und der ist fremder Text.
+    func test_leereVersionIstKeinUpdate() {
+        XCTAssertNil(Leistenzeichenwahl.zeichen(bewegung: nil, updateVersion: ""))
+    }
+}

@@ -89,16 +89,37 @@ final class SaldoauswahlTests: XCTestCase {
         XCTAssertEqual(gewaehlt([saldo(2500, .available, am: heuteFrueh, dispo: true)])?.amount, 2500)
     }
 
-    // MARK: - Stufe 3: nichts aus der Zukunft
+    // MARK: - Stufe 3: Zukunft wird nachgeordnet, nicht verworfen
 
     /// Eine Vorausberechnung der Bank oder eine verstellte Uhr — als „aktueller
-    /// Kontostand" taugt beides nicht.
-    func test_zukunftWirdVerworfen() {
+    /// Kontostand" taugt beides nicht, solange es etwas anderes gibt.
+    func test_zukunftVerliertGegenGegenwart() {
         let gewinner = gewaehlt([
             saldo(100, .booked, am: heuteFrueh),
             saldo(777, .available, am: jetzt.addingTimeInterval(48 * 3600))
         ])
         XCTAssertEqual(gewinner?.amount, 100)
+    }
+
+    /// Der ING-Fall vom 06.11.2026: Die Bank schickt **einen** Saldo und stempelt ihn
+    /// mit Ortszeit, kennzeichnet ihn aber als UTC — gemessen 19:00:04Z zu einer
+    /// Protokollzeile um 18:00:04Z, also genau eine Stunde voraus. Als Ausschluss
+    /// gelesen hieß das: kein Kontostand, nur eine Meldung. Die verstellte Uhr macht den
+    /// Betrag aber nicht falsch.
+    func test_nurZukunft_wirdGenommen() {
+        let gewinner = gewaehlt([saldo(604.12, .booked, am: jetzt.addingTimeInterval(3600))])
+        XCTAssertEqual(gewinner?.amount, 604.12)
+    }
+
+    /// Und die Gegenprobe zu Stufe 2: Dispo wiegt schwerer als die Uhr. Ein
+    /// zukunftsdatierter Betrag ohne Dispo-Linie ist eher ein Kontostand als ein
+    /// gegenwärtiger mit.
+    func test_dispoVerliertAuchGegenZukunft() {
+        let gewinner = gewaehlt([
+            saldo(2500, .available, am: heuteFrueh, dispo: true),
+            saldo(300, .booked, am: jetzt.addingTimeInterval(3600), dispo: false)
+        ])
+        XCTAssertEqual(gewinner?.amount, 300)
     }
 
     /// Ein Eintrag ohne Datum lässt sich nicht einordnen und landet hinter jedem

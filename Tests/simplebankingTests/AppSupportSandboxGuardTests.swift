@@ -51,6 +51,10 @@ final class AppSupportSandboxGuardTests: XCTestCase {
              try TransactionsDatabase.databaseURL(bankId: "guard-probe").standardizedFileURL.path),
             ("TransferDraftStore.directoryURL",
              try TransferDraftStore.directoryURL().standardizedFileURL.path),
+            // Darin steht der komplette Umsatzverlauf aus MoneyMoney. Ein Testlauf,
+            // der sie in den echten Ordner legt, hinterlässt sie dort.
+            ("MoneyMoneyAblage.ort",
+             try XCTUnwrap(MoneyMoneyAblage.ort).standardizedFileURL.path),
         ]
 
         for (name, path) in derived {

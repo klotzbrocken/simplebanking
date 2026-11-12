@@ -271,6 +271,24 @@ enum AssignmentRules {
         return rule
     }
 
+    /// Zieht die Kategorie aller Regeln auf einen neuen Namen um — gebraucht, wenn eine
+    /// eigene Kategorie umbenannt wird. Eine Regel, die auf einen Namen zeigt, den es
+    /// nicht mehr gibt, greift weiter, setzt aber eine Kategorie, die nirgends
+    /// auftaucht; der Nutzer sieht dann eine Regel, die nichts tut.
+    static func kategorieUmbenennen(von alt: String, nach neu: String) {
+        let ziel = Kategorienamen.normalisiert(alt)
+        guard !ziel.isEmpty, alt != neu else { return }
+        var regeln = all()
+        var geaendert = false
+        for index in regeln.indices {
+            guard let kategorie = regeln[index].setCategory,
+                  Kategorienamen.normalisiert(kategorie.rawValue) == ziel else { continue }
+            regeln[index].setCategory = TransactionCategory(rawValue: neu)
+            geaendert = true
+        }
+        if geaendert { save(regeln) }
+    }
+
     @discardableResult
     static func remove(id: UUID) -> Bool {
         var rules = all()
@@ -351,9 +369,18 @@ enum AssignmentRules {
     // Consumers
 
     /// First enabled rule (priority then createdAt) that matches and assigns a category.
+    ///
+    /// Eine Regel auf eine **gelöschte** eigene Kategorie zählt nicht mehr: Sonst
+    /// stünde in der Umsatzliste ein Kategoriename, den kein Auswahlmenü mehr kennt —
+    /// und der Bestätigungsdialog beim Löschen sagt zu, dass die Buchungen auf die
+    /// automatische Zuordnung zurückfallen. Die Regel selbst bleibt stehen; wer die
+    /// Kategorie wieder anlegt, hat beides zurück.
     static func firstCategory(for input: RuleInput, rules: [AssignmentRule]? = nil,
                               cadence: PaymentFrequency? = nil) -> TransactionCategory? {
-        sorted(rules ?? all()).first { $0.setCategory != nil && $0.matches(input, cadence: cadence) }?.setCategory
+        let treffer = sorted(rules ?? all()).first {
+            ($0.setCategory?.istBekannt ?? false) && $0.matches(input, cadence: cadence)
+        }
+        return treffer?.setCategory
     }
 
     /// Live-Pfad: zieht die Händler-Cadence aus dem Live-Cache, sodass `.interval`-

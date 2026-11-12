@@ -75,4 +75,64 @@ final class FreigabewacheTests: XCTestCase {
         irgendwo = await wache.laeuftIrgendwo()
         XCTAssertFalse(irgendwo)
     }
+
+    // MARK: - Der Ausgang aus dem Warten
+    //
+    // Gemeldet am 06.11.2026: Nach einem versehentlich geschlossenen Freigabe-Fenster kam
+    // der Nutzer bis zum Programmneustart nicht mehr an sein Konto. Die Marke ist der
+    // Ausgang; diese Tests halten ihre drei Eigenschaften fest.
+
+    func test_ohneAbbruchKeineMarke() async {
+        let wache = Freigabewache()
+        let abgebrochen = await wache.nimmAbbruch("bunq")
+        XCTAssertFalse(abgebrochen)
+    }
+
+    /// Der entkoppelte Weg („bitte in der Banking-App bestätigen") meldet sich bei der
+    /// Wache nie an — er braucht den Ausgang trotzdem.
+    func test_abbruchWirktAuchOhneLaufendenVorgang() async {
+        let wache = Freigabewache()
+        await wache.abbrechen("ing")
+        let abgebrochen = await wache.nimmAbbruch("ing")
+        XCTAssertTrue(abgebrochen, "ohne das bleibt der entkoppelte Weg ohne Ausgang")
+    }
+
+    /// Verbrauchend, damit die Reihenfolge nicht zählt: Stünde die Marke noch, wenn der
+    /// neue Anlauf beginnt, würde der sich selbst abräumen.
+    func test_abbruchWirktGenauEinmal() async {
+        let wache = Freigabewache()
+        await wache.abbrechen("bunq")
+        let erster = await wache.nimmAbbruch("bunq")
+        let zweiter = await wache.nimmAbbruch("bunq")
+        XCTAssertTrue(erster)
+        XCTAssertFalse(zweiter, "sonst bricht der nächste Anlauf sofort wieder ab")
+    }
+
+    func test_abbruchGiltJeKonto() async {
+        let wache = Freigabewache()
+        await wache.abbrechen("bunq")
+        let anderes = await wache.nimmAbbruch("sparkasse")
+        XCTAssertFalse(anderes)
+    }
+
+    /// Eine beendete Freigabe darf keinen Abbruch zurücklassen.
+    func test_beendenRaeumtDieMarkeMitWeg() async {
+        let wache = Freigabewache()
+        _ = await wache.beginnen("bunq")
+        await wache.abbrechen("bunq")
+        await wache.beenden("bunq")
+        let abgebrochen = await wache.nimmAbbruch("bunq")
+        XCTAssertFalse(abgebrochen)
+    }
+
+    /// Ein Abbruch, den nie eine Schleife abgeholt hat, war an keine gerichtet.
+    func test_abbruchVerfaelltWieEinVorgang() async {
+        let wache = Freigabewache()
+        let start = Date()
+        await wache.abbrechen("bunq", jetzt: start)
+
+        let spaeter = start.addingTimeInterval(Freigabewache.hoechstdauer + 1)
+        let abgebrochen = await wache.nimmAbbruch("bunq", jetzt: spaeter)
+        XCTAssertFalse(abgebrochen)
+    }
 }

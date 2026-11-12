@@ -550,6 +550,36 @@ enum YaxiService {
         }
     }
 
+    /// Die Bankverbindung zu einer IBAN, oder `nil`, wenn YAXI keine kennt.
+    ///
+    /// Das ist die **belastbare** Antwort auf „ist dieses Konto über Open Banking
+    /// erreichbar" — belastbarer als der Kontotyp, den eine fremde App draufschreibt.
+    /// Das SDK zieht aus einem IBAN-förmigen Suchbegriff die Bankleitzahl und gibt
+    /// die Verbindungen dieses Bereichs heraus (`ibanDetection`).
+    ///
+    /// Anders als `searchBanks` **wirft** die Funktion: Für den MoneyMoney-Import ist
+    /// „YAXI kennt diese Bank nicht" eine Absage an den Nutzer, „die Abfrage ist
+    /// fehlgeschlagen" aber nur fehlendes Netz. Beides als leere Liste zu melden
+    /// hieße, einem Umsteiger ohne Verbindung zu sagen, seine Banken gingen nicht.
+    ///
+    /// Bei mehreren Verbindungen zur gleichen Bankleitzahl (etwa FinTS und Weiterleitung)
+    /// kommt die erste. Das ist eine Annahme, keine Auskunft — darum führt der
+    /// Zurück-Weg aus dem Zugangsdaten-Schritt weiter in die Banksuche, wo der Nutzer
+    /// die Verbindung selbst wählen kann.
+    static func verbindung(fuerIban iban: String) async throws -> ConnectionInfo? {
+        let begriff = iban.replacingOccurrences(of: " ", with: "").uppercased()
+        guard begriff.count >= 5 else { return nil }
+        let client = YaxiTransport.client()
+        let ticket = try YaxiTicketMaker.accountsTicket()
+        let gefunden = try await client.search(
+            ticket: ticket,
+            filters: [.term(begriff)],
+            ibanDetection: true,
+            limit: 5
+        )
+        return gefunden.first
+    }
+
     /// Persists a YAXI ConnectionInfo as the active bank for the current slot.
     /// Called from the setup wizard immediately after the user selects a bank.
     static func storeConnectionInfo(_ info: ConnectionInfo) {
@@ -847,6 +877,11 @@ enum YaxiService {
         let model = loadCredentialsModel(slotId: slotSnapshot)
         let d = UserDefaults.standard
         guard let connectionId = d.string(forKey: connIdKey), !connectionId.isEmpty else {
+            // Hier gibt es noch keinen Client und damit keinen Trace. Dann muss die Zeile
+            // es sagen, sonst sieht die Diagnose nur eine leere Trace-Ablage und der
+            // Nutzer meldet „erstellt kein Trace".
+            ohneTraceWeil("fetchBalances", "keine connectionId — der Slot war nie eingerichtet",
+                          alwaysTrace: alwaysTrace)
             return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
                                    connectionData: nil, error: "no connectionId yet",
                                    userMessage: nil, scaRequired: nil)
@@ -874,7 +909,15 @@ enum YaxiService {
         // kennt keine Freigabe-Zweige; klappt er, ist der Abruf hier zu Ende. Klappt er
         // nicht, läuft unverändert alles Bisherige — inklusive Wiederholungen,
         // Zustimmungsregeln und Fehlerbericht.
-        if let cd = storedCD,
+        //
+        // **Außer in der Diagnose.** `RoutexRefreshClient` hat keine
+        // Trace-Schnittstelle; wer diesen Weg nimmt, kann keinen Trace liefern. Gemeldet
+        // am 06.11.2026 („Diagnose erstellt kein Trace"), und auf diesem Rechner war
+        // genau das die Ursache: Schalter gesetzt, Schnellabruf geglückt, kein Trace.
+        // Eine Zeile im Protokoll hat dafür nicht gereicht — die Diagnose fährt man, um
+        // den Trace zu bekommen, also nimmt sie hier den langen Weg.
+        if !alwaysTrace,
+           let cd = storedCD,
            let schnell = await schnellSalden(slotSnapshot: slotSnapshot,
                                              connectionData: cd,
                                              accountRefs: accountRefs,
@@ -1060,6 +1103,9 @@ enum YaxiService {
                     meldung = Self.freigabeNoetigText
                     freigabeNoetig = true
                 }
+                await traceBeiAusgang(client: client, ticket: ticket,
+                                      label: "diag-fetchBalances-sca-\(freigabe.kurzname)",
+                                      alwaysTrace: alwaysTrace)
                 return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
                                        connectionData: nil, error: nil,
                                        userMessage: meldung, scaRequired: true,
@@ -1073,6 +1119,9 @@ enum YaxiService {
                                       slotId: slotSnapshot)
 
             guard case .balances(let result) = outcome.payload else {
+                await traceBeiAusgang(client: client, ticket: ticket,
+                                      label: "diag-fetchBalances-falscher-antworttyp",
+                                      alwaysTrace: alwaysTrace)
                 return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
                                        connectionData: nil, error: "unexpected result type",
                                        userMessage: nil, scaRequired: nil)
@@ -1124,6 +1173,9 @@ enum YaxiService {
                     // Liste im Protokoll ist bei der Fehlersuche Gold wert —, aber er
                     // liefert keinen Anzeigewert mehr. Der Slot meldet stattdessen, dass
                     // sein Konto nicht in der Zustimmung steckt.
+                    await traceBeiAusgang(client: client, ticket: ticket,
+                                          label: "diag-fetchBalances-konto-nicht-in-zustimmung",
+                                          alwaysTrace: alwaysTrace)
                     return BalancesResponse(
                         ok: false, booked: nil, expected: nil,
                         session: outcome.session?.bytes.base64EncodedString(),
@@ -1227,12 +1279,15 @@ enum YaxiService {
         let model = loadCredentialsModel(slotId: slotSnapshot)
         let d = UserDefaults.standard
         guard let connectionId = d.string(forKey: connIdKey), !connectionId.isEmpty else {
+            ohneTraceWeil("fetchTransactions", "keine connectionId — der Slot war nie eingerichtet",
+                          alwaysTrace: alwaysTrace)
             return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                        connectionData: nil, error: "no connectionId yet",
                                        userMessage: nil, scaRequired: nil)
         }
         let iban = d.string(forKey: ibanKeySnap) ?? ""
         guard !iban.isEmpty else {
+            ohneTraceWeil("fetchTransactions", "keine IBAN gespeichert", alwaysTrace: alwaysTrace)
             return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                        connectionData: nil, error: "missing iban",
                                        userMessage: nil, scaRequired: nil)
@@ -1250,8 +1305,10 @@ enum YaxiService {
 
         AppLogger.log("fetchTransactions from=\(from)", category: "YaxiService")
 
-        // Erst der nicht-interaktive Weg — siehe `schnellSalden` für die Begründung.
-        if let cd = storedCD,
+        // Erst der nicht-interaktive Weg — siehe `schnellSalden`, dort steht auch, warum
+        // die Diagnose ihn überspringt.
+        if !alwaysTrace,
+           let cd = storedCD,
            let schnell = await schnellUmsaetze(
                slotSnapshot: slotSnapshot,
                connectionData: cd,
@@ -1408,6 +1465,9 @@ enum YaxiService {
                     meldung = Self.freigabeNoetigText
                     freigabeNoetig = true
                 }
+                await traceBeiAusgang(client: client, ticket: ticket,
+                                      label: "diag-fetchTransactions-sca-\(freigabe.kurzname)",
+                                      alwaysTrace: alwaysTrace)
                 return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                            connectionData: nil, error: nil,
                                            userMessage: meldung, scaRequired: true,
@@ -1424,6 +1484,9 @@ enum YaxiService {
                                       slotId: slotSnapshot)
 
             guard case .transactions(let result) = outcome.payload else {
+                await traceBeiAusgang(client: client, ticket: ticket,
+                                      label: "diag-fetchTransactions-falscher-antworttyp",
+                                      alwaysTrace: alwaysTrace)
                 return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                            connectionData: nil, error: "unexpected result type",
                                            userMessage: nil, scaRequired: nil)
@@ -1809,6 +1872,186 @@ enum YaxiService {
             msg.contains("supports no user id") ||
             msg.contains("user id is not supported") ||
             msg.contains("user id and a password")
+    }
+
+    // MARK: - Daueraufträge
+
+    /// Was ein Dauerauftrags-Abruf zurückgibt. Spiegelt die Rolle von
+    /// `TransactionsResponse`: die Daten, ein technischer Fehler fürs Protokoll und
+    /// getrennt davon der Satz, den der Nutzer lesen soll.
+    struct DauerauftragsAbruf: Sendable {
+        var auftraege: [Dauerauftrag] = []
+        var fehler: String? = nil
+        var nutzermeldung: String? = nil
+        var freigabeNoetig: Bool = false
+    }
+
+    /// Die Daueraufträge des aktiven Kontos.
+    ///
+    /// **Warum hier kein Wiederanlauf-Gestrüpp steht.** `fetchBalances` und
+    /// `fetchTransactions` tragen eine lange Leiter aus Wiederholungen, weil sie
+    /// unbeaufsichtigt an einem Zeitgeber hängen und sich selbst heilen müssen. Dieser
+    /// Abruf wird von Hand ausgelöst; scheitert er, ist die ehrliche Antwort eine
+    /// Meldung und kein stiller zweiter Versuch mit weniger Zustimmung.
+    ///
+    /// Daraus folgt beiläufig, dass die Regel aus CLAUDE.md hier nicht verletzt werden
+    /// *kann*: Es gibt keinen Zweig, der die `connectionData` beiseitelegt. Bei einer
+    /// Weiterleitungsbank bleibt die Zustimmung unangetastet, auch wenn dieser Dienst
+    /// sie ablehnt.
+    ///
+    /// **Session aus dem Salden-Bereich, mit Absicht.** YAXI zum Umstand, dass
+    /// `standingOrders` keinen Aufruf ohne Zugangsdaten hat: „Genau dafür ist die
+    /// Session gut." Die Freigabe des vorangegangenen Salden-Abrufs trägt also, und der
+    /// Nutzer bestätigt einmal statt zweimal. Ein eigener vierter `Scope` wäre das
+    /// Gegenteil: Ihn befüllt niemand, also käme der erste Abruf immer mit
+    /// `session: nil` und kostete seine eigene Freigabe.
+    ///
+    /// Die `connectionData` wandert ebenfalls in den Salden-Bereich zurück — sie gilt
+    /// laut YAXI über Dienstgrenzen und nützt dort dem nächsten Abruf.
+    static func fetchStandingOrders(
+        userId: String,
+        password: String,
+        ausloeser: Freigabeausloeser = .nutzerhandlung
+    ) async throws -> DauerauftragsAbruf {
+        // Demo-Modus: kein Bank-Aufruf, zwei Beispielaufträge. Gleiches Muster wie in
+        // `sendTransfer` — und die einzige Möglichkeit, die Anzeige zu prüfen, ohne
+        // eine echte Freigabe an einer echten Bank zu verbrauchen.
+        if UserDefaults.standard.bool(forKey: "demoMode") {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            return DauerauftragsAbruf(auftraege: Dauerauftrag.beispiele())
+        }
+
+        let slotSnapshot = activeSlotId
+        // HBCI-Mutex: Jede neue Bank-Aufrufstelle geht über die Warteschlange, sonst
+        // antwortet eine Volksbank mit „Fehlender Dialogkontext" (CLAUDE.md).
+        let ergebnis: DauerauftragsAbruf? = try await BankRequestQueue.shared.withSlot(slotSnapshot) {
+            try await fetchStandingOrdersLocked(
+                slotSnapshot: slotSnapshot, userId: userId, password: password, ausloeser: ausloeser
+            )
+        }
+        guard let ergebnis else {
+            AppLogger.log("fetchStandingOrders: slot busy, skip slot=\(slotSnapshot.prefix(8))",
+                          category: "YaxiService", level: "WARN")
+            return DauerauftragsAbruf(fehler: "bank busy", nutzermeldung: Self.freigabeLaeuftText)
+        }
+        return ergebnis
+    }
+
+    /// Eigentlicher Bank-Call. Voraussetzung: Caller hält den Slot. Nie direkt rufen.
+    private static func fetchStandingOrdersLocked(
+        slotSnapshot: String,
+        userId: String,
+        password: String,
+        ausloeser: Freigabeausloeser
+    ) async throws -> DauerauftragsAbruf {
+        let d = UserDefaults.standard
+        let model = loadCredentialsModel(slotId: slotSnapshot)
+        guard let connectionId = d.string(forKey: connectionIdKey(for: slotSnapshot)),
+              !connectionId.isEmpty else {
+            return DauerauftragsAbruf(fehler: "no connectionId yet")
+        }
+        let iban = d.string(forKey: ibanKey(for: slotSnapshot)) ?? ""
+        guard !iban.isEmpty else { return DauerauftragsAbruf(fehler: "missing iban") }
+
+        let storedCD = await sessionStore.connectionData(slotId: slotSnapshot)
+        let cdAlter = await sessionStore.connectionDataAge(slotId: slotSnapshot)
+        let storedSession = await sessionStore.session(for: .balances, slotId: slotSnapshot)
+        AppLogger.log("fetchStandingOrders: slot=\(slotSnapshot.prefix(8)) storedCD=\(storedCD == nil ? "nil" : "\(storedCD!.count)b") alter=\(cdAlter.map { String(format: "%.1fh", $0 / 3600) } ?? "?") session=\(storedSession == nil ? "nil" : "present") model.none=\(model.none)",
+                      category: "YaxiService")
+
+        // Die gespeicherte Zustimmung reist **im** `Credentials`-Umschlag mit
+        // (`Credentials.connectionData`). Dass der Dienst keinen eigenen
+        // `connectionData:`-Aufruf hat, heißt also nicht, dass eine Anmeldung nötig ist:
+        // „Pass back to skip authentication and authorization steps", sagt das SDK.
+        // Manche Banken verlangen für Daueraufträge dennoch eine frische Freigabe —
+        // genau deshalb gibt es die Abkürzung nicht, denn sie könnte keine anbieten.
+        let creds = try buildCredentials(
+            connectionId: connectionId, model: model,
+            connectionData: storedCD, userId: userId, password: password
+        )
+
+        let client = YaxiTransport.client()
+        var ticket = try YaxiTicketMaker.standingOrdersTicket(iban: iban)
+
+        do {
+            var resp: Response<StandingOrdersResult>
+            do {
+                resp = try await client.standingOrders(
+                    ticket: ticket, credentials: creds,
+                    session: storedSession.map(Session.init), recurringConsents: true
+                )
+            } catch {
+                // Der einzige Wiederanlauf, und er ist der wahrscheinlichste: Die
+                // Session kommt aus dem Salden-Abruf, also über eine Dienstgrenze. Ist
+                // sie verbraucht, hilft ein Versuch ohne sie — er kostet höchstens eine
+                // Freigabe. Die gespeicherte Session wird dabei **nicht** gelöscht; sie
+                // gehört dem Salden-Abruf, und der soll sie behalten.
+                guard storedSession != nil else { throw error }
+                AppLogger.log("fetchStandingOrders: Fehler mit Session, einmal ohne: \(error)",
+                              category: "YaxiService", level: "WARN")
+                ticket = try YaxiTicketMaker.standingOrdersTicket(iban: iban)
+                resp = try await client.standingOrders(
+                    ticket: ticket, credentials: creds, session: nil, recurringConsents: true
+                )
+            }
+
+            let scaTicket = ticket
+            let confirm: @Sendable (ConfirmationContext) async throws -> SCACommon = { ctx in
+                try await toSCACommon(client.confirmStandingOrders(ticket: scaTicket, context: ctx)) { .standingOrders($0) }
+            }
+            let respond: @Sendable (InputContext, String) async throws -> SCACommon = { ctx, r in
+                try await toSCACommon(client.respondStandingOrders(ticket: scaTicket, context: ctx, response: r)) { .standingOrders($0) }
+            }
+
+            let freigabe = await handleSCA(
+                initial: toSCACommon(resp) { .standingOrders($0) },
+                client: client, ticket: scaTicket, slotId: slotSnapshot,
+                confirm: confirm, respond: respond, ausloeser: ausloeser
+            )
+            guard case .erfolg(let outcome) = freigabe else {
+                var meldung: String? = nil
+                var freigabeNoetig = false
+                if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
+                if case .freigabeNoetig = freigabe {
+                    meldung = Self.freigabeNoetigText
+                    freigabeNoetig = true
+                }
+                return DauerauftragsAbruf(nutzermeldung: meldung, freigabeNoetig: freigabeNoetig)
+            }
+
+            AppLogger.log("fetchStandingOrders: outcome.connectionData=\(outcome.connectionData == nil ? "nil" : "\(outcome.connectionData!.bytes.count)b")",
+                          category: "YaxiService")
+            await sessionStore.update(scope: .balances,
+                                      session: outcome.session?.bytes,
+                                      connectionData: outcome.connectionData?.bytes,
+                                      slotId: slotSnapshot)
+
+            guard case .standingOrders(let result) = outcome.payload else {
+                return DauerauftragsAbruf(fehler: "unexpected result type")
+            }
+            // `Authenticated<T>` ist der JWT, nicht das Ergebnis. Signatur prüfen könnte
+            // nur ein Backend mit dem HMAC-Schlüssel; für die Anzeige genügt laut SDK
+            // das unverifizierte Auslesen.
+            let auftraege = try result.decodeUnverified().data.map { Dauerauftrag.aus($0) }
+            AppLogger.log("fetchStandingOrders: \(auftraege.count) Aufträge slot=\(slotSnapshot.prefix(8))",
+                          category: "YaxiService")
+            return DauerauftragsAbruf(auftraege: auftraege)
+
+        } catch {
+            let traceId = await client.traceID
+            await captureUnexpectedErrorIfNeeded(
+                error: error, client: client, ticket: ticket,
+                slotSnapshot: slotSnapshot, callName: "fetchStandingOrders",
+                callSource: .normal, traceId: traceId
+            )
+            AppLogger.log("fetchStandingOrders failed: \(error.localizedDescription)",
+                          category: "YaxiService", level: "ERROR")
+            return DauerauftragsAbruf(
+                fehler: error.localizedDescription,
+                nutzermeldung: RoutexErrorMapper.userMessage(for: error).detail
+                    ?? RoutexErrorMapper.userMessage(for: error).title
+            )
+        }
     }
 
     // MARK: - sendTransfer
@@ -2294,12 +2537,52 @@ enum YaxiService {
         // Rangfolge „Booked vor Available" falsch war. Kurz: Die Postbank liefert als
         // `Booked` den Tagesabschluss des Vortags und daneben ein aktuelleres
         // `Available`; die Reihenfolge der Einträge ist nicht zugesichert.
-        let booked = Saldoauswahl.waehle(aus: allBalances) ?? allBalances.first
+        //
+        // Was die Bank geliefert hat, steht im Protokoll — **immer**, nicht nur im
+        // Fehlerfall. „ING zeigt einen anderen Kontostand" (06.11.2026) war ohne diese
+        // Zeile nicht zu entscheiden: Welche Arten mit welchem Datum ankamen, wusste
+        // niemand.
+        let angeboten = allBalances.map { b in
+            "\(balanceTypeName(b.balanceType))=\(b.amount)\(b.creditLimitIncluded == true ? "+dispo" : "")@\(b.dateTime.map { ISO8601DateFormatter().string(from: $0) } ?? "ohne Datum")"
+        }
+        AppLogger.log("Salden der Bank: \(angeboten.isEmpty ? "keine" : angeboten.joined(separator: ", "))",
+                      category: "YaxiService")
+
+        // **Kein `?? allBalances.first`.** Das war die Hintertür: Läuft der Filter leer,
+        // entschied wieder die Reihenfolge des Feldes — und dann konnte ein `Expected`
+        // (das wartende Eingänge einrechnet und deshalb höher steht als jede Banking-App)
+        // oder ein zukunftsdatierter Saldo auf dem Schirm landen. Genau die
+        // Reihenfolge-Abhängigkeit, die `Saldoauswahl` abschaffen sollte.
+        //
+        // Liefert die Bank nichts Brauchbares, ist das kein Saldo, sondern ein Befund.
+        // Lieber „— €" mit einer Zeile im Protokoll als eine Zahl, die vielleicht etwas
+        // anderes bedeutet als der Nutzer annimmt.
+        guard let booked = Saldoauswahl.waehle(aus: allBalances) else {
+            AppLogger.log("Kein verwendbarer Saldo: \(allBalances.isEmpty ? "die Bank hat keinen geliefert" : "nur unpassende Arten oder alle in der Zukunft")",
+                          category: "YaxiService", level: "WARN")
+            return BalancesResponse(
+                ok: false, booked: nil, expected: nil,
+                session: session?.base64EncodedString(),
+                connectionData: connectionData?.base64EncodedString(),
+                error: nil,
+                userMessage: Self.keinSaldoText,
+                scaRequired: nil)
+        }
+        // Ein Saldo, der in der Zukunft liegt, wird genommen (siehe `Saldoauswahl`) —
+        // aber er wird benannt. Die ING stempelt mit Ortszeit und kennzeichnet als UTC;
+        // der Vorsprung ist dann genau die Zonenverschiebung. Steht die Zahl hier, ist
+        // die Rückfrage an YAXI belegt statt geraten.
+        if let stand = booked.dateTime, stand > Date() {
+            let vorsprung = stand.timeIntervalSinceNow
+            AppLogger.log(String(format: "Saldo liegt %.0f min in der Zukunft — Bank stempelt vermutlich Ortszeit als UTC", vorsprung / 60),
+                          category: "YaxiService", level: "WARN")
+        }
+
         let expected = allBalances.first(where: { $0.balanceType == .expected })
 
         return BalancesResponse(
             ok: true,
-            booked: booked.map { makeBalanceModel($0) },
+            booked: makeBalanceModel(booked),
             expected: expected.map { makeBalanceModel($0) },
             session: session?.base64EncodedString(),
             connectionData: connectionData?.base64EncodedString(),
@@ -2463,6 +2746,7 @@ enum YaxiService {
         case transactions(Authenticated<TransactionsResult>)
         case accounts(Authenticated<AccountsResult>)
         case transfer(Authenticated<TransferResult>)
+        case standingOrders(Authenticated<StandingOrdersResult>)
     }
 
     private struct SCAOutcome {
@@ -2494,6 +2778,15 @@ enum YaxiService {
     static let freigabeLaeuftText = L10n.t(
         "Für dieses Konto läuft gerade schon eine Freigabe. Schließe sie in der Banking-App oder im Browser ab — oder warte einen Moment, dann geht es wieder.",
         "An approval is already running for this account. Finish it in your banking app or browser — or wait a moment and try again.")
+
+    /// Der Satz, wenn die Bank keinen Saldo geliefert hat, den man anzeigen darf.
+    ///
+    /// Vorher wurde in diesem Fall der erstbeste genommen — auch ein `Expected`, das
+    /// wartende Eingänge einrechnet. Eine Zahl, die etwas anderes bedeutet als der Nutzer
+    /// annimmt, ist schlimmer als keine; deshalb sagt es hier jemand.
+    static let keinSaldoText = L10n.t(
+        "Die Bank hat keinen verwertbaren Kontostand geliefert. Die Umsätze unten sind davon nicht betroffen.",
+        "The bank did not return a usable balance. The transactions below are unaffected.")
 
     /// Übersetzt ein nicht erfolgreiches Freigabe-Ergebnis in die Meldung eines Datenabrufs.
     ///
@@ -2554,6 +2847,18 @@ enum YaxiService {
         /// Der Ablauf brach ab, **nachdem** etwas an die Bank ging. Bei Zahlungen darf
         /// daraus weder ein „fehlgeschlagen" noch ein neuer Versuch werden.
         case unklar
+
+        /// Für den Namen der Trace-Datei — der Grund ist die Diagnose, nicht die
+        /// Uhrzeit. Siehe `traceBeiAusgang`.
+        var kurzname: String {
+            switch self {
+            case .erfolg: return "erfolg"
+            case .abgebrochen: return "abgebrochen"
+            case .freigabeNoetig: return "freigabe-noetig"
+            case .freigabeLaeuftBereits: return "freigabe-laeuft"
+            case .unklar: return "unklar"
+            }
+        }
     }
 
     private enum SCACommon {
@@ -2648,10 +2953,23 @@ enum YaxiService {
             switch input {
 
             case .selection(let options, let context):
-                let preferred = options.first(where: { o in
-                    let s = "\(o.key) \(o.label) \(o.explanation ?? "")".lowercased()
-                    return s.contains("push") || s.contains("app") || s.contains("decoupled")
-                }) ?? options.first
+                let angebote = options.map {
+                    Tanverfahren.Angebot(schluessel: $0.key, beschriftung: $0.label, erklaerung: $0.explanation)
+                }
+                // Zuerst merken, was die Bank anbietet. Vorher kennt die App die
+                // Verfahren dieser Bank nicht — ohne diese Liste hätte die Einstellung
+                // unter „Konten" nichts, woraus sich wählen ließe.
+                var slotEinstellungen = BankSlotSettingsStore.load(slotId: slotId)
+                let angeboteJetzt = Dictionary(angebote.map { ($0.schluessel, $0.beschriftung) },
+                                               uniquingKeysWith: { erstes, _ in erstes })
+                if slotEinstellungen.tanVerfahrenAngebote != angeboteJetzt {
+                    slotEinstellungen.tanVerfahrenAngebote = angeboteJetzt
+                    BankSlotSettingsStore.save(slotEinstellungen, slotId: slotId)
+                }
+                let preferred = Tanverfahren.wahl(
+                    aus: angebote,
+                    gespeicherterSchluessel: slotEinstellungen.tanVerfahrenSchluessel,
+                    gespeicherterName: slotEinstellungen.tanVerfahrenName)
                 guard let preferred else {
                     AppLogger.log("SCA Selection: no options available", category: "YaxiService", level: "WARN")
                     return .abgebrochen
@@ -2666,13 +2984,15 @@ enum YaxiService {
                         "die Auswahl trifft die App, nicht der Nutzer. slot=\(slotId.prefix(8))",
                         category: "YaxiService", level: "WARN")
                 }
-                AppLogger.log("SCA Selection: picking '\(preferred.key)'", category: "YaxiService")
+                let herkunft = slotEinstellungen.tanVerfahrenSchluessel == nil ? "Vorgabe" : "Einstellung"
+                AppLogger.log("SCA Selection: picking '\(preferred.schluessel)' (\(herkunft), \(angebote.count) angeboten)",
+                              category: "YaxiService")
                 // Der Name, den die Bank dem Verfahren gibt („s-pushTAN"), wanderte
                 // bisher nur ins Protokoll. Der Nutzer stand vor „Banking-App öffnen"
                 // und musste raten, welche App gemeint ist.
-                let gewaehltesVerfahren = Verfahrensname.lesbar(aus: preferred.label) ?? verfahren
+                let gewaehltesVerfahren = Verfahrensname.lesbar(aus: preferred.beschriftung) ?? verfahren
                 do {
-                    let next = try await respond(context, preferred.key)
+                    let next = try await respond(context, preferred.schluessel)
                     return await handleSCA(initial: next, client: client, ticket: ticket, slotId: slotId,
                                            confirm: confirm, respond: respond, depth: depth + 1, ausloeser: ausloeser,
                                            verfahren: gewaehltesVerfahren)
@@ -2999,6 +3319,21 @@ enum YaxiService {
         return min(base * pow(2.0, exponent), cap)
     }
 
+    /// Hat der Nutzer das Warten beendet? Fragt die Marke ab und verbraucht sie.
+    ///
+    /// Beide Warteschleifen rufen das je Runde — also höchstens fünf Sekunden nach dem
+    /// Klick. Erst wenn sie zurückkehren, geben die `defer` der Aufrufer
+    /// `hbciSlotsInFlight` und die Warteschlange frei; genau darauf wartet der neue
+    /// Anlauf. Die Vorgänge des Kontos werden gleich mitvergessen, damit die Drossel im
+    /// `RedirectCoordinator` die neue Seite nicht schluckt.
+    private static func freigabeAbgebrochen(slotId: String, wo: String) async -> Bool {
+        guard await Freigabewache.shared.nimmAbbruch(slotId) else { return false }
+        await RedirectCoordinator.shared.vergessen(slotId: slotId)
+        AppLogger.log("\(wo): vom Nutzer beendet — Warten abgebrochen (slot=\(slotId.prefix(8)))",
+                      category: "YaxiService")
+        return true
+    }
+
     private static func pollConfirmation(
         context: ConfirmationContext,
         delay: TimeInterval,
@@ -3021,6 +3356,7 @@ enum YaxiService {
             let sleepSeconds = max(currentDelay, 1.0) + errorBackoff
             try? await Task.sleep(nanoseconds: UInt64(sleepSeconds * 1_000_000_000))
             if Task.isCancelled { return .unklar }
+            if await freigabeAbgebrochen(slotId: slotId, wo: "SCA Confirmation") { return .abgebrochen }
             do {
                 let next = try await confirm(ctx)
                 consecutiveErrors = 0
@@ -3111,6 +3447,7 @@ enum YaxiService {
                 try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 s
                 if Task.isCancelled { return .unklar }
             }
+            if await freigabeAbgebrochen(slotId: slotId, wo: "SCA Redirect") { return .abgebrochen }
             do {
                 let next = try await confirm(ctx)
                 switch next {
@@ -3161,11 +3498,46 @@ enum YaxiService {
     }
 
     // MARK: - Trace
+    //
+    // Gemeldet am 06.11.2026: „Die Diagnose erstellt kein Trace." Sie tat es tatsächlich
+    // nicht, und zwar genau in den Fällen, für die man sie fährt. Der Trace hing am Ende
+    // des Erfolgszweigs, und die aufschlussreichen Ausgänge — Freigabe nötig, Konto nicht
+    // in der Zustimmung, unerwarteter Antworttyp — **kehren normal zurück statt zu
+    // werfen**. Damit lief auch der unbedingte Trace im `catch` nicht. Ergebnis: rote
+    // Zeile in der Diagnose, null Dateien.
+    //
+    // Seither gilt: Jeder Ausgang, der etwas zu sagen hat, schreibt einen Trace
+    // (`traceBeiAusgang`), und wo keiner möglich ist, steht der Grund im Protokoll
+    // (`ohneTraceWeil`).
 
-    /// Fetches the trace for the last client operation and writes it to
-    /// ~/Library/Logs/simplebanking/yaxi-trace-<timestamp>-<label>.txt
-    /// Always creates a file — even when no traceId is available — so that
-    /// the call site can be confirmed and the triggering error is recorded.
+    /// Sagt im Protokoll, **warum** es hier keinen Trace geben kann.
+    ///
+    /// Vor dem ersten Bankaufruf gibt es keinen Client, und der Schnellabruf läuft über
+    /// `RoutexRefreshClient`, der gar keine Trace-Schnittstelle hat. Eine leere
+    /// Trace-Ablage sieht für den Nutzer gleich aus wie ein Fehler — also steht der Grund
+    /// dort, wo er nachsieht.
+    static func ohneTraceWeil(_ aufruf: String, _ grund: String, alwaysTrace: Bool) {
+        guard alwaysTrace else { return }
+        AppLogger.log("\(aufruf): kein Trace möglich — \(grund)", category: "YaxiService", level: "WARN")
+    }
+
+    /// Trace für einen Ausgang, der weder geglückt ist noch geworfen hat.
+    ///
+    /// Der Grund steht im Namen der Datei, denn genau der ist die Diagnose. Die Kennung
+    /// wird **zuerst** gelesen: `client.trace(…)` ist selbst eine Anfrage und überschreibt
+    /// sie sonst mit seiner eigenen — dieselbe Falle wie im `catch`-Zweig.
+    static func traceBeiAusgang(client: RoutexClient, ticket: some RoutexTicket,
+                                label: String, alwaysTrace: Bool) async {
+        guard alwaysTrace else { return }
+        let traceId = await client.traceID
+        await writeTrace(client: client, label: label, ticket: ticket, error: nil, traceId: traceId)
+    }
+
+    /// Holt den Trace zum letzten Aufruf des Clients und legt ihn unter
+    /// `~/Library/Logs/simplebanking/trace/yaxi-trace-<zeit>-<label>.txt` ab.
+    ///
+    /// Legt **immer** eine Datei an — auch ohne Kennung —, damit die Aufrufstelle und der
+    /// auslösende Fehler belegt sind.
     /// - Parameter traceId: Kennung des Aufrufs, um den es geht. Wird sie nicht
     ///   übergeben, fragt die Funktion den Client — was nur solange stimmt, wie seither
     ///   keine weitere Anfrage lief. Aufrufer in einem `catch` sollten sie deshalb
@@ -3188,7 +3560,11 @@ enum YaxiService {
 
         var content = ""
         if let error {
-            content += "=== Triggering error ===\n\(error)\n\n"
+            // Durch die gleiche Säuberung wie das Hauptprotokoll. Der YAXI-Trace darunter
+            // ist AGE-verschlüsselt und enthält keinen Klartext; die Fehlerbeschreibung
+            // hier **kann** einen enthalten — sie kommt aus dem SDK und trägt gelegentlich
+            // IBAN oder Token im Text. Die Datei geht per Mail an uns.
+            content += "=== Triggering error ===\n\(LogSanitizer.redact("\(error)"))\n\n"
         }
 
         let aktuelleKennung = await client.traceID
@@ -3483,6 +3859,14 @@ actor RedirectCoordinator {
         }
         geoeffnet[vorgang] = jetzt
         return true
+    }
+
+    /// Vergisst alle Vorgänge dieses Kontos. Nötig nach einem Abbruch durch den Nutzer:
+    /// Sonst schluckt die Frist von 290 Sekunden das Öffnen der neuen Seite, falls der
+    /// nächste Anlauf auf dieselbe Fahrkarte trifft — der Nutzer klickt „Freigabe neu
+    /// anstoßen" und bekommt wieder keinen Browser.
+    func vergessen(slotId: String) {
+        geoeffnet = geoeffnet.filter { !$0.key.hasPrefix("\(slotId)|") }
     }
 
     /// Alte Einträge verwerfen, damit die Tabelle nicht mit jedem Vorgang wächst.

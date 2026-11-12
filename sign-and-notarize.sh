@@ -119,6 +119,22 @@ if [[ -f "$CLI_BIN" ]]; then
         "$CLI_BIN"
 fi
 
+# MoneyMoney-Helfer — dieselben Regeln wie MCP und CLI.
+#
+# Bewusst dieselben Entitlements und KEINE eigene Datei „ohne Netz": Die App
+# trägt kein `com.apple.security.app-sandbox`, also gewährt
+# `com.apple.security.network.client` nichts und sein Weglassen verbietet nichts.
+# Eine abgespeckte Entitlements-Datei wäre eine Zusage, die sie nicht halten
+# kann. Dass der Helfer nichts ins Netz schickt, hält `MoneyMoneyHelferTests`
+# am Quelltext fest — dort ist es prüfbar.
+MM_BIN="$APP/Contents/MacOS/simplebanking-mmimport"
+if [[ -f "$MM_BIN" ]]; then
+    codesign --force --timestamp --options runtime \
+        --sign "$SIGN_IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        "$MM_BIN"
+fi
+
 # Main Swift binary — with sandbox entitlements
 codesign --force --timestamp --options runtime \
     --sign "$SIGN_IDENTITY" \

@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.2.0":
+            return v220
         case "2.0.9":
             return v209
         case "2.0.7":
@@ -287,6 +289,128 @@ enum WhatsNewContent {
             return nil
         }
     }
+
+    /// 2.2.0. Trägt auch den Inhalt der übersprungenen 2.1.0 — die ist nie
+    /// erschienen, also hat sie niemand gesehen, und ein `case "2.1.0"` hätte für
+    /// immer ins Leere gezeigt: Kein „Was ist neu"-Fenster, und mit ihm auch nicht
+    /// die Newsletter-Anmeldung in dessen Fuß. Nichts wäre fehlgeschlagen, es wäre
+    /// nur nichts passiert.
+    ///
+    /// Dieselbe Auswahlregel wie immer — nur, was jemand auch merkt. Der Kontoname
+    /// auf der Kachel und der benannte Schritt in der Einrichtung stehen deshalb
+    /// nicht hier: Beides fällt erst auf, wenn man es daneben legt.
+    private static let v220: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "square.and.arrow.down",
+            tint: .sbBlueStrong,
+            title: L10n.t("Umstieg von MoneyMoney \u{2014} in einem Zug",
+                          "Switching from MoneyMoney \u{2014} in one go"),
+            description: L10n.t(
+                "Wer von MoneyMoney kommt, musste bisher mit einem leeren Verlauf anfangen: Die Bank liefert \u{00FC}ber Open Banking nur die letzten 90 Tage, alles davor lag in MoneyMoney und blieb dort. Die Einrichtung bietet den Umstieg jetzt selbst an, wenn sie eine MoneyMoney-Datenbank findet \u{2014} **Konten, der ganze Umsatzverlauf und die erste Ebene deiner Kategorien**, und zwar nur f\u{00FC}r die Konten, die \u{00FC}ber Open Banking \u{00FC}berhaupt erreichbar sind; Depots und Offline-Konten sagt sie ausdr\u{00FC}cklich ab, mit Grund. Deine eigenen Kategorien werden angelegt, nicht auf unsere vierzehn gebogen, und die Kontonamen aus MoneyMoney werden die Kurznamen. Dein MoneyMoney-Kennwort braucht sie zum Entschl\u{00FC}sseln und **speichert es nicht**; gelesen wird nur, nie zur\u{00FC}ckgeschrieben. Importiert wird allein, was \u{00E4}lter ist als der Zeitraum der Bank \u{2014} nichts liegt doppelt.",
+                "Switching from MoneyMoney used to mean starting with an empty history: over Open Banking your bank only hands out the last 90 days, and everything before that stayed in MoneyMoney. Setup now offers the switch itself when it finds a MoneyMoney database \u{2014} **accounts, your whole transaction history and the first level of your categories** \u{2014} and only for the accounts that Open Banking can actually reach; portfolios and offline accounts are declined explicitly, with a reason. Your own categories are created rather than squeezed into our fourteen, and your MoneyMoney account names become the nicknames. Your MoneyMoney password is needed to decrypt and is **never stored**; the database is only read, never written back. Only what predates your bank's window is imported \u{2014} nothing lands twice."
+            )
+        ),
+        WhatsNewItem(
+            icon: "arrow.down.circle",
+            tint: .sbBlueStrong,
+            title: L10n.t("Die App sagt selbst, wenn eine neue Fassung da ist",
+                          "The app now tells you when a new version is out"),
+            description: L10n.t(
+                "Bisher prüfte simplebanking nur auf Zuruf \u{2014} Men\u{00FC} \u{2192} \u{201E}Nach Updates suchen\u{2026}\u{201C}. Wer nie nachsah, erfuhr nie von einer Aktualisierung. Liegt jetzt eine neue Fassung bereit, steht rechts neben dem Saldo ein \u{21BB}, und im Flyout erscheint \u{00FC}ber der Karte ein Band mit der Fassungsnummer. **Kein Fenster springt auf**, nichts wird im Hintergrund installiert \u{2014} der Hinweis wartet, bis du hinsiehst. Hat das Konto etwas zu melden, hat das Vorrang: Geld geht vor Software.",
+                "Until now simplebanking only checked when asked \u{2014} Menu \u{2192} \u{201C}Check for Updates\u{2026}\u{201D}. Anyone who never looked never heard about an update. When a new version is ready you now get a \u{21BB} next to your balance and a band above the card in the flyout naming the version. **No window pops up**, nothing installs in the background \u{2014} the hint waits until you look. If your account has news, that comes first: money before software."
+            )
+        ),
+        WhatsNewItem(
+            icon: "accessibility",
+            tint: .sbBlueStrong,
+            title: L10n.t("Mit VoiceOver bedienbar",
+                          "Usable with VoiceOver"),
+            description: L10n.t(
+                "Das Men\u{00FC}leisten-Symbol war mit VoiceOver erreichbar, aber nicht bedienbar \u{2014} VO+Leertaste bewirkte nichts, es ging weder Men\u{00FC} noch Fenster auf. *Gemeldet von einem blinden Nutzer, der macOS nur \u{00FC}ber Tastatur und VoiceOver bedient.* Jetzt \u{00F6}ffnet ein Druck ohne Maus das Men\u{00FC}leisten-Men\u{00FC}, und das erreicht neu auch Kontostand, Ums\u{00E4}tze und das Ein- und Ausblenden des Saldos \u{2014} letzteres ging bisher **nur** mit der Maus. Das Symbol sagt \u{201E}simplebanking, Kontostand \u{2026}\u{201C} statt einer nackten Zahl, ein ausgeblendeter Saldo wird **nie** vorgelesen, und rund 50 Symbolkn\u{00F6}pfe, die Kontokacheln und die Wischaktionen in der Umsatzliste tragen jetzt Namen, Zustand und Tastaturweg.",
+                "The menu bar item was reachable with VoiceOver but not operable \u{2014} VO+Space did nothing, no menu and no window opened. *Reported by a blind user who drives macOS entirely by keyboard and VoiceOver.* A press without a mouse now opens the menu bar menu, and that menu newly reaches your balance, your transactions and hiding or showing the balance \u{2014} the last of which previously needed the **mouse**. The item announces \u{201C}simplebanking, balance \u{2026}\u{201D} instead of a bare number, a hidden balance is **never** spoken, and some 50 icon buttons, the account tiles and the swipe actions in the transaction list now carry names, state and a keyboard route."
+            )
+        ),
+        WhatsNewItem(
+            icon: "calendar.badge.clock",
+            tint: .sbBlueStrong,
+            title: L10n.t("Dauerauftr\u{00E4}ge kommen von der Bank",
+                          "Standing orders now come from your bank"),
+            description: L10n.t(
+                "\u{201E}Abos & Vertr\u{00E4}ge\u{201C} erkannte Wiederkehr allein an der Vergangenheit und brauchte daf\u{00FC}r mindestens zwei Buchungen \u{2014} ein Dauerauftrag, der erst n\u{00E4}chsten Monat das erste Mal l\u{00E4}uft, war unsichtbar, und bei den \u{00FC}brigen war der Betrag ein Mittelwert. Der Knopf \u{201E}Dauerauftr\u{00E4}ge\u{201C} fragt sie jetzt direkt beim Institut ab, mit vereinbartem Betrag, Takt und **n\u{00E4}chstem** Termin. Der Abruf l\u{00E4}uft nur auf Klick, weil er je nach Bank eine Freigabe kosten kann.",
+                "\u{201C}Subscriptions & contracts\u{201D} spotted recurrence only from the past and needed at least two bookings for it \u{2014} a standing order first due next month was invisible, and for the rest the amount was an average. The \u{201C}Standing orders\u{201D} button now asks your bank directly, with the agreed amount, interval and **next** date. It runs on click only, because depending on the bank it can cost an approval."
+            )
+        ),
+        WhatsNewItem(
+            icon: "rectangle.and.hand.point.up.left",
+            tint: .sbGreenStrong,
+            title: L10n.t("Mehr als sieben Konten sind wieder erreichbar",
+                          "More than seven accounts are reachable again"),
+            description: L10n.t(
+                "Ab acht Konten passte die Reihe der Kontosymbole nicht mehr ins Flyout \u{2014} und sie wurde an **beiden** Enden abgeschnitten, unter Umst\u{00E4}nden samt dem gerade aktiven Konto. *Gemeldet von einem Nutzer mit zehn Konten.* Die Reihe l\u{00E4}sst sich jetzt quer scrollen, blendet ihre R\u{00E4}nder aus, wenn etwas \u{00FC}berl\u{00E4}uft, und holt das aktive Konto von selbst in den Blick. Weil nicht jede Maus quer scrollen kann, gibt es den Kontowechsel zus\u{00E4}tzlich im Men\u{00FC} der Men\u{00FC}leiste unter \u{201E}Konto\u{201C} \u{2014} mit Haken am aktiven und \u{201E}Alle Konten\u{201C}.",
+                "From eight accounts on, the row of account symbols no longer fitted the flyout \u{2014} and it was cut off at **both** ends, sometimes including the account you were looking at. *Reported by a user with ten accounts.* The row now scrolls sideways, fades its edges when something overflows, and brings the active account into view by itself. Because not every mouse can scroll sideways, switching accounts is also in the menu bar menu under \u{201C}Account\u{201D} \u{2014} with a checkmark on the active one and \u{201C}All accounts\u{201D}."
+            )
+        ),
+        WhatsNewItem(
+            icon: "lock.rotation",
+            tint: .sbGreenStrong,
+            title: L10n.t("Eine abgebrochene Freigabe l\u{00E4}sst sich neu ansto\u{00DF}en",
+                          "An interrupted approval can be restarted"),
+            description: L10n.t(
+                "Wer das Freigabe-Fenster seiner Bank versehentlich schloss, kam bis zum Programmneustart nicht mehr an sein Konto: \u{201E}Aktualisieren\u{201C}, das \u{21BB} und das Herunterziehen der Liste taten nichts, \u{00FC}ber der Umsatzliste stand nur \u{201E}Die Bank wartet noch auf deine Freigabe\u{201C}. Jetzt gibt es **\u{201E}Freigabe neu ansto\u{00DF}en\u{201C}** \u{2014} \u{00FC}ber der Umsatzliste und im Men\u{00FC} der Men\u{00FC}leiste, dort auch bei geschlossener Liste. Ein Klick beendet das Warten und \u{00F6}ffnet eine neue Freigabe; deine Bankverbindung bleibt bestehen, es kostet keinen QR-Scan. Wer das Fenster schlie\u{00DF}t und in der Banking-App best\u{00E4}tigt, bekommt seine Daten wie bisher von selbst.",
+                "If you accidentally closed your bank's approval window, your account was unreachable until you quit the app: \u{201C}Refresh\u{201D}, the \u{21BB} and pull-to-refresh did nothing, and the transaction list only said the bank was still waiting for your approval. Now there is **\u{201C}Restart approval\u{201D}** \u{2014} above the transaction list and in the menu bar menu, the latter even when the list is closed. One click ends the wait and opens a fresh approval; your bank connection stays, and it costs no QR scan. Close the window and confirm in your banking app instead, and your data still arrives on its own."
+            )
+        ),
+        WhatsNewItem(
+            icon: "wrench.and.screwdriver",
+            tint: .sbGreenStrong,
+            title: L10n.t("\u{201E}Failed to resume installing update\u{201C} r\u{00E4}umt sich selbst weg",
+                          "\u{201C}Failed to resume installing update\u{201D} now clears itself"),
+            description: L10n.t(
+                "Bleibt von einer fr\u{00FC}heren Aktualisierung ein Fortschritts-Agent zur\u{00FC}ck, meldet er \u{201E}es l\u{00E4}uft bereits eine Installation\u{201C}, kann aber keine Daten dazu liefern \u{2014} und jeder weitere Versuch endet an derselben Stelle. *Gemeldet von einem Nutzer mit 2.0.7; an Signatur und Appcast lag es nachweislich nicht.* Die App erkennt diesen einen Abbruch jetzt selbst, r\u{00E4}umt den Rest weg und pr\u{00FC}ft einmal neu. Andere Abbr\u{00FC}che bleiben unangetastet \u{2014} eine abgelehnte Signatur heilt kein Aufr\u{00E4}umen.",
+                "If a progress agent from an earlier update stays behind, it reports \u{201C}an installation is already running\u{201D} but can no longer supply any data for it \u{2014} and every further attempt ends in the same place. *Reported by a user on 2.0.7; it demonstrably was not the signature or the appcast.* The app now recognises this one failure, clears the leftovers and checks once more. Other failures are left alone \u{2014} no amount of cleanup fixes a rejected signature."
+            )
+        ),
+        WhatsNewItem(
+            icon: "tag",
+            tint: .sbBlueStrong,
+            title: L10n.t("Eigene Kategorien",
+                          "Your own categories"),
+            description: L10n.t(
+                "Die 14 Kategorien waren fest \u{2014} nicht umbenennbar, nichts hinzuzuf\u{00FC}gen. *Gemeldet von einem Tester, der von MoneyMoney kommt und dort einen eigenen Kategoriebaum pflegt.* Unter Einstellungen \u{2192} Finanzen \u{2192} **Kategorien** legst Du jetzt eigene an, mit Namen und Symbol, und benennst die eingebauten um. Sie stehen \u{00FC}berall, wo die eingebauten stehen: im Auswahlmen\u{00FC} einer Buchung, in den Regeln, in der Suche, im Monatsbericht, bei `sb` \u{2014} und die KI-Zuordnung kennt sie auch. Bestehende Zuordnungen bleiben erhalten, Umbenennen eingeschlossen.",
+                "The 14 categories were fixed \u{2014} no renaming, nothing to add. *Reported by a tester coming from MoneyMoney, where he keeps his own category tree.* Settings \u{2192} Finance \u{2192} **Categories** now lets you add your own, with a name and a symbol, and rename the built-in ones. They appear everywhere the built-in ones do: in a transaction's menu, in your rules, in search, in the monthly report, in `sb` \u{2014} and the AI assignment knows them too. Existing assignments are preserved, renaming included."
+            )
+        ),
+        WhatsNewItem(
+            icon: "capsule.fill",
+            tint: .sbBlueStrong,
+            title: L10n.t("Die Kategorie steht jetzt in der Zeile \u{2014} farbig",
+                          "Your category now sits in the row \u{2014} in colour"),
+            description: L10n.t(
+                "Jede Buchung wird kategorisiert, nur bekam das kaum jemand zu sehen: Die Anzeige war ab Werk **aus**, und eingeschaltet stand sie als graues Etikett unter dem H\u{00E4}ndlernamen. Jetzt ist sie an, und im breiten Fenster steht die Kategorie farbig get\u{00F6}nt direkt neben dem H\u{00E4}ndler \u{2014} zu erkennen, ohne sie zu lesen. Gek\u{00FC}rzt wird der Verwendungszweck, nie die Kapsel; im schmalen Flyout bleibt sie unter dem Namen. Die Palette kennt **kein Gr\u{00FC}n, kein Orange und kein Rot**: Die drei geh\u{00F6}ren deinem Saldo und den Betr\u{00E4}gen, und eine Kapsel in Saldo-Farbe l\u{00E4}se sich als Warnung. Unter Einstellungen \u{2192} Finanzen \u{2192} Kategorien w\u{00E4}hlst du die Farbe je Kategorie selbst, auch f\u{00FC}r die eingebauten. Das Tag-Symbol \u{00FC}ber der Liste schaltet das Ganze wie bisher ab.",
+                "Every transaction gets a category, but hardly anyone ever saw one: the display was **off** by default, and switched on it sat below the merchant as a grey label. It is on now, and in the wide window your category sits right next to the merchant in colour \u{2014} recognisable without reading it. The remittance text is what gets truncated, never the capsule; in the narrow flyout it stays below the name. The palette has **no green, no orange and no red**: those three belong to your balance and your amounts, and a capsule in a balance colour would read as a warning. Settings \u{2192} Finance \u{2192} Categories lets you pick the colour per category, the built-in ones included. The tag icon above the list still switches it all off."
+            )
+        ),
+        WhatsNewItem(
+            icon: "sidebar.squares.right",
+            tint: .sbGreenStrong,
+            title: L10n.t("Die Details einer Buchung blieben nicht offen",
+                          "A transaction's details would not stay open"),
+            description: L10n.t(
+                "Ein Klick auf eine Buchung \u{00F6}ffnete die Details \u{2014} und schloss sie im selben Moment wieder. *Gemeldet am 11.11.2026.* Dahinter steckte mehr als ein zuckendes Fenster: Schon das \u{00D6}ffnen schrieb die angezeigte Kategorie als **von Hand gesetzt** in die Datenbank, und die neu aufgebaute Liste riss das Fenster mit. Eine so gesetzte Kategorie ist von einer wirklich gew\u{00E4}hlten nicht mehr zu unterscheiden und folgt keiner Regel mehr. Jetzt wird nur geschrieben, was Du selbst \u{00E4}nderst. Und weil im selben Atemzug gefragt wurde, wo man eigene Kategorien anlegt: Neben \u{201E}Kategorie\u{201C} steht jetzt ein **+**, das genau dorthin f\u{00FC}hrt.",
+                "Clicking a transaction opened its details \u{2014} and closed them again in the same instant. *Reported on 11 November 2026.* There was more to it than a flickering window: merely opening it wrote the displayed category into the database as **manually set**, and rebuilding the list tore the window down with it. A category set that way is indistinguishable from one you really chose and no longer follows any rule. Now only what you change yourself is written. And since the same report asked where custom categories are created: next to \u{201C}Category\u{201D} there is now a **+** that leads exactly there."
+            )
+        ),
+        WhatsNewItem(
+            icon: "lock.square",
+            tint: .sbGreenStrong,
+            title: L10n.t("Das TAN-Verfahren l\u{00E4}sst sich festlegen",
+                          "You can now pin your TAN method"),
+            description: L10n.t(
+                "Fragt die Bank, welches Verfahren sie nehmen soll, hat die App diese R\u{00FC}ckfrage immer selbst beantwortet \u{2014} App-Freigabe zuerst, sonst der erste Eintrag. Wer pushTAN registriert hat, aber am Schreibtisch sitzt und chipTAN benutzen will, bekam trotzdem pushTAN, jedes Mal. Unter Einstellungen \u{2192} Konten steht jetzt **TAN-Verfahren**, mit dem, was Deine Bank zuletzt angeboten hat. \u{201E}Automatisch\u{201C} bleibt die Vorgabe \u{2014} wer nichts einstellt, merkt keinen Unterschied. Die Verfahren erscheinen erst, nachdem die Bank einmal danach gefragt hat; vorher kennt die App sie nicht.",
+                "When your bank asks which method to use, the app always answered for you \u{2014} app approval first, otherwise the first entry on the list. Anyone with pushTAN registered who was sitting at their desk and wanted chipTAN got pushTAN anyway, every time. Settings \u{2192} Accounts now has **TAN method**, listing what your bank last offered. \u{201C}Automatic\u{201D} stays the default \u{2014} change nothing and nothing changes. The methods only appear once your bank has asked for one; before that the app does not know them."
+            )
+        )
+    ]
 
     /// 2.0.9. Zehn Punkte, weil 2.0.8 hier mit eingefaltet ist und die Runde lang wurde.
     /// Die Auswahlregel bleibt dieselbe: nur, was jemand auch merkt — eine Überweisung, die

@@ -1,31 +1,88 @@
 import Foundation
 
-enum TransactionCategory: String, CaseIterable, Codable {
-    // Existing
-    case einkommen    = "Einkommen"
-    case essenAlltag  = "Essen & Alltag"
-    case abosDigital  = "Abos & Digital"
-    case shopping     = "Shopping"
-    case versicherungen = "Versicherungen"
-    case mobilitaet   = "Mobilitaet"
-    case wohnenKredit = "Wohnen & Kredit"
-    case sonstiges    = "Sonstiges"
-    // AI categories
-    case gastronomie  = "Gastronomie"
-    case sparen       = "Sparen"
-    case freizeit     = "Freizeit"
-    case gehalt       = "Gehalt"
-    case gesundheit   = "Gesundheit"
-    case umbuchung    = "Umbuchungen"
+/// Eine Kategorie: eine der 14 eingebauten oder eine selbst angelegte.
+///
+/// War bis 2.1.0 ein `enum` — und damit vom Nutzer nicht erweiterbar. Jetzt eine
+/// Struktur, deren eingebaute Werte dieselben `rawValue`s tragen wie die alten Fälle.
+/// Das ist kein Umbau, sondern die Öffnung eines geschlossenen Typs: Die Kategorie ist
+/// an **jeder** Speicherstelle längst eine Zeichenkette (Datenbank-Spalte `kategorie`,
+/// Override in den UserDefaults, `setCategory` einer Regel), nur im Programm war sie
+/// geschlossen. Siehe `Eigenkategorien`.
+///
+/// Zwei Dinge, die beim Ändern hier zu beachten sind:
+/// - `switch` über `.einkommen` funktioniert weiter (Ausdrucksmuster über `Equatable`),
+///   braucht aber ein `default` — eine Struktur kennt keine Vollständigkeit. Genau das
+///   ist der Preis: Wer eine neue eingebaute Kategorie ergänzt, bekommt **keinen**
+///   Compilerfehler an den Stellen, die sie behandeln müssten. Die drei Stellen mit
+///   fester Zuordnung sind `icon`, `BTXMosaic.style(for:)` und `categoryEmoji`.
+/// - `Codable` ist von Hand geschrieben und kodiert **einen nackten String**, genau wie
+///   das `enum` vorher. Eine synthetisierte Fassung schriebe `{"rawValue": …}` — und
+///   damit wäre die Kategorie jeder gespeicherten Zuordnungsregel still verloren.
+struct TransactionCategory: Hashable, Codable, CaseIterable, Sendable {
+
+    /// Identität **und** Speicherform.
+    let rawValue: String
+
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    // MARK: - Die eingebauten
+
+    static let einkommen      = TransactionCategory(rawValue: "Einkommen")
+    static let essenAlltag    = TransactionCategory(rawValue: "Essen & Alltag")
+    static let abosDigital    = TransactionCategory(rawValue: "Abos & Digital")
+    static let shopping       = TransactionCategory(rawValue: "Shopping")
+    static let versicherungen = TransactionCategory(rawValue: "Versicherungen")
+    static let mobilitaet     = TransactionCategory(rawValue: "Mobilitaet")
+    static let wohnenKredit   = TransactionCategory(rawValue: "Wohnen & Kredit")
+    static let sonstiges      = TransactionCategory(rawValue: "Sonstiges")
+    // Kategorien, die die KI-Zuordnung mitbringt
+    static let gastronomie    = TransactionCategory(rawValue: "Gastronomie")
+    static let sparen         = TransactionCategory(rawValue: "Sparen")
+    static let freizeit       = TransactionCategory(rawValue: "Freizeit")
+    static let gehalt         = TransactionCategory(rawValue: "Gehalt")
+    static let gesundheit     = TransactionCategory(rawValue: "Gesundheit")
+    static let umbuchung      = TransactionCategory(rawValue: "Umbuchungen")
+
+    static let eingebaute: [TransactionCategory] = [
+        .einkommen, .essenAlltag, .abosDigital, .shopping, .versicherungen,
+        .mobilitaet, .wohnenKredit, .sonstiges, .gastronomie, .sparen,
+        .freizeit, .gehalt, .gesundheit, .umbuchung
+    ]
+
+    /// Eingebaute zuerst, dann die eigenen — das ist die Reihenfolge jedes Auswahlmenüs.
+    static var allCases: [TransactionCategory] {
+        eingebaute + Eigenkategorien.alle.map { TransactionCategory(rawValue: $0.name) }
+    }
+
+    var istEigene: Bool { !Self.eingebaute.contains(self) }
+
+    /// Gibt es diese Kategorie noch?
+    ///
+    /// Eine gelöschte eigene Kategorie kann in einer Zuordnungsregel oder in einem
+    /// Override stehen bleiben. Zugeordnet werden darf sie dann nicht mehr — sonst
+    /// zeigte die Umsatzliste eine Kategorie, die in keinem Auswahlmenü vorkommt.
+    var istBekannt: Bool {
+        !istEigene || Eigenkategorien.alle.contains { $0.name == rawValue }
+    }
+
+    /// Der Name ab Werk. Bleibt als Vergleichsform erhalten, auch wenn der Nutzer die
+    /// Kategorie umbenennt — sonst fände `from(displayName:)` eine schon gespeicherte
+    /// „Mobilität" nicht mehr.
+    var werkseitigerName: String {
+        self == .mobilitaet ? "Mobilität" : rawValue
+    }
 
     var displayName: String {
-        switch self {
-        case .mobilitaet: return "Mobilität"
-        default:          return rawValue
-        }
+        if istEigene { return rawValue }
+        return Eigenkategorien.umbenennungen[rawValue] ?? werkseitigerName
+    }
+
+    var istUmbenannt: Bool {
+        !istEigene && Eigenkategorien.umbenennungen[rawValue] != nil
     }
 
     var icon: String {
+        if istEigene { return Eigenkategorien.symbol(fuer: rawValue) ?? "tag" }
         switch self {
         case .einkommen:     return "briefcase"
         case .essenAlltag:   return "fork.knife"
@@ -41,8 +98,22 @@ enum TransactionCategory: String, CaseIterable, Codable {
         case .gehalt:        return "eurosign.circle"
         case .gesundheit:    return "cross.case"
         case .umbuchung:     return "arrow.triangle.2.circlepath"
+        default:             return "tag"
         }
     }
+
+    // MARK: - Speicherform
+
+    init(from decoder: Decoder) throws {
+        rawValue = try decoder.singleValueContainer().decode(String.self)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var behaelter = encoder.singleValueContainer()
+        try behaelter.encode(rawValue)
+    }
+
+    // MARK: - Aus Text
 
     static func from(jsonKey: String) -> TransactionCategory? {
         switch jsonKey {
@@ -64,30 +135,50 @@ enum TransactionCategory: String, CaseIterable, Codable {
         case "transport":      return .mobilitaet
         case "versicherung":   return .versicherungen
         case "sonstiges":      return .sonstiges
-        default:               return nil
+        // Eine eigene Kategorie trägt keinen technischen Schlüssel — die KI bekommt
+        // ihren Namen und schickt ihn zurück.
+        default:               return from(displayName: jsonKey)
         }
     }
 
+    /// Findet die Kategorie zu einer gespeicherten Bezeichnung.
+    ///
+    /// Geprüft werden `rawValue`, werkseitiger Name **und** der aktuelle Anzeigename:
+    /// In der Datenbank können Bezeichnungen aus allen drei Zuständen liegen, weil sie
+    /// beim Schreiben jeweils aktuell war.
     static func from(displayName: String) -> TransactionCategory? {
-        let normalized = normalize(displayName)
-        for category in TransactionCategory.allCases {
-            if normalize(category.rawValue) == normalized || normalize(category.displayName) == normalized {
-                return category
+        let ziel = Kategorienamen.normalisiert(displayName)
+        guard !ziel.isEmpty else { return nil }
+        for kategorie in allCases {
+            if Kategorienamen.normalisiert(kategorie.rawValue) == ziel
+                || Kategorienamen.normalisiert(kategorie.werkseitigerName) == ziel
+                || Kategorienamen.normalisiert(kategorie.displayName) == ziel {
+                return kategorie
             }
         }
         return nil
     }
-
-    private static func normalize(_ text: String) -> String {
-        text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "de_DE"))
-            .lowercased()
-    }
 }
+
 
 enum TransactionCategorizer {
     static let overridesStorageKey = "transactionCategoryOverrides"
+
+    /// Im Testlauf eine Wegwerf-Domain statt der echten — dasselbe Muster wie bei
+    /// `Eigenkategorien.defaults` und `MultibankingStore.defaults`. Bis hierher lief
+    /// jeder Test, der einen Override schreibt, in die echten Zuordnungen des
+    /// Nutzers; gemerkt hätte man es erst an einer Buchung, die plötzlich in der
+    /// falschen Kategorie steht.
+    /// `nonisolated(unsafe)`, weil dieser Laden aus jedem Faden gelesen wird und
+    /// `UserDefaults` selbst fadensicher ist — nur der Compiler weiß das nicht.
+    nonisolated(unsafe) static let defaults: UserDefaults = {
+        let name = "simplebanking.tests.zuordnungen"
+        if NSClassFromString("XCTestCase") != nil, let sandkasten = UserDefaults(suiteName: name) {
+            sandkasten.removePersistentDomain(forName: name)
+            return sandkasten
+        }
+        return .standard
+    }()
 
     private struct CategoriesFile: Decodable {
         let categories: [String: CategoryEntry]
@@ -275,6 +366,29 @@ enum TransactionCategorizer {
         persistOverrides(overrides)
     }
 
+    /// Viele Overrides mit **einem** Lese- und einem Schreibvorgang.
+    ///
+    /// `saveOverride` liest und schreibt je Aufruf das ganze Wörterbuch; bei einem
+    /// Umsteiger mit 50.000 Buchungen ist das quadratisch und dauert Minuten, in
+    /// denen der Einrichtungsassistent steht. Gleiche Aufräumregel wie dort: der
+    /// alte Nur-txID-Schlüssel fliegt mit raus, sonst driften alte und neue
+    /// Speicherform auseinander.
+    static func saveOverrides(_ zuordnungen: [(txID: String, slotId: String,
+                                               category: TransactionCategory)]) {
+        guard !zuordnungen.isEmpty else { return }
+        var overrides = transactionOverrides()
+        var geaendert = false
+        for (txID, slotId, category) in zuordnungen {
+            let key = compositeOverrideKey(slotId: slotId, txID: txID)
+            guard !key.isEmpty else { continue }
+            overrides[key] = category.rawValue
+            let legacy = legacyOverrideKey(txID: txID)
+            if !legacy.isEmpty { overrides.removeValue(forKey: legacy) }
+            geaendert = true
+        }
+        if geaendert { persistOverrides(overrides) }
+    }
+
     @discardableResult
     static func removeOverride(txID: String,
                                slotId: String = TransactionsDatabase.activeSlotId) -> Bool {
@@ -310,6 +424,23 @@ enum TransactionCategorizer {
             return TransactionCategory.from(displayName: rawValue)
         }
         return nil
+    }
+
+    /// Zieht alle Overrides von einem Kategorienamen auf einen anderen um — Gegenstück
+    /// zu `TransactionsDatabase.kategorieUmbenennen`. Der Override ist die stärkste
+    /// Zuordnung (er schlägt Regeln und gespeicherte Bezeichnung); ihn beim Umbenennen
+    /// liegen zu lassen hieße, genau die Zuordnungen zu verlieren, die der Nutzer von
+    /// Hand getroffen hat.
+    static func overridesUmbenennen(von alt: String, nach neu: String) {
+        let ziel = Kategorienamen.normalisiert(alt)
+        guard !ziel.isEmpty, alt != neu else { return }
+        var overrides = transactionOverrides()
+        var geaendert = false
+        for (schluessel, wert) in overrides where Kategorienamen.normalisiert(wert) == ziel {
+            overrides[schluessel] = neu
+            geaendert = true
+        }
+        if geaendert { persistOverrides(overrides) }
     }
 
     private static func compositeOverrideKey(slotId: String, txID: String) -> String {
@@ -443,14 +574,14 @@ enum TransactionCategorizer {
     }
 
     private static func persistOverrides(_ overrides: [String: String]) {
-        let defaults = UserDefaults.standard
+        let defaults = Self.defaults
         if let data = try? JSONEncoder().encode(overrides) {
             defaults.set(data, forKey: overridesStorageKey)
         }
     }
 
     private static func transactionOverrides() -> [String: String] {
-        let defaults = UserDefaults.standard
+        let defaults = Self.defaults
         guard let data = defaults.data(forKey: overridesStorageKey),
               let decoded = try? JSONDecoder().decode([String: String].self, from: data)
         else {

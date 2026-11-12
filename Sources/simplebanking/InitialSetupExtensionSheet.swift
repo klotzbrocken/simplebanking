@@ -17,6 +17,22 @@ import SwiftUI
 @MainActor
 final class InitialSetupExtensionPanel: NSObject, NSWindowDelegate {
 
+    /// Maßgebend für **alle** Fenster der Einrichtung — `SetupFlowPanel` holt sie
+    /// sich hier. Zwei Fenster derselben Einrichtung, die beim Übergang springen,
+    /// sehen aus wie zwei Programme.
+    static let fensterBreite: CGFloat = 480
+    static let fensterHoehe: CGFloat = 560
+
+    /// Ob dieser Assistent nach der Bankeinrichtung noch kommt.
+    ///
+    /// `SetupFlowPanel` beschriftet seinen letzten Knopf danach: „Los geht's!" ist
+    /// gelogen, wenn danach noch sechs Schritte folgen.
+    static var folgtNoch: Bool {
+        !UserDefaults.standard.bool(forKey: erledigtSchluessel)
+    }
+
+    static let erledigtSchluessel = "simplebanking.initialWizardCompleted"
+
     private let panel: NSPanel
     private let slotId: String
     private let requestMasterPassword: () -> String?
@@ -25,7 +41,8 @@ final class InitialSetupExtensionPanel: NSObject, NSWindowDelegate {
         self.slotId = slotId
         self.requestMasterPassword = requestMasterPassword
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: Self.fensterBreite,
+                                height: Self.fensterHoehe),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -33,8 +50,8 @@ final class InitialSetupExtensionPanel: NSObject, NSWindowDelegate {
         panel.title = "simplebanking — Einrichtung abschließen"
         panel.isFloatingPanel = true
         panel.level = .floating
-        panel.minSize = NSSize(width: 480, height: 560)
-        panel.maxSize = NSSize(width: 480, height: 560)
+        panel.minSize = NSSize(width: Self.fensterBreite, height: Self.fensterHoehe)
+        panel.maxSize = NSSize(width: Self.fensterBreite, height: Self.fensterHoehe)
         super.init()
         panel.delegate = self
     }
@@ -126,7 +143,8 @@ struct InitialSetupExtensionSheet: View {
             Divider().opacity(0.5)
             footer
         }
-        .frame(width: 480, height: 560)
+        .frame(width: InitialSetupExtensionPanel.fensterBreite,
+               height: InitialSetupExtensionPanel.fensterHoehe)
         .background(Color.panelBackground)
         .onAppear { initializeFromExistingState() }
     }
@@ -187,33 +205,54 @@ struct InitialSetupExtensionSheet: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Button(L10n.t("Zurück", "Back")) {
+            assistentenKnopf(L10n.t("Zurück", "Back"), gefuellt: false) {
                 if currentStep > 0 { currentStep -= 1 }
             }
             .disabled(currentStep == 0)
+            .opacity(currentStep == 0 ? 0.4 : 1)
 
-            Spacer()
+            assistentenKnopf(L10n.t("Überspringen", "Skip"), gefuellt: false) { advance() }
 
-            Button(L10n.t("Überspringen", "Skip")) {
-                advance()
-            }
-
-            Button(action: { commitAndAdvance() }) {
-                Text(primaryButtonLabel)
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .foregroundColor(.white)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8).fill(Color.sbBlueStrong)
-                    )
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.defaultAction)
+            assistentenKnopf(primaryButtonLabel, gefuellt: true) { commitAndAdvance() }
+                .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 14)
         .background(Color.panelBackground)
+    }
+
+    /// Dieselbe Form wie im Einrichtungsassistenten davor.
+    ///
+    /// Dort sind es AppKit-Knöpfe (`primaryButton` / `outlineButton` in
+    /// `SetupFlowPanel`): Ecke 8, gefüllt in der Systemakzentfarbe, daneben ein
+    /// grauer. Hier standen eine macOS-Standardtaste („Überspringen") und ein
+    /// handgemalter in `sbBlueStrong` nebeneinander — zwei Formen und zwei Blautöne
+    /// in einem Fenster, und beide anders als im Fenster davor. *Gemeldet am
+    /// 11.11.2026 als Medienbruch zwischen den beiden Assistenten.*
+    ///
+    /// Systemakzent und nicht `sbBlueStrong`: Der vordere Assistent überlässt seinen
+    /// Hauptknopf AppKit (`keyEquivalent = "\r"`), und AppKit malt ihn in der Farbe,
+    /// die der Nutzer im System eingestellt hat.
+    private func assistentenKnopf(_ titel: String, gefuellt: Bool,
+                                  aktion: @escaping () -> Void) -> some View {
+        Button(action: aktion) {
+            Text(titel)
+                .font(.system(size: 13, weight: gefuellt ? .semibold : .regular))
+                .lineLimit(1)
+                // Alle drei gleich breit und 44 hoch wie im Fenster davor
+                // (`primaryButton`/`outlineButton` in `SetupFlowPanel`). Vorher
+                // wuchsen sie mit ihrer Beschriftung, und „Für €15 freischalten"
+                // brach auf zwei Zeilen um. Gemeldet am 11.11.2026.
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .foregroundColor(gefuellt ? .white : .primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(gefuellt ? Color(nsColor: .controlAccentColor)
+                                       : Color(nsColor: .quaternaryLabelColor).opacity(0.5))
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Step 1: Gehaltstag
@@ -486,10 +525,9 @@ struct InitialSetupExtensionSheet: View {
     }
 
     private var primaryButtonLabel: String {
-        if currentStep == 5 {
-            return L10n.t("Für \(LicenseConfig.displayPrice) freischalten",
-                          "Unlock for \(LicenseConfig.displayPrice)")
-        }
+        // Ohne Preis: Der steht in der Aufzählung darüber, und in einen Knopf, der
+        // so breit ist wie „Überspringen", passt er nicht ohne Umbruch.
+        if currentStep == 5 { return L10n.t("Freischalten", "Unlock") }
         if currentStep == totalSteps - 1 {
             return L10n.t("Fertig", "Done")
         }
@@ -511,13 +549,21 @@ struct InitialSetupExtensionSheet: View {
                 upsellBullet(icon: "bolt.fill",
                              text: L10n.t("SEPA-Überweisung in 2 Klicks aus deinen Buchungen heraus.",
                                           "SEPA transfer in 2 clicks from your transactions."))
+                upsellBullet(icon: "doc.text.viewfinder",
+                             text: L10n.t("Rechnung aufs Flyout ziehen — Betrag, IBAN und Zweck liest simplebanking selbst aus, auf diesem Mac.",
+                                          "Drag an invoice onto the flyout — simplebanking reads amount, IBAN and reference itself, on this Mac."))
                 upsellBullet(icon: "lock.shield.fill",
                              text: L10n.t("TAN-Bestätigung wie gewohnt direkt bei deiner Bank.",
                                           "TAN confirmation directly with your bank."))
                 upsellBullet(icon: "checkmark.seal.fill",
-                             text: L10n.t("Einmalkauf für \(LicenseConfig.displayPrice). Updates innerhalb von 1.x kostenlos.",
-                                          "One-time purchase for \(LicenseConfig.displayPrice). Free updates within 1.x."))
+                             text: umstieg
+                                ? L10n.t("Einmalkauf \(LicenseConfig.displayPrice), für Dich \(LicenseConfig.umstiegDisplayPrice). Updates innerhalb von 1.x kostenlos.",
+                                         "One-time purchase \(LicenseConfig.displayPrice), \(LicenseConfig.umstiegDisplayPrice) for you. Free updates within 1.x.")
+                                : L10n.t("Einmalkauf für \(LicenseConfig.displayPrice). Updates innerhalb von 1.x kostenlos.",
+                                         "One-time purchase for \(LicenseConfig.displayPrice). Free updates within 1.x."))
             }
+
+            if umstieg { umstiegsrabatt }
 
             Text(L10n.t(
                 "Ein Klick auf Freischalten öffnet die sichere Checkout-Seite im Browser. Du kannst diesen Schritt jederzeit überspringen und später aus dem Menü kaufen.",
@@ -528,6 +574,48 @@ struct InitialSetupExtensionSheet: View {
                 .padding(.top, 4)
         }
     }
+
+    /// Nur für Umsteiger: Wer seinen MoneyMoney-Verlauf mitgebracht hat, bekommt
+    /// den Code für die Bestellseite.
+    ///
+    /// Nicht als `discount_code` an die Checkout-URL gehängt, obwohl Polar das
+    /// könnte: Ein Rabatt, der still im Hintergrund greift, wird nicht gesehen —
+    /// und gesehen werden soll er, denn er ist das Dankeschön für den Umstieg.
+    /// Der Code steht deshalb zum Abtippen da, mit dem Satz, wohin er gehört.
+    private var umstiegsrabatt: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "gift.fill")
+                .font(.system(size: 13))
+                .foregroundColor(.sbGreenStrong)
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(L10n.t("\(LicenseConfig.umstiegRabatt) Umsteigerrabatt",
+                            "\(LicenseConfig.umstiegRabatt) switcher discount"))
+                    .font(.system(size: 12.5, weight: .semibold))
+                Text(L10n.t("Auf der Bestellseite im Feld für den Rabattcode eingeben:",
+                            "Enter this in the discount code field on the order page:"))
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.sbTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // Zum Markieren: Abtippen ist die wahrscheinlichste Fehlerquelle an
+                // einem Code, der über Groß- und Kleinschreibung entscheidet.
+                Text(LicenseConfig.umstiegDiscountCode)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.5)))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8)
+            .fill(Color.sbGreenStrong.opacity(0.12)))
+    }
+
+    /// Kam dieser Mac von MoneyMoney?
+    private var umstieg: Bool { MoneyMoneyVorhaben.umstiegErfolgt }
 
     private func upsellBullet(icon: String, text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
@@ -582,7 +670,11 @@ struct InitialSetupExtensionSheet: View {
 
     private func commitTransferUpsell() {
         guard LicenseConfig.isConfigured else { return }
-        NSWorkspace.shared.open(LicenseConfig.purchaseURL)
+        // Umsteiger bekommen den Code angehängt — er greift dann von selbst, und im
+        // Fenster steht er trotzdem: zum Nachlesen und für den Kauf aus dem Menü,
+        // der über eine URL ohne Parameter geht.
+        NSWorkspace.shared.open(LicenseConfig.purchaseURL(
+            mitRabattcode: umstieg ? LicenseConfig.umstiegDiscountCode : nil))
     }
 
     // MARK: - Persistence

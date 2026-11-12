@@ -437,6 +437,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         updateMenuBarButton()
     }
 
+    /// Wartet irgendein Konto auf eine Freigabe? Daran hängt, ob der Menüeintrag
+    /// „Freigabe neu anstoßen" überhaupt zu sehen ist.
+    private var irgendeinWarten: Bool { !tanPendingSlots.isEmpty }
+
+    /// Beendet das Warten auf eine Freigabe und beginnt sofort eine neue.
+    ///
+    /// Gemeldet am 06.11.2026: Wer das Freigabe-Fenster versehentlich schließt, kam bis
+    /// zum Programmneustart nicht mehr an sein Konto — jede Nutzerhandlung prallte an
+    /// `hbciSlotsInFlight` ab, das der zehn Minuten lang wartende Aufruf hielt (siehe
+    /// `Freigabewache`).
+    ///
+    /// **Kein neuer Bankweg.** Der Weg, den „Aktualisieren" nimmt, öffnet aus einem freien
+    /// Zustand längst korrekt eine Freigabe-Seite; ihm fehlte nur der freie Zustand. Die
+    /// gespeicherte Zustimmung wird dabei nicht angefasst — `darfZustimmungVerwerfen`
+    /// liefert bei Umleitungsbanken immer `false`, ein neuer Anlauf ist einfach ein
+    /// weiterer Aufruf auf demselben Konto. Wer hier `clearAll` einbaut, kostet den Nutzer
+    /// sicher einen QR-Scan.
+    @objc func freigabeNeuAnstossen() {
+        let slot = aktuellerSlotId
+        AppLogger.log("Freigabe neu anstoßen (slot=\(slot.prefix(8)))", category: "YaxiService")
+        Task { [weak self] in
+            await Freigabewache.shared.abbrechen(slot)
+            guard let self else { return }
+            // Die Warteschleife merkt den Abbruch in ihrer nächsten Runde — also binnen
+            // fünf Sekunden. Erst wenn sie zurückkehrt, gibt ihr `defer` die Sperre frei.
+            // Zehn Sekunden Geduld: Dieselbe Obergrenze wie beim Öffnen der Umsatzliste.
+            var gewartet = 0
+            while self.bankAufrufLaeuft(slot), gewartet < 10_000 {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                gewartet += 200
+            }
+            if self.bankAufrufLaeuft(slot) {
+                // Nicht stillschweigend aufgeben: Genau das war der gemeldete Fehler.
+                AppLogger.log("Freigabe neu anstoßen: Aufruf hängt nach \(gewartet)ms noch (slot=\(slot.prefix(8)))",
+                              category: "YaxiService", level: "WARN")
+                self.txVM.error = self.t("Das Warten ließ sich nicht beenden. Bitte in einer Minute erneut versuchen.",
+                                         "The wait could not be ended. Please try again in a minute.")
+                return
+            }
+            self.scaBackoffUntil = nil
+            await self.refreshAsync(ausloeser: .nutzerhandlung)
+        }
+    }
+
     private var isHiddenBalance: Bool = false
     private var hideTimer: Timer?
     private var pendingLeftClick: DispatchWorkItem?
@@ -456,6 +500,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     // After a missed SCA redirect, pause auto-refresh to avoid burning through the bank's
     // daily SCA authorization limit (e.g. Sparkasse allows ~4 redirects per day).
     private var scaBackoffUntil: Date? = nil
+
+    /// Die bereitliegende neue Fassung, von `UpdateChecker` gemeldet (oder keine).
+    private var verfuegbareUpdateVersion: String?
+
+    /// Der Tooltip, den das Leistenzeichen zuletzt gesetzt hat — damit beim
+    /// Verschwinden nur dieser zurückgenommen wird und keine fremden.
+    private var gesetzterLeistenhinweis: String?
+
+    /// Das Zeichen, das gerade rechts außen in der Menüleiste steht (oder keins) —
+    /// Kontobewegung oder Update-Hinweis, nie beides. Siehe `Leistenzeichenwahl`.
+    private func aktuellesLeistenzeichen() -> Leistenzeichen? {
+        Leistenzeichenwahl.zeichen(bewegung: aktuellesBewegungszeichen(),
+                                   updateVersion: verfuegbareUpdateVersion)
+    }
 
     /// Das Zeichen, das gerade rechts außen in der Menüleiste steht (oder keins).
     private func aktuellesBewegungszeichen() -> Kontobewegungszeichen? {
@@ -490,8 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         UserDefaults.standard.set(betrag, forKey: schluessel)
         // Der allererste bekannte Saldo ist keine Bewegung — sonst begrüßte eine
         // frische Installation den Nutzer sofort mit einem Pfeil.
-        UserDefaults.standard.set(Date().timeIntervalSince1970,
-                                  forKey: "simplebanking.cachedBalanceAt.\(slotId)")
+        Saldoalter.merken(slotId: slotId)
         guard let richtung = Saldobewegung.richtung(vorher: vorher, jetzt: betrag) else { return }
         let jetzt = Date()
         bewegungBySlot[slotId] = Bewegungsstand(
@@ -838,7 +895,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         // TAN / 2FA pending
         if isTanPending {
-            setButtonTitle(button, "\(p)TAN")
+            setButtonTitle(button, "\(p)TAN",
+                           vorlesen: t("Freigabe erforderlich", "approval required"))
             setzeBreite(isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo))
             return
         }
@@ -855,11 +913,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if isShort {
                 // Short: logo + (optional) emoji, kein Mask-Text
                 setButtonTitle(button, logo != nil ? hiddenEmoji : "\(hiddenEmoji)€",
-                               zeichen: aktuellesBewegungszeichen())
+                               zeichen: aktuellesLeistenzeichen())
             } else {
                 // Long: logo + (optional) emoji + Mask
                 setButtonTitle(button, "\(p)\(hiddenEmoji)•.••• ",
-                               zeichen: aktuellesBewegungszeichen())
+                               zeichen: aktuellesLeistenzeichen())
             }
             setzeBreite(isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo))
             return
@@ -880,20 +938,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Auch ohne Saldotext gehört das Bewegungszeichen in die Leiste — genau
             // dieser Modus ist die Voreinstellung und blieb bisher stumm.
             setButtonTitle(button, logo != nil ? moodEmoji : "\(moodEmoji)€",
-                           zeichen: aktuellesBewegungszeichen())
+                           zeichen: aktuellesLeistenzeichen())
         } else if let unifiedTitle = computeUnifiedBalanceTitle() {
-            setButtonTitle(button, unifiedTitle, zeichen: aktuellesBewegungszeichen())
+            setButtonTitle(button, unifiedTitle, zeichen: aktuellesLeistenzeichen())
         } else {
             setButtonTitle(button, "\(p)\(moodEmoji)\(lastShownTitle)",
-                           zeichen: aktuellesBewegungszeichen())
+                           zeichen: aktuellesLeistenzeichen())
         }
-        if let zeichen = aktuellesBewegungszeichen() {
+        if let zeichen = aktuellesLeistenzeichen() {
             button.toolTip = zeichen.hinweis
-        } else if button.toolTip?.isEmpty == false,
-                  Kontobewegungszeichen.alleHinweise.contains(button.toolTip ?? "") {
+            gesetzterLeistenhinweis = zeichen.hinweis
+        } else if let eigener = gesetzterLeistenhinweis, button.toolTip == eigener {
             // Nur den eigenen Hinweis zurücknehmen, nie fremde Tooltips (Demo-Modus,
-            // Sperre, Einrichtung) überschreiben.
+            // Sperre, Einrichtung) überschreiben. Gemerkt statt aus einer festen
+            // Liste erkannt: Der Update-Hinweis trägt die Versionsnummer und lässt
+            // sich nicht aufzählen.
             button.toolTip = ""
+            gesetzterLeistenhinweis = nil
         }
         setzeBreite(isShort ? NSStatusItem.variableLength : menubarFixedWidth(logo: logo))
     }
@@ -937,7 +998,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let logoReserve = max(22, (logo?.size.width ?? 16) + 6)  // Bildbreite + Gap
         // Das Bewegungszeichen steht rechts außen und braucht eigenen Platz;
         // ohne diese Reserve schneidet macOS im Saldo-Modus den letzten Cent ab.
-        let zeichenReserve: CGFloat = aktuellesBewegungszeichen() != nil ? 11 : 0
+        let zeichenReserve: CGFloat = aktuellesLeistenzeichen() != nil ? 11 : 0
         return textWidth + emojiReserve + logoReserve + zeichenReserve
     }
 
@@ -964,20 +1025,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         statusItem.length = breite
     }
 
+    /// Setzt den sichtbaren Titel der Leiste **und** seinen Vorlesetext.
+    ///
+    /// Beides an einer Stelle, weil es bis 2.1.0 vierzehn Stellen gab, die den Titel
+    /// schrieben, und keine einzige, die eine Beschriftung setzte — VoiceOver las
+    /// darum „— €" oder eine nackte Zahl vor.
+    ///
+    /// - Parameter vorlesen: Nur nötig, wo der Titel seine Bedeutung nicht trägt.
+    ///   Sonst leitet `Vorlesetext.leiste` ihn aus dem Titel ab.
     private func setButtonTitle(_ button: NSStatusBarButton, _ text: String,
-                                zeichen: Kontobewegungszeichen? = nil) {
+                                zeichen: Leistenzeichen? = nil,
+                                vorlesen: String? = nil) {
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         ]
         let titel = NSMutableAttributedString(string: text, attributes: attrs)
         if let zeichen {
-            titel.append(NSAttributedString(string: " ", attributes: attrs))
-            titel.append(NSAttributedString(string: zeichen.glyph, attributes: [
+            var zeichenAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: Self.zeichenGroesse, weight: .semibold),
                 .baselineOffset: Self.zeichenVersatz,
-            ]))
+            ]
+            // Nur der Update-Hinweis bekommt Farbe, und zwar die Systemakzentfarbe:
+            // Sie passt sich Hell und Dunkel von selbst an, und Grün wie Orange sind
+            // in dieser App als Geld-Ampel belegt (`BalanceSignal`).
+            if zeichen.akzent { zeichenAttrs[.foregroundColor] = NSColor.controlAccentColor }
+            titel.append(NSAttributedString(string: " ", attributes: attrs))
+            titel.append(NSAttributedString(string: zeichen.glyph, attributes: zeichenAttrs))
         }
         button.attributedTitle = titel
+        button.setAccessibilityLabel(Vorlesetext.leiste(text, zusatz: vorlesen))
+    }
+
+    /// Klartext-Titel der Leiste samt Vorlesetext.
+    ///
+    /// Für die Stellen, die kein `attributedTitle` brauchen — „Verbinden…", „Lädt…",
+    /// „Gesperrt", „— €". Sie schrieben bisher direkt auf `button?.title`.
+    private func setzeLeistentitel(_ text: String, vorlesen: String? = nil) {
+        guard let btn = statusItem.button else { return }
+        btn.title = text
+        btn.setAccessibilityLabel(Vorlesetext.leiste(text, zusatz: vorlesen))
     }
 
     private func updateHiddenBalanceTooltip() {
@@ -1303,6 +1389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLogger.log("Application did finish launching")
+        Doppelinstallation.protokolliereInstallationsort()
         // Stabilen MCP-Symlink nach App-Move/Update auf das aktuelle Bundle nachziehen,
         // damit eine bereits geschriebene Claude-Config gültig bleibt (No-op, wenn nicht
         // installiert oder Ziel bereits korrekt).
@@ -1428,6 +1515,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         // Fold legacy recurring-correction keys into the unified RecurringAssignments store (once).
         RecurringAssignments.migrateLegacyIfNeeded()
+
+        // Ein MoneyMoney-Vorhaben, dessen Konto inzwischen existiert, wird jetzt
+        // nachgetragen — und was nachgetragen ist, räumt sich selbst weg. Beim Start
+        // und nicht nur nach der Einrichtung, damit ein Abbruch zwischen „Bank steht"
+        // und „Verlauf drin" nicht der letzte Stand bleibt.
+        Task { await MoneyMoneyNachtrag.alleFaelligen() }
         TransactionCategorizer.preload()
         Task.detached {
             do {
@@ -1492,6 +1585,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // (Settings → Verhalten) sofort wirkt, statt erst beim nächsten Refresh.
             self?.updateMenuBarButton()
         }
+        // Eigene Kategorien liegen in den Einstellungen unter „Finanzen" (Reiter 2).
+        // Gesucht wird sie aber dort, wo man kategorisiert — in der Detailansicht
+        // einer Buchung. Gemeldet am 11.11.2026: „Neue Kategorien können nicht
+        // angelegt werden (sehe nicht wo)." Sie konnten es, nur drei Klicks entfernt
+        // und ohne Hinweis.
+        NotificationCenter.default.addObserver(forName: .kategorienVerwalten, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                UserDefaults.standard.set(2, forKey: "settingsLastTab")
+                // Die Mitteilung allein reicht nicht: Ist das Fenster noch zu, gibt
+                // es niemanden, der sie hört — `showSettings()` baut die Ansicht erst
+                // danach auf, und dann ist sie vorbei. Genau so sah es aus: richtiger
+                // Reiter, kein Sprung. Die Marke überdauert das Aufbauen und wird in
+                // `onAppear` abgeholt, wie beim Sprung zu den Quick-Send-Vorlagen.
+                UserDefaults.standard.set(true, forKey: "settingsScrollToKategorien")
+                self?.showSettings()
+            }
+        }
         NotificationCenter.default.addObserver(forName: .changeBankCredentials, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.changeBankCredentials() }
         }
@@ -1502,6 +1612,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         NotificationCenter.default.addObserver(forName: .quitRequested, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.quit() }
+        }
+        NotificationCenter.default.addObserver(forName: .freigabeNeuAnstossen, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.freigabeNeuAnstossen() }
         }
         NotificationCenter.default.addObserver(forName: .creditLimitToggleChanged, object: nil, queue: .main) { [weak self] _ in
             // Automatischer UI-Refresh (kein User-Sync) → kein eBon-Login-Fenster.
@@ -1562,6 +1675,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         menu.addItem(refreshItem)
 
+        // ── Kontostand, Umsätze, Sichtbarkeit ─────────────────────────────
+        // Die drei Dinge, die bis 2.1.0 **nur** der Klick auf das Symbol erreichte:
+        // Flyout (Einfachklick), Umsatzliste (Doppelklick) und das Einblenden eines
+        // ausgeblendeten Saldos (Maus-Hover). Für einen Nutzer ohne Maus war das Menü
+        // damit vollständig, bloß nicht für das, worum es in dieser App geht.
+        //
+        // Ganz oben, damit VoiceOver sie zuerst liest. Keine `keyEquivalent`s: Das Menü
+        // hängt nicht in `NSApp.mainMenu`, sie würden nur bei offenem Menü wirken — und
+        // „⌃⌘S" neben „Kontostand anzeigen" wäre gelogen, sobald jemand den Hotkey
+        // umlegt.
+        let flyoutItem = NSMenuItem(title: t("Kontostand anzeigen", "Show balance"),
+                                    action: #selector(kontostandAnzeigen), keyEquivalent: "")
+        flyoutItem.tag = 310
+        flyoutItem.target = self
+        if let img = NSImage(systemSymbolName: "eurosign.circle", accessibilityDescription: nil) {
+            img.isTemplate = true; flyoutItem.image = img
+        }
+        menu.addItem(flyoutItem)
+
+        let umsaetzeItem = NSMenuItem(title: t("Umsätze…", "Transactions…"),
+                                      action: #selector(umsaetzeOeffnen), keyEquivalent: "")
+        umsaetzeItem.tag = 320
+        umsaetzeItem.target = self
+        if let img = NSImage(systemSymbolName: "list.bullet.rectangle", accessibilityDescription: nil) {
+            img.isTemplate = true; umsaetzeItem.image = img
+        }
+        menu.addItem(umsaetzeItem)
+
+        let sichtbarItem = NSMenuItem(title: t("Kontostand ausblenden", "Hide balance"),
+                                      action: #selector(saldoSichtbarkeitUmschalten), keyEquivalent: "")
+        sichtbarItem.tag = 330
+        sichtbarItem.target = self
+        if let img = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil) {
+            img.isTemplate = true; sichtbarItem.image = img
+        }
+        menu.addItem(sichtbarItem)
+
         // ── simplesend: Geld senden (Lizenz-Gate + FeatureFlag) ───────────
         // Im Demo-Mode immer sichtbar — auch ohne Tester-Build-Flag,
         // damit das Feature vollständig getestet werden kann.
@@ -1582,6 +1732,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             }
             menu.addItem(sendMoneyItem)
         }
+
+        // ── Freigabe neu anstoßen ─────────────────────────────────────────
+        // Nur sichtbar, solange ein Konto auf eine Freigabe wartet (`menuWillOpen`).
+        // Das Menü ist der Ort, der auch dann trägt, wenn die Umsatzliste zu ist — und
+        // genau die lässt sich während des Wartens nicht öffnen, sie zeigt stattdessen
+        // „Die Bank wartet noch auf deine Freigabe".
+        let freigabeItem = NSMenuItem(title: t("Freigabe neu anstoßen", "Restart approval"),
+                                      action: #selector(freigabeNeuAnstossen),
+                                      keyEquivalent: "")
+        freigabeItem.tag = 610
+        freigabeItem.target = self
+        freigabeItem.isHidden = true
+        if let img = NSImage(systemSymbolName: "lock.rotation", accessibilityDescription: nil) {
+            img.isTemplate = true; freigabeItem.image = img
+        }
+        menu.addItem(freigabeItem)
+
+        // ── Konto wechseln (submenu) ──────────────────────────────────────
+        // Der gestenfreie Weg zu den Konten: Im Flyout scrollt die Kachelreihe
+        // (siehe `Kachelreihe`), was eine Magic Mouse nicht quer kann. Inhalt
+        // entsteht bei jedem Öffnen neu in `menuWillOpen` — Namen und Anzahl
+        // ändern sich zur Laufzeit.
+        let kontoItem = NSMenuItem(title: t("Konto", "Account"), action: nil, keyEquivalent: "")
+        kontoItem.tag = 600
+        kontoItem.submenu = NSMenu()
+        if let img = NSImage(systemSymbolName: "creditcard", accessibilityDescription: nil) {
+            img.isTemplate = true; kontoItem.image = img
+        }
+        menu.addItem(kontoItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1930,6 +2109,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.sendMoney(draft: draft)
         }
 
+        // Daueraufträge: angefordert aus der Abo-Ansicht, die keine Zugangsdaten hat.
+        NotificationCenter.default.addObserver(
+            forName: .dauerauftraegeAnfordern,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dauerauftraegeAbrufen() }
+        }
+
         // Aktualisieren per App Intent (Kurzbefehle, Spotlight, Raycast).
         // Der Intent holt die App nach vorn — verlangt die Bank eine TAN oder eine
         // Freigabe im Browser, muss jemand davorsitzen.
@@ -1966,6 +2153,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
 
         updateChecker = UpdateChecker()
+        // Sparkle prüft nach eigenem Zeitplan und meldet still, was es gefunden hat.
+        // Die Leiste zieht sofort nach; das Flyout holt sich den Stand beim nächsten
+        // Öffnen aus `buildFlyoutHost` — ein Update, das genau im geöffneten Flyout
+        // eintrifft, ist den Aufwand einer lebenden Verbindung nicht wert.
+        updateChecker?.onVerfuegbareVersion = { [weak self] version in
+            guard let self else { return }
+            self.verfuegbareUpdateVersion = version
+            self.updateMenuBarButton()
+        }
 
         // Aufrunden: Banner-Button öffnet den Choice-Sheet (Picker mit
         // Heute/Gestern/Vorgestern/Monat + Abbrechen/Jetzt sparen).
@@ -2267,6 +2463,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 : theme.panelLightColor
         }
         panel.isFloatingPanel = true
+        // Ein `isFloatingPanel` nimmt den Tastaturfokus ab Werk nur, wenn ein
+        // Bedienelement ihn ausdrücklich verlangt — bis dahin landet keine Taste und kein
+        // VoiceOver-Fokus darin. Derselbe Einzeiler wie bei `KeyablePanel`
+        // (MasterPasswordPanel.swift), dessen Kommentar den Grund festhält: Ein
+        // `.accessory`-Programm lässt sich seit macOS 26 nicht mehr allein mit
+        // `NSApp.activate` nach vorn holen.
+        panel.becomesKeyOnlyIfNeeded = false
         panel.hidesOnDeactivate = false
         if #available(macOS 11.0, *) {
             panel.toolbarStyle = .unifiedCompact
@@ -2370,6 +2573,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 : theme.panelLightColor
         }
         panel.isFloatingPanel = true
+        // Ein `isFloatingPanel` nimmt den Tastaturfokus ab Werk nur, wenn ein
+        // Bedienelement ihn ausdrücklich verlangt — bis dahin landet keine Taste und kein
+        // VoiceOver-Fokus darin. Derselbe Einzeiler wie bei `KeyablePanel`
+        // (MasterPasswordPanel.swift), dessen Kommentar den Grund festhält: Ein
+        // `.accessory`-Programm lässt sich seit macOS 26 nicht mehr allein mit
+        // `NSApp.activate` nach vorn holen.
+        panel.becomesKeyOnlyIfNeeded = false
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.fullScreenNone, .managed]
 
@@ -2709,7 +2919,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             showLockIcon()
             promptUnlockIfNeeded()
         } else {
-            statusItem.button?.title = t("Verbinden…", "Connect…")
+            setzeLeistentitel(t("Verbinden…", "Connect…"))
             statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
             // User verlässt Demo ohne je ein echtes Konto eingerichtet zu haben
             // → den Setup-Wizard direkt anstoßen, damit Menü-Icon, Saldo und
@@ -2739,12 +2949,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private func activateMultiDemo() {
         backupSlotsForDemo()
 
-        // Pick 3 distinct random banks
+        // Vorgabe 3 Konten; mehr nur, wenn jemand sie ausdrücklich einstellt. Damit ist
+        // der Überlauf der Kachelreihe (ab 8 Konten, siehe `Kachelreihe`) ohne zehn echte
+        // Bankverbindungen von Hand prüfbar:
+        //   defaults write de.klotzbrocken.simplebanking demoSlotCount -int 10
+        let gewuenscht = UserDefaults.standard.object(forKey: "demoSlotCount") as? Int ?? 3
+        let anzahl = max(1, min(gewuenscht, BankLogoAssets.brands.count))
+
         var seed = UInt64(truncatingIfNeeded: demoSeed)
         let brands = BankLogoAssets.brands
         var usedIndices = Set<Int>()
         var picked: [BankLogoAssets.BankBrand] = []
-        while picked.count < 3 && picked.count < brands.count {
+        while picked.count < anzahl && picked.count < brands.count {
             let idx = Int(FakeData.nextDouble(&seed) * Double(brands.count))
             guard idx >= 0 && idx < brands.count else { continue }
             if usedIndices.insert(idx).inserted {
@@ -2941,6 +3157,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             attrTitle.append(NSAttributedString(string: "🔒"))
         }
         btn.attributedTitle = attrTitle
+        // Das Schloss ist ein Zeichen, kein Wort — ohne Beschriftung las VoiceOver hier
+        // nur den Präfix vor, also nichts.
+        btn.setAccessibilityLabel(Vorlesetext.leiste(prefix,
+                                                     zusatz: t("gesperrt", "locked")))
     }
     
     private func hideLockIcon() {
@@ -3034,6 +3254,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// die Zusage „Dock-Icon öffnet die Umsatzliste" auch dann stimmt, wenn
     /// gerade nur Settings o.ä. offen ist.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Ein `open -a` schickt an die laufende App dasselbe Ereignis wie ein
+        // Dock-Klick. Wer gerade einen Überweisungsentwurf übergeben hat, wollte
+        // simplesend und nicht zusätzlich die Umsatzliste — siehe
+        // `TransferDraftWatcher`.
+        if TransferDraftWatcher.reopenGehoertZuEntwurf() { return true }
         if txPanel?.isVisible != true {
             Task { [weak self] in await self?.openTransactionsPanel() }
         }
@@ -3060,6 +3285,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let isSetup = CredentialsStore.exists() || demoMode
         applyLocalizedMenuTitles()
         syncAutoHideMenuState()
+        baueKontomenue(in: menu)
+        if let freigabe = menu.item(withTag: 610) {
+            freigabe.title = t("Freigabe neu anstoßen", "Restart approval")
+            freigabe.isHidden = !irgendeinWarten
+        }
         
         // Update lock/unlock title
         if let item = menu.item(withTag: 999) {
@@ -3100,6 +3330,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
+    /// Füllt das Untermenü „Konto" neu. Bei einem einzigen Konto bleibt es verborgen —
+    /// ein Menü mit genau einem Eintrag, der schon den Haken trägt, ist keine Auswahl.
+    private func baueKontomenue(in menu: NSMenu) {
+        guard let kontoItem = menu.item(withTag: 600), let sub = kontoItem.submenu else { return }
+        let store = MultibankingStore.shared
+        kontoItem.title = t("Konto", "Account")
+        kontoItem.isHidden = store.slots.count <= 1
+
+        sub.removeAllItems()
+        let eintraege = Kontomenue.eintraege(slots: store.slots,
+                                             activeIndex: store.activeIndex,
+                                             unified: txVM.isUnifiedMode)
+        for (i, e) in eintraege.enumerated() {
+            let item = NSMenuItem(title: e.titel, action: #selector(kontoGewaehlt(_:)), keyEquivalent: "")
+            // `representedObject` statt Tag: Der Index kann über 100 Konten gehen und
+            // soll sich nicht mit den festen Tags im Hauptmenü überschneiden.
+            item.representedObject = e.index as NSNumber?
+            item.state = e.aktiv ? .on : .off
+            item.target = self
+            if e.istAlle, i > 0 { sub.addItem(NSMenuItem.separator()) }
+            sub.addItem(item)
+        }
+    }
+
+    @objc private func kontoGewaehlt(_ sender: NSMenuItem) {
+        guard let index = (sender.representedObject as? NSNumber)?.intValue else {
+            // „Alle Konten" — derselbe Weg wie die Aggregat-Kachel im Flyout.
+            txVM.unifiedModeEnabled = true
+            aktualisiereTanAnzeige()
+            refreshFlyoutIfVisible()
+            return
+        }
+        txVM.unifiedModeEnabled = false
+        Task { [weak self] in await self?.switchToSlot(index: index) }
+    }
+
     @objc private func setHideOff() { hideIndex = 0; restartHideTimer() }
     @objc private func setHideImmediate() { hideIndex = 1; restartHideTimer() }
     @objc private func setHide10() { hideIndex = 2; restartHideTimer() }
@@ -3117,6 +3383,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard let menu = statusMenu else { return }
 
         menu.item(withTag: 300)?.title = t("Aktualisieren", "Refresh")
+        menu.item(withTag: 310)?.title = t("Kontostand anzeigen", "Show balance")
+        menu.item(withTag: 320)?.title = t("Umsätze…", "Transactions…")
+        menu.item(withTag: 330)?.title = isHiddenBalance
+            ? t("Kontostand einblenden", "Show balance in menu bar")
+            : t("Kontostand ausblenden", "Hide balance")
 
         // Auto-hide submenu
         if let hideItem = menu.item(withTag: 401), let sub = hideItem.submenu {
@@ -3360,7 +3631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 offerBiometricEnrollmentIfNeeded(password: pw)
             }
 
-            statusItem.button?.title = t("Lädt…", "Loading…")
+            setzeLeistentitel(t("Lädt…", "Loading…"))
             // Aus dem lokalen Cache rechnen, bevor der Netz-Refresh anläuft.
             recomputeLeftToPay()
             Task {
@@ -3472,7 +3743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         failedAttempts = 0
         balancePopover?.performClose(nil)
         hideLockIcon()
-        statusItem.button?.title = t("Verbinden…", "Connect…")
+        setzeLeistentitel(t("Verbinden…", "Connect…"))
         statusItem.button?.toolTip = t("Rechtsklick → Einrichtungsassistent", "Right-click → Setup Wizard")
         
         // Asynchrone Aufräumarbeiten — die Erfolgsmeldung kommt ERST danach, sonst
@@ -3532,14 +3803,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
+    /// Klappt das Statusmenü am Symbol auf.
+    ///
+    /// Einziger Öffner, geteilt von Rechtsklick und Bedienungshilfen-Druck. Das Menü
+    /// hängt bewusst **nicht** an `statusItem.menu` (siehe Menüaufbau), also muss es von
+    /// Hand aufgeklappt werden.
+    private func zeigeStatusmenue() {
+        guard let btn = statusItem.button, let menu = statusMenu else { return }
+        menu.popUp(positioning: menu.items.first, at: NSPoint(x: 0, y: 0), in: btn)
+    }
+
+    /// Menüeintrag „Kontostand anzeigen".
+    ///
+    /// Ruft `showBalanceFlyout()` direkt und **nicht** `performBalancePrimaryAction()`:
+    /// Das kehrt bei `showBalanceInMenuBar == true` sofort zurück, der Eintrag hätte für
+    /// einen großen Teil der Nutzer also nichts getan — derselbe Fehler mit neuer Ursache.
+    @objc private func kontostandAnzeigen() {
+        showBalanceFlyout()
+    }
+
+    /// Menüeintrag „Umsätze…" — der Tastaturweg zu einer Liste, die sonst nur ein
+    /// Doppelklick öffnet.
+    @objc private func umsaetzeOeffnen() {
+        Task { await openTransactionsPanel() }
+    }
+
+    /// Menüeintrag „Kontostand einblenden/ausblenden".
+    ///
+    /// Das Einblenden eines verborgenen Saldos hing bis 2.1.0 ausschließlich am
+    /// Maus-Hover (`setWidgetHovered`) — ein Tastaturnutzer konnte ihn nie wieder sehen.
+    @objc private func saldoSichtbarkeitUmschalten() {
+        if isHiddenBalance {
+            unhideNow()
+        } else {
+            hideBalance()
+        }
+    }
+
     @objc private func statusItemClicked() {
+        // Ein Druck über die Bedienungshilfen — VoiceOver VO+Leertaste,
+        // Schaltersteuerung, AppleScript — ruft diese Action ohne Mausereignis auf. Bis
+        // 2.1.0 fiel das durch **alle** Zweige hier durch, und das Symbol war erreichbar,
+        // aber nicht bedienbar (siehe `Statusklick`). Ohne Maus gibt es keine
+        // Klickunterscheidung, also das Menü: der einzige Weg, der alles erreicht und den
+        // VoiceOver von Haus aus vorliest.
+        guard Statusklick.istMausklick(NSApp.currentEvent?.type) else {
+            zeigeStatusmenue()
+            return
+        }
         guard let ev = NSApp.currentEvent else { return }
 
         if ev.type == .rightMouseUp {
-            // Right click: menu - let the system position it properly
-            if let btn = statusItem.button, let menu = statusMenu {
-                menu.popUp(positioning: menu.items.first, at: NSPoint(x: 0, y: 0), in: btn)
-            }
+            zeigeStatusmenue()
             return
         }
 
@@ -4360,9 +4675,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
     /// Popover-/Overlay-Größe inkl. evtl. offenem Quick-Send-Drawer.
     private func flyoutContentSize(hasDots: Bool) -> NSSize {
-        let base: CGFloat = hasDots ? 178 : 140
-        let extra: CGFloat = flyoutQuickSendOpen ? QuickSendDrawerView.totalDrawerHeight : 0
-        return NSSize(width: 348, height: base + extra)
+        NSSize(width: Flyoutmasse.breite,
+               height: Flyoutmasse.fensterhoehe(
+                   hasDots: hasDots,
+                   updateVersion: verfuegbareUpdateVersion,
+                   drawerOffen: flyoutQuickSendOpen))
     }
 
     /// Vom Drawer-Toggle gerufen — fährt die aktive Flyout-Präsentation hoch/runter.
@@ -4795,6 +5112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         rootView.salaryDay = subMetricsSettings.effectiveSalaryDay
         rootView.salaryToleranceBefore = subMetricsSettings.salaryDayToleranceBefore
         rootView.salaryToleranceAfter = subMetricsSettings.salaryDayToleranceAfter
+        rootView.updateVersion = verfuegbareUpdateVersion
         rootView.onDoubleTap = onDoubleTap
         rootView.onHoverChanged = { [weak self] hovering in
             self?.isFlyoutHovered = hovering
@@ -4900,6 +5218,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Setting `flyoutHoldCenterEnabled == true` ist. Re-Entry while open:
     /// no-op (Hotkey-Auto-Repeat).
     fileprivate func showCenteredFlyout() {
+        // Mit VoiceOver führt der Hotkey auf das Popover-Flyout. Das zentrierte Overlay
+        // ist randlos und wird mit `orderFront(nil)` gezeigt — es kann den Tastaturfokus
+        // nie übernehmen, und `canBecomeKey` zu überschreiben hilft nicht: Seine
+        // Lebensdauer hängt an einer **gehaltenen** Taste, VoiceOver käme nie hinein.
+        // Darum ersetzen statt abschalten; kein Modus, nur die Wahl des Bedienelements,
+        // das Fokus halten kann.
+        if NSWorkspace.shared.isVoiceOverEnabled {
+            showBalanceFlyout()
+            return
+        }
         guard !isCenteredFlyoutVisible, !centeredFlyoutAnimating else { return }
         balancePopover?.performClose(nil)                       // Modi exklusiv
 
@@ -4945,8 +5273,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // (manuelles setFrame in setFlyoutQuickSendOpen) — preferredContentSize würde
         // das Auto-Resizing übernehmen und mit der Top-Verankerung kollidieren.
         result.host.sizingOptions = []
-        let contentHeight: CGFloat = result.hasDots ? 178 : 140
-        let contentWidth: CGFloat = 348
+        let contentHeight = Flyoutmasse.fensterhoehe(
+            hasDots: result.hasDots,
+            updateVersion: verfuegbareUpdateVersion,
+            drawerOffen: flyoutQuickSendOpen)
+        let contentWidth = Flyoutmasse.breite
         let content = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: contentWidth, height: contentHeight),
             styleMask: [.borderless],
@@ -5426,7 +5757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
         if locked { promptUnlockIfNeeded() }
         guard !locked, let pw = masterPassword else {
-            statusItem.button?.title = t("Gesperrt", "Locked")
+            setzeLeistentitel(t("Gesperrt", "Locked"))
             statusItem.button?.toolTip = t("Entsperren erforderlich", "Unlock required")
             return
         }
@@ -5435,7 +5766,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         do {
             creds = try CredentialsStore.load(masterPassword: pw)
         } catch {
-            statusItem.button?.title = t("Gesperrt", "Locked")
+            setzeLeistentitel(t("Gesperrt", "Locked"))
             statusItem.button?.toolTip = t("Entsperren fehlgeschlagen", "Unlock failed")
             locked = true
             AppLogger.log("Unlock failed during refresh: \(error.localizedDescription)", category: "Auth", level: "WARN")
@@ -5528,13 +5859,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // unter dem falschen Kontonamen. Jetzt bleibt der zuletzt bekannte Stand
                 // stehen, ausdrücklich als alt gekennzeichnet, und der Tooltip nennt den
                 // Grund samt Weg zur Kontoauswahl.
-                let alter = UserDefaults.standard.object(
-                    forKey: "simplebanking.cachedBalanceAt.\(YaxiService.activeSlotId)") as? Double
-                let standText = alter.map { wert -> String in
-                    let f = DateFormatter()
-                    f.dateStyle = .short; f.timeStyle = .short
-                    return f.string(from: Date(timeIntervalSince1970: wert))
-                }
+                let standText = Saldoalter.zeitpunkt(slotId: YaxiService.activeSlotId)
+                    .map { Saldoalter.beschriftung($0) }
                 txVM.error = t(
                     "Dieses Konto steckt nicht in der erteilten Zustimmung. Der angezeigte Stand ist alt\(standText.map { " (\($0))" } ?? "") — bitte das Konto in den Einstellungen neu auswählen.",
                     "This account is not covered by the granted consent. The balance shown is stale\(standText.map { " (\($0))" } ?? "") — please re-select the account in settings."
@@ -5564,7 +5890,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // Pause auto-refresh for 1 hour so we don't burn through the bank's daily
                 // SCA authorization limit before the user can approve.
                 scaBackoffUntil = Date().addingTimeInterval(3600)
-                statusItem.button?.title = "— €"
+                setzeLeistentitel("— €")
                 statusItem.button?.toolTip = t(
                     "Banking-Freigabe erforderlich — klicke \"Aktualisieren\" wenn du bereit bist, die SCA-Anfrage in deiner Banking-App zu bestätigen",
                     "Banking approval required — click \"Refresh\" when ready to approve the SCA request in your banking app"
@@ -5572,12 +5898,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 AppLogger.log("SCA required — auto-refresh paused for 1h to preserve daily SCA limit", category: "Network", level: "WARN")
                 recordCLIRefreshError("SCA-Freigabe erforderlich")
             } else {
-                statusItem.button?.title = "— €"
-                statusItem.button?.toolTip = resp.error ?? "Keine Daten"
-                recordCLIRefreshError(resp.error ?? "Keine Daten")
+                // `userMessage` zuerst: Sie ist der Satz, der für den Nutzer geschrieben
+                // wurde — `error` ist der englische Kurzschlüssel für uns. Ohne diesen
+                // Vorrang stand bei „kein verwertbarer Saldo" nur „Keine Daten" im
+                // Tooltip und nichts über der Umsatzliste.
+                let meldung = resp.userMessage ?? resp.error ?? t("Keine Daten", "No data")
+                setzeLeistentitel("— €")
+                statusItem.button?.toolTip = meldung
+                if resp.userMessage != nil { txVM.error = meldung }
+                recordCLIRefreshError(resp.error ?? meldung)
             }
         } catch {
-            statusItem.button?.title = "— €"
+            setzeLeistentitel("— €")
             statusItem.button?.toolTip = "Fehler: \(error.localizedDescription)"
             txVM.currentBalance = "— €"
             AppLogger.log("Balance refresh failed: \(error.localizedDescription)", category: "Network", level: "ERROR")
@@ -5878,6 +6210,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     } else {
                         try TransactionsDatabase.upsert(transactions: sortedNetwork)
                     }
+                    // Jetzt steht die Naht: Ein wartender MoneyMoney-Verlauf kann
+                    // nachrücken, ohne die Wochen doppelt zu bringen, die gerade
+                    // eben von der Bank kamen. Hier und nicht in der Einrichtung —
+                    // dies ist die einzige Stelle, die Bankumsätze schreibt.
+                    if !MoneyMoneyVorhaben.eintraege.isEmpty {
+                        await MoneyMoneyNachtrag.alleFaelligen()
+                    }
                     let persistedTransactions = try TransactionsDatabase.loadTransactions(days: displayDays)
                     txVM.transactions = sortTransactionsNewestFirst(persistedTransactions)
                     // Reload enrichment so newly inserted rows (is_unread=1) show
@@ -6041,6 +6380,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         confettiInitialShown = true
         txVM.rippleTrigger += 1
         return true
+    }
+
+    /// Holt die Daueraufträge bei der Bank und legt sie in `DauerauftragStore`.
+    ///
+    /// Eigener Weg statt Anhängsel des Saldo-Abrufs, und mit Absicht ohne Zeitgeber:
+    /// Der Abruf kann eine Freigabe kosten (siehe `YaxiService.fetchStandingOrders`),
+    /// also darf ihn nur ein Klick auslösen. Die Zugangsdaten liegen nur hier — die
+    /// Ansicht fragt über eine Mitteilung an.
+    private func dauerauftraegeAbrufen() {
+        let store = DauerauftragStore.shared
+        guard !store.laeuft else { return }
+
+        var userId = ""
+        var password = ""
+        if !demoMode {
+            guard !locked, let pw = masterPassword,
+                  let creds = try? CredentialsStore.load(masterPassword: pw) else {
+                store.abrufBeendet(meldung: t("Zum Abrufen der Daueraufträge zuerst entsperren.",
+                                              "Unlock the app to fetch standing orders."))
+                return
+            }
+            userId = creds.userId
+            password = creds.password
+        }
+
+        let slot = YaxiService.activeSlotId
+        store.abrufStartet()
+        Task {
+            do {
+                let abruf = try await YaxiService.fetchStandingOrders(userId: userId, password: password)
+                // Nur bei Erfolg schreiben — ein Fehlschlag darf eine vorhandene Liste
+                // nicht gegen eine leere tauschen.
+                if abruf.fehler == nil {
+                    store.uebernehmen(abruf.auftraege, slotId: slot)
+                }
+                store.abrufBeendet(meldung: abruf.nutzermeldung)
+            } catch {
+                let meldung = RoutexErrorMapper.userMessage(for: error)
+                store.abrufBeendet(meldung: meldung.detail ?? meldung.title)
+            }
+        }
     }
 
     private func checkNewBookings(userId: String, password: String) async {
@@ -6207,6 +6587,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         case .gesundheit:    return "🏥"
         case .umbuchung:     return "↔️"
         case .sonstiges:     return "🏷️"
+        // Eigene Kategorie: dasselbe Zeichen wie „Sonstiges" — ein Symbol je Kategorie
+        // gibt es in der Mitteilung nicht, dort passt nur ein Emoji.
+        default:             return "🏷️"
         }
     }
 
@@ -6653,11 +7036,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if let cachedBalance = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slot.id)") as? Double {
             lastBalance = cachedBalance
             txVM.currentBalance = formatEURWithCents(cachedBalance)
+            // Den Zeitpunkt mitnehmen. Ohne ihn behielt die Kopfzeile die Zeit des
+            // **vorherigen** Kontos — eine falsche Zeit an einer richtigen Zahl, und
+            // genau daran scheiterte die Frage „ist dieser Stand aktuell?".
+            txVM.currentBalanceFetchedAt = Saldoalter.zeitpunkt(slotId: slot.id)
             updateStatusBalanceTitle()
         } else if !isHiddenBalance, balancePopover?.isShown != true {
             // Gleicher Grund wie in `updateMenuBarButton`: kein Breitenwechsel unter
             // einem offenen Flyout.
-            statusItem.button?.title = "…"
+            setzeLeistentitel("…")
         }
 
         // Show cached transactions from DB right away (no network wait)
@@ -6780,7 +7167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let newSlot = BankSlot.makeNew(iban: "", displayName: "", logoId: nil)
         SlotContext.activate(slotId: newSlot.id)
 
-        final class AdditionalAccountsBox: @unchecked Sendable { var value: [RoutexModels.Account] = [] }
+        final class AdditionalAccountsBox: @unchecked Sendable {
+            var value: [RoutexModels.Account] = []
+            var primary: RoutexModels.Account?
+        }
         let additionalAccountsBox = AdditionalAccountsBox()
 
         let wizard = SetupWizardPanel(
@@ -6798,6 +7188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     connectionIdKeySnapshot: YaxiService.connectionIdKey
                 )
                 additionalAccountsBox.value = setupResult.additionalAccounts
+                additionalAccountsBox.primary = setupResult.primaryAccount
                 return setupResult.bank
             },
             existingMasterPassword: masterPassword   // Passwort-Schritt überspringen
@@ -6816,7 +7207,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 iban: normalizedIBAN,
                 displayName: bank.displayName,
                 logoId: bank.logoId,
-                nickname: wizard.collectedNickname
+                nickname: Kontoname.fuerErstenSlot(
+                    eingetippt: wizard.collectedNickname,
+                    weitereKonten: additionalAccountsBox.value.count,
+                    anzeigename: additionalAccountsBox.primary?.displayName,
+                    produktname: additionalAccountsBox.primary?.productName,
+                    inhaber: additionalAccountsBox.primary?.ownerName,
+                    iban: normalizedIBAN)
             )
             MultibankingStore.shared.addSlot(finalSlot)
 
@@ -6840,14 +7237,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 Task { await YaxiService.copyConnectionState(fromSlotId: primarySlotId, toSlotId: extraSlotId) }
                 YaxiService.activeSlotId = extraSlotId
                 YaxiService.storeDiscoveredIBAN(iban)
-                let accountTitle: String = {
-                    let parts = [account.displayName, account.ownerName, String(iban.prefix(12)) + "…"].compactMap { $0?.nilIfEmpty }
-                    return parts.first ?? iban
-                }()
+                // Der Bankname gehört in `displayName` — daran hängt die Marken- und
+                // Logoerkennung. Der Name, den die Bank dem Konto gibt („Extra-Konto"),
+                // gehört in `nickname`: Den zeigt die ganze App ohnehin bevorzugt an
+                // (`nickname ?? displayName`), und der Nutzer kann ihn in den
+                // Einstellungen überschreiben. Bis 2.1.0 stand der Kontoname in
+                // `displayName` — dort war die Bank verloren, und das erste Konto hieß
+                // nach der Bank, jedes weitere nach dem Konto.
+                //
                 // `ownerName` ist nur das Netz der Eigenerkennung — hart entscheidet die
                 // IBAN, und die steht bei jedem Slot. Hier liegt der Name ohnehin vor.
-                let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle,
-                                             logoId: bank.logoId, ownerName: account.ownerName)
+                let extraBankSlot = BankSlot(id: extraSlotId, iban: iban,
+                                             displayName: bank.displayName,
+                                             logoId: bank.logoId,
+                                             nickname: Kontoname.fuerSlot(
+                                                anzeigename: account.displayName,
+                                                produktname: account.productName,
+                                                inhaber: account.ownerName,
+                                                iban: iban),
+                                             ownerName: account.ownerName)
                 MultibankingStore.shared.addSlot(extraBankSlot)
             }
             // Restore to primary slot
@@ -6909,14 +7317,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         lastBalance = nil
         txVM.transactions = []
         txVM.resetPaging()
-        statusItem.button?.title = t("Verbinden…", "Connect…")
+        setzeLeistentitel(t("Verbinden…", "Connect…"))
 
         // Ensure legacy slot is active for first-time setup.
         // If the app was reset while a non-legacy slot was active, activeSlotId would still
         // hold the old slot ID — causing all setup data to be written under the wrong keys.
         SlotContext.activate(slotId: "legacy")
 
-        final class AdditionalAccountsBox2: @unchecked Sendable { var value: [RoutexModels.Account] = [] }
+        final class AdditionalAccountsBox2: @unchecked Sendable {
+            var value: [RoutexModels.Account] = []
+            var primary: RoutexModels.Account?
+        }
         let additionalAccountsBox2 = AdditionalAccountsBox2()
 
         let wizard = SetupWizardPanel(connectAction: { payload, selectedBankName, options, masterPassword in
@@ -6933,6 +7344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 connectionIdKeySnapshot: YaxiService.connectionIdKey
             )
             additionalAccountsBox2.value = setupResult.additionalAccounts
+            additionalAccountsBox2.primary = setupResult.primaryAccount
             return setupResult.bank
         })
 
@@ -6952,7 +7364,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .uppercased()
                 // Ersten Slot in MultibankingStore anlegen (id="legacy" für Erstkonto)
-                let legacySlot = BankSlot(id: "legacy", iban: normalizedIBAN, displayName: bank.displayName, logoId: bank.logoId, nickname: wizard.collectedNickname)
+                let legacySlot = BankSlot(
+                    id: "legacy", iban: normalizedIBAN,
+                    displayName: bank.displayName, logoId: bank.logoId,
+                    nickname: Kontoname.fuerErstenSlot(
+                        eingetippt: wizard.collectedNickname,
+                        weitereKonten: additionalAccountsBox2.value.count,
+                        anzeigename: additionalAccountsBox2.primary?.displayName,
+                        produktname: additionalAccountsBox2.primary?.productName,
+                        inhaber: additionalAccountsBox2.primary?.ownerName,
+                        iban: normalizedIBAN))
                 MultibankingStore.shared.replaceFirstSlot(with: legacySlot)
 
                 // Create extra slots for additional accounts selected in the picker
@@ -6974,14 +7395,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     Task { await YaxiService.copyConnectionState(fromSlotId: "legacy", toSlotId: extraSlotId) }
                     YaxiService.activeSlotId = extraSlotId
                     YaxiService.storeDiscoveredIBAN(iban)
-                    let accountTitle: String = {
-                        let parts = [account.displayName, account.ownerName, String(iban.prefix(12)) + "…"].compactMap { $0?.nilIfEmpty }
-                        return parts.first ?? iban
-                    }()
+                    // Der Bankname gehört in `displayName` — daran hängt die Marken- und
+                    // Logoerkennung. Der Name, den die Bank dem Konto gibt („Extra-Konto"),
+                    // gehört in `nickname`: Den zeigt die ganze App ohnehin bevorzugt an
+                    // (`nickname ?? displayName`), und der Nutzer kann ihn in den
+                    // Einstellungen überschreiben. Bis 2.1.0 stand der Kontoname in
+                    // `displayName` — dort war die Bank verloren, und das erste Konto hieß
+                    // nach der Bank, jedes weitere nach dem Konto.
+                    //
                     // `ownerName` ist nur das Netz der Eigenerkennung — hart entscheidet die
                     // IBAN, und die steht bei jedem Slot. Hier liegt der Name ohnehin vor.
-                    let extraBankSlot = BankSlot(id: extraSlotId, iban: iban, displayName: accountTitle,
-                                                 logoId: bank.logoId, ownerName: account.ownerName)
+                    let extraBankSlot = BankSlot(id: extraSlotId, iban: iban,
+                                                 displayName: bank.displayName,
+                                                 logoId: bank.logoId,
+                                                 nickname: Kontoname.fuerSlot(
+                                                    anzeigename: account.displayName,
+                                                    produktname: account.productName,
+                                                    inhaber: account.ownerName,
+                                                    iban: iban),
+                                                 ownerName: account.ownerName)
                     MultibankingStore.shared.addSlot(extraBankSlot)
                 }
                 // Restore to legacy slot
@@ -6997,7 +7429,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             statusItem.button?.toolTip = "Verbunden mit \(bank.displayName)"
             // Fresh setup — mark legacy slot migration as done so it never wipes sessions on first restart
             UserDefaults.standard.set(true, forKey: "simplebanking.migration.legacySlotFullReset.v1")
-            Task { await self.refreshAsync() }
+            // Saldo, dann Umsätze, dann der MoneyMoney-Verlauf — in dieser
+            // Reihenfolge und in einer Aufgabe.
+            //
+            // Die Naht ist die älteste Buchung, die der Slot schon hat: Übernommen
+            // wird nur, was davor liegt. Ohne sie bringt MoneyMoney auch die Wochen
+            // mit, die die Bank selbst liefert, und in der Überschneidung steht
+            // jede Buchung zweimal, sobald ihr Zweck bei Bank und MoneyMoney nicht
+            // zeichengleich ist — der Fingerabdruck fängt nur das Zeichengleiche.
+            //
+            // Hier wird nichts erzwungen: `refreshAsync` holt den Saldo,
+            // `checkNewBookings` prüft nur auf Neues und **schreibt nicht** in die
+            // Datenbank. Die einzige Stelle, die Bankumsätze speichert, ist
+            // `openTransactionsPanel` — dort rückt der MoneyMoney-Verlauf nach.
+            // Bis dahin wartet er, und der Aufruf hier ist der Fall, dass schon
+            // Umsätze da sind.
+            Task {
+                await self.refreshAsync()
+                await MoneyMoneyNachtrag.alleFaelligen()
+            }
             // 5-Schritte-Folge-Wizard nach allererstem Bank-Connect (nur einmal).
             // Liegt absichtlich VOR promptAddAnotherAccount damit der User die
             // Settings vor dem evtl. nächsten Bank-Setup gesehen hat.
@@ -7103,7 +7553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// nicht genervt wird wenn er die Sheet schließt ohne durchzulaufen.
     /// Add-Account-Pfad ruft diese Funktion nicht auf (separater Branch).
     private func runInitialSetupExtensionIfNeeded(slotId: String) {
-        let key = "simplebanking.initialWizardCompleted"
+        let key = InitialSetupExtensionPanel.erledigtSchluessel
         guard !UserDefaults.standard.bool(forKey: key) else { return }
         UserDefaults.standard.set(true, forKey: key)
         let panel = InitialSetupExtensionPanel(
@@ -7155,6 +7605,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let normalizedIBAN: String
         let apiKey: String?
         let additionalAccounts: [RoutexModels.Account]
+        /// Das gewählte Hauptkonto. Nur für den Namen gebraucht, den die Bank ihm gibt —
+        /// bis 2.1.0 wurde er verworfen, und zwei Konten derselben Bank sahen gleich aus.
+        let primaryAccount: RoutexModels.Account?
     }
 
 
@@ -7442,7 +7895,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
 
             // Step 2: balances() — nutzt connectionData + IBAN aus accounts().
             // Kein SCA mehr nötig (recurring consent ist gesetzt).
-            options.onProgress?(.fetchingBalance)
+            let fortschrittKonto = Kontoname.fuerFortschritt(
+                anzeigename: primaryAccount.displayName, produktname: primaryAccount.productName)
+            options.onProgress?(.fetchingBalance(konto: fortschrittKonto))
             AppLogger.log("Setup step warmup_balances", category: "Setup")
             let warmupBalances = try await runSetupStepWithTimeout(step: "warmup_balances", timeout: 300, logger: diagnosticsLogger,
                                                                       succeeded: { $0.ok }) {
@@ -7470,7 +7925,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 )
             }
 
-            options.onProgress?(.requestingTransactionApproval)
+            options.onProgress?(.requestingTransactionApproval(konto: fortschrittKonto))
             AppLogger.log("Setup step warmup_transactions", category: "Setup")
             var warmupTransactions = try await runSetupStepWithTimeout(step: "warmup_transactions", timeout: 720, logger: diagnosticsLogger,
                                                                           succeeded: { $0.ok == true }) {
@@ -7555,7 +8010,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 bank: finalBank,
                 normalizedIBAN: storedIBAN,
                 apiKey: nil,
-                additionalAccounts: additionalAccounts
+                additionalAccounts: additionalAccounts,
+                primaryAccount: primaryAccount
             )
         } catch is CancellationError {
             // Abbruch (Fenster/Sheet geschlossen) ist KEIN Fehler → roh weiterreichen,
@@ -7923,70 +8379,99 @@ private struct FlyoutSlotSegmentedControl: View {
         return colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)
     }
 
+    /// Welche Kachel die Reihe in den Blick holen soll, wenn sie scrollt.
+    private var aktiveKennung: Kachelkennung {
+        isUnifiedMode ? .alle : .konto(activeIndex)
+    }
+
     var body: some View {
         // BTX: reine Text-Umschalter statt Pillen mit Bank-Icon (siehe accountDotsBar).
+        //
+        // Kein `Spacer(minLength: 0)` mehr am Ende: In der Scrollview fällt er auf 0
+        // zusammen und die Reihe würde mittig stehen. Linksbündig macht jetzt das
+        // `.frame(maxWidth:alignment:)` im Modifier.
         if !ThemeChrome.glyphControls {
             return AnyView(HStack(spacing: 14) {
                 ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
                     let active = !isUnifiedMode && idx == activeIndex
                     if active || !soloActiveOnly {
-                        Text(item.nickname?.isEmpty == false ? item.nickname! : item.name)
-                            .font(ThemeFonts.flyoutBody(size: 15))
-                            .textCase(.uppercase)
-                            .foregroundColor(active ? Color.themedAccent : Color.themedInk.opacity(0.85))
-                            .underline(active)
-                            .lineLimit(1)
-                            .contentShape(Rectangle())
-                            .onTapGesture { if !active { onSwitch(idx) } }
+                        Button { if !active { onSwitch(idx) } } label: {
+                            Text(item.nickname?.isEmpty == false ? item.nickname! : item.name)
+                                .font(ThemeFonts.flyoutBody(size: 15))
+                                .textCase(.uppercase)
+                                .foregroundColor(active ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                                .underline(active)
+                                .lineLimit(1)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(active ? [.isSelected] : [])
+                        .id(Kachelkennung.konto(idx))
                     }
                 }
                 if showUnified && !soloActiveOnly {
-                    Text(L10n.t("Alle", "All"))
-                        .font(ThemeFonts.flyoutBody(size: 15))
-                        .textCase(.uppercase)
-                        .foregroundColor(isUnifiedMode ? Color.themedAccent : Color.themedInk.opacity(0.85))
-                        .underline(isUnifiedMode)
-                        .contentShape(Rectangle())
-                        .onTapGesture { if !isUnifiedMode { onActivateUnified?() } }
+                    Button { if !isUnifiedMode { onActivateUnified?() } } label: {
+                        Text(L10n.t("Alle", "All"))
+                            .font(ThemeFonts.flyoutBody(size: 15))
+                            .textCase(.uppercase)
+                            .foregroundColor(isUnifiedMode ? Color.themedAccent : Color.themedInk.opacity(0.85))
+                            .underline(isUnifiedMode)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .beschriftet(L10n.t("Alle Konten", "All accounts"), aktiv: isUnifiedMode)
+                    .id(Kachelkennung.alle)
                 }
-                Spacer(minLength: 0)
-            })
+            }
+            .kachelreihe(aktiv: aktiveKennung))
         }
         return AnyView(HStack(spacing: KontoKachel.abstand) {
             ForEach(Array(slots.enumerated()), id: \.offset) { idx, item in
                 let active = !isUnifiedMode && idx == activeIndex
                 if active {
                     activePill(item)
+                        .id(Kachelkennung.konto(idx))
                 } else if !soloActiveOnly {
-                    iconPill(item)
-                        .contentShape(Capsule())
-                        .onTapGesture { onSwitch(idx) }
-                        .help(item.nickname?.isEmpty == false ? item.nickname! : item.name)
+                    Button { onSwitch(idx) } label: {
+                        iconPill(item).contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .beschriftet(item.nickname?.isEmpty == false ? item.nickname! : item.name)
+                    .id(Kachelkennung.konto(idx))
                 }
             }
             if showUnified && !soloActiveOnly {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(isUnifiedMode ? activeTint : Color(NSColor.secondaryLabelColor))
-                    .frame(width: KontoKachel.inaktivKante, height: KontoKachel.inaktivKante)
-                    .background(Capsule(style: .continuous)
-                        .fill(isUnifiedMode ? activeFill : inactiveFill))
-                    .contentShape(Capsule())
-                    .onTapGesture { if !isUnifiedMode { onActivateUnified?() } }
-                    .help(L10n.t("Alle Konten", "All accounts"))
+                Button { if !isUnifiedMode { onActivateUnified?() } } label: {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(isUnifiedMode ? activeTint : Color(NSColor.secondaryLabelColor))
+                        .frame(width: KontoKachel.inaktivKante, height: KontoKachel.inaktivKante)
+                        .background(Capsule(style: .continuous)
+                            .fill(isUnifiedMode ? activeFill : inactiveFill))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .beschriftet(L10n.t("Alle Konten", "All accounts"), aktiv: isUnifiedMode)
+                .id(Kachelkennung.alle)
             }
-            Spacer(minLength: 0)
         }
         .animation(.easeInOut(duration: 0.2), value: activeIndex)
-        .animation(.easeInOut(duration: 0.2), value: isUnifiedMode))
+        .animation(.easeInOut(duration: 0.2), value: isUnifiedMode)
+        .kachelreihe(aktiv: aktiveKennung))
     }
 
     /// Aktives Konto: größere Kachel, volle Sättigung, Ring in der Temperaturfarbe.
     private func activePill(_ item: FlyoutSlotItem) -> some View {
-        logoTile(item, size: KontoKachel.aktivLogo)
-            .frame(width: KontoKachel.aktivKante, height: KontoKachel.aktivKante)
-            .background(Capsule(style: .continuous).fill(activeFill))
-            .help(item.nickname?.isEmpty == false ? item.nickname! : item.name)
+        // Auch die aktive Kachel ist ein Knopf, mit leerer Handlung: Ein deaktiviertes
+        // Element überspringt VoiceOver, und dann erfährt niemand, welches Konto gewählt
+        // ist — die Auswahl trugen bisher allein Größe und Sättigung.
+        Button { } label: {
+            logoTile(item, size: KontoKachel.aktivLogo)
+                .frame(width: KontoKachel.aktivKante, height: KontoKachel.aktivKante)
+                .background(Capsule(style: .continuous).fill(activeFill))
+        }
+        .buttonStyle(.plain)
+        .beschriftet(item.nickname?.isEmpty == false ? item.nickname! : item.name, aktiv: true)
     }
 
     /// Weitere Konten: kleinere Kachel, gedämpft.
@@ -8017,6 +8502,28 @@ private struct FlyoutSlotSegmentedControl: View {
         }
     }
 
+}
+
+/// Die festen Maße des Flyouts an einer Stelle.
+///
+/// Die Höhe stand bisher an drei Stellen verdrahtet (Popover, mittiges Fenster,
+/// Drawer-Toggle). Ein Summand mehr — hier das Update-Band — wird dabei zuverlässig
+/// an einer von ihnen vergessen, und dann ist der Inhalt abgeschnitten.
+enum Flyoutmasse {
+    static let breite: CGFloat = 348
+    static let updateBandHoehe: CGFloat = 44
+
+    /// Karten-Bereich. Einzelkonto = reiner Wash-Block (140); Multibanking =
+    /// Wash-Block + weißer Abstand + Segmented-Control (~178).
+    static func kartenbereich(hasDots: Bool) -> CGFloat { hasDots ? 178 : 140 }
+
+    /// Fensterhöhe: Karten-Bereich, darüber das Update-Band (nur wenn eine Fassung
+    /// bereitliegt), darunter der Quick-Send-Drawer (nur wenn offen).
+    static func fensterhoehe(hasDots: Bool, updateVersion: String?, drawerOffen: Bool) -> CGFloat {
+        kartenbereich(hasDots: hasDots)
+            + (updateVersion == nil ? 0 : updateBandHoehe)
+            + (drawerOffen ? QuickSendDrawerView.totalDrawerHeight : 0)
+    }
 }
 
 private struct StatusBalanceFlyoutCardView: View {
@@ -8102,6 +8609,14 @@ private struct StatusBalanceFlyoutCardView: View {
     var reweLastReceiptDate: Date? = nil
     /// Hintergrund-Sync scheiterte (Login abgelaufen) → Hinweis statt Uhrzeit.
     var reweNeedsLogin: Bool = false
+
+    // MARK: Update-Band
+    /// Höhe des Bandes über dem Karten-Bereich. Der Host rechnet sie in die
+    /// Fensterhöhe ein (`flyoutContentSize`), deshalb liegt sie hier und nicht
+    /// als Zahl in der Ansicht.
+
+    /// Bereitliegende neue Fassung („2.1.0") → Band wird gezeigt. `nil` → kein Band.
+    var updateVersion: String? = nil
     /// 0 = Monat, 1 = Jahr, 2 = Vorjahr.
     @State private var reweRange: Int = 0
 
@@ -8252,7 +8767,7 @@ private struct StatusBalanceFlyoutCardView: View {
     /// im eingeklappten Zustand setzt.
     // Prototyp 4b (ringlos): kompaktere Karte. Einzelkonto = reiner Wash-Block (140);
     // Multibanking = Wash-Block + weißer Abstand + Segmented-Control (~178).
-    private var cardRegionHeight: CGFloat { hasDots ? 178 : 140 }
+    private var cardRegionHeight: CGFloat { Flyoutmasse.kartenbereich(hasDots: hasDots) }
 
     /// 26×26 Toggle in der Kartenkopfzeile: Papierflieger (zu) ↔ Chevron-up (offen, invertiert).
     /// Liegt in-flow am rechten Ende der Header-HStack (nach dem Emoji), damit
@@ -8298,7 +8813,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 }
             }
             .buttonStyle(.plain)
-            .help(L10n.t("Schnellüberweisung", "Quick transfer"))
+            .beschriftet(L10n.t("Schnellüberweisung", "Quick transfer"))
         }
     }
 
@@ -8326,8 +8841,9 @@ private struct StatusBalanceFlyoutCardView: View {
             .foregroundColor(detail)
         }
         .buttonStyle(.plain)
-        .help(L10n.t("Tippen: letzte Buchung / Ausgaben diesen Monat",
-                     "Tap: last transaction / spending this month"))
+        .beschriftet(L10n.t("Anzeige wechseln", "Switch display"),
+                     hinweis: L10n.t("Tippen: letzte Buchung / Ausgaben diesen Monat",
+                                     "Tap: last transaction / spending this month"))
     }
 
     private var leftToPaySubtitle: some View {
@@ -8354,12 +8870,55 @@ private struct StatusBalanceFlyoutCardView: View {
     }
 
 
+    /// Das Band ganz oben, wenn eine neue Fassung bereitliegt: Hinweis links,
+    /// Knopf rechts. Der Knopf öffnet keinen eigenen Weg, sondern postet dieselbe
+    /// Nachricht wie der Menüeintrag „Nach Updates suchen…" — Sparkle holt damit
+    /// das bereits gefundene Update nach vorn.
+    ///
+    /// Farbe ist die Akzentfarbe des Themes — das Flyout ist die gestaltete Fläche,
+    /// anders als die Menüleiste, die ihr Zeichen in der Systemakzentfarbe trägt.
+    /// Nicht Grün und nicht Orange: Beide gehören in dieser App der Geld-Ampel
+    /// (`BalanceSignal`), und ein Software-Hinweis in Ampelfarbe läse sich wie eine
+    /// Aussage über den Kontostand.
+    private func updateBand(version: String) -> some View {
+        let flaeche = Color.themedAccent
+        return HStack(spacing: 10) {
+            Image(systemName: "arrow.down.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(L10n.t("Update verfügbar", "Update available"))
+                    .font(ThemeFonts.rowBody(size: 12, weight: .semibold, lofiSize: 13))
+                Text(L10n.t("Version \(version)", "Version \(version)"))
+                    .font(ThemeFonts.rowBody(size: 11, lofiSize: 12))
+                    .opacity(0.9)
+            }
+            Spacer(minLength: 8)
+            Button {
+                NotificationCenter.default.post(name: .checkForUpdatesRequested, object: nil)
+            } label: {
+                Text(L10n.t("Aktualisieren", "Update"))
+                    .font(ThemeFonts.rowBody(size: 12, weight: .semibold, lofiSize: 13))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.white.opacity(0.92)))
+                    .foregroundColor(flaeche)
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 14)
+        .frame(height: Flyoutmasse.updateBandHoehe)
+        .frame(maxWidth: .infinity)
+        .background(flaeche)
+    }
+
     /// Der eigentliche Flyout-Inhalt: oberer Karten-Bereich (feste Höhe) + darunter
     /// der Quick-Send-Drawer (feste Höhe). Natürliche Gesamthöhe = Card + Drawer.
     /// Wird im `body` als oben verankertes Overlay über einen fenstergroßen Container
     /// gelegt und auf Fenstergröße geclippt (siehe dort).
     private var flyoutColumn: some View {
         VStack(spacing: 0) {
+            if let updateVersion { updateBand(version: updateVersion) }
             // ── Oberer Karten-Bereich — feste Höhe (cardRegionHeight), komplett
             //    statisch. Wird beim Auf-/Zuklappen des Drawers NIE neu layoutet.
             VStack(spacing: 0) {
@@ -8440,7 +8999,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 .accessibilityHidden(!showSend)
             }
         }
-        .frame(width: 348)
+        .frame(width: Flyoutmasse.breite)
     }
 
     var body: some View {
@@ -8453,7 +9012,7 @@ private struct StatusBalanceFlyoutCardView: View {
         // heraus, abgeschnitten). Beim Klick wächst nur das Popover-Fenster nach unten
         // und gibt den Drawer frei; der obere Bereich bleibt fix und unverändert.
         Color.clear
-            .frame(width: 348)
+            .frame(width: Flyoutmasse.breite)
             .frame(maxHeight: .infinity)
             .overlay(alignment: .top) { flyoutColumn }
             .clipped()
@@ -8505,8 +9064,10 @@ private struct StatusBalanceFlyoutCardView: View {
             return L10n.t("Kontostand", "Balance")
         }()
         guard let date else { return name }
-        let hour = Calendar.current.component(.hour, from: date)
-        return L10n.t("\(name) · \(hour) Uhr", "\(name) · \(hour):00")
+        // Bis 06.11.2026 nur die Stunde („ING · 14 Uhr"). Damit war gestern 14 Uhr von
+        // vor einer Minute nicht zu unterscheiden — bei einem Abruftakt von vier Stunden
+        // die halbe Antwort auf „warum zeigt meine Bank etwas anderes?". Siehe `Saldoalter`.
+        return "\(name) · \(Saldoalter.beschriftung(date))"
     }
 
     private var unifiedCard: some View {
@@ -8563,6 +9124,7 @@ private struct StatusBalanceFlyoutCardView: View {
 
             // Nur der Gesamt-Saldo (keine Konten-Aufschlüsselung rechts).
             Text(effectiveBalanceText)
+                .accessibilityLabel(Text(Vorlesetext.betrag(effectiveBalanceText)))
                 .font(lofi ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
                      : themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
                               : .system(size: 38, weight: .bold, design: .default))
@@ -8650,6 +9212,7 @@ private struct StatusBalanceFlyoutCardView: View {
                         .foregroundColor(themed ? .themedExpense : .orange)
                 } else {
                     Text(formatBankHeader(date: balanceFetchedAt))
+                        .accessibilityLabel(Text(kopfzeileVorlesetext(balanceFetchedAt)))
                         .font(themed ? ThemeFonts.flyoutBody(size: lofi ? 15 : 14) : .system(size: 14))
                         .textCase(ThemeChrome.textCase)
                         .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
@@ -8657,6 +9220,7 @@ private struct StatusBalanceFlyoutCardView: View {
                 Spacer()
             }
             Text(effectiveBalanceText)
+                .accessibilityLabel(Text(Vorlesetext.betrag(effectiveBalanceText)))
                 .font(lofi ? ThemeFonts.flyoutHeading(size: 42, weight: .bold)
                      : themed ? ThemeFonts.flyoutHeading(size: 38, weight: .bold)
                               : .system(size: 38, weight: .bold, design: .default))
@@ -8694,7 +9258,8 @@ private struct StatusBalanceFlyoutCardView: View {
                 .foregroundColor(themed ? Color.themedInk.opacity(0.85) : toggleColor)
             }
             .buttonStyle(.plain)
-            .help(L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
+            .beschriftet(L10n.t("Zeitraum", "Range"),
+                         hinweis: L10n.t("Tippen: Monat / Jahr / Vorjahr", "Tap: month / year / last year"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         // Ring als Overlay rechts, vertikal an der Betrags-Zeile ausgerichtet.
@@ -8729,11 +9294,20 @@ private struct StatusBalanceFlyoutCardView: View {
         if let bn = bankName?.trimmingCharacters(in: .whitespacesAndNewlines), !bn.isEmpty { return bn }
         return L10n.t("Kontostand", "Balance")
     }
-    /// „ · 6 Uhr" (oder leer, wenn kein Zeitstempel).
+    /// „ · 14:32", „ · gestern 14:32" (oder leer, wenn kein Zeitstempel).
+    ///
+    /// Die Umstellung auf `Saldoalter` am 06.11.2026 hat `formatBankHeader` erwischt,
+    /// nicht diese Stelle — und die Standardkarte ist die, die läuft. Bis 2.1.0 stand
+    /// hier weiter „ · 14 Uhr" aus der nackten Stunde, in der gestern 14 Uhr von vor
+    /// einer Minute nicht zu unterscheiden war.
     private func headerTimeSuffix(_ date: Date?) -> String {
         guard let date else { return "" }
-        let hour = Calendar.current.component(.hour, from: date)
-        return L10n.t(" · \(hour) Uhr", " · \(hour):00")
+        return " · " + Saldoalter.beschriftung(date)
+    }
+    /// Dieselbe Kopfzeile zum Vorlesen: Komma statt Mittelpunkt, „Stand" vor der Zeit.
+    private func kopfzeileVorlesetext(_ date: Date?) -> String {
+        guard let date else { return headerNameOnly }
+        return headerNameOnly + ", " + L10n.t("Stand ", "as of ") + Saldoalter.beschriftung(date)
     }
 
     // Prototyp 4b: warmer Temperatur-Wash hinter Balance, KEIN Ring (Datum wandert in
@@ -8803,6 +9377,10 @@ private struct StatusBalanceFlyoutCardView: View {
                  + Text(headerTimeSuffix(balanceFetchedAt)).font(timeFont).foregroundColor(detailColor))
                     .textCase(ThemeChrome.textCase)
                     .lineLimit(1)
+                    // Ohne Beschriftung liest VoiceOver den Mittelpunkt als Zeichen vor
+                    // („ING Mittelpunkt 14 Uhr 32"). Das Komma trennt hörbar, und
+                    // „Stand" sagt, was die Zeit bedeutet.
+                    .accessibilityLabel(Text(kopfzeileVorlesetext(balanceFetchedAt)))
                 // BTX: blinkendes Telefon-Steuerzeichen neben der Bank (wie Demo-Kopf).
                 // Zierrat, kein Bedienelement — folgt `lofiTypography`.
                 if ThemeChrome.lofi {
@@ -8820,6 +9398,9 @@ private struct StatusBalanceFlyoutCardView: View {
                     // (178 bzw. 140) hinge wieder an der Länge des Kontostands.
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(displayBalance)
+                            // „•.••• €" wird nie als Punktreihe vorgelesen, „--,-- €"
+                            // nicht als Striche. Siehe `Vorlesetext`.
+                            .accessibilityLabel(Text(Vorlesetext.betrag(displayBalance)))
                             .font(balanceFont)
                             .tracking(lofi ? 1.0 : -0.6)
                             .foregroundColor(balanceColor)
