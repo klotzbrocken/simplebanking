@@ -49,6 +49,43 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.2.0</title>
+            <pubDate>Thu, 12 Nov 2026 12:01:19 +0100</pubDate>
+            <sparkle:version>20261112768</sparkle:version>
+            <sparkle:shortVersionString>2.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.2.0/simplebanking-20261112-115725.dmg" length="35632074" type="application/octet-stream" sparkle:edSignature="WDADwTWZEkQm+GvS1Saq1weHrgqfiEHrkWw6YAXGWag+CChawtES8AFPoiN2I30hrA8q0MpnjZLGCoZ8GNTQBw=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.2.0</h2>
+                <p>2.1.0 ist hier mit eingefaltet — sie ist nie erschienen.</p>
+                <h3>Neu</h3>
+                <ul>
+                    <li><strong>Umstieg von MoneyMoney — in einem Zug.</strong> Open Banking liefert nur die letzten 90 Tage; alles davor lag in MoneyMoney und blieb dort. Die Einrichtung bietet den Umstieg jetzt selbst an: Konten, der ganze Umsatzverlauf und die erste Ebene deiner Kategorien — und nur für die Konten, die über Open Banking erreichbar sind; Depots und Offline-Konten werden ausdrücklich abgesagt, mit Grund. Dein MoneyMoney-Kennwort wird zum Entschlüsseln gebraucht und <strong>nirgends gespeichert</strong>; gelesen wird nur, nie zurückgeschrieben, und von den Tabellen nur vier — die Bank-PIN und der HBCI-Schlüssel in derselben Datei werden nie geöffnet.</li>
+                    <li><strong>Die Kategorie steht in der Umsatzzeile — farbig.</strong> Jede Buchung wird kategorisiert, nur bekam das kaum jemand zu sehen: Die Anzeige war ab Werk aus. Jetzt ist sie an, und im breiten Fenster steht die Kategorie farbig getönt neben dem Händler. Die Palette kennt kein Grün, kein Orange und kein Rot — die drei gehören dem Saldo und den Beträgen. Die Farbe lässt sich je Kategorie wählen.</li>
+                    <li><strong>Eigene Kategorien.</strong> Die vierzehn eingebauten waren fest. Jetzt legst du eigene an und benennst die eingebauten um; bestehende Zuordnungen bleiben erhalten, Umbenennen eingeschlossen.</li>
+                    <li><strong>Mit VoiceOver bedienbar.</strong> Das Menüleisten-Symbol war erreichbar, aber nicht bedienbar — ein Druck ohne Maus tat nichts. Jetzt öffnet er das Menü, und das erreicht neu auch Kontostand, Umsätze und das Ein- und Ausblenden des Saldos. Rund 50 Bedienelemente, die Kontokacheln und die Wischaktionen tragen jetzt Namen, Zustand und einen Tastaturweg. Ein ausgeblendeter Saldo wird nie vorgelesen.</li>
+                    <li><strong>Daueraufträge kommen von der Bank</strong> statt aus der Hochrechnung — mit vereinbartem Betrag, Takt und nächstem Termin, auch für einen Auftrag, der erst künftig das erste Mal läuft. Nur auf Klick, weil er je nach Institut eine Freigabe kostet.</li>
+                    <li><strong>Das TAN-Verfahren lässt sich festlegen.</strong> Bisher hat die App die Rückfrage der Bank immer selbst beantwortet.</li>
+                    <li><strong>Die App sagt selbst, wenn eine neue Fassung da ist.</strong> Kein Fenster springt auf, nichts wird im Hintergrund installiert — ein Zeichen neben dem Saldo wartet, bis du hinsiehst.</li>
+                </ul>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>Ab acht Konten war die Hälfte nicht mehr erreichbar.</strong> Die Reihe der Kontosymbole lief an beiden Enden über — unter Umständen samt dem aktiven Konto. Sie scrollt jetzt, holt das aktive Konto in die Mitte, und im Menü steht ein Eintrag je Konto.</li>
+                    <li><strong>Eine abgebrochene Freigabe ließ sich nicht neu anstoßen.</strong> Wer das Fenster seiner Bank versehentlich schloss, kam bis zum Neustart nicht mehr an sein Konto. Jetzt gibt es „Freigabe neu anstoßen“ — ohne QR-Scan, ohne neue Einrichtung.</li>
+                    <li><strong>„Failed to resume installing update“ ließ sich nicht abschütteln.</strong> Ein Rest einer früheren Aktualisierung blockierte jeden weiteren Versuch. Die App erkennt diesen einen Abbruch jetzt selbst und räumt ihn weg.</li>
+                    <li><strong>Die Details einer Buchung blieben nicht offen</strong> — und schon das Öffnen schrieb die Kategorie als von Hand gesetzt in die Datenbank. Jetzt wird nur geschrieben, was du selbst änderst.</li>
+                    <li><strong>Der Kontostand konnte aus der Reihenfolge der Bankantwort entstehen</strong>, und sein Alter war ihm nicht anzusehen — die Kopfzeile nannte nur die Stunde. Jetzt trägt alles, was nicht von heute ist, sein Datum.</li>
+                    <li><strong>Den Kontonamen der Bank hat die App weggeworfen.</strong> Zwei Konten derselben Bank sahen gleich aus und hießen gleich; beim zweiten stand der Kontoname dort, wo die Bank stehen muss — woran die Logoerkennung hängt.</li>
+                    <li><strong>Keine Bankseite mehr ohne dein Zutun</strong>, und die Einrichtung sagt jetzt, auf welchen Schritt und welches Konto sie wartet.</li>
+                </ul>
+                <p>Vollständig in <a href="https://github.com/klotzbrocken/simplebanking/blob/main/CHANGELOG.md">CHANGELOG.md</a>.</p>
+            ]]></description>
+        </item>
+        <item>
             <title>2.0.9</title>
             <pubDate>Thu, 22 Oct 2026 11:55:32 +0200</pubDate>
             <sparkle:version>20261022732</sparkle:version>
