@@ -1,5 +1,11 @@
 # Changelog — simplebanking
 
+## [Unreleased]
+
+### Behoben
+
+- **Der übernommene MoneyMoney-Verlauf war nirgends zu sehen** — knapp 3000 Buchungen aus mehreren Jahren, gemeldet als übernommen, und die Umsatzliste zeigte trotzdem nur die letzten Wochen. Sie lagen vollständig in der Datenbank; gelesen wird aber überall nur ein Fenster von `fetchDays` Tagen zurück, standardmäßig 60. Der Datei-Import hinterlässt dafür seit 1.4.0 eine Marke mit seiner Tiefe (`lastImportedDays`), der MoneyMoney-Nachtrag nicht — er schrieb Jahre in eine Datenbank, die niemand so weit zurück abfragt. *Gemeldet am 13.11.2026.* Die Marke wird jetzt nach dem Schreiben gesetzt, und zwar aus der **ältesten Buchung des Kontos** statt aus der gerade übernommenen Liste: Ein zweiter Lauf bringt nichts Neues herein (die Naht liegt dann schon am Anfang des Verlaufs), muss die Marke aber trotzdem setzen können — sonst wäre ein bereits vollzogener Umstieg nicht mehr zu heilen. Der Abrufzeitraum der Bank bleibt davon unberührt, der ist weiterhin auf 90 Tage gedeckelt.
+
 ## [2.2.1] — 2026-11-13
 
 ### Neu
