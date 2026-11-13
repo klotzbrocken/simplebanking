@@ -19,6 +19,10 @@ struct MoneyMoneyAbsage: Hashable {
         case depot              // portfolio = 1: Depots, Versicherungsverträge
         case nichtErreichbar    // YAXI kennt zu dieser BLZ keine Verbindung
         case nichtGeprueft      // Abfrage fehlgeschlagen, meist kein Netz
+        /// Nur im Bestandsweg (`MoneyMoneyBestand`): Das Konto ist in simplebanking
+        /// nicht verbunden. Ob seine Bank über Open Banking ginge, ist damit nicht
+        /// gesagt — dort wird gar nicht gefragt, weil die Antwort nichts ändert.
+        case nichtVerbunden
     }
     let konto: MoneyMoneyKonto
     let grund: Grund
@@ -37,6 +41,11 @@ struct MoneyMoneyAbsage: Hashable {
         case .nichtGeprueft:
             return L10n.t("konnte nicht geprüft werden",
                           "could not be checked")
+        case .nichtVerbunden:
+            // Sagt, was zu tun ist. „Nicht verbunden" allein ließe offen, ob das
+            // Konto überhaupt gehen würde.
+            return L10n.t("in simplebanking nicht verbunden — Konto hinzufügen, dann erneut übernehmen",
+                          "not connected in simplebanking — add the account, then import again")
         }
     }
 }
@@ -280,7 +289,34 @@ enum MoneyMoneyVorhaben {
 
     static func anlegen(_ neue: [MoneyMoneyVorhabenEintrag]) {
         eintraege = neue
-        if !neue.isEmpty { defaults.set(true, forKey: umstiegSchluessel) }
+        guard !neue.isEmpty else { return }
+        defaults.set(true, forKey: umstiegSchluessel)
+        defaults.removeObject(forKey: angelegtSchluessel)   // neues Vorhaben, neue Frist
+        anlegedatumSetzenFallsNoetig()
+    }
+
+    /// Einträge **hinzufügen**, ohne vorhandene wegzuwerfen.
+    ///
+    /// `anlegen` ersetzt die ganze Liste, und das ist im Assistenten richtig: Dort
+    /// entsteht das Vorhaben in einem Zug aus einer Auswahl. Der Weg über die
+    /// Einstellungen (`MoneyMoneyBestand`) kann aber auf ein Vorhaben treffen, das noch
+    /// offen ist — eine Bank aus der Ersteinrichtung, die nie verbunden wurde. Diese
+    /// Einträge zu überschreiben hieße, einen schon zugesagten Verlauf stillschweigend
+    /// fallen zu lassen.
+    ///
+    /// Eine IBAN, die schon einen **offenen** Eintrag hat, kommt nicht zweimal herein:
+    /// Zwei Einträge auf denselben Slot schrieben denselben Verlauf zweimal, und der
+    /// Fingerabdruck fängt das nicht, weil die zweite Runde hinter einer verschobenen
+    /// Naht liegt. Ein **erledigter** Eintrag steht dem nicht im Weg — er bedeutet „die
+    /// Bank steht", nicht „der Verlauf ist drin".
+    static func ergaenzen(_ neue: [MoneyMoneyVorhabenEintrag]) {
+        guard !neue.isEmpty else { return }
+        let offeneIbans = Set(offene.map { normiert($0.iban) })
+        let hinzu = neue.filter { !offeneIbans.contains(normiert($0.iban)) }
+        guard !hinzu.isEmpty else { return }
+        eintraege += hinzu
+        defaults.set(true, forKey: umstiegSchluessel)
+        anlegedatumSetzenFallsNoetig()
     }
 
     /// Ob dieser Mac einen Umstieg aus MoneyMoney hinter sich hat.
@@ -329,6 +365,39 @@ enum MoneyMoneyVorhaben {
 
     static func wegwerfen() {
         defaults.removeObject(forKey: schluessel)
+        defaults.removeObject(forKey: angelegtSchluessel)
+    }
+
+    // MARK: - Verfall
+
+    /// Wann das laufende Vorhaben angelegt wurde. Eigener Schlüssel und kein Feld im
+    /// Eintrag: Ein neues Feld in `MoneyMoneyVorhabenEintrag` müsste von schon
+    /// gespeicherten Einträgen dekodiert werden, und das ist der Preis nicht wert.
+    private static let angelegtSchluessel = "moneymoneyVorhabenAngelegtAm"
+
+    /// Danach gilt ein Vorhaben als aufgegeben.
+    ///
+    /// Ohne diese Grenze bleibt der Auszug (der ganze Umsatzverlauf **aller** Konten
+    /// der MoneyMoney-Datei) unbefristet neben der Datenbank liegen, sobald ein
+    /// Eintrag nie fertig wird — etwa weil die Bank nie verbunden wurde oder das Konto
+    /// nie abgerufen wird. Er wird weggeworfen, wenn der letzte Eintrag durch ist;
+    /// „nie fertig" hieß bisher „nie weggeworfen".
+    static let hoechstalter: TimeInterval = 30 * 24 * 60 * 60
+
+    /// `true`, wenn das Vorhaben zu alt ist. Ohne Anlegedatum (Vorhaben aus einer
+    /// Fassung vor 2.2.1) `false` — ein unbekanntes Alter ist kein Verfall.
+    static func istVerfallen(jetzt: Date = Date()) -> Bool {
+        guard !eintraege.isEmpty,
+              let angelegt = defaults.object(forKey: angelegtSchluessel) as? Date
+        else { return false }
+        return jetzt.timeIntervalSince(angelegt) > hoechstalter
+    }
+
+    /// Setzt das Anlegedatum, wenn noch keines steht. Nicht bei jedem Zutun neu:
+    /// Sonst verlängert jeder weitere Eintrag die Frist und das Vorhaben verfällt nie.
+    private static func anlegedatumSetzenFallsNoetig(_ jetzt: Date = Date()) {
+        guard defaults.object(forKey: angelegtSchluessel) == nil else { return }
+        defaults.set(jetzt, forKey: angelegtSchluessel)
     }
 
     /// Einen Eintrag ganz entfernen — nach dem Nachtrag, wenn er nichts mehr soll.

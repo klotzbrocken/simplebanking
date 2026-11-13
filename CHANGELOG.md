@@ -1,5 +1,24 @@
 # Changelog — simplebanking
 
+## [2.2.1] — 2026-11-13
+
+### Neu
+
+- **Der MoneyMoney-Umstieg geht jetzt auch nachträglich** — bis 2.2.0 war er ausschließlich Teil der Ersteinrichtung: Wer simplebanking schon benutzte und seinen MoneyMoney-Verlauf erst danach mitnehmen wollte, hätte alles löschen und neu einrichten müssen. Unter **Einstellungen → Konten** steht dafür „Verlauf aus MoneyMoney übernehmen …". Ein Blatt für alle Konten und nicht eines je Konto, weil eine MoneyMoney-Datenbank den Verlauf aller Konten trägt und mit *einem* Kennwort geöffnet wird — hätte der Einstieg an der Kontozeile gehängt, wäre das Kennwort je Konto erneut fällig gewesen.
+
+  Die Zuordnung läuft gegen die **vorhandenen Konten**, nicht gegen eine Abfrage bei YAXI. Im Assistenten muss gefragt werden, weil dort noch kein Konto existiert und die Antwort entscheidet, was einzurichten ist; bei einem Bestandssetup ist das längst beantwortet — das Konto ist da, die Zustimmung steht, Umsätze liegen in der Datenbank. Dieser Weg braucht deshalb **kein Netz**, und es gibt hier auch kein „nicht geprüft". Was nicht geht, wird mit Grund abgesagt: ohne IBAN, Depot, oder „in simplebanking nicht verbunden — Konto hinzufügen, dann erneut übernehmen". Übernommen wird wie bisher nur, was **älter** ist als die älteste Buchung, die das Konto schon hat; die vorhandenen Umsätze bleiben unberührt. Hat ein Konto noch gar keine Bankbuchung, fehlt der Bezugspunkt — dann steht das so da („wartet auf den ersten Abruf"), und der Verlauf rückt danach von selbst nach. Das Kennwort wird nur zum Entschlüsseln gebraucht und nicht gespeichert.
+
+### Behoben
+
+- **Der Verlauf konnte im falschen Konto landen** — der Nachtrag merkte sich das MoneyMoney-Konto an `accounts.rowid`, und die gilt nur innerhalb *der* Datei, aus der sie stammt. Wer eine andere Datenbank liest — eine Kopie aus einer Sicherung, eine zweite Fassung —, hat dort hinter derselben Nummer ein anderes Konto; der Nachtrag hätte stillschweigend den falschen Verlauf geschrieben. Jetzt entscheidet die IBAN, die über Dateien hinweg trägt; die Nummer bleibt nur Rückfall. Aufgefallen beim Bau des nachträglichen Umstiegs, der genau diesen Fall erlaubt — ausgelöst hat er ihn bei niemandem.
+- **Der MoneyMoney-Auszug blieb unbefristet liegen** — zwischen Auswahl und Nachtrag legt die App den Auszug neben die Datenbank (nur für Dich lesbar) und wirft ihn weg, sobald der letzte Eintrag durch ist. „Nie fertig" hieß damit „nie weggeworfen": Ein Konto, das nie abgerufen wird, ließ den ganzen Umsatzverlauf **aller** Konten der MoneyMoney-Datei dauerhaft dort stehen. Nach 30 Tagen gelten Vorhaben und Auszug jetzt als aufgegeben und verschwinden. Ein weiteres Konto verlängert die Frist ausdrücklich nicht — sonst hält sie jeder Nachtrag am Leben.
+- **Ein gescheitertes Speichern der PayPal-Umsätze blieb stumm** — schlägt das Schreiben fehl, weil die Datenbank gerade von der Kommandozeile oder dem MCP-Server gehalten wird, las die App danach den **alten** Stand und die Liste sah normal aus, nur veraltet. Im Protokoll stand dazu nichts. Jetzt schon.
+
+### Innen
+
+- **Vormerkungen zu löschen ist nicht mehr der Standard** — `upsert` konnte nach dem Schreiben Vormerkungen entfernen, die der Abruf nicht mehr enthielt, und tat das ohne Zutun. Fünf Aufrufstellen mussten sich daran erinnern, es abzuschalten, und genau eine hatte es vergessen — das war der Fehler, der bis 2.0.3 jeden Datei-Import alle Vormerkungen des Kontos kosten ließ. Der Standard ist jetzt die harmlose Fassung; die beiden Live-Abrufe sagen ausdrücklich, dass sie löschen wollen.
+- **Ein zweiter Betragsparser im Überweisungsformular ist weg** — er löschte jeden Punkt und stimmte nur, solange getippt wird: Eine andere Stelle macht bei jedem Tastendruck aus Punkten Kommas. `amountInput` wird aber auch von außen gesetzt — aus einem GiroCode, einer gelesenen Rechnung, einer Vorlage. Käme von dort je „10.50", wären daraus 1050 € geworden. Jetzt rechnet dieselbe geprüfte Funktion wie in simplesend, die am Muster entscheidet, ob ein Trenner Tausender oder Dezimale meint.
+
 ## [2.2.0] — 2026-11-12
 
 ### Neu

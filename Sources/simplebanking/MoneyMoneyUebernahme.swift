@@ -83,13 +83,48 @@ enum MoneyMoneyAblage {
 @MainActor
 enum MoneyMoneyNachtrag {
 
+    /// Was aus einem Eintrag geworden ist. Die Einstellungen zeigen das Zeile für
+    /// Zeile an: Wer die Übernahme selbst angestoßen hat, erwartet eine Antwort und
+    /// nicht nur das Verschwinden des Blattes.
+    struct Bericht: Sendable {
+        enum Ausgang: Sendable, Equatable {
+            case uebernommen
+            /// Der Slot hat noch keine Bankbuchung, also fehlt die Naht. Der Eintrag
+            /// bleibt liegen und rückt nach dem nächsten Abruf von selbst nach.
+            case wartetAufAbruf
+            case gescheitert(String)
+        }
+        var iban: String
+        var buchungen = 0
+        var kategorien = 0
+        var ausgang: Ausgang = .uebernommen
+    }
+
     /// Alle Einträge, deren Konto inzwischen existiert.
+    ///
+    /// Der Rückgabewert ist seit 2.2.1 die Liste der Berichte statt der Summe der
+    /// Buchungen — die drei Aufrufer im Abruf- und Startweg verwerfen ihn wie bisher,
+    /// der Weg über die Einstellungen stellt ihn hin.
     @discardableResult
-    static func alleFaelligen() async -> Int {
+    static func alleFaelligen() async -> [Bericht] {
+        // Zu alt heißt aufgegeben: Vorhaben und Auszug weg. Der Auszug trägt den
+        // Umsatzverlauf aller Konten der MoneyMoney-Datei, und ein Eintrag, der nie
+        // fertig wird (Bank nie verbunden, Konto nie abgerufen), ließ ihn bisher für
+        // immer liegen.
+        if MoneyMoneyVorhaben.istVerfallen() {
+            AppLogger.log("MoneyMoney-Nachtrag: Vorhaben älter als "
+                          + "\(Int(MoneyMoneyVorhaben.hoechstalter / 86_400)) Tage — "
+                          + "\(MoneyMoneyVorhaben.eintraege.count) Einträge und Auszug verworfen",
+                          category: "MoneyMoney", level: "WARN")
+            MoneyMoneyVorhaben.wegwerfen()
+            MoneyMoneyAblage.wegwerfen()
+            return []
+        }
+
         let eintraege = MoneyMoneyVorhaben.eintraege
         guard !eintraege.isEmpty else {
             MoneyMoneyAblage.wegwerfenWennFertig()
-            return 0
+            return []
         }
         guard let auszug = MoneyMoneyAblage.holen() else {
             // Ohne Auszug ist nichts nachzutragen, und die Einträge würden ewig
@@ -97,10 +132,10 @@ enum MoneyMoneyNachtrag {
             AppLogger.log("MoneyMoney-Nachtrag: Ablage fehlt, \(eintraege.count) Einträge verworfen",
                           category: "MoneyMoney", level: "WARN")
             MoneyMoneyVorhaben.wegwerfen()
-            return 0
+            return []
         }
 
-        var buchungen = 0
+        var berichte: [Bericht] = []
         for eintrag in eintraege {
             let gesucht = MoneyMoneyVorhaben.normiert(eintrag.iban)
             guard let slot = MultibankingStore.shared.slots.first(where: {
@@ -122,24 +157,42 @@ enum MoneyMoneyNachtrag {
                 AppLogger.log("MoneyMoney-Nachtrag: slot=\(slot.id) hat noch keine "
                               + "Bankbuchungen — Verlauf wartet auf die Naht",
                               category: "MoneyMoney")
+                berichte.append(Bericht(iban: eintrag.iban, ausgang: .wartetAufAbruf))
                 continue
             }
+
+            // Das MoneyMoney-Konto zu dieser IBAN — gebraucht für den Kurznamen und
+            // für den Kontoschlüssel.
+            let mmKonto = auszug.konten.first(where: {
+                MoneyMoneyVorhaben.normiert($0.iban) == gesucht
+            })
 
             // Den Namen, den der Nutzer in MoneyMoney selbst vergeben hat, als
             // Kurznamen übernehmen. Nur wo keiner steht: Ein vorhandener Kurzname
             // ist seine Entscheidung.
             if (slot.nickname ?? "").isEmpty,
-               let mmName = auszug.konten.first(where: {
-                   MoneyMoneyVorhaben.normiert($0.iban) == gesucht
-               })?.name,
+               let mmName = mmKonto?.name,
                !mmName.trimmingCharacters(in: .whitespaces).isEmpty {
                 MultibankingStore.shared.updateNickname(mmName, forSlotId: slot.id)
             }
 
+            // **Der Schlüssel kommt aus dem Auszug, nicht aus dem Eintrag.**
+            // `kontoSchluessel` ist `accounts.rowid` und gilt nur innerhalb *der*
+            // Datenbank, aus der er stammt. Der Weg über die Einstellungen kann eine
+            // andere Datei lesen (eine Kopie aus einer Sicherung, eine zweite
+            // Fassung) — dort zeigt dieselbe rowid auf ein anderes Konto, und der
+            // Nachtrag schriebe stillschweigend den falschen Verlauf in den Slot.
+            // Die IBAN trägt über Dateien hinweg, die rowid nicht. Sie bleibt als
+            // Rückfall für den Fall, dass der Auszug das Konto nicht mehr kennt.
+            let kontoSchluessel = mmKonto?.schluessel ?? eintrag.kontoSchluessel
+
             do {
                 let ergebnis = try await MoneyMoneyUebernahme.nachtragen(
-                    slotId: slot.id, kontoSchluessel: eintrag.kontoSchluessel, auszug: auszug)
-                buchungen += ergebnis.buchungen
+                    slotId: slot.id, kontoSchluessel: kontoSchluessel, auszug: auszug)
+                berichte.append(Bericht(iban: eintrag.iban,
+                                        buchungen: ergebnis.buchungen,
+                                        kategorien: ergebnis.kategorien,
+                                        ausgang: .uebernommen))
                 AppLogger.log("MoneyMoney-Nachtrag: slot=\(slot.id) → "
                               + "\(ergebnis.buchungen) Buchungen, \(ergebnis.kategorien) Kategorien"
                               + (ergebnis.uebergangeneKategorien.isEmpty ? ""
@@ -151,6 +204,8 @@ enum MoneyMoneyNachtrag {
                 AppLogger.log("MoneyMoney-Nachtrag gescheitert slot=\(slot.id): "
                               + "\(error.localizedDescription)",
                               category: "MoneyMoney", level: "ERROR")
+                berichte.append(Bericht(iban: eintrag.iban,
+                                        ausgang: .gescheitert(error.localizedDescription)))
             }
             // Erledigt ist erledigt — auch bei einem Fehler. Ein zweiter Versuch
             // beim nächsten Start würde denselben Fehler wiederholen und den
@@ -159,7 +214,7 @@ enum MoneyMoneyNachtrag {
         }
 
         MoneyMoneyAblage.wegwerfenWennFertig()
-        return buchungen
+        return berichte
     }
 }
 

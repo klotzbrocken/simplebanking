@@ -259,7 +259,10 @@ final class MoneyMoneyVorhabenAufraeumenTests: XCTestCase {
     /// statt alles zu nehmen.
     func testDerNachtragHaengtAmSchreibenDerBankumsaetze() throws {
         let bar = Quelltext.ohneKommentare(try Quelltext.datei("BalanceBar.swift"))
-        guard let schreiben = bar.range(of: "TransactionsDatabase.upsert(transactions: sortedNetwork)"),
+        // Nur bis zum Argumentnamen suchen: Mit 2.2.1 kam `purgeStalePending: true`
+        // ausdrücklich dazu, und an der festen ganzen Zeichenkette scheiterte der Test,
+        // obwohl die Reihenfolge stimmte.
+        guard let schreiben = bar.range(of: "TransactionsDatabase.upsert(transactions: sortedNetwork"),
               let nachtrag = bar.range(of: "MoneyMoneyNachtrag.alleFaelligen()", range: schreiben.upperBound..<bar.endIndex)
         else { return XCTFail("Der Nachtrag steht nicht hinter dem Schreiben der Bankumsätze") }
         XCTAssertLessThan(schreiben.upperBound, nachtrag.lowerBound)

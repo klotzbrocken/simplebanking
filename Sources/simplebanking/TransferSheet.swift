@@ -178,13 +178,18 @@ struct TransferSheet: View {
         availableBalance + dispoLimit
     }
 
+    /// Derselbe Parser wie in simplesend, nicht ein zweiter.
+    ///
+    /// Hier stand eine eigene Fassung, die **jeden Punkt löschte** und sich damit auf
+    /// `sanitizeDecimal` verließ, das bei jedem Tastendruck Punkte zu Kommas macht.
+    /// Solange nur getippt wird, stimmt das. Gesetzt wird `amountInput` aber auch von
+    /// außen — aus einem GiroCode, einer gelesenen Rechnung, einer Vorlage. Käme von
+    /// dort je „10.50", wären daraus 1050 € geworden, ohne dass es irgendwo auffällt.
+    /// `sanitizeAmountInput` entscheidet dagegen am Muster, ob ein Trenner Tausender
+    /// oder Dezimale meint, und hat Tests dafür.
     private var amountValue: Decimal {
-        let cleaned = amountInput
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "€", with: "")
-            .replacingOccurrences(of: ".", with: "")
-            .replacingOccurrences(of: ",", with: ".")
-        return Decimal(string: cleaned) ?? 0
+        QuickSendFormatting.amountDecimal(
+            QuickSendFormatting.sanitizeAmountInput(amountInput)) ?? 0
     }
 
     /// Überschreitet das normale Guthaben (ohne Dispo) — User-feedback

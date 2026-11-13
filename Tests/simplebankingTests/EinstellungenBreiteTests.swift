@@ -88,4 +88,19 @@ final class EinstellungenBreiteTests: XCTestCase {
         // und dann fehlt links die Hälfte.
         XCTAssertEqual(host.frame.width, 480, accuracy: 0.5)
     }
+
+    /// Der längste Knopf in Einstellungen → Konten (2.2.1: der nachträgliche
+    /// MoneyMoney-Umstieg). Er steht unter „Konto hinzufügen" und ist mit Abstand die
+    /// breiteste Zeile dort — also genau die Sorte Zeile, die am 01.10.2026 die ganze
+    /// Seite verrutschen ließ. Wird der Text länger oder kommt eine Sprache mit
+    /// längerer Fassung dazu, schlägt dieser Test an, bevor es jemand sieht.
+    func test_moneyMoneyUebernahmeKnopf_passtInDieKarte() {
+        for text in ["Verlauf aus MoneyMoney übernehmen …",
+                     "Import history from MoneyMoney …"] {
+            let knopf = Label(text, systemImage: "arrow.down.doc")
+                .font(ThemeFonts.body(size: 13))
+            XCTAssertLessThan(breite(knopf), platzInDerKarte,
+                              "„\(text)" + "\" ist zu breit für die Karte")
+        }
+    }
 }

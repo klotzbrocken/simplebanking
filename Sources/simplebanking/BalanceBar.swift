@@ -1247,7 +1247,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             if !txs.isEmpty {
                 let sorted = sortTransactionsNewestFirst(txs)
                 // Slot ausdrücklich mitgeben, nicht aus dem globalen activeSlotId raten.
-                try? TransactionsDatabase.upsert(transactions: sorted, slotId: slotId)
+                do {
+                    _ = try TransactionsDatabase.upsert(transactions: sorted, slotId: slotId,
+                                                        purgeStalePending: true)
+                } catch {
+                    // Nicht stillschweigend: Schlägt das Schreiben fehl (Datenbank von
+                    // CLI/MCP gesperrt, Platte voll), liest die Zeile darunter den ALTEN
+                    // Stand und die Liste sieht normal aus — nur veraltet. Ohne diese
+                    // Zeile stand dazu nichts im Protokoll.
+                    AppLogger.log("PayPal: Umsätze konnten nicht gespeichert werden "
+                                  + "(slot=\(slotId.prefix(8))): \(error.localizedDescription)",
+                                  category: "PayPal", level: "ERROR")
+                }
                 if let persisted = try? TransactionsDatabase.loadTransactions(days: days) {
                     txVM.transactions = sortTransactionsNewestFirst(persisted)
                     txVM.loadEnrichmentData(bankId: "primary")
@@ -6208,7 +6219,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                         // muss hier eigens laufen, sonst bleibt eine erledigte Vormerkung stehen.
                         try TransactionsDatabase.purgeAllPending()
                     } else {
-                        try TransactionsDatabase.upsert(transactions: sortedNetwork)
+                        // `purgeStalePending: true` ausdrücklich: Dies ist der Live-Abruf
+                        // der Bank, und was sie nicht mehr meldet, ist erledigt. Seit
+                        // 2.2.1 ist der Standard `false` — die löschende Fassung muss
+                        // dastehen, nicht aus dem Vergessen entstehen.
+                        try TransactionsDatabase.upsert(transactions: sortedNetwork,
+                                                        purgeStalePending: true)
                     }
                     // Jetzt steht die Naht: Ein wartender MoneyMoney-Verlauf kann
                     // nachrücken, ohne die Wochen doppelt zu bringen, die gerade

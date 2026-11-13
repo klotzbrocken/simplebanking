@@ -284,6 +284,9 @@ struct SettingsView: View {
     @State private var showSlotDeleteConfirmation: Bool = false
     @State private var slotBeingRenamed: BankSlot? = nil
     @State private var slotBeingImported: BankSlot? = nil
+    /// Der nachträgliche MoneyMoney-Umstieg — ein Blatt für alle Konten, weil eine
+    /// MoneyMoney-Datenbank mit *einem* Kennwort geöffnet wird.
+    @State private var zeigeMoneyMoneyUebernahme = false
     @State private var renameText: String = ""
     @State private var nicknameText: String = ""
     @State private var slotColorSelection: [String: Color] = [:]
@@ -1494,6 +1497,30 @@ struct SettingsView: View {
                 .buttonStyle(PlainButtonStyle())
                 .foregroundColor(.accentColor)
 
+                // Der nachträgliche MoneyMoney-Umstieg (2.2.1). Bis 2.2.0 war er
+                // ausschließlich Teil der Ersteinrichtung; wer simplebanking schon
+                // benutzte, hätte alles löschen und neu anlegen müssen.
+                //
+                // Sichtbar, sobald es ein Bankkonto gibt — und nicht erst, wenn eine
+                // MoneyMoney-Datenbank am üblichen Ort liegt. Genau die Nutzer, die das
+                // Blatt am meisten brauchen, haben ihre Datei woanders (Kopie aus einer
+                // Sicherung, zweite Fassung); eine Bedingung auf den üblichen Ort
+                // versteckte die Funktion vor ihnen, und dagegen kommen sie nicht an.
+                // In einer frischen Installation steht sie nicht: Dort führt der
+                // Assistent, und der bietet den Umstieg selbst an.
+                if multibankingStore.slots.contains(where: { !$0.isReceiptSlot }) {
+                    Button(action: { zeigeMoneyMoneyUebernahme = true }) {
+                        Label(t("Verlauf aus MoneyMoney übernehmen …",
+                                "Import history from MoneyMoney …"),
+                              systemImage: "arrow.down.doc")
+                            .font(ThemeFonts.body(size: 13))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .foregroundColor(.accentColor)
+                    .help(t("Konten, Verlauf und Kategorien aus einer MoneyMoney-Datenbank — für Konten, die hier schon verbunden sind.",
+                            "Accounts, history and categories from a MoneyMoney database — for accounts already connected here."))
+                }
+
                 if multibankingStore.slots.contains(where: { $0.isReceiptSlot }) {
                     Text(t("Händler-Login-Cookies (REWE/dm/Amazon) werden lokal gespeichert, damit der Sync ohne erneuten Login läuft. Mit Abmelden werden sie gelöscht.",
                            "Merchant login cookies (REWE/dm/Amazon) are stored locally so syncing works without logging in again. Sign out clears them."))
@@ -1518,6 +1545,9 @@ struct SettingsView: View {
                     requestMasterPassword: { requestMasterPassword() },
                     onClose: { slotBeingImported = nil }
                 )
+            }
+            .sheet(isPresented: $zeigeMoneyMoneyUebernahme) {
+                MoneyMoneyBestandSheet(onClose: { zeigeMoneyMoneyUebernahme = false })
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.settingsCard))

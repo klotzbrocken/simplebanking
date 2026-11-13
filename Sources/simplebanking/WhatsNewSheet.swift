@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.2.1":
+            return v221
         case "2.2.0":
             return v220
         case "2.0.9":
@@ -299,6 +301,19 @@ enum WhatsNewContent {
     /// Dieselbe Auswahlregel wie immer — nur, was jemand auch merkt. Der Kontoname
     /// auf der Kachel und der benannte Schritt in der Einrichtung stehen deshalb
     /// nicht hier: Beides fällt erst auf, wenn man es daneben legt.
+    private static let v221: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "square.and.arrow.down",
+            tint: .sbBlueStrong,
+            title: L10n.t("MoneyMoney-Umstieg auch nachtr\u{00E4}glich",
+                          "Switch from MoneyMoney later, too"),
+            description: L10n.t(
+                "Der Umstieg aus MoneyMoney war bisher Teil der Ersteinrichtung \u{2014} wer simplebanking schon benutzte und seinen Verlauf erst sp\u{00E4}ter mitnehmen wollte, h\u{00E4}tte alles l\u{00F6}schen und neu anlegen m\u{00FC}ssen. Jetzt steht er in **Einstellungen \u{2192} Konten**: ein Blatt f\u{00FC}r alle Konten, weil eine MoneyMoney-Datenbank mit *einem* Kennwort ge\u{00F6}ffnet wird. \u{00DC}bernommen wird nur, was \u{00E4}lter ist als die \u{00E4}lteste Buchung, die das Konto schon hat \u{2014} die vorhandenen Ums\u{00E4}tze bleiben unber\u{00FC}hrt. Konten, die hier nicht verbunden sind, werden mit Grund abgesagt, statt stillschweigend zu fehlen. Das Kennwort wird wie bisher nur zum Entschl\u{00FC}sseln gebraucht und nicht gespeichert.",
+                "Importing from MoneyMoney used to be part of first-time setup only \u{2014} if you already used simplebanking and wanted your history later, you would have had to delete everything and start over. It now lives in **Settings \u{2192} Accounts**: one sheet for all accounts, because a MoneyMoney database opens with *one* password. Only entries older than the account's oldest existing booking are imported \u{2014} what is already there stays untouched. Accounts not connected here are declined with a reason instead of quietly missing. The password is still only used to decrypt and is never stored."
+            )
+        ),
+    ]
+
     private static let v220: [WhatsNewItem] = [
         WhatsNewItem(
             icon: "square.and.arrow.down",

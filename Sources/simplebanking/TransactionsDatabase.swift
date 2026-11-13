@@ -602,6 +602,12 @@ enum TransactionsDatabase {
     /// solange sie bestehen), falsch für Datei-Importe: OFX/CAMT/Deep-Sync enthalten nie
     /// Vormerkungen — bis 2.0.3 löschte jeder Import stillschweigend alle Vormerkungen
     /// des Slots.
+    ///
+    /// **Der Standard ist seit 2.2.1 `false`, also die harmlose Fassung.** Vorher war er
+    /// `true`: Fünf Aufrufstellen mussten sich daran erinnern, ihn abzuschalten, und
+    /// genau eine hatte es vergessen — das war der 2.0.3-Fehler. Löschen soll dastehen,
+    /// wo gelöscht wird, und nicht aus dem Vergessen entstehen. Die beiden Live-Pfade in
+    /// `BalanceBar` geben `true` ausdrücklich mit.
     /// Liefert die `tx_id`s in der Reihenfolge der übergebenen Buchungen.
     ///
     /// Gebraucht vom MoneyMoney-Import, der die Kategorie NACH dem Schreiben als
@@ -610,7 +616,7 @@ enum TransactionsDatabase {
     /// nachzubauen hieße, sie zweimal zu pflegen und beim nächsten Umbau
     /// auseinanderlaufen zu lassen.
     @discardableResult
-    static func upsert(transactions: [TransactionsResponse.Transaction], slotId explicitSlotId: String? = nil, bankId: String = "primary", purgeStalePending: Bool = true) throws -> [String] {
+    static func upsert(transactions: [TransactionsResponse.Transaction], slotId explicitSlotId: String? = nil, bankId: String = "primary", purgeStalePending: Bool = false) throws -> [String] {
         guard !transactions.isEmpty else { return [] }
 
         try migrate(bankId: bankId)
