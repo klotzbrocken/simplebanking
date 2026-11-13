@@ -49,6 +49,33 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.2.1</title>
+            <pubDate>Fri, 13 Nov 2026 16:03:45 +0100</pubDate>
+            <sparkle:version>20261113775</sparkle:version>
+            <sparkle:shortVersionString>2.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.2.1/simplebanking-2.2.1.dmg" length="35961990" type="application/octet-stream" sparkle:edSignature="iHlvfkCYxJk2NWpk7/nV9zkshTxL3MwihQz9ANlP2JW3og4rXAFIwmxYcppUM2qIpODtNnKpcr4HzYnCKORHCQ=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.2.1</h2>
+                <h3>Neu</h3>
+                <ul>
+                    <li><strong>Umstieg von MoneyMoney auch nachtr&#228;glich.</strong> Bisher ging das nur bei der Ersteinrichtung &#8212; wer simplebanking schon benutzte, h&#228;tte alles l&#246;schen m&#252;ssen. Jetzt unter <em>Einstellungen &#8594; Konten</em>. Konten, die hier schon verbunden sind, bekommen nur den Verlauf; f&#252;r alle anderen &#246;ffnet sich der Einrichtungs-Assistent und geht Bank f&#252;r Bank durch. Dein MoneyMoney-Kennwort wird dabei nicht zweimal gebraucht.</li>
+                    <li><strong>&#8222;Verf&#252;gbar&#8220; unter dem Kontostand.</strong> Manche Banken &#8212; die ING etwa &#8212; geben &#252;ber ihre Schnittstelle nur den gebuchten Saldo heraus, zeigen in ihrer App aber den Stand abz&#252;glich schon vorgemerkter Abbuchungen. simplebanking rechnet die zweite Zahl jetzt selbst und zeigt sie im Untertitel, im Flyout wie in der Umsatzliste. Nur wenn etwas vorgemerkt ist; vorgemerkte Eing&#228;nge z&#228;hlen bewusst nicht. Die gro&#223;e Zahl bleibt, was die Bank sagt.</li>
+                </ul>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>&#8222;An dieser Stelle liegt keine lesbare Datei&#8220;</strong> &#8212; &#252;ber eine Datei, die im Finder sichtbar war. Der MoneyMoney-Import pr&#252;fte auf eine Art, die macOS f&#252;r fremde App-Ordner verweigert, ohne zu fragen. Die Meldung sagt jetzt, was zu tun ist, und f&#252;hrt direkt zum Festplattenvollzugriff.</li>
+                    <li><strong>Der Verlauf konnte im falschen Konto landen,</strong> wenn eine andere MoneyMoney-Datei gelesen wurde als die, aus der die Auswahl stammte. Jetzt entscheidet die IBAN.</li>
+                    <li><strong>Vorgemerkte Ums&#228;tze</strong> werden beim Datei-Import nicht mehr versehentlich gel&#246;scht &#8212; die l&#246;schende Variante muss jetzt ausdr&#252;cklich verlangt werden.</li>
+                    <li><strong>Dauerhafte Rechenlast nach ge&#246;ffneter Umsatzliste</strong> &#8212; die App zeichnete die Saldokarte bis zum Beenden weiter. Jetzt null.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.2.0</title>
             <pubDate>Thu, 12 Nov 2026 12:01:19 +0100</pubDate>
             <sparkle:version>20261112768</sparkle:version>
