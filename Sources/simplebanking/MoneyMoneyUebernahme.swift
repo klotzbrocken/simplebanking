@@ -280,18 +280,8 @@ enum MoneyMoneyUebernahme {
             }
         }
 
-        // **Ohne diese Marke bleibt der übernommene Verlauf unsichtbar.** Jede Liste,
-        // der Export und die Kategorisierung lesen nur `displayDays` zurück —
-        // standardmäßig 60 Tage. Die übernommenen Jahre lägen also in der Datenbank
-        // und wären nirgends zu sehen; gemeldet am 13.11.2026 nach einem Umstieg mit
-        // knapp 3000 Buchungen. Derselbe Schritt wie nach einem Deep-Sync-Import
-        // (`ImportSheet.runDeepSync`).
-        //
-        // Nach dem Schreiben und über den **Bestand** des Slots, nicht über die gerade
-        // übernommene Liste: Ein zweiter Lauf bringt nichts Neues herein (die Naht
-        // liegt dann schon am Anfang des Verlaufs), müsste die Marke aber trotzdem
-        // setzen können.
-        tiefeMerken(slotId: slotId, bankId: bankId)
+        // Sonst liegt der übernommene Verlauf jenseits des Lesefensters (s. `Anzeigetiefe`).
+        Anzeigetiefe.merken(slotId: slotId, bankId: bankId)
 
         // **Der Überschneidungszeitraum.** Ab der Naht liefert die Bank die Buchungen
         // selbst; übernommen wird davon nichts, sonst stünde jede zweimal da. Die
@@ -345,36 +335,6 @@ enum MoneyMoneyUebernahme {
                       + "kategorien=\(ergebnis.kategorien) naht=\(naht ?? "-")",
                       category: "MoneyMoney")
         return ergebnis
-    }
-
-    /// Wie weit der Verlauf zurückreicht, in Tagen ab `heute` — einschließlich des
-    /// Stichtags, weil `loadTransactions(days:)` ihn mitzählt (Stichtag = heute −
-    /// (Tage − 1)). `nil`, wenn das Datum nicht lesbar ist.
-    static func tiefeInTagen(_ tag: String, heute: Date = Date()) -> Int? {
-        let format = DateFormatter()
-        format.locale = Locale(identifier: "en_US_POSIX")
-        format.timeZone = .current
-        format.dateFormat = "yyyy-MM-dd"
-        let kalender = Calendar(identifier: .gregorian)
-        guard let datum = format.date(from: tag),
-              let abstand = kalender.dateComponents([.day],
-                                                    from: kalender.startOfDay(for: datum),
-                                                    to: kalender.startOfDay(for: heute)).day
-        else { return nil }
-        return max(1, abstand + 1)
-    }
-
-    /// Nur nach oben: Ein tieferer Import von früher darf nicht verloren gehen.
-    private static func tiefeMerken(slotId: String, bankId: String) {
-        guard let aelteste = (try? TransactionsDatabase.aeltesteBuchung(slotId: slotId,
-                                                                        bankId: bankId)) ?? nil,
-              let tiefe = tiefeInTagen(aelteste) else { return }
-        var einstellungen = BankSlotSettingsStore.load(slotId: slotId)
-        guard tiefe > (einstellungen.lastImportedDays ?? 0) else { return }
-        einstellungen.lastImportedDays = tiefe
-        BankSlotSettingsStore.save(einstellungen, slotId: slotId)
-        AppLogger.log("MoneyMoney: Anzeigezeitraum slot=\(slotId) auf \(tiefe) Tage erweitert",
-                      category: "MoneyMoney")
     }
 
     /// Gibt es die Kategorie schon, wird sie benutzt; sonst wird sie als eigene

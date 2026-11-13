@@ -250,6 +250,7 @@ struct ImportSheet: View {
         statusMessage = t("Lese OFX-Datei…", "Reading OFX file…")
         do {
             let r = try OFXImporter.importFile(url: url, slotId: slotId)
+            Anzeigetiefe.merken(slotId: slotId)
             isRunning = false
             result = r
         } catch {
@@ -266,6 +267,7 @@ struct ImportSheet: View {
         statusMessage = t("Lese CAMT.053-Datei…", "Reading CAMT.053 file…")
         do {
             let r = try Camt053Importer.importFile(url: url, slotId: slotId)
+            Anzeigetiefe.merken(slotId: slotId)
             isRunning = false
             result = r
         } catch {
@@ -301,11 +303,12 @@ struct ImportSheet: View {
                     slotId: slotId, days: days, masterPassword: pw)
                 : try await YaxiDeepSyncImporter.importHistory(
                     slotId: slotId, days: days, masterPassword: pw)
-            // Persistiere die Import-Tiefe, damit die UI nach dem Deep-Sync auch
-            // wirklich alle 180/365 Tage anzeigt (Auto-Sync bleibt bei fetchDays-Cap).
-            var s = BankSlotSettingsStore.load(slotId: slotId)
-            s.lastImportedDays = max(s.lastImportedDays ?? 0, days)
-            BankSlotSettingsStore.save(s, slotId: slotId)
+            // Damit die UI nach dem Deep-Sync auch wirklich alle 180/365 Tage anzeigt
+            // (Auto-Sync bleibt bei `fetchDays`-Cap). Über den Bestand und nicht über
+            // `days`: Hat die Bank weniger geliefert, als angefragt war, ist das
+            // Fenster sonst breiter als die Daten — und ein zweiter Lauf könnte eine
+            // fehlende Marke nicht nachholen.
+            Anzeigetiefe.merken(slotId: slotId)
             isRunning = false
             result = r
         } catch {

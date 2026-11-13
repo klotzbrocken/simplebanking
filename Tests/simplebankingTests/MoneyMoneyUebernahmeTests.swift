@@ -293,21 +293,6 @@ final class MoneyMoneyUebernahmeTests: XCTestCase {
         return former.string(from: Date().addingTimeInterval(Double(-abstand) * 86_400))
     }
 
-    func testDieTiefeZaehltDenStichtagMit() {
-        // Vor 100 Tagen gebucht: `loadTransactions(days:)` nimmt heute − (Tage − 1)
-        // als Stichtag, also braucht es 101 Tage, damit die Buchung hereinfällt.
-        XCTAssertEqual(MoneyMoneyUebernahme.tiefeInTagen(tag(100)), 101)
-    }
-
-    func testHeuteGebuchtErgibtEinenTag() {
-        XCTAssertEqual(MoneyMoneyUebernahme.tiefeInTagen(tag(0)), 1)
-    }
-
-    func testOhneLesbaresDatumGibtEsKeineTiefe() {
-        XCTAssertNil(MoneyMoneyUebernahme.tiefeInTagen("Mittwoch"))
-        XCTAssertNil(MoneyMoneyUebernahme.tiefeInTagen(""))
-    }
-
     /// Der eigentliche Fehler von 2.2.1: Buchungen in der Datenbank, aber
     /// `displayDays` bei 60 — und damit nichts zu sehen.
     func testDieUebernahmeWeitetDenAnzeigezeitraum() async throws {
