@@ -1,12 +1,14 @@
 # Changelog — simplebanking
 
-## [Unreleased]
+## [2.2.2] — 2026-11-13
 
 ### Behoben
 
 - **Importierte Historie war nirgends zu sehen** — knapp 3000 MoneyMoney-Buchungen aus mehreren Jahren, gemeldet als übernommen, und die Umsatzliste zeigte trotzdem nur die letzten Wochen. Sie lagen vollständig in der Datenbank; gelesen wird aber überall nur ein Fenster von `fetchDays` Tagen zurück, standardmäßig 60. Der Deep-Sync hinterlässt dafür seit 1.4.0 eine Marke mit seiner Tiefe (`lastImportedDays`) — **drei der vier Importwege taten das nicht**: der MoneyMoney-Nachtrag, der OFX- und der CAMT.053-Dateiimport. Alle drei schrieben Jahre in eine Datenbank, die niemand so weit zurück abfragt, und zwar ohne Fehlermeldung: Geschrieben, gezählt und gemeldet war alles richtig, nur unsichtbar — in der Liste, im Export und in der Kategorisierung. *Gemeldet am 13.11.2026.*
 
   Die Marke liegt jetzt an **einer** Stelle (`Anzeigetiefe`) und kommt aus der ältesten Buchung des Kontos statt aus der gerade geschriebenen Liste. Das heilt auch einen schon vollzogenen Import: Ein zweiter Lauf bringt nichts Neues herein — bei MoneyMoney liegt die Naht dann am Anfang des Verlaufs, bei einer Datei sind es lauter Doubletten —, setzt die Marke aber trotzdem. Aus demselben Grund rechnet auch der Deep-Sync nicht mehr mit der angefragten Zahl: Hat die Bank weniger geliefert als die angefragten 365 Tage, war das Fenster bisher breiter als die Daten. Der **Abrufzeitraum** der Bank bleibt unberührt, der ist weiterhin auf 90 Tage gedeckelt. Ein Test prüft die Zusage am Quelltext, weil kein Typ sie erzwingt — ein Importweg, der die Marke vergisst, schreibt ja fehlerfrei.
+
+- **Der Demo-Modus zeigte 60 Tage, obwohl er ein Jahr erzeugt** — dieselbe Ursache, nur ohne Schaden: Die Demo-Buchungen gehen über ein Jahr in `transactions-demo.db`, aus der CLI, MCP und die Raycast-Erweiterung lesen; die App selbst erzeugte ihre Demo-Liste für das 60-Tage-Fenster. Zwei verschiedene Demos derselben Einstellung, und Fixkosten, Abos und der Jahresverlauf hatten in der App zu wenig Material. Die Demo-Slots tragen jetzt ihr Jahr als Lesefenster, und der Demo-Abruf rechnet mit demselben Fenster wie die Umsatzliste — vorher schrumpfte die Liste bei jedem ↻ auf die Abruftiefe zusammen.
 
 ## [2.2.1] — 2026-11-13
 

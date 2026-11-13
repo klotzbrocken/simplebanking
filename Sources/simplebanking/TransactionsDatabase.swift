@@ -546,6 +546,11 @@ enum TransactionsDatabase {
     /// Kontenliste aus den `cachedBalance.demo-slot-N`-Schlüsseln ab und filtert Umsätze
     /// über `slot_id`. Die früher hier verwendeten Namen (`demo-main/daily/bills`) passten
     /// zu keinem davon — dieselbe Unstimmigkeit war im MCP schon einmal zu beheben.
+    /// Wie weit die Demo-Historie zurückreicht. Auch das Lesefenster der Demo-Slots
+    /// hängt daran (`Anzeigetiefe`), sonst zeigte die App weniger, als in der Datei
+    /// steht.
+    static let demoHistorieTage = 365
+
     static func writeDemoDB(seed: Int, slotIds: [String]) {
         guard !slotIds.isEmpty else { return }
         guard let queue = try? makeQueue(bankId: "demo") else { return }
@@ -563,7 +568,7 @@ enum TransactionsDatabase {
 
         for (profile, slotId) in slotIds.enumerated() {
             var s = UInt64(bitPattern: Int64(truncatingIfNeeded: seed)) &+ UInt64(profile)
-            let txs = FakeData.generateDemoTransactions(seed: &s, days: 365, slotId: slotId, slotProfile: profile)
+            let txs = FakeData.generateDemoTransactions(seed: &s, days: demoHistorieTage, slotId: slotId, slotProfile: profile)
 
             try? queue.write { db in
                 try db.execute(sql: "DELETE FROM transactions WHERE slot_id = ?", arguments: [slotId])

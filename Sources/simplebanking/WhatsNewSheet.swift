@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.2.2":
+            return v222
         case "2.2.1":
             return v221
         case "2.2.0":
@@ -291,6 +293,23 @@ enum WhatsNewContent {
             return nil
         }
     }
+
+    /// 2.2.2. Eine Karte, ein Fehler — aber einer, der jeden traf, der Historie
+    /// importiert hat, und zwar unsichtbar: Es gab keine Fehlermeldung, nur keine
+    /// Umsätze. Wer deshalb glaubt, sein Import sei schiefgegangen, soll hier lesen,
+    /// dass er es nicht war und was jetzt zu tun ist.
+    private static let v222: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "calendar.badge.clock",
+            tint: .sbBlueStrong,
+            title: L10n.t("Importierte Historie ist jetzt auch zu sehen",
+                          "Imported history is now actually visible"),
+            description: L10n.t(
+                "Wer Umsätze aus MoneyMoney, einer OFX- oder einer CAMT.053-Datei übernommen hat, bekam die richtige Zahl gemeldet — und sah danach trotzdem nur die letzten Wochen. Die Buchungen waren vollständig da; die Liste fragt die Datenbank aber nur so weit zurück, wie ihr Zeitraum reicht, und der blieb beim Import unverändert. Nichts ist dabei verloren gegangen. **Den Import einfach noch einmal starten**: Er bringt nichts Neues herein, zieht den Zeitraum aber auf den Verlauf, der schon liegt — danach steht alles in der Liste, im Export und in der Kategorisierung. Der Abrufzeitraum der Bank bleibt davon unberührt.",
+                "If you imported transactions from MoneyMoney, an OFX or a CAMT.053 file, you were told the right number — and then still only saw the last few weeks. The entries were all there; the list only queries the database as far back as its own range reaches, and importing never widened it. Nothing was lost. **Just run the import again**: it brings in nothing new, but widens the range to the history already stored — after that everything shows up in the list, the export and in categorisation. How far back the bank itself is queried is unaffected."
+            )
+        ),
+    ]
 
     /// 2.2.0. Trägt auch den Inhalt der übersprungenen 2.1.0 — die ist nie
     /// erschienen, also hat sie niemand gesehen, und ein `case "2.1.0"` hätte für

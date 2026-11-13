@@ -2856,6 +2856,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// die App erzeugt ihre Demo-Umsätze im Speicher. Im Hintergrund, weil pro Slot ein
     /// Jahr Buchungen entsteht — das soll den Menüklick nicht aufhalten.
     private func spiegleDemoUmsaetze(slotIds: [String]) {
+        // Dasselbe Jahr auch in der App zeigen. Ohne diese Marke läge das Lesefenster
+        // der Demo-Slots bei 60 Tagen, und weil die App ihre Demo-Umsätze für genau
+        // dieses Fenster erzeugt, sähe die Demo dünner aus als die Datei, die CLI,
+        // MCP und Raycast lesen — und Fixkosten, Abos und der Jahresverlauf hätten in
+        // der Demo zu wenig Material.
+        for slotId in slotIds {
+            var einstellungen = BankSlotSettingsStore.load(slotId: slotId)
+            guard einstellungen.lastImportedDays != TransactionsDatabase.demoHistorieTage else { continue }
+            einstellungen.lastImportedDays = TransactionsDatabase.demoHistorieTage
+            BankSlotSettingsStore.save(einstellungen, slotId: slotId)
+        }
         let seedSnapshot = demoSeed
         Task.detached(priority: .utility) {
             TransactionsDatabase.writeDemoDB(seed: seedSnapshot, slotIds: slotIds)
@@ -5989,10 +6000,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Demo-Modus: Komplett synthetische Daten ohne API-Calls
         if demoMode {
             txVM.anthropicApiKey = nil
-            let daysToFetch: Int = {
-                let d = BankSlotSettingsStore.load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").fetchDays
-                return d > 0 ? d : 60
-            }()
+            // `displayDays` und nicht `fetchDays`: Hier ruft nichts bei einer Bank ab,
+            // also gibt es auch keinen Grund für den 90-Tage-Deckel — und die
+            // Umsatzliste erzeugt ihre Demo-Daten ebenfalls über `displayDays`. Mit
+            // zwei verschiedenen Fenstern schrumpfte die Demo-Liste bei jedem ↻.
+            let daysToFetch = BankSlotSettingsStore
+                .load(slotId: MultibankingStore.shared.activeSlot?.id ?? "legacy").displayDays
             txVM.fromDate = isoDateDaysAgo(daysToFetch)
             txVM.toDate = isoDateDaysAgo(0)
 
