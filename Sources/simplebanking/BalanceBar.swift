@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import MoneyMoneyForm
 import RoutexClient
 import SwiftUI
 import UserNotifications
@@ -495,6 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private var languageObserver: Any?
     private var balanceDisplayModeObserver: Any?
     private var addAccountObserver: Any?
+    private var moneyMoneySetupObserver: Any?
     private var globalHotkeyObserver: Any?
     private var didTriggerAutoSetupThisLaunch: Bool = false
     // After a missed SCA redirect, pause auto-refresh to avoid burning through the bank's
@@ -2082,6 +2084,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.connect()
         }
 
+        // Aus den Einstellungen: MoneyMoney-Konten, die hier noch kein Konto haben.
+        // Der Auszug kommt über die Ablage und nicht über die Mitteilung — er trägt den
+        // Umsatzverlauf, und der gehört nicht in ein `userInfo`, das jeder Beobachter
+        // sieht. Die Ablage ist ohnehin der Weg, über den der Nachtrag ihn später liest.
+        moneyMoneySetupObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("simplebanking.setupFromMoneyMoney"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let auszug = MoneyMoneyAblage.holen() else {
+                    AppLogger.log("MoneyMoney-Einrichtung angefordert, aber keine Ablage da",
+                                  category: "MoneyMoney", level: "WARN")
+                    return
+                }
+                self?._runSetupWizardForAddingAccount(mmAuszug: auszug)
+            }
+        }
+
         // Launch: nur Anzeige aktualisieren. NICHT `refresh()` — das öffnet bei
         // eBon-Slots (REWE/dm) das Login-/Sync-Fenster; ein WKWebView-Fenster mitten
         // im Launch crasht (Autorelease-Pop). Sync passiert nur vom User „angestoßen".
@@ -2201,6 +2222,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         if let observer = balanceDisplayModeObserver {
             NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = moneyMoneySetupObserver {
+            NotificationCenter.default.removeObserver(observer)
+            moneyMoneySetupObserver = nil
         }
         if let observer = addAccountObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -7175,7 +7200,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
     }
 
-    private func _runSetupWizardForAddingAccount() {
+    /// `mmAuszug`: aus den Einstellungen übergeben, wenn dort MoneyMoney-Konten
+    /// gewählt wurden, die es hier noch nicht gibt. Der Assistent startet dann in der
+    /// MoneyMoney-Kontenauswahl statt in der Banksuche.
+    private func _runSetupWizardForAddingAccount(mmAuszug: MoneyMoneyAuszug? = nil) {
         let previousSlot = MultibankingStore.shared.activeSlot
 
         // Neue Slot-ID VOR dem Wizard erstellen und aktivieren,
@@ -7207,7 +7235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 additionalAccountsBox.primary = setupResult.primaryAccount
                 return setupResult.bank
             },
-            existingMasterPassword: masterPassword   // Passwort-Schritt überspringen
+            existingMasterPassword: masterPassword,  // Passwort-Schritt überspringen
+            moneymoneyAuszug: mmAuszug
         )
 
         switch wizard.runModal() {

@@ -45,7 +45,11 @@ struct MoneyMoneyBestandSheet: View {
     @State private var absagen: [MoneyMoneyAbsage] = []
     /// Angehakte Konten, über `accounts.rowid`.
     @State private var gewaehlt: Set<Int64> = []
+    /// Konten, die es hier noch nicht gibt — angehakt heißt „einrichten".
+    @State private var einzurichten: Set<Int64> = []
     @State private var berichte: [MoneyMoneyNachtrag.Bericht] = []
+    /// MoneyMoney-Konten ohne Slot. Für sie läuft die normale Einrichtung.
+    @State private var neue: [MoneyMoneyKonto] = []
 
     private var datei: URL { datenbank ?? MoneyMoneyLesepfad.ueblicherOrt }
 
@@ -106,7 +110,7 @@ struct MoneyMoneyBestandSheet: View {
                 Spacer()
                 Button(t("Übernehmen", "Import")) { Task { await uebernehmen() } }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(gewaehlt.isEmpty)
+                    .disabled(gewaehlt.isEmpty && einzurichten.isEmpty)
             case .laeuft:
                 Spacer()
             case .fertig:
@@ -137,10 +141,31 @@ struct MoneyMoneyBestandSheet: View {
                         .controlSize(.small)
                 }
                 if !vorhanden {
-                    Text(t("An dieser Stelle liegt keine lesbare Datei.",
-                           "There is no readable file at this location."))
-                        .font(.system(size: 11))
-                        .foregroundColor(.red)
+                    // **Nicht „fehlt".** `isReadableFile` benutzt `access(2)`, und das
+                    // verweigert macOS für den Container einer anderen App ohne zu
+                    // fragen. Die alte Fassung behauptete, dort liege keine Datei —
+                    // der Nutzer sah sie im Finder und kam nicht weiter (13.11.2026).
+                    // Lesen darf man trotzdem: Das echte Öffnen löst die Rückfrage aus.
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Kein „versuch es trotzdem, macOS fragt schon": Für den
+                        // Container einer anderen App fragt macOS **nicht** — es
+                        // verweigert still. Bestätigt am 13.11.2026: Der Dialog kam in
+                        // keinem Lauf. Also die Anweisung, die wirklich hilft.
+                        Text(t("Die Datei fehlt nicht — macOS lässt simplebanking nur nicht in den Ordner von MoneyMoney. Einen Dialog gibt es dafür nicht: Trag simplebanking unten beim Festplattenvollzugriff mit „+“ ein und komm zurück.",
+                               "The file is not missing — macOS simply will not let simplebanking into MoneyMoney's folder. There is no prompt for this: add simplebanking under Full Disk Access with “+” below, then come back."))
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(t("Festplattenvollzugriff öffnen …", "Open Full Disk Access …")) {
+                            // Die moderne Schreibweise springt in die Liste selbst; die
+                            // alte (`com.apple.preference.security`) landete nur auf
+                            // „Datenschutz & Sicherheit", und man suchte weiter.
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .controlSize(.small)
+                    }
                 }
             }
 
@@ -211,7 +236,11 @@ struct MoneyMoneyBestandSheet: View {
                                                          slots: MultibankingStore.shared.slots)
             auszug = gelesen
             treffer = aufgeteilt.treffer
-            absagen = aufgeteilt.absagen
+            // Nicht verbunden ist keine Absage mehr, sondern ein Angebot: Die Bank
+            // lässt sich einrichten, und der Verlauf kommt danach von selbst nach.
+            absagen = aufgeteilt.absagen.filter { $0.grund != .nichtVerbunden }
+            neue = aufgeteilt.absagen.filter { $0.grund == .nichtVerbunden }.map(\.konto)
+            einzurichten = Set(neue.map(\.schluessel))
             // Alles vorausgewählt: Wer die Übernahme selbst anstößt, will sie in der
             // Regel ganz. Abwählen ist ein Klick, Anwählen von allem sind viele.
             gewaehlt = Set(aufgeteilt.treffer.map(\.konto.schluessel))
@@ -226,61 +255,91 @@ struct MoneyMoneyBestandSheet: View {
 
     @ViewBuilder
     private var auswahlAbschnitt: some View {
-        if treffer.isEmpty {
+        if treffer.isEmpty && neue.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                hinweis(t("Keines der Konten aus MoneyMoney ist in simplebanking verbunden.",
-                          "None of the MoneyMoney accounts is connected in simplebanking."),
+                hinweis(t("Aus dieser MoneyMoney-Datenbank lässt sich nichts übernehmen.",
+                          "Nothing in this MoneyMoney database can be imported."),
                         farbe: .orange, symbol: "info.circle.fill")
                 absagenListe
             }
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(t("Diese Konten sind verbunden", "These accounts are connected"))
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                        ForEach(treffer, id: \.konto.schluessel) { eintrag in
-                            Toggle(isOn: haken(eintrag.konto.schluessel)) {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(eintrag.slotName)
-                                        .font(.system(size: 13))
-                                    Text(herkunftszeile(eintrag))
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
+                    if !treffer.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(t("Schon verbunden — nur der Verlauf",
+                                   "Already connected — history only"))
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.secondary)
+                            ForEach(treffer, id: \.konto.schluessel) { eintrag in
+                                Toggle(isOn: haken(eintrag.konto.schluessel, in: $gewaehlt)) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(eintrag.slotName)
+                                            .font(.system(size: 13))
+                                        Text(herkunftszeile(eintrag.konto, vorsatz: eintrag.konto.name))
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
                             }
+                            Text(t("Übernommen wird nur, was älter ist als die älteste Buchung, die das Konto schon hat — die vorhandenen Umsätze bleiben unberührt.",
+                                   "Only entries older than the account's oldest existing booking are imported — what is already there stays untouched."))
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+
+                    if !neue.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(t("Noch nicht verbunden — Konto einrichten",
+                                   "Not connected yet — set up the account"))
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.secondary)
+                            ForEach(neue, id: \.schluessel) { konto in
+                                Toggle(isOn: haken(konto.schluessel, in: $einzurichten)) {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text((konto.name ?? "").isEmpty ? konto.iban : konto.name!)
+                                            .font(.system(size: 13))
+                                        Text(herkunftszeile(konto, vorsatz: nil))
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                            Text(t("Dafür öffnet sich der Einrichtungs-Assistent: Bank für Bank, mit der Freigabe, die deine Bank verlangt. Der Verlauf kommt nach dem ersten Abruf von selbst nach. Dein MoneyMoney-Kennwort wird dabei nicht erneut gebraucht.",
+                                   "The setup assistant opens for these: bank by bank, with whatever approval your bank requires. The history follows on its own after the first fetch. Your MoneyMoney password is not needed again."))
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
                     absagenListe
-                    Text(t("Übernommen wird nur, was älter ist als die älteste Buchung, die das Konto schon hat — die vorhandenen Umsätze bleiben unberührt.",
-                           "Only entries older than the account's oldest existing booking are imported — what is already there stays untouched."))
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.trailing, 4)
             }
         }
     }
 
-    private func haken(_ schluessel: Int64) -> Binding<Bool> {
-        Binding(get: { gewaehlt.contains(schluessel) },
+    private func haken(_ schluessel: Int64, in menge: Binding<Set<Int64>>) -> Binding<Bool> {
+        Binding(get: { menge.wrappedValue.contains(schluessel) },
                 set: { an in
-                    if an { gewaehlt.insert(schluessel) } else { gewaehlt.remove(schluessel) }
+                    if an { menge.wrappedValue.insert(schluessel) }
+                    else { menge.wrappedValue.remove(schluessel) }
                 })
     }
 
     /// Woher der Verlauf kommt: wie das Konto in MoneyMoney heißt, und ab wann dort
     /// Buchungen liegen. Beides steht im Auszug, kostet also keinen Datenbankzugriff —
     /// und sagt dem Nutzer, was er bekommt, statt ihn eine Zahl raten zu lassen.
-    private func herkunftszeile(_ eintrag: MoneyMoneyBestandstreffer) -> String {
-        let name = (eintrag.konto.name ?? "").trimmingCharacters(in: .whitespaces)
+    private func herkunftszeile(_ konto: MoneyMoneyKonto, vorsatz: String?) -> String {
+        let name = (vorsatz ?? "").trimmingCharacters(in: .whitespaces)
         let inMM = name.isEmpty ? t("in MoneyMoney", "in MoneyMoney")
                                 : t("in MoneyMoney: \(name)", "in MoneyMoney: \(name)")
         guard let auszug else { return inMM }
         let tage = auszug.umsaetze
-            .filter { $0.kontoSchluessel == eintrag.konto.schluessel
+            .filter { $0.kontoSchluessel == konto.schluessel
                       && MoneyMoneyLeseregeln.istUebernehmbar($0) }
             .map { MoneyMoneyLeseregeln.tag(ausEpoche: $0.gebuchtAm) }
         guard let aeltester = tage.min() else {
@@ -322,9 +381,41 @@ struct MoneyMoneyBestandSheet: View {
     private func uebernehmen() async {
         guard let auszug else { return }
         let gewaehlteTreffer = treffer.filter { gewaehlt.contains($0.konto.schluessel) }
-        guard !gewaehlteTreffer.isEmpty else { return }
+        let gewaehlteNeue = neue.filter { einzurichten.contains($0.schluessel) }
+        guard !gewaehlteTreffer.isEmpty || !gewaehlteNeue.isEmpty else { return }
         abschnitt = .laeuft
 
+        // Konten, die es hier noch nicht gibt, gehen an den Einrichtungs-Assistenten:
+        // Er kann die Banksuche, die Zugangsdaten und vor allem die Freigabe, die die
+        // Bank verlangt. Das in diesem Blatt nachzubauen hieße, den halben Assistenten
+        // ein zweites Mal zu haben.
+        //
+        // Der Auszug geht über die Ablage und nicht über die Mitteilung — er trägt den
+        // Umsatzverlauf, und der gehört nicht in ein `userInfo`. Deshalb MUSS er vor
+        // dem Verschicken liegen.
+        if !gewaehlteNeue.isEmpty {
+            MoneyMoneyAblage.legen(auszug)
+            // Erst den Verlauf der schon verbundenen Konten fertig machen, dann
+            // übergeben: Der Assistent läuft modal, und danach kommt dieses Blatt
+            // nicht mehr zum Zug.
+            if !gewaehlteTreffer.isEmpty {
+                await verlaufUebernehmen(gewaehlteTreffer, auszug: auszug)
+            }
+            AppLogger.log("MoneyMoney-Bestand: \(gewaehlteNeue.count) Konten an den "
+                          + "Einrichtungs-Assistenten übergeben", category: "MoneyMoney")
+            NotificationCenter.default.post(
+                name: Notification.Name("simplebanking.setupFromMoneyMoney"), object: nil)
+            schliessen()
+            return
+        }
+
+        await verlaufUebernehmen(gewaehlteTreffer, auszug: auszug)
+        abschnitt = .fertig
+    }
+
+    /// Der Verlauf für Konten, die es hier schon gibt.
+    private func verlaufUebernehmen(_ gewaehlteTreffer: [MoneyMoneyBestandstreffer],
+                                    auszug: MoneyMoneyAuszug) async {
         // Der Auszug muss auf die Platte, weil der Nachtrag ihn von dort liest — und
         // weil ein Konto ohne Bankbuchungen (Naht fehlt) erst beim nächsten Abruf
         // nachrückt. Er räumt sich selbst weg, sobald kein Eintrag mehr offen ist.
@@ -344,7 +435,6 @@ struct MoneyMoneyBestandSheet: View {
         })
 
         berichte = await MoneyMoneyNachtrag.alleFaelligen()
-        abschnitt = .fertig
     }
 
     // MARK: - Ergebnis

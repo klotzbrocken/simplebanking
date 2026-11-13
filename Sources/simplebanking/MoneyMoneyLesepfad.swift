@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MoneyMoneyForm
 
@@ -172,8 +173,12 @@ enum MoneyMoneyFehler: Error, LocalizedError {
             return L10n.t("Der Importhelfer fehlt in dieser Installation.",
                           "The import helper is missing from this installation.")
         case .keineDatei:
-            return L10n.t("Die MoneyMoney-Datenbank wurde nicht gefunden.",
-                          "The MoneyMoney database was not found.")
+            // Nennt beide Möglichkeiten, weil der Helfer sie nicht unterscheiden kann:
+            // Ein verweigerter Zugriff und eine fehlende Datei sehen für ihn gleich aus.
+            // Der häufigere Fall steht vorn — MoneyMoneys Ordner ist der Container einer
+            // anderen App, und den gibt macOS erst auf Nachfrage frei.
+            return L10n.t("Die MoneyMoney-Datenbank ließ sich nicht öffnen. Meist fehlt simplebanking der Zugriff auf den Ordner von MoneyMoney: Systemeinstellungen → Datenschutz & Sicherheit → Festplattenvollzugriff, dort simplebanking mit „+“ hinzufügen.",
+                          "The MoneyMoney database could not be opened. Usually simplebanking lacks access to MoneyMoney's folder: System Settings → Privacy & Security → Full Disk Access, add simplebanking there with “+”.")
         case .kennwortFalsch:
             return L10n.t("Das Kennwort passt nicht zu dieser MoneyMoney-Datenbank.",
                           "That password does not open this MoneyMoney database.")
@@ -209,8 +214,17 @@ enum MoneyMoneyLesepfad {
         .appendingPathComponent("Library/Containers/com.moneymoney-app.retail/Data/"
                                 + "Library/Application Support/MoneyMoney/Database/MoneyMoney.sqlite")
 
+    /// Benutzt dieser Mensch MoneyMoney? Gefragt wird LaunchServices, nicht das
+    /// Dateisystem.
+    ///
+    /// Hier stand `isReadableFile` auf der Datenbank. Das benutzt `access(2)`, und für
+    /// den Container einer anderen App verweigert macOS das seit Sonoma ohne
+    /// Rückfrage — die Antwort war also auf jedem Rechner ohne Festplattenvollzugriff
+    /// `false`, und der Assistent bot den Umstieg nie an (13.11.2026). Ob die App
+    /// installiert ist, beantwortet ohnehin die bessere Frage: Die Datei lesen wir
+    /// erst, wenn der Nutzer es verlangt, und dann fragt macOS selbst.
     static var istVorhanden: Bool {
-        FileManager.default.isReadableFile(atPath: ueblicherOrt.path)
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.moneymoney-app.retail") != nil
     }
 
     /// Neben dem laufenden Programm — im Bundle `Contents/MacOS/`, bei einem

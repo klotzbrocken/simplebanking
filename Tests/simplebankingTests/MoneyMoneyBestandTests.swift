@@ -103,6 +103,29 @@ final class MoneyMoneyBestandTests: XCTestCase {
         XCTAssertEqual(treffer.first?.slotId, "slot-a", "Der erste gewinnt, nicht der zufällige")
     }
 
+    // MARK: - Die zweite Gruppe (2.2.1): Konten, die es hier noch nicht gibt
+
+    /// `.nichtVerbunden` ist keine Absage mehr, sondern das Angebot „Konto einrichten".
+    /// Das Blatt teilt daran auf — kippt der Grund, landen die Konten stillschweigend
+    /// wieder unter „Übergangen" und niemand kann sie einrichten.
+    func testNichtVerbundeneSindVonDenEchtenAbsagenTrennbar() {
+        let slots = [slot("DE83460500010001808336")]
+        let (_, absagen) = MoneyMoneyBestand.aufteilen(auszug(), slots: slots)
+
+        let einzurichten = absagen.filter { $0.grund == .nichtVerbunden }.map(\.konto.schluessel)
+        let echteAbsagen = absagen.filter { $0.grund != .nichtVerbunden }.map(\.konto.schluessel)
+
+        XCTAssertEqual(Set(einzurichten), [2, 5], "Konten mit IBAN, aber ohne Slot")
+        XCTAssertEqual(Set(echteAbsagen), [3, 4], "Depot und nackte Kontonummer bleiben Absagen")
+    }
+
+    func testOhneJedenSlotIstAllesEinzurichten() {
+        let (treffer, absagen) = MoneyMoneyBestand.aufteilen(auszug(), slots: [])
+        XCTAssertTrue(treffer.isEmpty)
+        XCTAssertEqual(absagen.filter { $0.grund == .nichtVerbunden }.count, 3,
+                       "Alle drei Konten mit gültiger IBAN")
+    }
+
     // MARK: - Der Name in der Auswahlliste
 
     func testKurznameGewinntVorBanknameUndIban() {

@@ -19,6 +19,21 @@ final class MoneyMoneyHelferTests: XCTestCase {
         }
     }
 
+    /// Keine Vorprüfung mit `access(2)`.
+    ///
+    /// `isReadableFile` benutzt `access(2)`, und für den Container einer anderen App
+    /// verweigert macOS das seit Sonoma **ohne zu fragen**. Die Rückfrage erscheint
+    /// erst beim echten `open`. Eine solche Vorprüfung meldete deshalb am 13.11.2026
+    /// „Datei nicht lesbar" über eine Datei, die der Nutzer im Finder vor sich sah —
+    /// und verhinderte dabei genau den Dialog, der das Problem gelöst hätte.
+    func testKeineVorpruefungMitAccess() throws {
+        let quelle = try helfer
+        XCTAssertFalse(quelle.contains("isReadableFile"),
+                       "access(2) fragt nicht nach Zustimmung — sqlite3_open_v2 soll öffnen")
+        XCTAssertTrue(quelle.contains("SQLITE_OPEN_READONLY"),
+                      "Das echte Öffnen ist es, was die Rückfrage auslöst")
+    }
+
     func testKeinSternchenInDerAbfrage() throws {
         // `SELECT *` würde jede Spalte mitnehmen, die MoneyMoney morgen dazulegt —
         // auch eine, die etwas enthält, das uns nichts angeht.

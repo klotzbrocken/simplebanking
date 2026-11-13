@@ -57,9 +57,12 @@ guard argumente.count == 2 else {
     abbrechen(.keineDatei, "Aufruf: simplebanking-mmimport <pfad zur MoneyMoney.sqlite>")
 }
 let pfad = argumente[1]
-guard FileManager.default.isReadableFile(atPath: pfad) else {
-    abbrechen(.keineDatei, "Datei nicht lesbar")
-}
+// **Kein `isReadableFile` davor.** Das benutzt `access(2)`, und für den Container einer
+// anderen App verweigert macOS seit Sonoma genau das — ohne zu fragen. Der
+// Zustimmungsdialog erscheint erst, wenn jemand die Datei wirklich öffnet. Diese
+// Vorprüfung hat ihn also verhindert und dann „Datei nicht lesbar" gemeldet, obwohl die
+// Datei da war und der Nutzer sie im Finder sah (13.11.2026). `sqlite3_open_v2` unten
+// macht das echte `open` und liefert einen Grund, der stimmt.
 
 // Kennwort von stdin. Genau ein abschließender Zeilenumbruch fällt weg, damit die
 // Eingabe durch eine Pipe dasselbe ergibt wie eine ohne.

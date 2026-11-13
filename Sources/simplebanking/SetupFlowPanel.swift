@@ -264,7 +264,12 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
     private var accountPickerContinuation: CheckedContinuation<[RoutexModels.Account]?, Never>?
     private var accountPickerCheckboxes: [NSButton] = []
 
-    init(connectAction: @escaping ConnectAction, existingMasterPassword: String? = nil) {
+    /// `moneymoneyAuszug`: aus den Einstellungen übergeben, wenn dort Konten gewählt
+    /// wurden, die es hier noch nicht gibt. Dann startet der Assistent nicht in der
+    /// Banksuche, sondern in der MoneyMoney-Kontenauswahl — und fragt das
+    /// MoneyMoney-Kennwort nicht ein zweites Mal ab.
+    init(connectAction: @escaping ConnectAction, existingMasterPassword: String? = nil,
+         moneymoneyAuszug: MoneyMoneyAuszug? = nil) {
         self.connectAction = connectAction
         self.collectedMasterPassword = existingMasterPassword
         self.existingMasterPassword = existingMasterPassword
@@ -286,6 +291,23 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
 
         setupBaseLayout()
         setupControlDefaults()
+
+        // Aus den Einstellungen übergeben: Der Auszug ist schon entschlüsselt, das
+        // MoneyMoney-Kennwort gerade eben eingegeben. Hier nicht erneut danach fragen —
+        // direkt die Banken prüfen und die Kontenauswahl zeigen.
+        if let auszug = moneymoneyAuszug {
+            mmGewaehlt = true
+            render(step: .moneymoneyAngebot)
+            mmSpinner.startAnimation(nil)
+            mmLesenBtn?.isEnabled = false
+            // `Task.detached`: Der Assistent läuft gleich modal, und ein Task, der den
+            // Haupt-Actor erbt, wird dort nie eingeplant (siehe `Hauptthread`).
+            Task.detached(priority: .userInitiated) { [weak self] in
+                await self?.moneyMoneyPruefen(auszug: auszug)
+            }
+            return
+        }
+
         // Ist ein Passwort bereits vorhanden, Welcome- und Passwort-Schritt überspringen
         render(step: existingMasterPassword != nil ? .bankSearch : .welcome)
     }
@@ -1191,49 +1213,61 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
                               + "Kategorien \(auszug.kategorien.count)",
                               category: "MoneyMoney")
                 guard !Task.isCancelled else { return }
-                await Hauptthread.lauf { [weak self] in
-                    self?.zeigeMoneyMoneyStand(L10n.t("Banken werden geprüft …",
-                                                      "Checking banks …"))
-                }
-
-                // Je Bank eine YAXI-Abfrage. Bis zum 11.11.2026 stand dabei nur ein
-                // drehendes Rad: Wer nicht weiß, ob es noch läuft, hält es für
-                // hängend — zu Recht, denn zu sehen war kein Unterschied.
-                let aufgeteilt = await MoneyMoneyEinrichtung.aufteilung(auszug) {
-                    gefragt, insgesamt in
-                    Hauptthread.sprung {
-                        MainActor.assumeIsolated {
-                            fenster?.zeigeMoneyMoneyStand(
-                                L10n.t("Bank \(gefragt) von \(insgesamt) wird geprüft …",
-                                       "Checking bank \(gefragt) of \(insgesamt) …"))
-                        }
-                    }
-                }
-                guard !Task.isCancelled else { return }
-                AppLogger.log("MoneyMoney-Import: \(aufgeteilt.treffer.count) übernehmbar, "
-                              + "\(aufgeteilt.absagen.count) nicht", category: "MoneyMoney")
-
-                await Hauptthread.lauf { [weak self] in
-                    guard let self else { return }
-                    self.mmMeldungLabel.isHidden = true
-                    self.mmAuszug = auszug
-                    self.mmTreffer = aufgeteilt.treffer
-                    self.mmAbsagen = aufgeteilt.absagen
-                    self.mmVerbindungen = aufgeteilt.verbindungen
-                    self.mmKennwortField.stringValue = ""
-                    self.render(step: .moneymoneyKonten)
-                }
+                await fenster?.moneyMoneyPruefen(auszug: auszug)
+                return
             } catch {
                 AppLogger.log("MoneyMoney-Import: Lesen fehlgeschlagen (\(error))",
                               category: "MoneyMoney", level: "WARN")
                 guard !Task.isCancelled else { return }
                 let text = (error as? LocalizedError)?.errorDescription
-                    ?? L10n.t("Die MoneyMoney-Datenbank konnte nicht gelesen werden.",
-                              "The MoneyMoney database could not be read.")
+                    ?? MoneyMoneyFehler.lesefehler.errorDescription
+                    ?? "?"
                 await Hauptthread.lauf { [weak self] in
                     self?.zeigeMoneyMoneyMeldung(text)
                 }
             }
+        }
+    }
+
+    /// Fragt YAXI je Bank und zeigt die Kontenauswahl.
+    ///
+    /// Eigene Funktion, weil der Auszug aus zwei Richtungen kommen kann: frisch
+    /// gelesen (`onMoneyMoneyLesen`) oder schon entschlüsselt aus den Einstellungen.
+    /// Im zweiten Fall darf das MoneyMoney-Kennwort nicht ein zweites Mal fällig
+    /// werden — es ist gerade eben eingegeben worden.
+    nonisolated private func moneyMoneyPruefen(auszug: MoneyMoneyAuszug) async {
+        let fenster: SetupWizardPanel? = self
+        await Hauptthread.lauf { [weak self] in
+            self?.zeigeMoneyMoneyStand(L10n.t("Banken werden geprüft …",
+                                              "Checking banks …"))
+        }
+
+        // Je Bank eine YAXI-Abfrage. Bis zum 11.11.2026 stand dabei nur ein drehendes
+        // Rad: Wer nicht weiß, ob es noch läuft, hält es für hängend — zu Recht, denn
+        // zu sehen war kein Unterschied.
+        let aufgeteilt = await MoneyMoneyEinrichtung.aufteilung(auszug) {
+            gefragt, insgesamt in
+            Hauptthread.sprung {
+                MainActor.assumeIsolated {
+                    fenster?.zeigeMoneyMoneyStand(
+                        L10n.t("Bank \(gefragt) von \(insgesamt) wird geprüft …",
+                               "Checking bank \(gefragt) of \(insgesamt) …"))
+                }
+            }
+        }
+        guard !Task.isCancelled else { return }
+        AppLogger.log("MoneyMoney-Import: \(aufgeteilt.treffer.count) übernehmbar, "
+                      + "\(aufgeteilt.absagen.count) nicht", category: "MoneyMoney")
+
+        await Hauptthread.lauf { [weak self] in
+            guard let self else { return }
+            self.mmMeldungLabel.isHidden = true
+            self.mmAuszug = auszug
+            self.mmTreffer = aufgeteilt.treffer
+            self.mmAbsagen = aufgeteilt.absagen
+            self.mmVerbindungen = aufgeteilt.verbindungen
+            self.mmKennwortField.stringValue = ""
+            self.render(step: .moneymoneyKonten)
         }
     }
 
