@@ -8910,7 +8910,8 @@ private struct StatusBalanceFlyoutCardView: View {
             forceClassic: isUnifiedMode,
             compact: true,
             detailColor: detail,
-            bankgebuehr: bankgebuehr
+            bankgebuehr: bankgebuehr,
+            verfuegbar: availableBalance
         )
     }
 

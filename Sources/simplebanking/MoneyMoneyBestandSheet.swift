@@ -151,12 +151,19 @@ struct MoneyMoneyBestandSheet: View {
                         // Container einer anderen App fragt macOS **nicht** — es
                         // verweigert still. Bestätigt am 13.11.2026: Der Dialog kam in
                         // keinem Lauf. Also die Anweisung, die wirklich hilft.
-                        Text(t("Die Datei fehlt nicht — macOS lässt simplebanking nur nicht in den Ordner von MoneyMoney. Einen Dialog gibt es dafür nicht: Trag simplebanking unten beim Festplattenvollzugriff mit „+“ ein und komm zurück.",
-                               "The file is not missing — macOS simply will not let simplebanking into MoneyMoney's folder. There is no prompt for this: add simplebanking under Full Disk Access with “+” below, then come back."))
+                        Text(t("Die Datei fehlt nicht — macOS lässt simplebanking nur nicht in den Ordner von MoneyMoney. Einen Dialog gibt es dafür nicht. Der Knopf unten schließt dieses Fenster und öffnet die Liste: dort simplebanking mit „+“ eintragen, den Neustart bestätigen, den sie anbietet, und danach hier weitermachen.",
+                               "The file is not missing — macOS simply will not let simplebanking into MoneyMoney's folder. There is no prompt for this. The button below closes this window and opens the list: add simplebanking with “+”, confirm the restart it offers, and come back here afterwards."))
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Button(t("Festplattenvollzugriff öffnen …", "Open Full Disk Access …")) {
+                            // **Erst dieses Blatt zu.** Wer simplebanking in die Liste
+                            // einträgt, wird von macOS gefragt, ob die App neu starten
+                            // soll — und die Freigabe gilt erst danach. Solange hier ein
+                            // Blatt offen steht, läuft dieser Neustart ins Leere, und der
+                            // Nutzer sitzt mit erteilter Freigabe vor einer App, die sie
+                            // nicht hat (gemeldet 13.11.2026).
+                            schliessen()
                             // Die moderne Schreibweise springt in die Liste selbst; die
                             // alte (`com.apple.preference.security`) landete nur auf
                             // „Datenschutz & Sicherheit", und man suchte weiter.
@@ -230,6 +237,11 @@ struct MoneyMoneyBestandSheet: View {
         switch ergebnis {
         case .failure(let error):
             fehler = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            // Ins Protokoll, nicht nur ins Fenster: Beim Nachstellen am 13.11.2026 stand
+            // zu einem gescheiterten Lesen dort gar nichts, und die Diagnose fing bei
+            // null an.
+            AppLogger.log("MoneyMoney-Bestand: Lesen gescheitert — \(error)",
+                          category: "MoneyMoney", level: "WARN")
             abschnitt = .kennwort
         case .success(let gelesen):
             let aufgeteilt = MoneyMoneyBestand.aufteilen(gelesen,

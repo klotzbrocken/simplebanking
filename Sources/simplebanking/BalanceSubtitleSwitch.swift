@@ -36,6 +36,15 @@ struct BalanceSubtitleSwitch: View {
     var detailColor: Color? = nil
     /// Wiederkehrende Bankgebühr, falls erkannt. `nil` blendet die Position aus.
     var bankgebuehr: Double? = nil
+    /// Gebuchter Saldo abzüglich vorgemerkter Lastschriften. `nil` blendet die Position
+    /// aus — ohne offene Vormerkung wäre sie dieselbe Zahl wie oben.
+    ///
+    /// Anlass (13.11.2026, YAXI): Die ING-Schnittstelle liefert **nur** `interimBooked`,
+    /// also den gebuchten Saldo. Die ING-App zeigt dagegen den Stand abzüglich bereits
+    /// vorgemerkter Abbuchungen — 489,71 statt 505,21 bei 15,50 vorgemerkt. YAXI kann die
+    /// 489,71 nicht liefern; wer sie sehen will, muss rechnen. Das tut
+    /// `AvailableBalance`, und hier wird das Ergebnis endlich gezeigt.
+    var verfuegbar: Double? = nil
 
     private static let classicFormatter: NumberFormatter = {
         let f = NumberFormatter()
@@ -55,17 +64,30 @@ struct BalanceSubtitleSwitch: View {
     }
 
     private func toggle() {
-        // Classic (0) → Sub-Metrics (1) → Day-only (2) → Bankgebühren (3) → Classic.
-        // Die vierte Position wird übersprungen, wenn keine Gebühr erkannt wurde —
-        // sonst landete man auf einer leeren Zeile.
-        let anzahl = bankgebuehr == nil ? 3 : 4
-        style = (style + 1) % anzahl
+        // Classic (0) → Sub-Metrics (1) → Day-only (2) → Bankgebühren (3) →
+        // Verfügbar (4) → Classic. Positionen ohne Inhalt werden übersprungen, sonst
+        // landete man auf einer leeren Zeile.
+        var naechster = style
+        repeat {
+            naechster = (naechster + 1) % 5
+        } while !hatInhalt(naechster) && naechster != style
+        style = naechster
+    }
+
+    /// Hat diese Position gerade etwas zu sagen? 0-2 immer, 3 und 4 nur mit Wert.
+    private func hatInhalt(_ stil: Int) -> Bool {
+        switch stil {
+        case 3: return bankgebuehr != nil
+        case 4: return verfuegbar != nil
+        default: return true
+        }
     }
 
     /// Auf eine Position, die es gerade nicht gibt, darf die Anzeige nicht stehenbleiben:
-    /// Beim Kontowechsel kann die Gebühr verschwinden, der gespeicherte Modus bleibt.
+    /// Beim Kontowechsel kann die Gebühr oder die Vormerkung verschwinden, der
+    /// gespeicherte Modus bleibt.
     private var wirksamerStil: Int {
-        (style == 3 && bankgebuehr == nil) ? 0 : style
+        hatInhalt(style) ? style : 0
     }
 
     private var currentModeLabel: String {
@@ -73,15 +95,17 @@ struct BalanceSubtitleSwitch: View {
         case 1: return L10n.t("Sub-Metrics", "Sub-metrics")
         case 2: return L10n.t("Tagesbudget", "Daily budget")
         case 3: return L10n.t("Bankgebühren", "Bank fees")
+        case 4: return L10n.t("Verfügbar", "Available")
         default: return L10n.t("Klassisch", "Classic")
         }
     }
 
     private var nextModeLabel: String {
-        switch (style + 1) % 3 {
+        switch (style + 1) % 5 {
         case 1: return L10n.t("Sub-Metrics", "Sub-metrics")
         case 2: return L10n.t("Tagesbudget", "Daily budget")
         case 3: return L10n.t("Bankgebühren", "Bank fees")
+        case 4: return L10n.t("Verfügbar", "Available")
         default: return L10n.t("Klassisch", "Classic")
         }
     }
@@ -91,6 +115,7 @@ struct BalanceSubtitleSwitch: View {
         case 1: return "chart.bar.fill"
         case 2: return "sun.max.fill"
         case 3: return "building.columns.fill"
+        case 4: return "hourglass"
         default: return "text.alignleft"
         }
     }
@@ -141,6 +166,8 @@ struct BalanceSubtitleSwitch: View {
                 subMetricsWithFallback(dayOnly: true)
             case 3:
                 gebuehrenContent
+            case 4:
+                verfuegbarContent
             default:
                 classicContent
             }
@@ -159,6 +186,29 @@ struct BalanceSubtitleSwitch: View {
                 .lineLimit(1)
         }
     }
+
+    /// Mit Nachkommastellen, anders als die übrigen Positionen: Der Sinn dieser Zeile
+    /// ist der Vergleich mit der Banking-App, und die zeigt Cents.
+    @ViewBuilder
+    private var verfuegbarContent: some View {
+        if let betrag = verfuegbar {
+            Text(L10n.t("Verfügbar \(Self.centFormatter.string(from: NSNumber(value: betrag)) ?? "")",
+                        "Available \(Self.centFormatter.string(from: NSNumber(value: betrag)) ?? "")"))
+                .font(ThemeFonts.flyoutBody(size: 12))
+                .foregroundColor(detailColor ?? .secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private static let centFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.locale = Locale(identifier: "de_DE")
+        f.currencyCode = "EUR"
+        f.maximumFractionDigits = 2
+        f.minimumFractionDigits = 2
+        return f
+    }()
 
     // MARK: - Sub-Metrics Mode (mit Classic-Fallback bei .unknown)
 

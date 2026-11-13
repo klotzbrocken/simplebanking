@@ -252,8 +252,19 @@ private struct TransactionsPanelView: View {
             style: $panelSubtitleStyle,
             forceClassic: vm.isUnifiedMode,
             detailColor: detail,
-            bankgebuehr: vm.bankgebuehr
+            bankgebuehr: vm.bankgebuehr,
+            verfuegbar: verfuegbarerSaldo(gebucht: parsed)
         )
+    }
+
+    /// Gebuchter Saldo abzüglich vorgemerkter Lastschriften — dieselbe Rechnung wie im
+    /// Flyout, damit beide Fenster nicht auseinanderlaufen. `nil`, wenn es nichts
+    /// Vorgemerktes gibt (dann wäre es dieselbe Zahl wie oben) oder im Unified-Mode
+    /// (gemischte Währungen wären fachlich falsch).
+    private func verfuegbarerSaldo(gebucht: Double?) -> Double? {
+        guard !vm.isUnifiedMode, let gebucht else { return nil }
+        guard AvailableBalance.pendingDebitSum(vm.transactions) < -0.005 else { return nil }
+        return AvailableBalance.compute(adjustedBooked: gebucht, pendingTx: vm.transactions)
     }
 
     private var colorScheme: ColorScheme? {

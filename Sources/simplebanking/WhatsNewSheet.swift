@@ -312,6 +312,16 @@ enum WhatsNewContent {
                 "Importing from MoneyMoney used to be part of first-time setup only \u{2014} if you already used simplebanking and wanted your history later, you would have had to delete everything and start over. It now lives in **Settings \u{2192} Accounts**: one sheet for all accounts, because a MoneyMoney database opens with *one* password. Only entries older than the account's oldest existing booking are imported \u{2014} what is already there stays untouched. Accounts not connected here are declined with a reason instead of quietly missing. The password is still only used to decrypt and is never stored."
             )
         ),
+        WhatsNewItem(
+            icon: "hourglass",
+            tint: .sbBlueStrong,
+            title: L10n.t("„Verfügbar“ unter dem Kontostand",
+                          "“Available” below your balance"),
+            description: L10n.t(
+                "Manche Banken — die ING etwa — geben über ihre Schnittstelle nur den **gebuchten** Saldo heraus, zeigen in ihrer eigenen App aber den Stand abzüglich schon vorgemerkter Abbuchungen. Dann stehen zwei Zahlen nebeneinander, und keine ist falsch. simplebanking rechnet die zweite jetzt selbst und zeigt sie als weitere Position im Untertitel unter dem Saldo — im Flyout wie in der Umsatzliste, über dasselbe Symbol wie Fixkosten und Bankgebühren. Sie erscheint nur, wenn etwas vorgemerkt ist. Vorgemerkte **Eingänge** zählen bewusst nicht: Ein erwarteter Betrag ist nicht zugesagt. Die große Zahl bleibt, was die Bank sagt.",
+                "Some banks — ING among them — only hand out the **booked** balance over their interface, while their own app shows the balance minus payments that are already pending. Two numbers side by side, and neither is wrong. simplebanking now works out the second one itself and shows it as another position in the subtitle below your balance — in the flyout and in the transaction list, behind the same icon as recurring costs and bank fees. It only appears when something is pending. Pending **incoming** amounts deliberately do not count: money that is expected is not money that is promised. The big number stays what the bank says."
+            )
+        ),
     ]
 
     private static let v220: [WhatsNewItem] = [
