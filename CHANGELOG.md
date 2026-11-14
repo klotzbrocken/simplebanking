@@ -1,5 +1,17 @@
 # Changelog — simplebanking
 
+## [Unreleased]
+
+### Behoben
+
+- **Der angezeigte Empfänger sprang immer wieder auf „Unbekannt" zurück** — und zwar bis in alle Ewigkeit, ohne Fehlermeldung. Das Feld „Angezeigter Empfänger" in den Buchungsdetails ist mit dem aufgelösten Namen **vorbelegt**; findet die Auflösung keine Gegenseite — weil die Bank keinen Namen liefert, oder weil der gelieferte Name die eigene Seite ist —, steht dort der Platzhalter „Unbekannt". Ein Klick auf „Als Regel speichern" machte daraus eine echte Regel „Muster → Unbekannt", und die schrieb den Platzhalter von da an auf jede Buchung, die das Muster trifft. Die danach gespeicherte **richtige** Regel tat sichtbar nichts: Bei gleichem Muster gewinnt die ältere. *Gemeldet am 14.11.2026, nachvollzogen an den gespeicherten Regeln des Melders — zwei Einträge zum selben Muster, 17 Sekunden auseinander.*
+
+  Drei Stellen, damit es nicht wiederkommt: „Unbekannt" lässt sich nicht mehr als Regelziel speichern (das Blatt sagt jetzt, warum), eine neue Regel zum selben Muster und Bereich **ersetzt** ihre Vorgängerin statt sich dahinter einzureihen, und eine schon gespeicherte Regel auf den Platzhalter wird beim Lesen aussortiert — wer sie hat, wird sie ohne Zutun los.
+
+### Geändert
+
+- **Die Kategorie stand zweimal in den Buchungsdetails** — einmal als Auswahlfeld neben dem Buchungstext, einmal als unveränderliche Zeile in ihrer eigenen Karte darunter. Geändert wird sie jetzt in der Karte, die ihren Namen trägt; der Buchungstext bekommt die ganze Breite, die vorher das zweite Feld belegte.
+
 ## [2.2.2] — 2026-11-13
 
 ### Behoben

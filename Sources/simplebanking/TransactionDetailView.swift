@@ -373,6 +373,10 @@ struct TransactionDetailView: View {
             merchantEditStatus = "Bitte ein Suchmuster für die Regel angeben."
             return
         }
+        guard merchant.caseInsensitiveCompare(MerchantResolver.unknownMerchant) != .orderedSame else {
+            merchantEditStatus = "\u{201E}Unbekannt\u{201C} ist kein Name — bitte den Empfänger eintragen."
+            return
+        }
         guard MerchantResolver.saveRule(pattern: pattern, merchant: merchant, scope: rulePatternScope, matchType: .contains) != nil else {
             merchantEditStatus = "Regel konnte nicht gespeichert werden."
             return
@@ -707,57 +711,19 @@ struct TransactionDetailView: View {
                         
                         Divider()
                         
-                        // 4) Buchungstext und Kategorie
-                        HStack(alignment: .top, spacing: 20) {
-                            DetailColumn(
-                                label: "Buchungstext",
-                                value: transaction.additionalInformation ?? "—"
-                            )
+                        // 4) Buchungstext — in voller Breite. Die Kategorie stand
+                        // hier ein zweites Mal und nahm ihm den Platz; geändert wird
+                        // sie jetzt dort, wo sie hingehört: in ihrer eigenen Karte.
+                        DetailRow(
+                            label: "Buchungstext",
+                            value: transaction.additionalInformation ?? "—"
+                        )
 
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(spacing: 6) {
-                                    Text("Kategorie")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                    // Der Weg zu den eigenen Kategorien — dort, wo
-                                    // man kategorisiert. Ein Menü kann keinen
-                                    // Eintrag mit Aktion tragen, also steht er
-                                    // daneben.
-                                    Button {
-                                        dismiss()
-                                        NotificationCenter.default.post(
-                                            name: .kategorienVerwalten, object: nil)
-                                    } label: {
-                                        Image(systemName: "plus.circle")
-                                            .font(.system(size: 11))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .foregroundColor(.secondary)
-                                    .help(L10n.t("Eigene Kategorien anlegen und umbenennen",
-                                                 "Add and rename your own categories"))
-                                    .accessibilityLabel(Text(L10n.t(
-                                        "Eigene Kategorien verwalten",
-                                        "Manage your own categories")))
-                                }
-
-                                Picker("", selection: $selectedCategory) {
-                                    ForEach(TransactionCategory.allCases, id: \.self) { category in
-                                        Label(category.displayName, systemImage: category.icon)
-                                            .tag(category)
-                                    }
-                                }
-                                .pickerStyle(MenuPickerStyle())
-                                .labelsHidden()
-                                .disabled(isApplyingCategoryChange)
-
-                                if let purposeCode = transaction.purposeCode,
-                                   !purposeCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text("Bankcode: \(formatPurposeCode(purposeCode))")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let purposeCode = transaction.purposeCode,
+                           !purposeCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("Bankcode: \(formatPurposeCode(purposeCode))")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
                         }
                         
                         Divider()
@@ -789,17 +755,41 @@ struct TransactionDetailView: View {
                     )
 
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Kategorie")
-                            .font(.system(size: 12, weight: .semibold))
+                        HStack(spacing: 6) {
+                            Text("Kategorie")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.secondary)
+                            // Der Weg zu den eigenen Kategorien — dort, wo man
+                            // kategorisiert. Ein Menü kann keinen Eintrag mit Aktion
+                            // tragen, also steht er daneben.
+                            Button {
+                                dismiss()
+                                NotificationCenter.default.post(
+                                    name: .kategorienVerwalten, object: nil)
+                            } label: {
+                                Image(systemName: "plus.circle")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.plain)
                             .foregroundColor(.secondary)
+                            .help(L10n.t("Eigene Kategorien anlegen und umbenennen",
+                                         "Add and rename your own categories"))
+                            .accessibilityLabel(Text(L10n.t(
+                                "Eigene Kategorien verwalten",
+                                "Manage your own categories")))
+                        }
 
                         HStack(spacing: 8) {
-                            Image(systemName: selectedCategory.icon)
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                            Text(selectedCategory.displayName)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.primary)
+                            Picker("", selection: $selectedCategory) {
+                                ForEach(TransactionCategory.allCases, id: \.self) { category in
+                                    Label(category.displayName, systemImage: category.icon)
+                                        .tag(category)
+                                }
+                            }
+                            .pickerStyle(MenuPickerStyle())
+                            .labelsHidden()
+                            .fixedSize()
+                            .disabled(isApplyingCategoryChange)
                             Spacer()
 
                             if hasCategoryOverride {
