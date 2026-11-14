@@ -49,6 +49,26 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.2.2</title>
+            <pubDate>Sat, 14 Nov 2026 06:01:19 +0100</pubDate>
+            <sparkle:version>20261113778</sparkle:version>
+            <sparkle:shortVersionString>2.2.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.2.2/simplebanking-2.2.2.dmg" length="35969412" type="application/octet-stream" sparkle:edSignature="LYafkzJ3pGlbElTwPQmnvANU3UhHXl/Zs736db3y3q+VyJHye7wbdqWQTPOqyAXTcHyGIRtc0GdMAC8HTexGDA=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.2.2</h2>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>Importierte Historie ist jetzt auch zu sehen.</strong> Wer Ums&#228;tze aus MoneyMoney, einer OFX- oder einer CAMT.053-Datei &#252;bernommen hat, bekam die richtige Zahl gemeldet &#8212; und sah danach trotzdem nur die letzten Wochen. Die Buchungen waren vollst&#228;ndig da; die Liste fragt die Datenbank aber nur so weit zur&#252;ck, wie ihr Zeitraum reicht, und der blieb beim Import unver&#228;ndert. Verloren ist nichts: <strong>den Import einfach noch einmal starten</strong> &#8212; er bringt nichts Neues herein, zieht den Zeitraum aber auf den Verlauf, der schon liegt. Danach steht alles in der Liste, im Export und in der Kategorisierung. Wie weit die Bank selbst abgerufen wird, &#228;ndert sich nicht.</li>
+                    <li><strong>Der Demo-Modus zeigt sein ganzes Jahr.</strong> Dieselbe Ursache, nur ohne Schaden: Die Demo-Daten reichen ein Jahr zur&#252;ck, die Liste zeigte 60 Tage &#8212; und schrumpfte bei jedem Aktualisieren wieder zusammen.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.2.1</title>
             <pubDate>Fri, 13 Nov 2026 16:03:45 +0100</pubDate>
             <sparkle:version>20261113775</sparkle:version>
