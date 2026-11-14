@@ -496,8 +496,22 @@ enum MerchantResolver {
         guard !normalizedPattern.isEmpty, !normalizedMerchant.isEmpty else {
             return nil
         }
+        // „Unbekannt" ist der Platzhalter für „kein Name gefunden" — als Regelziel
+        // gespeichert heftet er genau diesen Platzhalter dauerhaft an jede Buchung,
+        // die das Muster trifft. Das Feld ist damit vorbelegt, ein Klick auf „Als
+        // Regel speichern" genügte: Am 14.11.2026 gemeldet als „der Empfänger springt
+        // immer auf Unbekannt zurück".
+        guard normalizedMerchant.caseInsensitiveCompare(unknownMerchant) != .orderedSame else {
+            return nil
+        }
 
-        var rules = userRules()
+        // Dieselbe Suche ersetzt ihren Vorgänger. Zwei Regeln mit gleichem Muster und
+        // Bereich sind nicht additiv — es gewinnt die ältere, und die eben gespeicherte
+        // tut sichtbar nichts.
+        var rules = userRules().filter {
+            !($0.matchScope == scope
+              && $0.pattern.caseInsensitiveCompare(normalizedPattern) == .orderedSame)
+        }
         let now = Date()
         let rule = MerchantUserRule(
             id: UUID(),
@@ -857,7 +871,12 @@ enum MerchantResolver {
         else {
             return []
         }
-        return decoded
+        // Bestandsregeln auf den Platzhalter aussortieren (siehe `saveRule`). Sie
+        // können nichts anderes sein als ein Versehen, und sie verdecken die
+        // richtige Regel zum selben Muster.
+        return decoded.filter {
+            $0.merchant.caseInsensitiveCompare(unknownMerchant) != .orderedSame
+        }
     }
 
     private static func loadOverrides() -> [String: String] {
