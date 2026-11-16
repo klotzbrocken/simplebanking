@@ -12,7 +12,11 @@
 
 - **„Bank-Zugang gesperrt, bei der Bank entsperren lassen" stand auch dann da, wenn nichts gesperrt war** – derselbe Fehler trägt einen Code, und der unterscheidet drei Lagen: Bei der Bank ist kein TAN-Verfahren für Drittanbieter eingerichtet, die Bank wartet auf eine Anmeldung im Online-Banking, oder der Zugang ist tatsächlich gesperrt. Der Code wurde verworfen, also bekamen alle drei den Rat, der nur für die letzte stimmt. Jetzt hat jede Lage ihren eigenen.
 
+- **Wer die Demo gesehen hatte, kam nicht mehr heraus** – und richtete danach vergeblich seine Bank ein. Der Demo-Modus war die einzige Einstellung, die sich nur über das Menü zurücknehmen ließ (Einstellungen › Demo-Modus › Aus): Eine echte Bank einzurichten ließ ihn an. Dann zeigt die App weiter ihre erfundenen Zahlen, die Umsätze der eigenen Bank bleiben leer, und weil der Programmstart den Demo-Modus über vorhandene Zugangsdaten stellt, war nach dem nächsten Start das eigene Konto weg und die Demo-Bank wieder da. Das Schlimmste daran stand eine Ebene tiefer: In diesem Zustand hielt die App auch das eigene Konto für nicht eingerichtet, und „Konto hinzufügen" startete deshalb die **Ersteinrichtung** auf genau dem Konto, das schon da war. Jetzt verlässt jeder Weg in den Einrichtungsassistenten vorher die Demo. *Gemeldet am 16.11.2026, zweimal eingerichtet und zweimal die Demo zurückbekommen.*
+
 ### Geändert
+
+- **Die Demo ist jetzt zu erkennen** – „🎭 Demo" steht im Kopf der Kontostand-Karte und über der Umsatzliste. Vorher sagte es nur der Tooltip am Menüleistensymbol und ein Abzeichen im Senden-Blatt. Die Demo-Slots tragen echte Bankmarken und ein Jahr erfundener Umsätze, also sah es aus wie ein Konto, und der Melder von oben hielt die erfundenen Buchungen für seine.
 
 - **Die Kategorie stand zweimal in den Buchungsdetails** — einmal als Auswahlfeld neben dem Buchungstext, einmal als unveränderliche Zeile in ihrer eigenen Karte darunter. Geändert wird sie jetzt in der Karte, die ihren Namen trägt; der Buchungstext bekommt die ganze Breite, die vorher das zweite Feld belegte.
 

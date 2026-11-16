@@ -2934,7 +2934,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         recomputeLeftToPay()
     }
 
-    @objc private func setDemoOff() {
+    /// Den Demo-Modus verlassen: Slots abbauen, Marken löschen, Demo-Umsätze aus dem
+    /// Ansichtsmodell. Was danach mit der Oberfläche passiert, entscheidet der Aufrufer.
+    ///
+    /// Zweiter Aufrufer ist der Einrichtungsassistent, und zwar als Fehlerbehebung: Wer
+    /// eine echte Bank einrichtet, verlässt die Demo. Bis 2.2.2 tat er das nicht –
+    /// `demoMode` war die einzige Marke, die nur das Menü umlegen konnte. Der Start
+    /// stellt sie aber über vorhandene Zugangsdaten (siehe die Verzweigung in
+    /// `applicationDidFinishLaunching`), also war nach dem nächsten Start das echte
+    /// Konto weg und die Demo-Bank wieder da. Gemeldet am 16.11.2026: ein Nutzer hat
+    /// zweimal seine Bank eingerichtet und zweimal die Demo zurückbekommen.
+    private func verlasseDemoModus() {
         guard demoMode else { return }
         if MultibankingStore.shared.slots.contains(where: { $0.id.hasPrefix("demo-slot-") }) {
             tearDownDemoSlots()
@@ -2944,7 +2954,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         txVM.transactions = []
         txVM.leftToPayAmount = nil   // drop stale demo value
         txVM.resetPaging()
-        rebuildMenuTitleForDemoMode()
         // Apply the live slot BEFORE checking credentials — CredentialsStore context
         // (slot ID) must be set correctly, otherwise exists() returns false and the
         // menu shows "Verbinden" even though credentials are stored on disk.
@@ -2961,6 +2970,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             applySlotToViewModel(slot)
         }
         updateTxPanelAccountNav()
+        rebuildMenuTitleForDemoMode()
+    }
+
+    @objc private func setDemoOff() {
+        guard demoMode else { return }
+        verlasseDemoModus()
         if CredentialsStore.exists() {
             locked = true
             showLockIcon()
@@ -6884,9 +6899,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         // Defer showing modal panels until the status bar menu fully dismisses.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Erst raus aus der Demo, dann entscheiden: Während Demo-Slots eingehängt
+            // sind, zeigt `CredentialsStore.exists()` auf einen Demo-Slot und ist
+            // `false`, auch wenn längst eine echte Bank eingerichtet ist. Wer in diesem
+            // Zustand den Assistenten öffnete, bekam die **Ersteinrichtung** auf dem
+            // Slot „legacy" – also auf seine vorhandenen Zugangsdaten.
+            self.verlasseDemoModus()
             // If a real account already exists, treat this as "add another account"
             // rather than a full reinstall — same as tapping "+" in the transaction list.
-            let hasRealAccount = CredentialsStore.exists() && !self.demoMode
+            let hasRealAccount = CredentialsStore.exists()
             if hasRealAccount {
                 self._runSetupWizardForAddingAccount()
             } else {
@@ -7224,6 +7245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// gewählt wurden, die es hier noch nicht gibt. Der Assistent startet dann in der
     /// MoneyMoney-Kontenauswahl statt in der Banksuche.
     private func _runSetupWizardForAddingAccount(mmAuszug: MoneyMoneyAuszug? = nil) {
+        // Siehe `runSetupWizardIfNeeded`: eine echte Bank und die Demo gehen nicht
+        // zusammen, und der Slot, der gleich entsteht, soll nicht neben Demo-Slots
+        // liegen – `previousSlot` wäre sonst ein Demo-Slot.
+        verlasseDemoModus()
         let previousSlot = MultibankingStore.shared.activeSlot
 
         // Neue Slot-ID VOR dem Wizard erstellen und aktivieren,
@@ -7371,13 +7396,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard slotId != "legacy" else { return }
         MainActor.assumeIsolated {
             guard !MultibankingStore.shared.slots.contains(where: { $0.id == slotId }) else { return }
-            AppLogger.log("Einrichtung abgebrochen — vorläufigen Slot \(slotId.prefix(8)) samt Verbindungsdaten entfernt",
+            AppLogger.log("Einrichtung abgebrochen – vorläufigen Slot \(slotId.prefix(8)) samt Verbindungsdaten entfernt",
                           category: "Setup")
             MultibankingStore.purgePerSlotData(slotId: slotId)
         }
     }
 
     private func runSetupWizardIfNeeded() {
+        // Wer hier landet, richtet eine echte Bank ein – also raus aus der Demo, bevor
+        // der Assistent läuft. Nicht `setDemoOff()`: das stößt ohne Zugangsdaten selbst
+        // wieder einen Assistenten an.
+        verlasseDemoModus()
         // Clear old state immediately — opening the wizard means starting fresh
         lastBalance = nil
         txVM.transactions = []
@@ -8593,6 +8622,8 @@ enum Flyoutmasse {
 
 private struct StatusBalanceFlyoutCardView: View {
     @AppStorage("balanceMoodEmojiEnabled") private var emojiEnabled: Bool = false
+    /// Demo-Modus → Kennzeichen in den Kartenkopf. Siehe `DemoBadge`.
+    @AppStorage("demoMode") private var demoModeAktiv: Bool = false
     let balanceText: String
     /// Optionaler Ersatz für den Kontostand (Desktop-Widget-Ruhezustand: Maske).
     var balanceTextOverride: String? = nil
@@ -9186,6 +9217,7 @@ private struct StatusBalanceFlyoutCardView: View {
                     .textCase(ThemeChrome.textCase)
                     .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 Spacer()
+                if demoModeAktiv { DemoBadge() }
             }
 
             // Nur der Gesamt-Saldo (keine Konten-Aufschlüsselung rechts).
@@ -9284,6 +9316,7 @@ private struct StatusBalanceFlyoutCardView: View {
                         .foregroundColor(themed ? Color.themedInk.opacity(0.9) : Color(NSColor.secondaryLabelColor))
                 }
                 Spacer()
+                if demoModeAktiv { DemoBadge() }
             }
             Text(effectiveBalanceText)
                 .accessibilityLabel(Text(Vorlesetext.betrag(effectiveBalanceText)))
@@ -9453,6 +9486,7 @@ private struct StatusBalanceFlyoutCardView: View {
                     BTXBlinkingPhone(size: 13)
                 }
                 Spacer()
+                if demoModeAktiv { DemoBadge() }
             }
 
             // Der Ring steht neben Saldo und Untertitel, nicht neben der Kopfzeile —

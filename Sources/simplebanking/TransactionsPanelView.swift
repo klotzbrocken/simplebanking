@@ -1509,6 +1509,7 @@ private struct TransactionsPanelView: View {
     /// rechts im Titelleisten-Streifen auf der Money-Heat.
     private var headerControls: some View {
         HStack(spacing: 15) {
+            if demoMode { DemoBadge() }
             Button { Task { await onRefresh() } } label: {
                 Image(systemName: ThemeChrome.symbol(for: .refresh))
             }

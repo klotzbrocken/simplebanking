@@ -2296,7 +2296,13 @@ private struct ProgressBar: View {
     }
 }
 
-private struct DemoBadge: View {
+/// „🎭 Demo" – das Kennzeichen, dass hier nichts echt ist.
+///
+/// Nicht mehr `private`, weil es dieselbe Marke auch im Flyout und über der
+/// Umsatzliste braucht: Bis 2.2.2 stand sie nur in diesem Blatt und im Tooltip des
+/// Menuleistensymbols. Ein Nutzer richtete darauf hin seine Bank ein, sah ein Jahr
+/// erfundener Umsätze und hielt sie für seine (gemeldet am 16.11.2026).
+struct DemoBadge: View {
     var body: some View {
         Text("🎭 Demo")
             .font(.system(size: 11, weight: .medium))
