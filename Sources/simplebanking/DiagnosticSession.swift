@@ -69,7 +69,7 @@ final class DiagnosticSession: ObservableObject {
             switch self {
             case .ok:      return "✓"
             case .failed:  return "✗"
-            case .skipped: return "—"
+            case .skipped: return "–"
             }
         }
 
@@ -216,7 +216,7 @@ final class DiagnosticSession: ObservableObject {
             mailAttachments: attachments
         )
         phase = .done(report)
-        AppLogger.log("diagnostic: session \(id) finished — \(collected.count) slots", category: "Diagnostic")
+        AppLogger.log("diagnostic: session \(id) finished – \(collected.count) slots", category: "Diagnostic")
     }
 
     private func probeSlot(slot: BankSlot, masterPassword: String, from30d: String) async -> SlotProbe {
@@ -388,7 +388,7 @@ final class DiagnosticSession: ObservableObject {
         let traces = newTraceFiles()
         s += "── YAXI-Traces (\(traces.count)) ────────────────────────\n"
         if traces.isEmpty {
-            s += "  (keine Trace-IDs verfügbar — älteres SDK oder Probe nie an die Bank gegangen)\n"
+            s += "  (keine Trace-IDs verfügbar – älteres SDK oder Probe nie an die Bank gegangen)\n"
         } else {
             for t in traces {
                 let size = (try? t.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -464,7 +464,7 @@ final class DiagnosticSession: ObservableObject {
 
     private func cachedBalanceLabel(slotId: String) -> String {
         let raw = UserDefaults.standard.object(forKey: "simplebanking.cachedBalance.\(slotId)") as? Double
-        guard let raw else { return "—" }
+        guard let raw else { return "–" }
         let f = NumberFormatter()
         f.locale = Locale(identifier: "de_DE")
         f.minimumFractionDigits = 2
@@ -526,7 +526,7 @@ final class DiagnosticSession: ObservableObject {
         switch r {
         case .ok(let ms):                return "\(ms)ms ✓"
         case .failed(let msg, let ms):   return "\(ms)ms ✗ (\(String(msg.prefix(60))))"
-        case .skipped(let reason):       return "— \(reason)"
+        case .skipped(let reason):       return "– \(reason)"
         }
     }
 

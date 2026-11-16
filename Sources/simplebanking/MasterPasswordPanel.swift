@@ -194,7 +194,7 @@ final class MasterPasswordPanel {
             stackViews.append(biometricCheckbox)
 
             let hint = NSTextField(wrappingLabelWithString: isUnlock
-                ? "Touch ID wird nach dem Entsperren eingerichtet — du wirst einmal gefragt."
+                ? "Touch ID wird nach dem Entsperren eingerichtet – du wirst einmal gefragt."
                 : "Nach dem Speichern wirst du einmal nach Touch ID gefragt.")
             hint.font = .systemFont(ofSize: 11)
             hint.textColor = .secondaryLabelColor
@@ -289,7 +289,7 @@ final class MasterPasswordPanel {
                 if !Self.isUserCancel(error) {
                     BiometricStore.clear()
                     self.touchIDButton?.isEnabled = false
-                    self.touchIDHint.stringValue = "Touch ID muss neu eingerichtet werden — Passwort eingeben."
+                    self.touchIDHint.stringValue = "Touch ID muss neu eingerichtet werden – Passwort eingeben."
                     self.touchIDHint.isHidden = false
                 }
             }

@@ -28,7 +28,7 @@ enum Auswertung {
         var description: String {
             switch self {
             case .keinStand:
-                return "Noch keine Auswertung vorhanden. Starte simplebanking einmal — gerechnet wird in der App, nicht hier."
+                return "Noch keine Auswertung vorhanden. Starte simplebanking einmal – gerechnet wird in der App, nicht hier."
             case .keinKonto(let id):
                 return "Kein Konto mit der ID \(id). `sb accounts` zeigt die gültigen IDs."
             }
@@ -112,7 +112,7 @@ enum Auswertung {
                 for p in posten {
                     let offen = p["open_this_cycle"] as? Bool ?? false
                     let marke = nurOffene ? "  " : (offen ? ANSIColor.yellow("● ") : "  ")
-                    let faellig = p["next_due"] as? String ?? "—"
+                    let faellig = p["next_due"] as? String ?? "–"
                     print("  \(marke)\(Format.pad(p["merchant"] as? String ?? "?", to: 30))"
                           + "\(Format.padRightANSI(Format.colorMoney(-betrag(p)), to: 12))"
                           + ANSIColor.dim("   fällig \(faellig)"))
@@ -146,7 +146,7 @@ enum Auswertung {
                     print("  \(Format.pad(a["name"] as? String ?? "?", to: 28))"
                           + "\(Format.padRightANSI(Format.colorMoney(-betrag(a)), to: 12))"
                           + ANSIColor.dim("   \(Format.pad(a["tab"] as? String ?? "", to: 18))"
-                                          + "nächste \(a["next_due"] as? String ?? "—")")
+                                          + "nächste \(a["next_due"] as? String ?? "–")")
                           + link)
                 }
             }

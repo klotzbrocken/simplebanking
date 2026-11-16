@@ -348,8 +348,8 @@ struct TransferSheet: View {
             terminalView(
                 icon: "questionmark.circle.fill",
                 tint: .sbOrangeStrong,
-                title: L10n.t("Status unklar — prüfe Banking-App",
-                              "Status unclear — check banking app"),
+                title: L10n.t("Status unklar – prüfe Banking-App",
+                              "Status unclear – check banking app"),
                 message: L10n.t(
                     "Die Bank hat nicht eindeutig bestätigt. Es ist möglich, dass die Überweisung trotzdem ausgeführt wurde.",
                     "The bank didn't confirm clearly. The transfer might still have been executed."
@@ -620,10 +620,10 @@ struct TransferSheet: View {
             switch prefillSource {
             case "mcp": return L10n.t("Vom Assistant vorbereitet",
                                        "Prepared by the assistant")
-            case "roundup": return L10n.t("Vom Aufrunden vorbereitet — Sparkonto-Übertrag",
-                                           "Prepared from round-up — savings transfer")
-            default:    return L10n.t("Vorausgefüllt — bitte prüfen",
-                                       "Pre-filled — please review")
+            case "roundup": return L10n.t("Vom Aufrunden vorbereitet – Sparkonto-Übertrag",
+                                           "Prepared from round-up – savings transfer")
+            default:    return L10n.t("Vorausgefüllt – bitte prüfen",
+                                       "Pre-filled – please review")
             }
         }()
         return HStack(spacing: 8) {
@@ -634,8 +634,8 @@ struct TransferSheet: View {
                 Text(sourceLabel)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.primary)
-                Text(L10n.t("Felder vorab geprüft — Bestätigung + SCA wie immer durch dich.",
-                            "Fields pre-validated — confirmation + SCA still up to you."))
+                Text(L10n.t("Felder vorab geprüft – Bestätigung + SCA wie immer durch dich.",
+                            "Fields pre-validated – confirmation + SCA still up to you."))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .lineLimit(2)
@@ -1516,8 +1516,8 @@ struct TransferSheet: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.sbBlueStrong)
                 Text(L10n.t(
-                    "Sende in \(delayRemaining)s — du kannst noch abbrechen.",
-                    "Sending in \(delayRemaining)s — you can still cancel."
+                    "Sende in \(delayRemaining)s – du kannst noch abbrechen.",
+                    "Sending in \(delayRemaining)s – you can still cancel."
                 ))
                     .font(.system(size: 12))
                     .foregroundColor(.sbTextSecondary)
@@ -1682,8 +1682,8 @@ struct TransferSheet: View {
                     .multilineTextAlignment(.center)
             }
             if demoMode {
-                Text(L10n.t("(Demo-Mode — keine echte Bank-Aktion)",
-                            "(Demo mode — no real bank action)"))
+                Text(L10n.t("(Demo-Mode – keine echte Bank-Aktion)",
+                            "(Demo mode – no real bank action)"))
                     .font(.system(size: 11))
                     .foregroundColor(.sbTextSecondary)
             }
@@ -1835,8 +1835,8 @@ struct TransferSheet: View {
         // Versand (z.B. über Menüleiste/Hotkey) — sonst würde von Konto B statt A gesendet.
         if let frozen = confirmedSourceSlotId, frozen != slotId {
             await MainActor.run {
-                bodyError = L10n.t("Quellkonto hat sich geändert — Überweisung abgebrochen.",
-                                   "Source account changed — transfer cancelled.")
+                bodyError = L10n.t("Quellkonto hat sich geändert – Überweisung abgebrochen.",
+                                   "Source account changed – transfer cancelled.")
                 phase = .idle
                 confirmedSourceSlotId = nil
             }

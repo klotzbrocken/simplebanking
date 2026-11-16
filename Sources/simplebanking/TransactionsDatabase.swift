@@ -1502,7 +1502,7 @@ enum TransactionsDatabase {
     /// Idempotent + best-effort — Fehler werden geloggt aber nicht propagiert.
     static func checkpointWAL(bankId: String = "primary") {
         guard let queue = try? makeQueue(bankId: bankId) else {
-            AppLogger.log("WAL checkpoint skipped — DB queue unavailable", category: "DB", level: "WARN")
+            AppLogger.log("WAL checkpoint skipped – DB queue unavailable", category: "DB", level: "WARN")
             return
         }
         do {

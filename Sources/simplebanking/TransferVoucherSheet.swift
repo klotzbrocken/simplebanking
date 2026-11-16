@@ -80,14 +80,14 @@ struct TransferVoucherSheet: View {
             // Feature-Beschreibung — kompakter als UpsellSheet
             VStack(alignment: .leading, spacing: 10) {
                 bullet(icon: "bolt.fill",
-                       text: L10n.t("SEPA-Überweisung in 2 Klicks — Empfänger und Betrag aus deinen Buchungen vorgeschlagen.",
-                                    "SEPA transfer in 2 clicks — recipient and amount suggested from your transactions."))
+                       text: L10n.t("SEPA-Überweisung in 2 Klicks – Empfänger und Betrag aus deinen Buchungen vorgeschlagen.",
+                                    "SEPA transfer in 2 clicks – recipient and amount suggested from your transactions."))
                 bullet(icon: "lock.shield.fill",
-                       text: L10n.t("Kein simplebanking-Cloudkonto — Zugangsdaten bleiben lokal im Keychain. Zahlungsauslösung über YAXI, TAN/SCA bestätigst du direkt bei deiner Bank.",
-                                    "No simplebanking cloud account — credentials stay local in your Keychain. Payment initiation via YAXI; you confirm TAN/SCA directly with your bank."))
+                       text: L10n.t("Kein simplebanking-Cloudkonto – Zugangsdaten bleiben lokal im Keychain. Zahlungsauslösung über YAXI, TAN/SCA bestätigst du direkt bei deiner Bank.",
+                                    "No simplebanking cloud account – credentials stay local in your Keychain. Payment initiation via YAXI; you confirm TAN/SCA directly with your bank."))
                 bullet(icon: "checkmark.seal.fill",
-                       text: L10n.t("Einmalkauf — keine Abo-Falle. Updates innerhalb von 1.x kostenlos.",
-                                    "One-time purchase — no subscription. Free updates within 1.x."))
+                       text: L10n.t("Einmalkauf – keine Abo-Falle. Updates innerhalb von 1.x kostenlos.",
+                                    "One-time purchase – no subscription. Free updates within 1.x."))
             }
 
             Divider()

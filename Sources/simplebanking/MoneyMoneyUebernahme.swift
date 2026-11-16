@@ -113,7 +113,7 @@ enum MoneyMoneyNachtrag {
         // immer liegen.
         if MoneyMoneyVorhaben.istVerfallen() {
             AppLogger.log("MoneyMoney-Nachtrag: Vorhaben älter als "
-                          + "\(Int(MoneyMoneyVorhaben.hoechstalter / 86_400)) Tage — "
+                          + "\(Int(MoneyMoneyVorhaben.hoechstalter / 86_400)) Tage – "
                           + "\(MoneyMoneyVorhaben.eintraege.count) Einträge und Auszug verworfen",
                           category: "MoneyMoney", level: "WARN")
             MoneyMoneyVorhaben.wegwerfen()
@@ -155,7 +155,7 @@ enum MoneyMoneyNachtrag {
             // Umsätze da sind — verloren geht nichts, der nächste Aufruf holt ihn.
             guard (try? TransactionsDatabase.aeltesteBuchung(slotId: slot.id)) ?? nil != nil else {
                 AppLogger.log("MoneyMoney-Nachtrag: slot=\(slot.id) hat noch keine "
-                              + "Bankbuchungen — Verlauf wartet auf die Naht",
+                              + "Bankbuchungen – Verlauf wartet auf die Naht",
                               category: "MoneyMoney")
                 berichte.append(Bericht(iban: eintrag.iban, ausgang: .wartetAufAbruf))
                 continue

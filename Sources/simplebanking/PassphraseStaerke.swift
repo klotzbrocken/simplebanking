@@ -29,8 +29,8 @@ enum PassphraseStaerke {
         let zeichen = Array(passphrase)
         guard zeichen.count >= mindestlaenge else {
             return Befund(stufe: .zuKurz, bits: 0,
-                          text: L10n.t("Zu kurz — mindestens \(mindestlaenge) Zeichen.",
-                                       "Too short — at least \(mindestlaenge) characters."))
+                          text: L10n.t("Zu kurz – mindestens \(mindestlaenge) Zeichen.",
+                                       "Too short – at least \(mindestlaenge) characters."))
         }
 
         var vorrat = 0
@@ -58,8 +58,8 @@ enum PassphraseStaerke {
         switch bits {
         case ..<40:
             return Befund(stufe: .schwach, bits: bits,
-                          text: L10n.t("Schwach — leicht zu raten. Länger oder mit mehr Zeichenarten.",
-                                       "Weak — easy to guess. Make it longer or mix character types."))
+                          text: L10n.t("Schwach – leicht zu raten. Länger oder mit mehr Zeichenarten.",
+                                       "Weak – easy to guess. Make it longer or mix character types."))
         case 40..<70:
             return Befund(stufe: .brauchbar, bits: bits,
                           text: L10n.t("Brauchbar. Mehrere zufällige Wörter wären deutlich besser.",

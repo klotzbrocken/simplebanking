@@ -60,8 +60,8 @@ struct MoneyAgeSheet: View {
     private var intro: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(L10n.t(
-                "Wie alt ist das Geld im Schnitt, das du gerade ausgibst — also wie viele Tage zwischen Eingang und Ausgabe liegen?",
-                "How old, on average, is the money you're currently spending — i.e. how many days pass between inflow and spending?"
+                "Wie alt ist das Geld im Schnitt, das du gerade ausgibst – also wie viele Tage zwischen Eingang und Ausgabe liegen?",
+                "How old, on average, is the money you're currently spending – i.e. how many days pass between inflow and spending?"
             ))
             .font(.system(size: 13))
             Text(L10n.t(
@@ -93,7 +93,7 @@ struct MoneyAgeSheet: View {
     private var mainNumber: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if result.band == .unknown {
-                Text("—")
+                Text("–")
                     .font(.system(size: 60, weight: .bold).monospacedDigit())
                     .foregroundColor(.secondary)
             } else {
@@ -162,7 +162,7 @@ struct MoneyAgeSheet: View {
                 .font(.system(size: 21, weight: .bold).monospacedDigit())
                 .foregroundColor(d >= 0 ? .sbGreenStrong : .sbOrangeStrong)
             } else {
-                Text("—").font(.system(size: 21, weight: .bold)).foregroundColor(.secondary)
+                Text("–").font(.system(size: 21, weight: .bold)).foregroundColor(.secondary)
             }
             Text(L10n.t("Trend vs. vorher", "Trend vs. previous"))
                 .font(.system(size: 11)).foregroundColor(.secondary)

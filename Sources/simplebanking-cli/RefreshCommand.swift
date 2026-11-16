@@ -83,7 +83,7 @@ struct RefreshCommand: ParsableCommand {
         // Timeout: Outcome-Marker hat sich innerhalb des Fensters nicht geändert.
         if !quiet {
             if isTTY { print("\r\u{001B}[2K", terminator: "") }
-            print(ANSIColor.red("✗ Timeout nach \(timeout)s — keine Antwort der App."))
+            print(ANSIColor.red("✗ Timeout nach \(timeout)s – keine Antwort der App."))
             print(ANSIColor.dim("  Mögliche Ursachen: App nicht gestartet, hängender TAN-Dialog,"))
             print(ANSIColor.dim("  oder Bank-Abruf dauert länger. Mit --timeout N erhöhen."))
         }
@@ -95,7 +95,7 @@ struct RefreshCommand: ParsableCommand {
         case .success:
             print(ANSIColor.green("✓ Bankabruf erfolgreich") + ANSIColor.dim(" (\(elapsed)s)"))
         case .locked:
-            print(ANSIColor.yellow("⚠ App gesperrt — kein Bankabruf ausgeführt"))
+            print(ANSIColor.yellow("⚠ App gesperrt – kein Bankabruf ausgeführt"))
             print(ANSIColor.dim("  Öffne simplebanking und gib das Master-Passwort ein, dann erneut versuchen."))
         case .failed:
             let tail = outcome.detail.map { ": \($0)" } ?? ""

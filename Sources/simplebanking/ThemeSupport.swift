@@ -511,7 +511,7 @@ final class ThemeManager: @unchecked Sendable {
     /// Intern statt privat: Tests prüfen die ausgelieferten `.cfg`-Inhalte direkt.
     static let builtInThemes: [String: String] = [
         "default.cfg": """
-        # simplebanking Theme — Color Harmony Palette
+        # simplebanking Theme – Color Harmony Palette
         id=default
         name=Default
         bodyFont=System
@@ -543,7 +543,7 @@ final class ThemeManager: @unchecked Sendable {
         panelDark=#2A2018
         """,
         "gameboy.cfg": """
-        # simplebanking Theme — Game Boy (authentische DMG-4-Ton-Palette)
+        # simplebanking Theme – Game Boy (authentische DMG-4-Ton-Palette)
         # Original Game-Boy-LCD: 4 Grüntöne, KEIN Rot. Flyout/Umsatzliste rendern
         # vollflächig flach in LCD-Grün (keine Money-Heat), Schrift im dunkelsten Grün.
         # Appearance-unabhängig (LCD sieht in Light/Dark gleich aus).
@@ -553,7 +553,7 @@ final class ThemeManager: @unchecked Sendable {
         bodyFont=Menlo
         headingFont=Menlo Bold
         accent=#306230
-        # Beträge monochrom (Vorzeichen unterscheidet Ein/Aus) — dunkelstes Grün auf Screen.
+        # Beträge monochrom (Vorzeichen unterscheidet Ein/Aus) – dunkelstes Grün auf Screen.
         positive=#0F380F
         negative=#0F380F
         positiveLight=#0F380F
@@ -570,11 +570,11 @@ final class ThemeManager: @unchecked Sendable {
         inkDark=#0F380F
         """,
         "btx.cfg": """
-        # simplebanking Theme — BTX revisited (Bildschirmtext, 1983–2001)
+        # simplebanking Theme – BTX revisited (Bildschirmtext, 1983–2001)
         #
         # Hommage an den Dienst, über den in Deutschland das erste Online-Banking lief.
         # BTX kannte pro Zeichenzelle je eine Vorder- und Hintergrundfarbe aus acht
-        # Grundfarben, eine Rasterschrift und KEINE Bildmarken — Händler wurden über
+        # Grundfarben, eine Rasterschrift und KEINE Bildmarken – Händler wurden über
         # Mosaik-Blöcke aus der 2x3-Unterteilung einer Zeichenzelle dargestellt.
         # Deshalb sind Logos, Symbole und der Wasser-Effekt hier abgeschaltet.
         #
@@ -609,7 +609,7 @@ final class ThemeManager: @unchecked Sendable {
         dottedLeaders=on
         squareControls=on
         glyphControls=off
-        # Die Rasterschrift-Gestaltung hängt seit 2.0.2 an einem eigenen Schlüssel —
+        # Die Rasterschrift-Gestaltung hängt seit 2.0.2 an einem eigenen Schlüssel –
         # vorher kam sie ungefragt mit `glyphControls=off`. BTX will beides.
         lofiTypography=on
         screenBorder=#e8b200
@@ -960,7 +960,7 @@ enum ThemeChrome {
         // hängt am Grundbild, die Farbflächen blieben also deckend, und das spezifische
         // Bild läge unsichtbar darunter. Lieber deutlich melden als still ignorieren.
         if spezifisch != nil, grund == nil {
-            AppLogger.log("Theme-Wallpaper: flächenspezifisches Bild ohne `wallpaper` — ohne Grundbild bleibt überall die Farbe. Bitte zusätzlich `wallpaper=` setzen.",
+            AppLogger.log("Theme-Wallpaper: flächenspezifisches Bild ohne `wallpaper` – ohne Grundbild bleibt überall die Farbe. Bitte zusätzlich `wallpaper=` setzen.",
                           category: "Theme", level: "WARN")
             return nil
         }

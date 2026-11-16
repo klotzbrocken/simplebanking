@@ -161,13 +161,13 @@ enum SetupDiagnosticsReport {
         let inhalt = (try? String(contentsOf: setupDatei, encoding: .utf8)) ?? ""
         let zeilen = inhalt.split(separator: "\n").map(String.init)
 
-        var s = "simplebanking — Diagnose der Einrichtung\n"
+        var s = "simplebanking – Diagnose der Einrichtung\n"
         s += "════════════════════════════════════════\n\n"
         s += "Versuch begonnen: \(zeitFormat.string(from: begonnen))\n"
         s += "Protokolldatei:   \(setupDatei.lastPathComponent)\n"
         s += "YAXI-Traces:      \(traces.count)\n"
         if traces.isEmpty {
-            s += "                  (keine — entweder war das Protokoll abgeschaltet\n"
+            s += "                  (keine – entweder war das Protokoll abgeschaltet\n"
             s += "                   oder es kam nie zu einem Bankaufruf)\n"
         }
         s += "\n"
@@ -177,7 +177,7 @@ enum SetupDiagnosticsReport {
             s += "── Ergebnis ─────────────────────────────\n\(finish)\n\n"
         } else {
             s += "── Ergebnis ─────────────────────────────\n"
-            s += "Kein Abschluss protokolliert — der Versuch wurde abgebrochen oder\n"
+            s += "Kein Abschluss protokolliert – der Versuch wurde abgebrochen oder\n"
             s += "die App wurde vorher beendet.\n\n"
         }
 

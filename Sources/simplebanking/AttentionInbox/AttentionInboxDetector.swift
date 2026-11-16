@@ -150,7 +150,7 @@ enum AttentionInboxDetector {
             type: .salaryMissing,
             priority: 1,
             title: "Gehaltseingang noch nicht erkannt",
-            body: "Kein Gehaltseingang gefunden — erwartet um den \(fmt.string(from: expectedDate)).",
+            body: "Kein Gehaltseingang gefunden – erwartet um den \(fmt.string(from: expectedDate)).",
             detail: "Heute ist der \(cal.component(.day, from: today)).",
             relatedTxId: nil,
             snoozeKey: "salary-missing"
@@ -366,7 +366,7 @@ enum AttentionInboxDetector {
                 type: .categorySpike,
                 priority: 3,
                 title: "\(cat) diesen Monat deutlich höher",
-                body: "Du hast bisher \(formatAmount(currentTotal)) ausgegeben — etwa \(factor / 10),\(factor % 10)× mehr als üblich.",
+                body: "Du hast bisher \(formatAmount(currentTotal)) ausgegeben – etwa \(factor / 10),\(factor % 10)× mehr als üblich.",
                 detail: "Ø \(formatAmount(avg)) / Monat",
                 relatedTxId: nil,
                 snoozeKey: "cat-spike:\(cat)"

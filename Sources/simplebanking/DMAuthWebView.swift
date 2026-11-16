@@ -212,7 +212,7 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
             didAutoSync = true
             syncTapped()
         } else {
-            statusLabel.stringValue = "Bereit — jetzt synchronisieren."
+            statusLabel.stringValue = "Bereit – jetzt synchronisieren."
         }
     }
 
@@ -220,7 +220,7 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
 
     @objc private func syncTapped() {
         guard !latestToken.isEmpty, !DMService.isExpired(latestToken) else {
-            statusLabel.stringValue = "Noch kein gültiger dm-Login erkannt — bitte Einkäufe öffnen."
+            statusLabel.stringValue = "Noch kein gültiger dm-Login erkannt – bitte Einkäufe öffnen."
             return
         }
         syncButton.isEnabled = false
@@ -233,7 +233,7 @@ final class DMAuthWebView: NSObject, NSWindowDelegate, WKScriptMessageHandler, W
                 onSynced?(result)
                 finish(true)
             } catch DMServiceError.tokenExpired {
-                statusLabel.stringValue = "Sitzung abgelaufen — Seite neu laden und nochmal synchronisieren."
+                statusLabel.stringValue = "Sitzung abgelaufen – Seite neu laden und nochmal synchronisieren."
                 if headless { finish(false) }
             } catch {
                 statusLabel.stringValue = "Fehler: \(error)"

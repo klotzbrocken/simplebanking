@@ -265,11 +265,11 @@ final class LicenseManager: ObservableObject {
         case .unbekannt(let roh):
             // Ein Status, den diese Version nicht kennt, ist keine gültige Lizenz —
             // aber auch kein Netzwerkfehler, der die Offline-Kulanz anstoßen würde.
-            AppLogger.log("license: unbekannter Polar-Status „\(roh)“ — als nicht lizenziert behandelt",
+            AppLogger.log("license: unbekannter Polar-Status „\(roh)“ – als nicht lizenziert behandelt",
                           category: "License", level: "WARN")
             throw LicenseError.invalid(
-                message: L10n.t("Lizenzstatus „\(roh)“ ist dieser Version unbekannt — bitte simplebanking aktualisieren.",
-                                "License status \u{201C}\(roh)\u{201D} is unknown to this version — please update simplebanking.")
+                message: L10n.t("Lizenzstatus „\(roh)“ ist dieser Version unbekannt – bitte simplebanking aktualisieren.",
+                                "License status \u{201C}\(roh)\u{201D} is unknown to this version – please update simplebanking.")
             )
         }
         // Hard-Expiry: wenn Polar ein expires_at liefert und das in der
@@ -326,8 +326,8 @@ final class LicenseManager: ObservableObject {
         // 404 = Key/org-Combination existiert nicht
         if http.statusCode == 404 {
             throw LicenseError.invalid(
-                message: L10n.t("Lizenz-Key nicht gefunden — bitte prüfen.",
-                                "License key not found — please verify.")
+                message: L10n.t("Lizenz-Key nicht gefunden – bitte prüfen.",
+                                "License key not found – please verify.")
             )
         }
         // 422 = Validation-Fehler (z.B. Conditions stimmen nicht); Polar

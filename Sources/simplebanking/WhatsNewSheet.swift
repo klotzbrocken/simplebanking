@@ -305,8 +305,8 @@ enum WhatsNewContent {
             title: L10n.t("Importierte Historie ist jetzt auch zu sehen",
                           "Imported history is now actually visible"),
             description: L10n.t(
-                "Wer Umsätze aus MoneyMoney, einer OFX- oder einer CAMT.053-Datei übernommen hat, bekam die richtige Zahl gemeldet — und sah danach trotzdem nur die letzten Wochen. Die Buchungen waren vollständig da; die Liste fragt die Datenbank aber nur so weit zurück, wie ihr Zeitraum reicht, und der blieb beim Import unverändert. Nichts ist dabei verloren gegangen. **Den Import einfach noch einmal starten**: Er bringt nichts Neues herein, zieht den Zeitraum aber auf den Verlauf, der schon liegt — danach steht alles in der Liste, im Export und in der Kategorisierung. Der Abrufzeitraum der Bank bleibt davon unberührt.",
-                "If you imported transactions from MoneyMoney, an OFX or a CAMT.053 file, you were told the right number — and then still only saw the last few weeks. The entries were all there; the list only queries the database as far back as its own range reaches, and importing never widened it. Nothing was lost. **Just run the import again**: it brings in nothing new, but widens the range to the history already stored — after that everything shows up in the list, the export and in categorisation. How far back the bank itself is queried is unaffected."
+                "Wer Umsätze aus MoneyMoney, einer OFX- oder einer CAMT.053-Datei übernommen hat, bekam die richtige Zahl gemeldet – und sah danach trotzdem nur die letzten Wochen. Die Buchungen waren vollständig da; die Liste fragt die Datenbank aber nur so weit zurück, wie ihr Zeitraum reicht, und der blieb beim Import unverändert. Nichts ist dabei verloren gegangen. **Den Import einfach noch einmal starten**: Er bringt nichts Neues herein, zieht den Zeitraum aber auf den Verlauf, der schon liegt – danach steht alles in der Liste, im Export und in der Kategorisierung. Der Abrufzeitraum der Bank bleibt davon unberührt.",
+                "If you imported transactions from MoneyMoney, an OFX or a CAMT.053 file, you were told the right number – and then still only saw the last few weeks. The entries were all there; the list only queries the database as far back as its own range reaches, and importing never widened it. Nothing was lost. **Just run the import again**: it brings in nothing new, but widens the range to the history already stored – after that everything shows up in the list, the export and in categorisation. How far back the bank itself is queried is unaffected."
             )
         ),
     ]
@@ -337,8 +337,8 @@ enum WhatsNewContent {
             title: L10n.t("„Verfügbar“ unter dem Kontostand",
                           "“Available” below your balance"),
             description: L10n.t(
-                "Manche Banken — die ING etwa — geben über ihre Schnittstelle nur den **gebuchten** Saldo heraus, zeigen in ihrer eigenen App aber den Stand abzüglich schon vorgemerkter Abbuchungen. Dann stehen zwei Zahlen nebeneinander, und keine ist falsch. simplebanking rechnet die zweite jetzt selbst und zeigt sie als weitere Position im Untertitel unter dem Saldo — im Flyout wie in der Umsatzliste, über dasselbe Symbol wie Fixkosten und Bankgebühren. Sie erscheint nur, wenn etwas vorgemerkt ist. Vorgemerkte **Eingänge** zählen bewusst nicht: Ein erwarteter Betrag ist nicht zugesagt. Die große Zahl bleibt, was die Bank sagt.",
-                "Some banks — ING among them — only hand out the **booked** balance over their interface, while their own app shows the balance minus payments that are already pending. Two numbers side by side, and neither is wrong. simplebanking now works out the second one itself and shows it as another position in the subtitle below your balance — in the flyout and in the transaction list, behind the same icon as recurring costs and bank fees. It only appears when something is pending. Pending **incoming** amounts deliberately do not count: money that is expected is not money that is promised. The big number stays what the bank says."
+                "Manche Banken – die ING etwa – geben über ihre Schnittstelle nur den **gebuchten** Saldo heraus, zeigen in ihrer eigenen App aber den Stand abzüglich schon vorgemerkter Abbuchungen. Dann stehen zwei Zahlen nebeneinander, und keine ist falsch. simplebanking rechnet die zweite jetzt selbst und zeigt sie als weitere Position im Untertitel unter dem Saldo – im Flyout wie in der Umsatzliste, über dasselbe Symbol wie Fixkosten und Bankgebühren. Sie erscheint nur, wenn etwas vorgemerkt ist. Vorgemerkte **Eingänge** zählen bewusst nicht: Ein erwarteter Betrag ist nicht zugesagt. Die große Zahl bleibt, was die Bank sagt.",
+                "Some banks – ING among them – only hand out the **booked** balance over their interface, while their own app shows the balance minus payments that are already pending. Two numbers side by side, and neither is wrong. simplebanking now works out the second one itself and shows it as another position in the subtitle below your balance – in the flyout and in the transaction list, behind the same icon as recurring costs and bank fees. It only appears when something is pending. Pending **incoming** amounts deliberately do not count: money that is expected is not money that is promised. The big number stays what the bank says."
             )
         ),
     ]
@@ -468,8 +468,8 @@ enum WhatsNewContent {
             title: L10n.t("Keine Bankseite mehr ohne dein Zutun",
                           "No bank page opens without you"),
             description: L10n.t(
-                "Ist die Zustimmung einer Bank abgelaufen, sprang bisher ungefragt deren Anmeldeseite auf — beim turnusmäßigen Abruf, beim Programmstart, beim Entsperren. Das ist vorbei: Eine Bankseite geht nur auf, wenn du unmittelbar davor etwas angeklickt hast. Im Hintergrund bleibt der Abruf stehen, du bekommst eine Mitteilung mit dem Namen der Bank, und Saldo und Umsätze bleiben sichtbar. \u{201E}Aktualisieren\u{201C} nimmt den Faden wieder auf.",
-                "When a bank's consent had expired, its login page used to open unasked — on the scheduled fetch, at startup, on unlock. No longer: a bank page opens only if you clicked something right before. In the background the fetch simply stops, you get a notification naming the bank, and your balance and transactions stay visible. \u{201C}Refresh\u{201D} picks it up again."
+                "Ist die Zustimmung einer Bank abgelaufen, sprang bisher ungefragt deren Anmeldeseite auf – beim turnusmäßigen Abruf, beim Programmstart, beim Entsperren. Das ist vorbei: Eine Bankseite geht nur auf, wenn du unmittelbar davor etwas angeklickt hast. Im Hintergrund bleibt der Abruf stehen, du bekommst eine Mitteilung mit dem Namen der Bank, und Saldo und Umsätze bleiben sichtbar. \u{201E}Aktualisieren\u{201C} nimmt den Faden wieder auf.",
+                "When a bank's consent had expired, its login page used to open unasked – on the scheduled fetch, at startup, on unlock. No longer: a bank page opens only if you clicked something right before. In the background the fetch simply stops, you get a notification naming the bank, and your balance and transactions stay visible. \u{201C}Refresh\u{201D} picks it up again."
             )
         ),
         WhatsNewItem(
@@ -508,8 +508,8 @@ enum WhatsNewContent {
             title: L10n.t("Zwei gleiche Buchungen bleiben zwei",
                           "Two identical bookings stay two"),
             description: L10n.t(
-                "Steht dieselbe Buchung zweimal im Abruf — zweimal derselbe Automat, zwei gleiche Tickets —, teilten sich beide Zeilen bisher Notiz, Beleg und Markierung, und was an der zweiten hing, war nicht erreichbar. Jede Zeile hat jetzt ihre eigene Kennung. Betrifft auch den Export und die gemerkten Sparraten; Gemerktes bleibt gemerkt.",
-                "When the same booking appears twice in one fetch — the same vending machine, two identical tickets — both rows used to share their note, receipt and flag, and whatever belonged to the second was unreachable. Each row now carries its own identity. This also covers the export and saved savings entries; what you marked stays marked."
+                "Steht dieselbe Buchung zweimal im Abruf – zweimal derselbe Automat, zwei gleiche Tickets –, teilten sich beide Zeilen bisher Notiz, Beleg und Markierung, und was an der zweiten hing, war nicht erreichbar. Jede Zeile hat jetzt ihre eigene Kennung. Betrifft auch den Export und die gemerkten Sparraten; Gemerktes bleibt gemerkt.",
+                "When the same booking appears twice in one fetch – the same vending machine, two identical tickets – both rows used to share their note, receipt and flag, and whatever belonged to the second was unreachable. Each row now carries its own identity. This also covers the export and saved savings entries; what you marked stays marked."
             )
         ),
         WhatsNewItem(
@@ -518,8 +518,8 @@ enum WhatsNewContent {
             title: L10n.t("Ein eigenes Händler-Logo bleibt stehen",
                           "Your own merchant logo stays put"),
             description: L10n.t(
-                "Ein Logo, das du selbst gesetzt hast, konnte kurz darauf wieder durch eines aus dem Netz ersetzt werden — manchmal gleich beim Start, ohne dass du etwas getan hattest. Eigene Logos haben jetzt Vorrang. Nebenbei: Die Hamburger Sparkasse trug das Zeichen von comdirect.",
-                "A logo you set yourself could be replaced by one from the internet moments later — sometimes right at startup, without you doing anything. Your own logos now take precedence. Also: Hamburger Sparkasse was showing comdirect's mark."
+                "Ein Logo, das du selbst gesetzt hast, konnte kurz darauf wieder durch eines aus dem Netz ersetzt werden – manchmal gleich beim Start, ohne dass du etwas getan hattest. Eigene Logos haben jetzt Vorrang. Nebenbei: Die Hamburger Sparkasse trug das Zeichen von comdirect.",
+                "A logo you set yourself could be replaced by one from the internet moments later – sometimes right at startup, without you doing anything. Your own logos now take precedence. Also: Hamburger Sparkasse was showing comdirect's mark."
             )
         ),
         WhatsNewItem(
@@ -558,8 +558,8 @@ enum WhatsNewContent {
             title: L10n.t("Die Sicherung sagt, was sie ausgelassen hat",
                           "The backup says what it left out"),
             description: L10n.t(
-                "Sehr große oder unlesbare Belege blieben draußen, gemeldet wurde trotzdem nur \u{201E}Sicherung abgelegt\u{201C} — nach einem Rechnerwechsel fehlten sie dann. Die Meldung nennt jetzt, was nicht mitkam. Lässt sich eine Bankverbindung nicht lesen, bricht die Sicherung ab, statt das Konto stillschweigend zu verlieren. Und das Einspielen prüft vorher, ob der Platz reicht.",
-                "Very large or unreadable receipts were left out while the message still said only “Backup saved” — after moving to a new Mac they were missing. The message now names what did not travel. If an account's credentials cannot be read, the backup stops instead of silently losing it. And restoring checks beforehand whether there is enough space."
+                "Sehr große oder unlesbare Belege blieben draußen, gemeldet wurde trotzdem nur \u{201E}Sicherung abgelegt\u{201C} – nach einem Rechnerwechsel fehlten sie dann. Die Meldung nennt jetzt, was nicht mitkam. Lässt sich eine Bankverbindung nicht lesen, bricht die Sicherung ab, statt das Konto stillschweigend zu verlieren. Und das Einspielen prüft vorher, ob der Platz reicht.",
+                "Very large or unreadable receipts were left out while the message still said only “Backup saved” – after moving to a new Mac they were missing. The message now names what did not travel. If an account's credentials cannot be read, the backup stops instead of silently losing it. And restoring checks beforehand whether there is enough space."
             )
         ),
     ]
@@ -574,8 +574,8 @@ enum WhatsNewContent {
             title: L10n.t("Erste Bank mit Freigabe im Browser ließ sich nicht einrichten",
                           "Connecting a browser-approval bank as your first account failed"),
             description: L10n.t(
-                "Wer ING, bunq, N26 oder Revolut als erstes Konto verbinden wollte, sah den Assistenten bei \u{201E}Sicherheitsfreigabe\u{201C} stehenbleiben — kein Browser-Fenster, keine Meldung. Ein zweites Konto hinzuzufügen war nie betroffen. Behoben; der Fehler kam mit 2.0.5 herein.",
-                "Anyone connecting ING, bunq, N26 or Revolut as their first account saw the wizard stall at the security approval step — no browser window, no message. Adding a second account was never affected. Fixed; the fault arrived with 2.0.5."
+                "Wer ING, bunq, N26 oder Revolut als erstes Konto verbinden wollte, sah den Assistenten bei \u{201E}Sicherheitsfreigabe\u{201C} stehenbleiben – kein Browser-Fenster, keine Meldung. Ein zweites Konto hinzuzufügen war nie betroffen. Behoben; der Fehler kam mit 2.0.5 herein.",
+                "Anyone connecting ING, bunq, N26 or Revolut as their first account saw the wizard stall at the security approval step – no browser window, no message. Adding a second account was never affected. Fixed; the fault arrived with 2.0.5."
             )
         ),
     ]
@@ -591,8 +591,8 @@ enum WhatsNewContent {
             title: L10n.t("Die Ersteinrichtung geht wieder zu Ende",
                           "Setting up your first account works again"),
             description: L10n.t(
-                "Der letzte Schritt des Assistenten — die Theme-Auswahl — hatte keinen Knopf zum Bestätigen. Weiter kam man weder mit der Maus noch mit der Tastatur, und weil erst dieser Schritt das Konto wegschreibt, war die ganze Einrichtung danach verloren. Nur die allererste Bankverbindung war betroffen; ein zweites Konto hinzuzufügen überspringt diese Seite. Jetzt stehen dort \u{201E}Zurück\u{201C} und \u{201E}Fertig\u{201C}, und die Eingabetaste bestätigt.",
-                "The wizard's last step — choosing a theme — had no button to confirm. Neither mouse nor keyboard got you any further, and since that step is what actually saves the account, the whole setup was lost. Only the very first bank connection was affected; adding a second account skips that page. It now has \u{201C}Back\u{201D} and \u{201C}Done\u{201D}, and Return confirms."
+                "Der letzte Schritt des Assistenten – die Theme-Auswahl – hatte keinen Knopf zum Bestätigen. Weiter kam man weder mit der Maus noch mit der Tastatur, und weil erst dieser Schritt das Konto wegschreibt, war die ganze Einrichtung danach verloren. Nur die allererste Bankverbindung war betroffen; ein zweites Konto hinzuzufügen überspringt diese Seite. Jetzt stehen dort \u{201E}Zurück\u{201C} und \u{201E}Fertig\u{201C}, und die Eingabetaste bestätigt.",
+                "The wizard's last step – choosing a theme – had no button to confirm. Neither mouse nor keyboard got you any further, and since that step is what actually saves the account, the whole setup was lost. Only the very first bank connection was affected; adding a second account skips that page. It now has \u{201C}Back\u{201D} and \u{201C}Done\u{201D}, and Return confirms."
             )
         ),
         WhatsNewItem(
@@ -617,8 +617,8 @@ enum WhatsNewContent {
             title: L10n.t("Bank-Freigabe im eigenen Fenster",
                           "Bank approval in its own window"),
             description: L10n.t(
-                "Die Freigabe-Seite der Bank öffnet nicht mehr in Safari, sondern in einem eigenen Fenster ohne Cookies und Verlauf — jeder Durchlauf startet leer. Damit ist der ING-Fehler \u{201E}Request Header Or Cookie Too Large\u{201C} vom Tisch, an dem Umsätze und Neueinrichtungen scheiterten. Wer Safari zurück will: Einstellungen → Allgemein.",
-                "The bank's approval page no longer opens in Safari but in its own window without cookies or history — every run starts clean. That settles the ING error \u{201C}Request Header Or Cookie Too Large\u{201D} that blocked transactions and new setups. Prefer Safari? Settings → General."
+                "Die Freigabe-Seite der Bank öffnet nicht mehr in Safari, sondern in einem eigenen Fenster ohne Cookies und Verlauf – jeder Durchlauf startet leer. Damit ist der ING-Fehler \u{201E}Request Header Or Cookie Too Large\u{201C} vom Tisch, an dem Umsätze und Neueinrichtungen scheiterten. Wer Safari zurück will: Einstellungen → Allgemein.",
+                "The bank's approval page no longer opens in Safari but in its own window without cookies or history – every run starts clean. That settles the ING error \u{201C}Request Header Or Cookie Too Large\u{201D} that blocked transactions and new setups. Prefer Safari? Settings → General."
             )
         ),
         WhatsNewItem(
@@ -627,8 +627,8 @@ enum WhatsNewContent {
             title: L10n.t("Aktualisieren wirkt wieder sofort",
                           "Refresh works again, right away"),
             description: L10n.t(
-                "Wartete ein Konto auf die Freigabe im Browser, standen bis zu drei Minuten lang alle Konten still — Herunterziehen, das ↻ und der Klick aufs Symbol taten nichts, und nur ein Neustart half. Das Warten bremst jetzt nur noch das Konto, um das es geht.",
-                "While one account waited for browser approval, every account stalled for up to three minutes — pull-to-refresh, the ↻ button and clicking the icon did nothing, and only a restart helped. That wait now only holds up the account it belongs to."
+                "Wartete ein Konto auf die Freigabe im Browser, standen bis zu drei Minuten lang alle Konten still – Herunterziehen, das ↻ und der Klick aufs Symbol taten nichts, und nur ein Neustart half. Das Warten bremst jetzt nur noch das Konto, um das es geht.",
+                "While one account waited for browser approval, every account stalled for up to three minutes – pull-to-refresh, the ↻ button and clicking the icon did nothing, and only a restart helped. That wait now only holds up the account it belongs to."
             )
         ),
         WhatsNewItem(
@@ -637,8 +637,8 @@ enum WhatsNewContent {
             title: L10n.t("Schärfere Händler-Logos",
                           "Sharper merchant logos"),
             description: L10n.t(
-                "Alte Logos waren winzige Favicons, und die neuen, großen wurden erst beim Zeichnen verkleinert — Kanten fransten aus, „DHL\u{201C} war nicht mehr zu lesen. Jetzt rechnet die App jedes Logo in genau der Pixelzahl, in der es erscheint, und breite Marken wie dm werden nicht mehr angeschnitten.",
-                "Old logos were tiny favicons, and the new large ones were only scaled down while drawing — edges frayed and \u{201C}DHL\u{201D} became unreadable. Every logo is now rendered at exactly the pixel size it appears at, and wide marks like dm are no longer cropped."
+                "Alte Logos waren winzige Favicons, und die neuen, großen wurden erst beim Zeichnen verkleinert – Kanten fransten aus, „DHL\u{201C} war nicht mehr zu lesen. Jetzt rechnet die App jedes Logo in genau der Pixelzahl, in der es erscheint, und breite Marken wie dm werden nicht mehr angeschnitten.",
+                "Old logos were tiny favicons, and the new large ones were only scaled down while drawing – edges frayed and \u{201C}DHL\u{201D} became unreadable. Every logo is now rendered at exactly the pixel size it appears at, and wide marks like dm are no longer cropped."
             )
         ),
     ]
@@ -650,8 +650,8 @@ enum WhatsNewContent {
             title: L10n.t("Verbindung zu den Banken wiederhergestellt",
                           "Bank connections restored"),
             description: L10n.t(
-                "Seit dem 21. September meldeten alle Konten \u{201E}offline\u{201C}: Der Schlüssel, mit dem simplebanking sich beim Bankdienst ausweist, war abgelaufen. Diese Version trägt den neuen. Ohne das Update bleibt jede Bank stumm — deshalb steht dieser Punkt ganz oben.",
-                "Since September 21 every account reported \u{201C}offline\u{201D}: the key simplebanking uses to identify itself to the banking service had expired. This version carries the new one. Without the update every bank stays silent — which is why this comes first."
+                "Seit dem 21. September meldeten alle Konten \u{201E}offline\u{201C}: Der Schlüssel, mit dem simplebanking sich beim Bankdienst ausweist, war abgelaufen. Diese Version trägt den neuen. Ohne das Update bleibt jede Bank stumm – deshalb steht dieser Punkt ganz oben.",
+                "Since September 21 every account reported \u{201C}offline\u{201D}: the key simplebanking uses to identify itself to the banking service had expired. This version carries the new one. Without the update every bank stays silent – which is why this comes first."
             )
         ),
         WhatsNewItem(
@@ -660,8 +660,8 @@ enum WhatsNewContent {
             title: L10n.t("Doppelklick auf das Menüleisten-Symbol geht wieder",
                           "Double-clicking the menu bar icon works again"),
             description: L10n.t(
-                "Auf dem neuen macOS öffnete ein Doppelklick nur das Flyout und schloss es gleich wieder, statt die Umsatzliste zu zeigen. Das System zählt zwei schnelle Klicks dort nicht mehr als einen Doppelklick — simplebanking zählt jetzt selbst.",
-                "On the new macOS a double-click only opened the flyout and closed it again instead of showing the transaction list. The system no longer counts two quick clicks there as a double-click — simplebanking now counts for itself."
+                "Auf dem neuen macOS öffnete ein Doppelklick nur das Flyout und schloss es gleich wieder, statt die Umsatzliste zu zeigen. Das System zählt zwei schnelle Klicks dort nicht mehr als einen Doppelklick – simplebanking zählt jetzt selbst.",
+                "On the new macOS a double-click only opened the flyout and closed it again instead of showing the transaction list. The system no longer counts two quick clicks there as a double-click – simplebanking now counts for itself."
             )
         ),
         WhatsNewItem(
@@ -670,8 +670,8 @@ enum WhatsNewContent {
             title: L10n.t("Überweisung: \u{201E}fehlgeschlagen\u{201C} nur, wenn es sicher ist",
                           "Transfers: \u{201C}failed\u{201D} only when it is certain"),
             description: L10n.t(
-                "Brach die Verbindung nach dem Senden ab, meldete die App \u{201E}Senden fehlgeschlagen\u{201C} — obwohl die Bank den Auftrag längst haben konnte. Wer daraufhin erneut sendete, zahlte doppelt. Jetzt heißt es in dem Fall \u{201E}Status unklar\u{201C}, und die Schnellüberweisung bietet keinen Weg zurück ins ausgefüllte Formular.",
-                "If the connection dropped after sending, the app reported \u{201C}send failed\u{201D} — even though the bank might already have the order. Anyone who sent again paid twice. It now says \u{201C}status unclear\u{201D} in that case, and the quick transfer offers no way back into the filled-in form."
+                "Brach die Verbindung nach dem Senden ab, meldete die App \u{201E}Senden fehlgeschlagen\u{201C} – obwohl die Bank den Auftrag längst haben konnte. Wer daraufhin erneut sendete, zahlte doppelt. Jetzt heißt es in dem Fall \u{201E}Status unklar\u{201C}, und die Schnellüberweisung bietet keinen Weg zurück ins ausgefüllte Formular.",
+                "If the connection dropped after sending, the app reported \u{201C}send failed\u{201D} – even though the bank might already have the order. Anyone who sent again paid twice. It now says \u{201C}status unclear\u{201D} in that case, and the quick transfer offers no way back into the filled-in form."
             )
         ),
         WhatsNewItem(
@@ -680,8 +680,8 @@ enum WhatsNewContent {
             title: L10n.t("Umsätze landen im richtigen Konto",
                           "Transactions land in the right account"),
             description: L10n.t(
-                "Wer während eines PayPal-Abrufs die Bank wechselte, fand die Umsätze unter der falschen — und beim nächsten Abruf doppelt unter der richtigen. Außerdem bleiben zwei gleiche Buchungen am selben Tag jetzt beide erhalten, und erledigte Vormerkungen verschwinden auch dann, wenn der Abruf sonst nichts Neues bringt.",
-                "Switching banks during a PayPal refresh put the transactions under the wrong one — and duplicated them under the right one on the next refresh. Two identical bookings on the same day are now both kept, and settled pending entries disappear even when a refresh brings nothing else new."
+                "Wer während eines PayPal-Abrufs die Bank wechselte, fand die Umsätze unter der falschen – und beim nächsten Abruf doppelt unter der richtigen. Außerdem bleiben zwei gleiche Buchungen am selben Tag jetzt beide erhalten, und erledigte Vormerkungen verschwinden auch dann, wenn der Abruf sonst nichts Neues bringt.",
+                "Switching banks during a PayPal refresh put the transactions under the wrong one – and duplicated them under the right one on the next refresh. Two identical bookings on the same day are now both kept, and settled pending entries disappear even when a refresh brings nothing else new."
             )
         ),
         WhatsNewItem(
@@ -690,8 +690,8 @@ enum WhatsNewContent {
             title: L10n.t("KI-Kategorisierung läuft wieder",
                           "AI categorization works again"),
             description: L10n.t(
-                "Sie sprach ein Claude-Modell an, das Anthropic im Februar abgeschaltet hatte, und verschluckte den Fehler — es sah aus, als würde sie nie starten. Jetzt Claude Haiku 4.5, und jeder Lauf steht im Protokoll.",
-                "It called a Claude model Anthropic retired in February and swallowed the error — it looked as if it never started. Now Claude Haiku 4.5, and every run is logged."
+                "Sie sprach ein Claude-Modell an, das Anthropic im Februar abgeschaltet hatte, und verschluckte den Fehler – es sah aus, als würde sie nie starten. Jetzt Claude Haiku 4.5, und jeder Lauf steht im Protokoll.",
+                "It called a Claude model Anthropic retired in February and swallowed the error – it looked as if it never started. Now Claude Haiku 4.5, and every run is logged."
             )
         ),
         WhatsNewItem(
@@ -710,8 +710,8 @@ enum WhatsNewContent {
             title: L10n.t("Händler-Logos: mitgelieferte zuerst, Rest von logo.dev",
                           "Merchant logos: bundled first, the rest from logo.dev"),
             description: L10n.t(
-                "Die gebündelten Logos werden jetzt vor jedem Netzaufruf genutzt, vier Händler sind neu dabei. Alles andere kommt von logo.dev statt vom Favicon — höchstens drei Abrufe am Tag, 30 Tage gemerkt. Neuer Schalter unter Zugänge, falls du gar keine Händlerdomain ins Netz schicken willst.",
-                "Bundled logos are now used before any network request, with four more merchants included. Everything else comes from logo.dev instead of the favicon — at most three requests a day, remembered for 30 days. A new switch under Access if you don't want any merchant domain sent out at all."
+                "Die gebündelten Logos werden jetzt vor jedem Netzaufruf genutzt, vier Händler sind neu dabei. Alles andere kommt von logo.dev statt vom Favicon – höchstens drei Abrufe am Tag, 30 Tage gemerkt. Neuer Schalter unter Zugänge, falls du gar keine Händlerdomain ins Netz schicken willst.",
+                "Bundled logos are now used before any network request, with four more merchants included. Everything else comes from logo.dev instead of the favicon – at most three requests a day, remembered for 30 days. A new switch under Access if you don't want any merchant domain sent out at all."
             )
         ),
         WhatsNewItem(
@@ -736,8 +736,8 @@ enum WhatsNewContent {
             title: L10n.t("Keine zweite TAN für einen Serverfehler",
                           "No second TAN for a server hiccup"),
             description: L10n.t(
-                "Antwortete die Bank mit einem Fehler ohne Begründung, hielt simplebanking die Zustimmung für abgelaufen, warf sie weg und fragte eine neue TAN ab — die dann am selben Fehler scheiterte. Jetzt wird erst unverändert wiederholt; das kostet keine Freigabe.",
-                "When the bank returned an error without a reason, simplebanking assumed your consent had expired, discarded it and asked for a fresh TAN — which then failed on the very same error. It now simply retries first, at no cost to you."
+                "Antwortete die Bank mit einem Fehler ohne Begründung, hielt simplebanking die Zustimmung für abgelaufen, warf sie weg und fragte eine neue TAN ab – die dann am selben Fehler scheiterte. Jetzt wird erst unverändert wiederholt; das kostet keine Freigabe.",
+                "When the bank returned an error without a reason, simplebanking assumed your consent had expired, discarded it and asked for a fresh TAN – which then failed on the very same error. It now simply retries first, at no cost to you."
             )
         ),
         WhatsNewItem(
@@ -756,15 +756,15 @@ enum WhatsNewContent {
             title: L10n.t("bunq verlangt nicht mehr bei jedem Abruf einen QR-Scan",
                           "bunq no longer asks for a QR scan on every refresh"),
             description: L10n.t(
-                "Bei Banken, die im Browser freigegeben werden — bunq, N26, Revolut — warf simplebanking die erteilte Zustimmung nach einem unklaren Serverfehler weg. Anders als bei Banken mit Zugangsdaten wächst sie dort nicht nach: Sie entsteht nur bei der Einrichtung. Einmal verworfen, fing jeder Abruf wieder von vorn an. Bestehende bunq-Verbindungen müssen einmalig neu eingerichtet werden.",
-                "For banks approved in the browser — bunq, N26, Revolut — simplebanking discarded your consent after an unclear server error. Unlike with credential-based banks it does not come back: it is only created during setup. Once discarded, every refresh started over. Existing bunq connections need to be set up once more."
+                "Bei Banken, die im Browser freigegeben werden – bunq, N26, Revolut – warf simplebanking die erteilte Zustimmung nach einem unklaren Serverfehler weg. Anders als bei Banken mit Zugangsdaten wächst sie dort nicht nach: Sie entsteht nur bei der Einrichtung. Einmal verworfen, fing jeder Abruf wieder von vorn an. Bestehende bunq-Verbindungen müssen einmalig neu eingerichtet werden.",
+                "For banks approved in the browser – bunq, N26, Revolut – simplebanking discarded your consent after an unclear server error. Unlike with credential-based banks it does not come back: it is only created during setup. Once discarded, every refresh started over. Existing bunq connections need to be set up once more."
             )
         ),
         WhatsNewItem(
             icon: "paintpalette",
             tint: .sbOrangeStrong,
-            title: L10n.t("Themes importieren — und mehr Spielraum beim Bauen",
-                          "Import themes — and more room to build them"),
+            title: L10n.t("Themes importieren – und mehr Spielraum beim Bauen",
+                          "Import themes – and more room to build them"),
             description: L10n.t(
                 "Einstellungen → Verhalten → „Theme importieren …“ nimmt eine einzelne .cfg oder ein ZIP mit Hintergrundbild, Logo und Ringgrafik und aktiviert es sofort. Wer selbst baut: Der Kontoring lässt sich weglassen oder durch eine eigene Grafik ersetzen, Textkommandos ziehen keine größeren Schriftgrade mehr nach sich, und die Farbe der Bedien-Symbole ist einstellbar.",
                 "Settings → Behaviour → \"Import theme …\" takes a single .cfg or a ZIP with wallpaper, logo and ring graphic, and activates it right away. If you build your own: the account ring can be dropped or replaced by a graphic, text controls no longer drag larger type sizes along, and the colour of the control icons is now yours to set."
@@ -776,8 +776,8 @@ enum WhatsNewContent {
             title: L10n.t("Neu im Labor: Veränderung neben dem Kontostand",
                           "New in Labs: change next to your balance"),
             description: L10n.t(
-                "Klein neben dem Saldo, etwa „▼ 4,2 %“: wie der Kontostand gegenüber demselben Tag im Vormonat steht. Bewusst kalendarisch und nicht „vor 30 Tagen“ — so liegt jeder monatliche Posten wie Gehalt oder Miete genau einmal im Vergleich. Standardmäßig aus, einzuschalten unter Einstellungen → Labor.",
-                "Small, next to your balance, like \"▼ 4.2 %\": how it compares to the same day a month ago. Deliberately calendar-based rather than \"30 days ago\" — that way every monthly item like salary or rent falls inside the window exactly once. Off by default; switch it on under Settings → Labs."
+                "Klein neben dem Saldo, etwa „▼ 4,2 %“: wie der Kontostand gegenüber demselben Tag im Vormonat steht. Bewusst kalendarisch und nicht „vor 30 Tagen“ – so liegt jeder monatliche Posten wie Gehalt oder Miete genau einmal im Vergleich. Standardmäßig aus, einzuschalten unter Einstellungen → Labor.",
+                "Small, next to your balance, like \"▼ 4.2 %\": how it compares to the same day a month ago. Deliberately calendar-based rather than \"30 days ago\" – that way every monthly item like salary or rent falls inside the window exactly once. Off by default; switch it on under Settings → Labs."
             )
         ),
     ]
@@ -792,8 +792,8 @@ enum WhatsNewContent {
             title: L10n.t("TAN-Eingabe erscheint sofort",
                           "TAN entry shows up right away"),
             description: L10n.t(
-                "Bei Banken mit Tipp-TAN kam das Eingabefeld erst, wenn man die Einrichtung abbrach — die TAN war dann abgelaufen. Und im Titel steht jetzt die Bank, die wirklich fragt.",
-                "With typed-TAN banks the input field only appeared once you cancelled setup — by then the TAN had expired. And the title now names the bank actually asking."
+                "Bei Banken mit Tipp-TAN kam das Eingabefeld erst, wenn man die Einrichtung abbrach – die TAN war dann abgelaufen. Und im Titel steht jetzt die Bank, die wirklich fragt.",
+                "With typed-TAN banks the input field only appeared once you cancelled setup – by then the TAN had expired. And the title now names the bank actually asking."
             )
         ),
         WhatsNewItem(
@@ -802,8 +802,8 @@ enum WhatsNewContent {
             title: L10n.t("Konten lassen sich wieder entfernen",
                           "Accounts can be removed again"),
             description: L10n.t(
-                "Ein abgebrochener Händler-Login hinterließ ein Konto, das sich weder löschen noch zurücksetzen ließ. Beides behoben — und das letzte Konto ist jetzt ebenfalls entfernbar.",
-                "An aborted merchant login left behind an account that could neither be deleted nor reset. Both fixed — and the last remaining account can now be removed too."
+                "Ein abgebrochener Händler-Login hinterließ ein Konto, das sich weder löschen noch zurücksetzen ließ. Beides behoben – und das letzte Konto ist jetzt ebenfalls entfernbar.",
+                "An aborted merchant login left behind an account that could neither be deleted nor reset. Both fixed – and the last remaining account can now be removed too."
             )
         ),
         WhatsNewItem(
@@ -812,8 +812,8 @@ enum WhatsNewContent {
             title: L10n.t("Bank-Logo in der Menüleiste",
                           "Bank logo in the menu bar"),
             description: L10n.t(
-                "Statt eines €-Platzhalters erscheint das Logo deiner Bank — jetzt für alle 192 Banken aus dem Katalog. Und das Flyout reagiert auf den ersten Klick.",
-                "Instead of a € placeholder you get your bank's logo — now for all 192 banks in the catalog. And the flyout responds to the first click."
+                "Statt eines €-Platzhalters erscheint das Logo deiner Bank – jetzt für alle 192 Banken aus dem Katalog. Und das Flyout reagiert auf den ersten Klick.",
+                "Instead of a € placeholder you get your bank's logo – now for all 192 banks in the catalog. And the flyout responds to the first click."
             )
         ),
     ]
@@ -822,8 +822,8 @@ enum WhatsNewContent {
         WhatsNewItem(
             icon: "paperplane.fill",
             tint: .sbBlueStrong,
-            title: L10n.t("simplesend — direkt aus simplebanking",
-                          "simplesend — straight from simplebanking"),
+            title: L10n.t("simplesend – direkt aus simplebanking",
+                          "simplesend – straight from simplebanking"),
             description: L10n.t(
                 "SEPA-Überweisungen mit Vorlagen, Favoriten, Sende-Verzögerung als Sicherheitsnetz und optionaler PDF-Quittung per E-Mail an den Empfänger.",
                 "SEPA transfers with templates, favorites, send-delay as a safety net, and optional PDF receipt by email to the recipient."
@@ -835,8 +835,8 @@ enum WhatsNewContent {
             title: L10n.t("IBAN aus Zwischenablage",
                           "IBAN from clipboard"),
             description: L10n.t(
-                "Kopierst du eine IBAN, erkennt simplebanking sie automatisch und bietet sie beim Senden an — ein Klick zum Einfügen.",
-                "Copy an IBAN anywhere, simplebanking detects it and offers to paste it when sending — one click."
+                "Kopierst du eine IBAN, erkennt simplebanking sie automatisch und bietet sie beim Senden an – ein Klick zum Einfügen.",
+                "Copy an IBAN anywhere, simplebanking detects it and offers to paste it when sending – one click."
             )
         ),
         WhatsNewItem(
@@ -865,8 +865,8 @@ enum WhatsNewContent {
             title: L10n.t("Schneller bei vielen Umsätzen",
                           "Faster with many transactions"),
             description: L10n.t(
-                "Such-, Abo- und Fixkosten-Indizes laufen jetzt im Hintergrund — kein UI-Hänger mehr beim Slot-Wechsel oder nach Auto-Refresh, auch bei 5.000+ Buchungen.",
-                "Search, subscription, and fixed-cost indexes now run in the background — no more UI hiccups on slot switch or auto-refresh, even at 5,000+ transactions."
+                "Such-, Abo- und Fixkosten-Indizes laufen jetzt im Hintergrund – kein UI-Hänger mehr beim Slot-Wechsel oder nach Auto-Refresh, auch bei 5.000+ Buchungen.",
+                "Search, subscription, and fixed-cost indexes now run in the background – no more UI hiccups on slot switch or auto-refresh, even at 5,000+ transactions."
             )
         ),
     ]

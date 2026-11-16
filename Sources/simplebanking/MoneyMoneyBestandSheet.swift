@@ -151,8 +151,8 @@ struct MoneyMoneyBestandSheet: View {
                         // Container einer anderen App fragt macOS **nicht** — es
                         // verweigert still. Bestätigt am 13.11.2026: Der Dialog kam in
                         // keinem Lauf. Also die Anweisung, die wirklich hilft.
-                        Text(t("Die Datei fehlt nicht — macOS lässt simplebanking nur nicht in den Ordner von MoneyMoney. Einen Dialog gibt es dafür nicht. Der Knopf unten schließt dieses Fenster und öffnet die Liste: dort simplebanking mit „+“ eintragen, den Neustart bestätigen, den sie anbietet, und danach hier weitermachen.",
-                               "The file is not missing — macOS simply will not let simplebanking into MoneyMoney's folder. There is no prompt for this. The button below closes this window and opens the list: add simplebanking with “+”, confirm the restart it offers, and come back here afterwards."))
+                        Text(t("Die Datei fehlt nicht – macOS lässt simplebanking nur nicht in den Ordner von MoneyMoney. Einen Dialog gibt es dafür nicht. Der Knopf unten schließt dieses Fenster und öffnet die Liste: dort simplebanking mit „+“ eintragen, den Neustart bestätigen, den sie anbietet, und danach hier weitermachen.",
+                               "The file is not missing – macOS simply will not let simplebanking into MoneyMoney's folder. There is no prompt for this. The button below closes this window and opens the list: add simplebanking with “+”, confirm the restart it offers, and come back here afterwards."))
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -183,8 +183,8 @@ struct MoneyMoneyBestandSheet: View {
                 SecureField("", text: $kennwort)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { if !kennwort.isEmpty { Task { await lesen() } } }
-                Text(t("Wird nur zum Entschlüsseln gebraucht und nicht gespeichert — weder in den Einstellungen noch im Schlüsselbund.",
-                       "Used only to decrypt, and never stored — neither in settings nor in the keychain."))
+                Text(t("Wird nur zum Entschlüsseln gebraucht und nicht gespeichert – weder in den Einstellungen noch im Schlüsselbund.",
+                       "Used only to decrypt, and never stored – neither in settings nor in the keychain."))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -240,7 +240,7 @@ struct MoneyMoneyBestandSheet: View {
             // Ins Protokoll, nicht nur ins Fenster: Beim Nachstellen am 13.11.2026 stand
             // zu einem gescheiterten Lesen dort gar nichts, und die Diagnose fing bei
             // null an.
-            AppLogger.log("MoneyMoney-Bestand: Lesen gescheitert — \(error)",
+            AppLogger.log("MoneyMoney-Bestand: Lesen gescheitert – \(error)",
                           category: "MoneyMoney", level: "WARN")
             abschnitt = .kennwort
         case .success(let gelesen):
@@ -279,8 +279,8 @@ struct MoneyMoneyBestandSheet: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if !treffer.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(t("Schon verbunden — nur der Verlauf",
-                                   "Already connected — history only"))
+                            Text(t("Schon verbunden – nur der Verlauf",
+                                   "Already connected – history only"))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(.secondary)
                             ForEach(treffer, id: \.konto.schluessel) { eintrag in
@@ -294,8 +294,8 @@ struct MoneyMoneyBestandSheet: View {
                                     }
                                 }
                             }
-                            Text(t("Übernommen wird nur, was älter ist als die älteste Buchung, die das Konto schon hat — die vorhandenen Umsätze bleiben unberührt.",
-                                   "Only entries older than the account's oldest existing booking are imported — what is already there stays untouched."))
+                            Text(t("Übernommen wird nur, was älter ist als die älteste Buchung, die das Konto schon hat – die vorhandenen Umsätze bleiben unberührt.",
+                                   "Only entries older than the account's oldest existing booking are imported – what is already there stays untouched."))
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -304,8 +304,8 @@ struct MoneyMoneyBestandSheet: View {
 
                     if !neue.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(t("Noch nicht verbunden — Konto einrichten",
-                                   "Not connected yet — set up the account"))
+                            Text(t("Noch nicht verbunden – Konto einrichten",
+                                   "Not connected yet – set up the account"))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(.secondary)
                             ForEach(neue, id: \.schluessel) { konto in
@@ -370,7 +370,7 @@ struct MoneyMoneyBestandSheet: View {
                     .foregroundColor(.secondary)
                 ForEach(absagen, id: \.self) { absage in
                     let name = (absage.konto.name ?? "").trimmingCharacters(in: .whitespaces)
-                    Text("• " + (name.isEmpty ? absage.konto.iban : name) + " — " + absage.satz)
+                    Text("• " + (name.isEmpty ? absage.konto.iban : name) + " – " + absage.satz)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -478,7 +478,7 @@ struct MoneyMoneyBestandSheet: View {
                 }
 
                 if summe == 0 && berichte.allSatisfy({ $0.ausgang == .uebernommen }) {
-                    Text(t("Der Verlauf aus MoneyMoney liegt nicht vor der ältesten Buchung, die diese Konten schon haben — es gab also nichts zu ergänzen.",
+                    Text(t("Der Verlauf aus MoneyMoney liegt nicht vor der ältesten Buchung, die diese Konten schon haben – es gab also nichts zu ergänzen.",
                            "The MoneyMoney history does not predate the oldest booking these accounts already have, so there was nothing to add."))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
@@ -508,8 +508,8 @@ struct MoneyMoneyBestandSheet: View {
             // Kein Fehler, sondern eine Reihenfolge: Ohne eine Buchung der Bank gibt
             // es keine Naht, und ohne Naht käme der ganze Zeitraum herein — auch die
             // Wochen, die die Bank selbst liefert.
-            return t("wartet auf den ersten Abruf dieses Kontos — der Verlauf rückt danach von selbst nach",
-                     "waiting for this account's first fetch — the history follows on its own afterwards")
+            return t("wartet auf den ersten Abruf dieses Kontos – der Verlauf rückt danach von selbst nach",
+                     "waiting for this account's first fetch – the history follows on its own afterwards")
         case .gescheitert(let grund):
             return t("nicht übernommen: \(grund)", "not imported: \(grund)")
         }

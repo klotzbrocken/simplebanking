@@ -892,8 +892,8 @@ private struct CalendarDaySheet: View {
                         .font(.system(size: 12))
                         .foregroundColor(anyForecast ? Color.sbOrangeStrong : .secondary)
                     Text(anyForecast
-                         ? L10n.t("Vorgemerkt — basiert auf erkannten Abos · erwartet \(formatAmount(-forecastTotal))",
-                                  "Forecast — based on detected subscriptions · expected \(formatAmount(-forecastTotal))")
+                         ? L10n.t("Vorgemerkt – basiert auf erkannten Abos · erwartet \(formatAmount(-forecastTotal))",
+                                  "Forecast – based on detected subscriptions · expected \(formatAmount(-forecastTotal))")
                          : L10n.t("Abo-Abbuchungen · \(formatAmount(-forecastTotal))",
                                   "Subscription charges · \(formatAmount(-forecastTotal))"))
                         .font(.system(size: 11))

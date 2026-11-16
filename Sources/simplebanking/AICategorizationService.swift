@@ -85,7 +85,7 @@ enum AICategorizationService {
         guard let data = json.data(using: .utf8),
               let array = try? JSONSerialization.jsonObject(with: data) as? [[String: String]]
         else {
-            AppLogger.log("Kategorisierung: Antwort war kein JSON-Array — \(json.prefix(120))", category: "AI", level: "WARN")
+            AppLogger.log("Kategorisierung: Antwort war kein JSON-Array – \(json.prefix(120))", category: "AI", level: "WARN")
             return 0
         }
 

@@ -50,8 +50,8 @@ struct PassphraseSheet: View {
 
             if erstellt {
                 Text(L10n.t(
-                    "Ohne diese Passphrase lässt sich die Sicherung nicht wiederherstellen — auch von dir nicht. Es gibt keine Hintertür.",
-                    "Without this passphrase the backup cannot be restored — not even by you. There is no back door."))
+                    "Ohne diese Passphrase lässt sich die Sicherung nicht wiederherstellen – auch von dir nicht. Es gibt keine Hintertür.",
+                    "Without this passphrase the backup cannot be restored – not even by you. There is no back door."))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -96,8 +96,8 @@ struct PassphraseSheet: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 360)
                     Text(L10n.t(
-                        "Wird beim Einspielen angezeigt und ist deshalb NICHT verschlüsselt — wer die Datei hat, liest sie mit. Also ein Hinweis, keine halbe Passphrase.",
-                        "Shown when restoring and therefore NOT encrypted — anyone holding the file can read it. So make it a hint, not half the passphrase."))
+                        "Wird beim Einspielen angezeigt und ist deshalb NICHT verschlüsselt – wer die Datei hat, liest sie mit. Also ein Hinweis, keine halbe Passphrase.",
+                        "Shown when restoring and therefore NOT encrypted – anyone holding the file can read it. So make it a hint, not half the passphrase."))
                         .font(.system(size: 10.5))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

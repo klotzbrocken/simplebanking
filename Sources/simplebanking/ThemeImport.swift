@@ -178,11 +178,11 @@ extension ThemeImport.Fehler {
         case .entpackenFehlgeschlagen:
             return L10n.t("Das Archiv ließ sich nicht entpacken.", "The archive could not be extracted.")
         case .keineCfgGefunden:
-            return L10n.t("Im Archiv ist keine .cfg-Datei — ohne sie ist es kein Theme.",
-                          "The archive contains no .cfg file — without one it isn't a theme.")
+            return L10n.t("Im Archiv ist keine .cfg-Datei – ohne sie ist es kein Theme.",
+                          "The archive contains no .cfg file – without one it isn't a theme.")
         case .reservierterName(let name):
-            return L10n.t("„\(name)“ ist ein mitgelieferter Themename. Er wird bei jedem Start überschrieben — benenne die Datei um.",
-                          "„\(name)“ is a built-in theme file name. It gets overwritten on every launch — rename the file.")
+            return L10n.t("„\(name)“ ist ein mitgelieferter Themename. Er wird bei jedem Start überschrieben – benenne die Datei um.",
+                          "„\(name)“ is a built-in theme file name. It gets overwritten on every launch – rename the file.")
         case .idBereitsVergeben(_, let name):
             return L10n.t("Ein Theme mit dieser Kennung gibt es schon: „\(name)“.",
                           "A theme with this id already exists: „\(name)“.")

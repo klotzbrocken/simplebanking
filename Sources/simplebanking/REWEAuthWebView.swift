@@ -175,7 +175,7 @@ final class REWEAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate {
             do {
                 let cookie = await harvestCookieHeader()
                 guard cookie.contains("rstp=") else {
-                    statusLabel.stringValue = "Nicht eingeloggt — bitte zuerst bei REWE anmelden."
+                    statusLabel.stringValue = "Nicht eingeloggt – bitte zuerst bei REWE anmelden."
                     syncButton.isEnabled = true
                     if headless { finish(false) }
                     return

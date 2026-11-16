@@ -46,7 +46,7 @@ private enum RuleSentence {
             add(".", tert)
         } else {
             add(" → ", tert)
-            if actions.isEmpty { add("—", tert) }
+            if actions.isEmpty { add("–", tert) }
             else {
                 for (i, a) in actions.enumerated() {
                     if i > 0 { add(" + ", tert) }
@@ -271,7 +271,7 @@ struct RulesManagerView: View {
         switch a.state {
         case .excluded:  return "ausgeschlossen"
         case .confirmed: return a.tab.map { "bestätigt · \($0)" } ?? "bestätigt"
-        case .neutral:   return a.tab ?? "—"
+        case .neutral:   return a.tab ?? "–"
         }
     }
 
@@ -537,7 +537,7 @@ private struct RuleAssistantView: View {
                     ForEach(opts, id: \.self) { o in
                         Button { c.value.wrappedValue = o } label: { menuCheckItem(o, selected: c.wrappedValue.value == o) }
                     }
-                } label: { MenuTriggerLabel(text: c.wrappedValue.value.isEmpty ? (opts.first ?? "—") : c.wrappedValue.value) }
+                } label: { MenuTriggerLabel(text: c.wrappedValue.value.isEmpty ? (opts.first ?? "–") : c.wrappedValue.value) }
                 .menuStyle(.borderlessButton).frame(width: 150)
                 Spacer(minLength: 0)
             } else {
@@ -638,7 +638,7 @@ private struct RuleAssistantView: View {
                 Text("\(matches.count) von \(transactions.count) Buchungen").font(.system(size: 12)).foregroundColor(.secondary)
             }
             if matches.isEmpty {
-                Text("Noch keine Treffer — gib oben eine Bedingung ein.")
+                Text("Noch keine Treffer – gib oben eine Bedingung ein.")
                     .font(.system(size: 12)).foregroundColor(.secondary).padding(.vertical, 8)
             } else {
                 ForEach(Array(matches.prefix(12).enumerated()), id: \.offset) { _, tx in

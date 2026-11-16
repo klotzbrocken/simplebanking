@@ -80,7 +80,7 @@ enum TransferEmailService {
 
         let canPerform = service.canPerform(withItems: [body, pdfURL])
         guard canPerform else {
-            AppLogger.log("TransferEmailService: composeEmail can't perform — Mail.app fehlt?", category: "Transfer", level: "WARN")
+            AppLogger.log("TransferEmailService: composeEmail can't perform – Mail.app fehlt?", category: "Transfer", level: "WARN")
             return false
         }
         service.perform(withItems: [body, pdfURL])
@@ -124,7 +124,7 @@ enum TransferEmailService {
                 kurze Info: Ich habe eine Überweisung über € \(amountStr) an dich\(from) \
                 für den \(dateStr) terminiert. Die genauen Details findest du im PDF im Anhang.
 
-                Das Geld wird erst am \(dateStr) von meiner Bank ausgeführt — es ist also \
+                Das Geld wird erst am \(dateStr) von meiner Bank ausgeführt – es ist also \
                 noch nicht unterwegs, sondern für dieses Datum geplant.
 
                 Liebe Grüße
@@ -135,7 +135,7 @@ enum TransferEmailService {
                 quick heads-up: I've scheduled a transfer of € \(amountStr) to you for \(dateStr). \
                 Full details are in the PDF attached.
 
-                The money will only be sent by my bank on \(dateStr) — so it's not on its way \
+                The money will only be sent by my bank on \(dateStr) – so it's not on its way \
                 yet, it's scheduled for that date.
 
                 Cheers
@@ -148,7 +148,7 @@ enum TransferEmailService {
             Hallo \(firstName),
 
             kurze Info: Ich habe dir gerade € \(amountStr) überwiesen\(from). \
-            Der Auftrag ist bei meiner Bank rausgegangen — die genauen Details \
+            Der Auftrag ist bei meiner Bank rausgegangen – die genauen Details \
             findest du im PDF im Anhang.
 
             Die Überweisung ist auf dem Weg, sollte je nach Bank in Sekunden \
@@ -160,7 +160,7 @@ enum TransferEmailService {
             Hi \(firstName),
 
             quick heads-up: I just sent you € \(amountStr). \
-            The transfer is on its way — full details are in the PDF attached.
+            The transfer is on its way – full details are in the PDF attached.
 
             Depending on the banks, it should land in your account within \
             seconds to a few hours.
@@ -325,8 +325,8 @@ private struct ReceiptCard: View {
 
     private var disclaimerText: String {
         L10n.t(
-            "Diese PDF bestätigt nur, dass die Überweisung von uns ausgelöst wurde. Bitte prüfe in deinem eigenen Konto, ob das Geld bereits angekommen ist — die Bank-Buchung kann je nach Institut Sekunden bis wenige Stunden dauern.",
-            "This PDF confirms only that the transfer was initiated. Please check your own account whether the money has actually landed — depending on the banks, posting can take seconds to a few hours."
+            "Diese PDF bestätigt nur, dass die Überweisung von uns ausgelöst wurde. Bitte prüfe in deinem eigenen Konto, ob das Geld bereits angekommen ist – die Bank-Buchung kann je nach Institut Sekunden bis wenige Stunden dauern.",
+            "This PDF confirms only that the transfer was initiated. Please check your own account whether the money has actually landed – depending on the banks, posting can take seconds to a few hours."
         )
     }
 

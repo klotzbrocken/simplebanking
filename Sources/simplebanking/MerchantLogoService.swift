@@ -985,7 +985,7 @@ final class MerchantLogoService: ObservableObject {
         // Zu klein heißt: in der Zeile nicht erkennbar. Dann lieber erst Google fragen
         // und, wenn auch das nichts taugt, das Kategorie-Symbol zeigen.
         guard Self.kanteInPixeln(image) >= Self.mindestKante else {
-            AppLogger.log("logo.dev: \(key) nur \(Self.kanteInPixeln(image))px — Rückfall auf Google",
+            AppLogger.log("logo.dev: \(key) nur \(Self.kanteInPixeln(image))px – Rückfall auf Google",
                           category: "Logos")
             await versucheGoogleFavicon(key: key, domain: domain)
             return
@@ -1005,13 +1005,13 @@ final class MerchantLogoService: ObservableObject {
               http.statusCode == 200, !data.isEmpty,
               let image = NSImage(data: data)
         else {
-            AppLogger.log("Kein Logo für \(key) — auch Google hat keins", category: "Logos")
+            AppLogger.log("Kein Logo für \(key) – auch Google hat keins", category: "Logos")
             return
         }
         // Unbekannte Domains beantwortet Google mit einer 16×16-Weltkugel statt mit 404.
         // Die Mindestgröße sortiert sie zusammen mit allen anderen zu kleinen Favicons aus.
         guard Self.kanteInPixeln(image) >= Self.mindestKante else {
-            AppLogger.log("Google-Favicon für \(key) nur \(Self.kanteInPixeln(image))px — verworfen",
+            AppLogger.log("Google-Favicon für \(key) nur \(Self.kanteInPixeln(image))px – verworfen",
                           category: "Logos")
             return
         }
@@ -1040,7 +1040,7 @@ final class MerchantLogoService: ObservableObject {
         // Zustand: `customLogoKeys` enthielt den Schlüssel weiter, das Lösch-X blieb
         // sichtbar, und darunter stand ein fremdes Logo.
         guard Self.darfNetzlogoUebernehmen(key: key, eigene: customLogoKeys) else {
-            AppLogger.log("Logo für \(key) verworfen — der Nutzer hat inzwischen ein eigenes gesetzt",
+            AppLogger.log("Logo für \(key) verworfen – der Nutzer hat inzwischen ein eigenes gesetzt",
                           category: "Logos")
             return
         }

@@ -46,7 +46,7 @@ private func leseZeile(grenze: Int) -> String? {
         }
         zeile.append(Character(UnicodeScalar(byte)))
         guard zeile.utf8.count <= grenze else {
-            FileHandle.standardError.write(Data("mcp: Zeile über \(grenze) Bytes — abgebrochen\n".utf8))
+            FileHandle.standardError.write(Data("mcp: Zeile über \(grenze) Bytes – abgebrochen\n".utf8))
             return nil
         }
     }
@@ -80,7 +80,7 @@ func readMessage() -> [String: Any]? {
     case .success(let n):
         laenge = n
     case .failure(let fehler):
-        FileHandle.standardError.write(Data("mcp: \(fehler) — abgelehnt\n".utf8))
+        FileHandle.standardError.write(Data("mcp: \(fehler) – abgelehnt\n".utf8))
         return nil
     }
 

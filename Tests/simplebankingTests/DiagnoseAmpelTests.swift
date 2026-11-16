@@ -38,7 +38,7 @@ final class DiagnoseAmpelTests: XCTestCase {
     /// Übersprungen ist nicht in Ordnung, aber auch kein Fehler — es steht dazwischen.
     /// Wichtig, damit „Slot momentan besetzt" nicht als Bankfehler gemeldet wird.
     func test_uebersprungenLiegtZwischenOkUndFehler() {
-        XCTAssertEqual(probe(.ok(durationMs: 1), .skipped(reason: "besetzt")).gesamt.glyph, "—")
+        XCTAssertEqual(probe(.ok(durationMs: 1), .skipped(reason: "besetzt")).gesamt.glyph, "–")
         XCTAssertEqual(probe(.skipped(reason: "besetzt"),
                              .failed(message: "x", durationMs: 1)).gesamt.glyph, "✗",
                        "ein echter Fehler schlägt ein Überspringen")

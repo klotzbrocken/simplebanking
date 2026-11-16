@@ -522,8 +522,8 @@ struct SettingsView: View {
                       : ((try? CredentialsStore.load(masterPassword: pw)) != nil)
         guard ok else {
             biometricOfferDismissed = false
-            touchIDMessage = t("Konnte nicht automatisch aktivieren — beim nächsten Entsperren anbieten.",
-                               "Couldn't enable automatically — will offer on next unlock.")
+            touchIDMessage = t("Konnte nicht automatisch aktivieren – beim nächsten Entsperren anbieten.",
+                               "Couldn't enable automatically – will offer on next unlock.")
             return
         }
         do {
@@ -1114,8 +1114,8 @@ struct SettingsView: View {
                 SettingsToggleRow(
                     title: t("Bank-Freigabe im eigenen Fenster", "Bank approval in its own window"),
                     subtitle: t(
-                        "Öffnet die Freigabe-Seite der Bank in einem eigenen Fenster ohne die Cookies und den Verlauf deines Browsers — jeder Durchlauf startet leer. Aus: Safari übernimmt, wie bis Version 2.0.3. Hilft, wenn die Bank „Request Header Or Cookie Too Large“ meldet.",
-                        "Opens the bank's approval page in its own window without your browser's cookies and history — every run starts clean. Off: Safari takes over, as in version 2.0.3 and earlier. Helps when the bank reports “Request Header Or Cookie Too Large”."
+                        "Öffnet die Freigabe-Seite der Bank in einem eigenen Fenster ohne die Cookies und den Verlauf deines Browsers – jeder Durchlauf startet leer. Aus: Safari übernimmt, wie bis Version 2.0.3. Hilft, wenn die Bank „Request Header Or Cookie Too Large“ meldet.",
+                        "Opens the bank's approval page in its own window without your browser's cookies and history – every run starts clean. Off: Safari takes over, as in version 2.0.3 and earlier. Helps when the bank reports “Request Header Or Cookie Too Large”."
                     ),
                     isOn: $scaEphemeralWindow
                 )
@@ -1213,8 +1213,8 @@ struct SettingsView: View {
             .toggleStyle(.switch)
 
             Text(t(
-                "Bei Freitext-Fragen in der Umsatzliste werden Ergebniszeilen des AKTIVEN Kontos (Empfänger, Verwendungszweck, Betrag, Kategorie, Datum) an den gewählten KI-Anbieter gesendet — KEINE IBAN und KEINE Rohdaten. Vordefinierte Auswertungen (Ausgaben, Fixkosten, …) bleiben vollständig lokal.",
-                "Free-text questions in the transaction list send result rows of the ACTIVE account (recipient, reference, amount, category, date) to the selected AI provider — NO IBAN and NO raw data. Predefined summaries (spending, fixed costs, …) stay fully local."
+                "Bei Freitext-Fragen in der Umsatzliste werden Ergebniszeilen des AKTIVEN Kontos (Empfänger, Verwendungszweck, Betrag, Kategorie, Datum) an den gewählten KI-Anbieter gesendet – KEINE IBAN und KEINE Rohdaten. Vordefinierte Auswertungen (Ausgaben, Fixkosten, …) bleiben vollständig lokal.",
+                "Free-text questions in the transaction list send result rows of the ACTIVE account (recipient, reference, amount, category, date) to the selected AI provider – NO IBAN and NO raw data. Predefined summaries (spending, fixed costs, …) stay fully local."
             ))
                 .font(ThemeFonts.body(size: 11))
                 .foregroundColor(.secondary)
@@ -1517,8 +1517,8 @@ struct SettingsView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .foregroundColor(.accentColor)
-                    .help(t("Konten, Verlauf und Kategorien aus einer MoneyMoney-Datenbank — für Konten, die hier schon verbunden sind.",
-                            "Accounts, history and categories from a MoneyMoney database — for accounts already connected here."))
+                    .help(t("Konten, Verlauf und Kategorien aus einer MoneyMoney-Datenbank – für Konten, die hier schon verbunden sind.",
+                            "Accounts, history and categories from a MoneyMoney database – for accounts already connected here."))
                 }
 
                 if multibankingStore.slots.contains(where: { $0.isReceiptSlot }) {
@@ -1599,8 +1599,8 @@ struct SettingsView: View {
                                 SettingsRow(
                                     title: t("Zugangsdaten", "Credentials"),
                                     subtitle: t(
-                                        "Anmeldename und PIN/Passwort des Online-Bankings — z.B. nachdem Du das Passwort bei der Bank geändert hast. Umsätze und Auswertungen bleiben erhalten.",
-                                        "Login name and PIN/password of your online banking — e.g. after you changed the password at your bank. Transactions and reports are preserved."
+                                        "Anmeldename und PIN/Passwort des Online-Bankings – z.B. nachdem Du das Passwort bei der Bank geändert hast. Umsätze und Auswertungen bleiben erhalten.",
+                                        "Login name and PIN/password of your online banking – e.g. after you changed the password at your bank. Transactions and reports are preserved."
                                     )
                                 ) {
                                     Button(t("Ändern…", "Change…")) {
@@ -2169,7 +2169,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             SettingsSectionHeader(title: t("Kategorien", "Categories"), icon: "tag")
 
-            Text(t("Eigene Kategorien anlegen, eingebaute umbenennen. Name ändern und Eingabetaste drücken. Bestehende Zuordnungen bleiben erhalten — auch bei einer umbenannten Kategorie.",
+            Text(t("Eigene Kategorien anlegen, eingebaute umbenennen. Name ändern und Eingabetaste drücken. Bestehende Zuordnungen bleiben erhalten – auch bei einer umbenannten Kategorie.",
                    "Add your own categories, rename the built-in ones. Change a name and press Return. Existing assignments are preserved, renamed categories included."))
                 .font(ThemeFonts.body(size: 11))
                 .foregroundColor(.secondary)
@@ -2419,8 +2419,8 @@ struct SettingsView: View {
             SettingsToggleRow(
                 title: t("Kontoring anzeigen", "Show Account Ring"),
                 subtitle: ThemeChrome.ringImageActive
-                    ? t("Das aktive Theme belegt diese Fläche mit einer eigenen Grafik. Beides gleichzeitig gibt der Platz nicht her — wähle ein anderes Theme, um den Ring zurückzubekommen.",
-                        "The active theme fills this spot with its own graphic. There isn't room for both — pick another theme to get the ring back.")
+                    ? t("Das aktive Theme belegt diese Fläche mit einer eigenen Grafik. Beides gleichzeitig gibt der Platz nicht her – wähle ein anderes Theme, um den Ring zurückzubekommen.",
+                        "The active theme fills this spot with its own graphic. There isn't room for both – pick another theme to get the ring back.")
                     : !ThemeChrome.accountRingEnabled
                     ? t("Das aktive Theme lässt den Ring bewusst weg. Wähle ein anderes Theme, um ihn zurückzubekommen.",
                         "The active theme deliberately omits the ring. Pick another theme to get it back.")
@@ -2596,10 +2596,10 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity)
 
                 Text(showBalanceInMenuBar
-                     ? t("Saldo dauerhaft sichtbar — kein Flyout beim Klick.",
-                         "Balance always visible — no flyout on click.")
-                     : t("Nur Bank-Logo in der Menüleiste — Klick öffnet die Flyout-Karte mit Saldo.",
-                         "Only bank logo in the menu bar — click opens the flyout card with balance."))
+                     ? t("Saldo dauerhaft sichtbar – kein Flyout beim Klick.",
+                         "Balance always visible – no flyout on click.")
+                     : t("Nur Bank-Logo in der Menüleiste – Klick öffnet die Flyout-Karte mit Saldo.",
+                         "Only bank logo in the menu bar – click opens the flyout card with balance."))
                     .font(ThemeFonts.body(size: 11))
                     .foregroundColor(.secondary)
 
@@ -2608,8 +2608,8 @@ struct SettingsView: View {
                 SettingsToggleRow(
                     title: t("„Vorgemerkt\" als Pille anzeigen", "Show “Pending” as a pill"),
                     subtitle: t(
-                        "Markiert vorgemerkte Buchungen in der Umsatzliste mit einer eigenen Kapsel. Aus: Die Zeile bleibt gedimmt, aber ohne Kapsel — ruhiger, wenn viele Buchungen noch nicht gebucht sind.",
-                        "Marks pending transactions in the list with their own pill. Off: the row stays dimmed but without the pill — calmer when many transactions are still pending."
+                        "Markiert vorgemerkte Buchungen in der Umsatzliste mit einer eigenen Kapsel. Aus: Die Zeile bleibt gedimmt, aber ohne Kapsel – ruhiger, wenn viele Buchungen noch nicht gebucht sind.",
+                        "Marks pending transactions in the list with their own pill. Off: the row stays dimmed but without the pill – calmer when many transactions are still pending."
                     ),
                     isOn: $pendingAsPill
                 )
@@ -2753,8 +2753,8 @@ struct SettingsView: View {
                     Text(t("Bank-Farbstreifen in der Umsatzliste",
                            "Bank color stripe in the transaction list"))
                         .font(ThemeFonts.body(size: 13, weight: .medium))
-                    Text(t("Schmaler Streifen in der Bankfarbe am linken Rand — hilft, die aktive Bank sofort zu erkennen. Die Liste selbst bleibt in der Money-Heat-Temperaturfarbe. Im Aufrunden-Modus aus.",
-                           "Thin stripe in the bank color on the left edge — helps you spot the active bank. The list itself keeps the money-heat temperature color. Off in round-up mode."))
+                    Text(t("Schmaler Streifen in der Bankfarbe am linken Rand – hilft, die aktive Bank sofort zu erkennen. Die Liste selbst bleibt in der Money-Heat-Temperaturfarbe. Im Aufrunden-Modus aus.",
+                           "Thin stripe in the bank color on the left edge – helps you spot the active bank. The list itself keeps the money-heat temperature color. Off in round-up mode."))
                         .font(ThemeFonts.body(size: 11))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2794,8 +2794,8 @@ struct SettingsView: View {
 
                 SettingsToggleRow(
                     title: t("Dauerhaft", "Always on"),
-                    subtitle: t("Ripple bei jedem Öffnen — nicht nur bei neuen Einnahmen.",
-                                "Ripple on every open — not only on new income."),
+                    subtitle: t("Ripple bei jedem Öffnen – nicht nur bei neuen Einnahmen.",
+                                "Ripple on every open – not only on new income."),
                     isOn: $rippleAlwaysOn
                 )
                 .disabled(confettiIncomeThreshold == 0)
@@ -2828,8 +2828,8 @@ struct SettingsView: View {
             }
 
             Text(t(
-                "Nach Bestätigen wartet die App diese Zeitspanne, bevor die Überweisung tatsächlich an die Bank geht. Während des Countdowns kannst du noch abbrechen — als Schutz vor Klick- und Tippfehlern.",
-                "After Confirm the app waits this period before actually submitting the transfer. You can still cancel during the countdown — a safety net against click and typing mistakes."
+                "Nach Bestätigen wartet die App diese Zeitspanne, bevor die Überweisung tatsächlich an die Bank geht. Während des Countdowns kannst du noch abbrechen – als Schutz vor Klick- und Tippfehlern.",
+                "After Confirm the app waits this period before actually submitting the transfer. You can still cancel during the countdown – a safety net against click and typing mistakes."
             ))
                 .font(ThemeFonts.body(size: 12))
                 .foregroundStyle(.secondary)
@@ -2996,8 +2996,8 @@ struct SettingsView: View {
                 Text(t("App-Passwort deaktivieren", "Disable app password"))
                     .font(ThemeFonts.heading(size: 18, weight: .bold))
                 Text(t(
-                    "Ohne App-Passwort kann jede Person mit Zugang zu diesem Mac die App öffnen und neue Kontoabfragen starten. Lokal gecachte Umsätze sind ohnehin über CLI/MCP/SQLite lesbar — das Passwort schützt den Bankabruf, nicht den Cache.",
-                    "Without an app password, anyone with access to this Mac can open the app and trigger new bank queries. Locally cached transactions are readable via CLI/MCP/SQLite anyway — the password protects bank access, not the cache."
+                    "Ohne App-Passwort kann jede Person mit Zugang zu diesem Mac die App öffnen und neue Kontoabfragen starten. Lokal gecachte Umsätze sind ohnehin über CLI/MCP/SQLite lesbar – das Passwort schützt den Bankabruf, nicht den Cache.",
+                    "Without an app password, anyone with access to this Mac can open the app and trigger new bank queries. Locally cached transactions are readable via CLI/MCP/SQLite anyway – the password protects bank access, not the cache."
                 ))
                 .font(ThemeFonts.body(size: 13))
                 .foregroundColor(.secondary)
@@ -3015,8 +3015,8 @@ struct SettingsView: View {
                 .foregroundColor(.sbOrangeStrong)
 
                 Text(t(
-                    "Dein Passwort wird im Schlüsselbund gespeichert, damit die App automatisch entsperren kann. Die Verschlüsselung bleibt erhalten — aber der Schutz vor unbefugtem Zugriff entfällt.",
-                    "Your password will be stored in the Keychain so the app can auto-unlock. Encryption stays intact — but protection against unauthorized access is removed."
+                    "Dein Passwort wird im Schlüsselbund gespeichert, damit die App automatisch entsperren kann. Die Verschlüsselung bleibt erhalten – aber der Schutz vor unbefugtem Zugriff entfällt.",
+                    "Your password will be stored in the Keychain so the app can auto-unlock. Encryption stays intact – but protection against unauthorized access is removed."
                 ))
                 .font(ThemeFonts.body(size: 12))
                 .foregroundColor(.secondary)
@@ -3501,8 +3501,8 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
 
             if quickSendFavorites.items.isEmpty {
-                Text(t("Noch keine Vorlagen — im Drawer über „+“ sichern oder hier anlegen.",
-                       "No templates yet — pin via “+” in the drawer or add one here."))
+                Text(t("Noch keine Vorlagen – im Drawer über „+“ sichern oder hier anlegen.",
+                       "No templates yet – pin via “+” in the drawer or add one here."))
                     .font(ThemeFonts.body(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -3540,8 +3540,8 @@ struct SettingsView: View {
             if quickSendFavorites.canAddMore {
                 quickSendFavoriteAdder
             } else {
-                Text(t("Maximal 4 Vorlagen — lösche eine, um Platz zu schaffen.",
-                       "Maximum of 4 templates — delete one to make room."))
+                Text(t("Maximal 4 Vorlagen – lösche eine, um Platz zu schaffen.",
+                       "Maximum of 4 templates – delete one to make room."))
                     .font(ThemeFonts.body(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -3643,8 +3643,8 @@ struct SettingsView: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.accentColor)
                 Text(t(
-                    "Zugriff auf deine Daten von außen — für Agenten, Terminal und Raycast. Lesend, bis Du es ausdrücklich änderst.",
-                    "Access to your data from outside — for agents, terminal and Raycast. Read-only until you explicitly change it."
+                    "Zugriff auf deine Daten von außen – für Agenten, Terminal und Raycast. Lesend, bis Du es ausdrücklich änderst.",
+                    "Access to your data from outside – for agents, terminal and Raycast. Read-only until you explicitly change it."
                 ))
                 .font(ThemeFonts.body(size: 11))
                 .foregroundColor(.secondary)
@@ -3748,8 +3748,8 @@ struct SettingsView: View {
                 // Server nur liest. Das gehört gesagt — sonst hält man die leere Liste
                 // für einen Fehler.
                 Label(t(
-                    "Noch kein Zugang vergeben. Claude Desktop und die Kommandozeile arbeiten trotzdem — ohne Zugang aber nur lesend. Ein Zugang lohnt sich, wenn du einem Agenten weniger geben willst als alles — oder Überweisungsentwürfe erlauben.",
-                    "No access granted yet. Claude Desktop and the command line still work — but read-only without one. Grant one when you want to give an agent less than everything, or to allow transfer drafts."
+                    "Noch kein Zugang vergeben. Claude Desktop und die Kommandozeile arbeiten trotzdem – ohne Zugang aber nur lesend. Ein Zugang lohnt sich, wenn du einem Agenten weniger geben willst als alles – oder Überweisungsentwürfe erlauben.",
+                    "No access granted yet. Claude Desktop and the command line still work – but read-only without one. Grant one when you want to give an agent less than everything, or to allow transfer drafts."
                 ), systemImage: "info.circle")
                 .font(ThemeFonts.body(size: 11))
                 .foregroundColor(.secondary)
@@ -3816,8 +3816,8 @@ struct SettingsView: View {
         let frage = NSAlert()
         frage.messageText = t("Zugang anlegen", "Grant access")
         frage.informativeText = t(
-            "Ein Name hilft dir später beim Widerrufen — etwa \u{201E}Claude Desktop\u{201C} oder \u{201E}Laptop\u{201C}.",
-            "A name helps you revoke it later — e.g. \u{201E}Claude Desktop\u{201C} or \u{201E}Laptop\u{201C}."
+            "Ein Name hilft dir später beim Widerrufen – etwa \u{201E}Claude Desktop\u{201C} oder \u{201E}Laptop\u{201C}.",
+            "A name helps you revoke it later – e.g. \u{201E}Claude Desktop\u{201C} or \u{201E}Laptop\u{201C}."
         )
         let feld = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         feld.stringValue = "Claude Desktop"
@@ -3840,8 +3840,8 @@ struct SettingsView: View {
             let fertig = NSAlert()
             fertig.messageText = t("Zugang angelegt", "Access granted")
             fertig.informativeText = t(
-                "Das Merkmal liegt in der Zwischenablage und wird jetzt nicht wieder angezeigt — es ist nirgends gespeichert, nur seine Prüfsumme. Trage es in der Claude-Konfiguration unter \u{201E}env\u{201C} als SIMPLEBANKING_MCP_TOKEN ein.",
-                "The token is on your clipboard and will not be shown again — it is stored nowhere, only its checksum. Add it to the Claude configuration under \u{201E}env\u{201C} as SIMPLEBANKING_MCP_TOKEN."
+                "Das Merkmal liegt in der Zwischenablage und wird jetzt nicht wieder angezeigt – es ist nirgends gespeichert, nur seine Prüfsumme. Trage es in der Claude-Konfiguration unter \u{201E}env\u{201C} als SIMPLEBANKING_MCP_TOKEN ein.",
+                "The token is on your clipboard and will not be shown again – it is stored nowhere, only its checksum. Add it to the Claude configuration under \u{201E}env\u{201C} as SIMPLEBANKING_MCP_TOKEN."
             )
             fertig.addButton(withTitle: "OK")
             fertig.runModal()
@@ -3904,8 +3904,8 @@ struct SettingsView: View {
             SettingsToggleRow(
                 title: t("Händler-Logos aus dem Internet laden", "Load merchant logos from the internet"),
                 subtitle: t(
-                    "Für Händler ohne mitgeliefertes Logo fragt die App bei logo.dev an; kennt logo.dev den Händler nicht, einmal zusätzlich bei Googles Favicon-Dienst. Übermittelt wird beide Male nur die Domain des Händlers (z. B. rewe.de) — keine IBANs, Beträge oder Buchungstexte. Höchstens drei Abrufe am Tag, geladene Logos gelten 30 Tage. Aus: nur die gebündelten Logos.",
-                    "For merchants without a bundled logo the app asks logo.dev; if logo.dev doesn't know the merchant, it asks Google's favicon service once. Either way only the merchant's domain is sent (e.g. rewe.de) — no IBANs, amounts or booking texts. At most three requests a day; loaded logos are kept for 30 days. Off: bundled logos only."
+                    "Für Händler ohne mitgeliefertes Logo fragt die App bei logo.dev an; kennt logo.dev den Händler nicht, einmal zusätzlich bei Googles Favicon-Dienst. Übermittelt wird beide Male nur die Domain des Händlers (z. B. rewe.de) – keine IBANs, Beträge oder Buchungstexte. Höchstens drei Abrufe am Tag, geladene Logos gelten 30 Tage. Aus: nur die gebündelten Logos.",
+                    "For merchants without a bundled logo the app asks logo.dev; if logo.dev doesn't know the merchant, it asks Google's favicon service once. Either way only the merchant's domain is sent (e.g. rewe.de) – no IBANs, amounts or booking texts. At most three requests a day; loaded logos are kept for 30 days. Off: bundled logos only."
                 ),
                 isOn: $remoteLogosEnabled
             )
@@ -3921,8 +3921,8 @@ struct SettingsView: View {
             SettingsToggleRow(
                 title: t("Kontostand-Veränderung anzeigen", "Show balance change"),
                 subtitle: t(
-                    "Zeigt neben dem Kontostand klein die Veränderung gegenüber demselben Tag im Vormonat, z. B. „▼ 4,2 %“. Kalendarisch und nicht „vor 30 Tagen“: So liegt jeder monatliche Posten — Gehalt, Miete, Abos — genau einmal im Vergleichsfenster, und der Wert springt nicht, wenn die Miete einen Tag wandert. Bei kleinem oder negativem Ausgangswert steht der Eurobetrag statt eines Prozentwerts, weil Prozent dort das Vorzeichen umdrehen würde.",
-                    "Shows the change against the same day last month next to the balance, e.g. „▼ 4.2 %“. Calendar-based rather than „30 days ago“: this way every monthly item — salary, rent, subscriptions — falls inside the window exactly once, so the value doesn't jump when rent shifts by a day. With a small or negative starting value it shows euros instead of a percentage, because a percentage would flip the sign there."
+                    "Zeigt neben dem Kontostand klein die Veränderung gegenüber demselben Tag im Vormonat, z. B. „▼ 4,2 %“. Kalendarisch und nicht „vor 30 Tagen“: So liegt jeder monatliche Posten – Gehalt, Miete, Abos – genau einmal im Vergleichsfenster, und der Wert springt nicht, wenn die Miete einen Tag wandert. Bei kleinem oder negativem Ausgangswert steht der Eurobetrag statt eines Prozentwerts, weil Prozent dort das Vorzeichen umdrehen würde.",
+                    "Shows the change against the same day last month next to the balance, e.g. „▼ 4.2 %“. Calendar-based rather than „30 days ago“: this way every monthly item – salary, rent, subscriptions – falls inside the window exactly once, so the value doesn't jump when rent shifts by a day. With a small or negative starting value it shows euros instead of a percentage, because a percentage would flip the sign there."
                 ),
                 isOn: $balanceChangeBadgeEnabled
             )
@@ -3968,8 +3968,8 @@ struct SettingsView: View {
             SettingsSectionHeader(title: t("Sicherung", "Backup"), icon: "externaldrive")
 
             Text(t(
-                "Legt Konten, Umsätze, Einstellungen und Themes in einer verschlüsselten Datei ab — für den Umzug auf einen neuen Mac oder nach einer Neuinstallation.",
-                "Stores accounts, transactions, settings and themes in one encrypted file — for moving to a new Mac or after a fresh install."
+                "Legt Konten, Umsätze, Einstellungen und Themes in einer verschlüsselten Datei ab – für den Umzug auf einen neuen Mac oder nach einer Neuinstallation.",
+                "Stores accounts, transactions, settings and themes in one encrypted file – for moving to a new Mac or after a fresh install."
             ))
             .font(ThemeFonts.body(size: 11))
             .foregroundColor(.secondary)
@@ -3979,8 +3979,8 @@ struct SettingsView: View {
             // Bank-Freigaben sind an Maschine und Zustimmung gebunden; sie mitzunehmen
             // ergäbe einen Abruf, der durchläuft und nichts liefert.
             Label(t(
-                "Die Bank-Freigaben wandern bewusst nicht mit — die gibst du nach dem Einspielen einmal neu. Dein Master-Passwort ist ebenfalls nicht enthalten; du tippst es wie bisher.",
-                "Bank approvals deliberately do not travel — you grant those once after restoring. Your master password is not included either; you enter it as before."
+                "Die Bank-Freigaben wandern bewusst nicht mit – die gibst du nach dem Einspielen einmal neu. Dein Master-Passwort ist ebenfalls nicht enthalten; du tippst es wie bisher.",
+                "Bank approvals deliberately do not travel – you grant those once after restoring. Your master password is not included either; you enter it as before."
             ), systemImage: "info.circle")
             .font(ThemeFonts.body(size: 11))
             .foregroundColor(.secondary)
@@ -4032,8 +4032,8 @@ struct SettingsView: View {
         let alert = NSAlert()
         alert.messageText = t("Wiederherstellung abgeschlossen", "Restore complete")
         alert.informativeText = t(
-            "Die Konten sind sofort sichtbar. Für einen vollständig sauberen Zustand — Umsatzlisten, Kontokontext, Datenbank — sollte simplebanking einmal neu starten.",
-            "Your accounts are visible right away. For a fully clean state — transaction lists, account context, database — simplebanking should restart once."
+            "Die Konten sind sofort sichtbar. Für einen vollständig sauberen Zustand – Umsatzlisten, Kontokontext, Datenbank – sollte simplebanking einmal neu starten.",
+            "Your accounts are visible right away. For a fully clean state – transaction lists, account context, database – simplebanking should restart once."
         )
         alert.addButton(withTitle: t("Jetzt neu starten", "Restart now"))
         alert.addButton(withTitle: t("Später", "Later"))
@@ -4272,8 +4272,8 @@ struct SettingsView: View {
         guard let claude = locateClaudeBinary() else {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(claudeCodeAddCommand, forType: .string)
-            claudeCodeSetupState = .error(t("claude nicht gefunden — Befehl kopiert",
-                                            "claude not found — command copied"))
+            claudeCodeSetupState = .error(t("claude nicht gefunden – Befehl kopiert",
+                                            "claude not found – command copied"))
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { claudeCodeSetupState = .idle }
             return
         }
@@ -4289,8 +4289,8 @@ struct SettingsView: View {
         } catch {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(claudeCodeAddCommand, forType: .string)
-            claudeCodeSetupState = .error(t("Fehlgeschlagen — Befehl kopiert",
-                                            "Failed — command copied"))
+            claudeCodeSetupState = .error(t("Fehlgeschlagen – Befehl kopiert",
+                                            "Failed – command copied"))
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { claudeCodeSetupState = .idle }
     }
@@ -4298,8 +4298,8 @@ struct SettingsView: View {
     private var mcpSettings: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(t(
-                "Der integrierte MCP-Server ermöglicht Claude Desktop direkten Lesezugriff auf deine lokalen Transaktionsdaten — ohne laufende App. Lokaler MCP-Zugriff; Claude kann Inhalte je nach Nutzung weiterverarbeiten.",
-                "The built-in MCP server lets Claude Desktop read your local transaction data directly — no running app required. Local MCP access; Claude may process content depending on usage."
+                "Der integrierte MCP-Server ermöglicht Claude Desktop direkten Lesezugriff auf deine lokalen Transaktionsdaten – ohne laufende App. Lokaler MCP-Zugriff; Claude kann Inhalte je nach Nutzung weiterverarbeiten.",
+                "The built-in MCP server lets Claude Desktop read your local transaction data directly – no running app required. Local MCP access; Claude may process content depending on usage."
             ))
             .font(ThemeFonts.body(size: 12))
             .foregroundColor(.secondary)
@@ -4425,8 +4425,8 @@ struct SettingsView: View {
             Divider().padding(.vertical, 4)
 
             Label(t(
-                "Überweisungen löst über MCP niemand aus. Mehr als ein Entwurf geht nicht, und auch der nur mit simplesend-Lizenz, eigens erteiltem Bereich und dem Schalter unten — bestätigen und freigeben musst immer Du.",
-                "Nothing initiates a transfer via MCP. A draft is the most that can happen, and only with a simplesend licence, an explicitly granted scope and the switch below — you always confirm and approve it yourself."
+                "Überweisungen löst über MCP niemand aus. Mehr als ein Entwurf geht nicht, und auch der nur mit simplesend-Lizenz, eigens erteiltem Bereich und dem Schalter unten – bestätigen und freigeben musst immer Du.",
+                "Nothing initiates a transfer via MCP. A draft is the most that can happen, and only with a simplesend licence, an explicitly granted scope and the switch below – you always confirm and approve it yourself."
             ), systemImage: "lock.shield")
             .font(ThemeFonts.body(size: 11))
             .foregroundColor(.secondary)
@@ -4487,8 +4487,8 @@ struct SettingsView: View {
             // — exakt wie `sqlite3 transactions.db` das immer schon konnte. Wir sagen das
             // explizit, damit niemand annimmt, das Master-Passwort würde den Lesezugriff blocken.
             (Text(Image(systemName: "info.circle")) + Text(" ") + Text(t(
-                "Liest den unverschlüsselten lokalen Cache unter `~/Library/Application Support/simplebanking/`. Wer Dateisystem-Zugriff auf diesen Mac hat, konnte diese Daten schon immer mit `sqlite3` einsehen — das Master-Passwort schützt nur den Bank-Abruf, nicht den Cache.",
-                "Reads the unencrypted local cache under `~/Library/Application Support/simplebanking/`. Anyone with filesystem access to this Mac could already read this data with `sqlite3` — the master password only protects bank fetches, not the cache."
+                "Liest den unverschlüsselten lokalen Cache unter `~/Library/Application Support/simplebanking/`. Wer Dateisystem-Zugriff auf diesen Mac hat, konnte diese Daten schon immer mit `sqlite3` einsehen – das Master-Passwort schützt nur den Bank-Abruf, nicht den Cache.",
+                "Reads the unencrypted local cache under `~/Library/Application Support/simplebanking/`. Anyone with filesystem access to this Mac could already read this data with `sqlite3` – the master password only protects bank fetches, not the cache."
             )))
             .font(ThemeFonts.body(size: 11))
             .foregroundColor(.secondary)

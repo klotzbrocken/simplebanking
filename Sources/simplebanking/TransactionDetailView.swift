@@ -112,13 +112,13 @@ struct TransactionDetailView: View {
     }()
 
     private func formatDate(_ dateStr: String?) -> String {
-        guard let dateStr = dateStr else { return "—" }
+        guard let dateStr = dateStr else { return "–" }
         guard let date = Self.inputDateFormatter.date(from: dateStr) else { return dateStr }
         return Self.outputDateFormatter.string(from: date)
     }
     
     private func formatAmount() -> String {
-        guard let amount = transaction.amount else { return "—" }
+        guard let amount = transaction.amount else { return "–" }
         let value = AmountParser.parse(amount.amount)
         let nf = NumberFormatter()
         nf.locale = Locale(identifier: "de_DE")
@@ -149,8 +149,8 @@ struct TransactionDetailView: View {
             }
         }
         return isOutgoing
-            ? (transaction.creditor?.name ?? transaction.debtor?.name ?? "—")
-            : (transaction.debtor?.name ?? transaction.creditor?.name ?? "—")
+            ? (transaction.creditor?.name ?? transaction.debtor?.name ?? "–")
+            : (transaction.debtor?.name ?? transaction.creditor?.name ?? "–")
     }
 
     /// Der Schlüssel, unter dem Notizen, Belege, Flags und Erinnerungen dieser Buchung
@@ -374,7 +374,7 @@ struct TransactionDetailView: View {
             return
         }
         guard merchant.caseInsensitiveCompare(MerchantResolver.unknownMerchant) != .orderedSame else {
-            merchantEditStatus = "\u{201E}Unbekannt\u{201C} ist kein Name — bitte den Empfänger eintragen."
+            merchantEditStatus = "\u{201E}Unbekannt\u{201C} ist kein Name – bitte den Empfänger eintragen."
             return
         }
         guard MerchantResolver.saveRule(pattern: pattern, merchant: merchant, scope: rulePatternScope, matchType: .contains) != nil else {
@@ -548,7 +548,7 @@ struct TransactionDetailView: View {
     }
 
     private func formatPurposeCode(_ code: String?) -> String {
-        guard let code = code else { return "—" }
+        guard let code = code else { return "–" }
         // Common PSD2 purpose codes
         let codes: [String: String] = [
             "RINP": "Eingehende Zahlung",
@@ -716,7 +716,7 @@ struct TransactionDetailView: View {
                         // sie jetzt dort, wo sie hingehört: in ihrer eigenen Karte.
                         DetailRow(
                             label: "Buchungstext",
-                            value: transaction.additionalInformation ?? "—"
+                            value: transaction.additionalInformation ?? "–"
                         )
 
                         if let purposeCode = transaction.purposeCode,
@@ -996,7 +996,7 @@ struct TransactionDetailView: View {
                         }
 
                         if attachments.isEmpty && !isLoadingAttachments {
-                            Text("Datei hierher ziehen (PDF, Bild) — max. 3 Dateien, 3 MB")
+                            Text("Datei hierher ziehen (PDF, Bild) – max. 3 Dateien, 3 MB")
                                 .font(.system(size: 12))
                                 .foregroundColor(Color(NSColor.placeholderTextColor))
                                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -1213,7 +1213,7 @@ private struct DetailRow: View {
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
             HStack(spacing: 6) {
-                Text(value.isEmpty ? "—" : value)
+                Text(value.isEmpty ? "–" : value)
                     .font(singleLine ? .system(size: 14).monospacedDigit() : .system(size: 14))
                     .foregroundColor(.primary)
                     .textSelection(.enabled)
@@ -1253,7 +1253,7 @@ private struct DetailColumn: View {
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
-            Text(value.isEmpty ? "—" : value)
+            Text(value.isEmpty ? "–" : value)
                 .font(.system(size: 14))
                 .foregroundColor(.primary)
         }

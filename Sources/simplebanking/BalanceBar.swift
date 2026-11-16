@@ -488,7 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Zeitstempel des letzten linken Mausklicks auf das Icon (Event-Zeit), für die eigene Doppelklick-Erkennung.
     private var letzterLinksklick: TimeInterval = 0
     private var flyoutClosedByClickAt: Date?
-    private var lastShownTitle: String = "—"
+    private var lastShownTitle: String = "–"
     
     private var settingsPanel: SettingsPanel?
     private var refreshIntervalObserver: Any?
@@ -1229,8 +1229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             return
         }
         guard let creds = paypalCredentials(masterPassword: pw, slotId: slotId) else {
-            txVM.error = L10n.t("PayPal-Zugangsdaten fehlen — bitte neu einrichten.",
-                                "PayPal credentials missing — please set up again.")
+            txVM.error = L10n.t("PayPal-Zugangsdaten fehlen – bitte neu einrichten.",
+                                "PayPal credentials missing – please set up again.")
             return
         }
         // Slot-Epoche wie im YAXI-Pfad: Wechselt der Nutzer während der beiden PayPal-
@@ -1479,7 +1479,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                     if await YaxiService.discoverBank() != nil {
                         AppLogger.log("Migration: legacy bank re-discovered successfully", category: "App")
                     } else {
-                        AppLogger.log("Migration: legacy bank re-discovery failed — user may need to re-run setup", category: "App", level: "WARN")
+                        AppLogger.log("Migration: legacy bank re-discovery failed – user may need to re-run setup", category: "App", level: "WARN")
                     }
                     YaxiService.activeSlotId = prev
                 }
@@ -1554,7 +1554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
              btn.imagePosition = .imageLeft
              
              btn.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)
-             btn.title = "— €"
+             btn.title = "– €"
              btn.target = self
              btn.action = #selector(statusItemClicked)
              btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -2772,7 +2772,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         }
         UserDefaults.standard.set(encoded.json, forKey: CLIRefreshOutcomeKeys.outcome)
         UserDefaults.standard.set(encoded.timestamp, forKey: CLIRefreshOutcomeKeys.legacy)
-        AppLogger.log("CLI-Refresh \(status.rawValue)\(detail.map { " — \($0)" } ?? "")", category: "CLI")
+        AppLogger.log("CLI-Refresh \(status.rawValue)\(detail.map { " – \($0)" } ?? "")", category: "CLI")
     }
 
     /// Vom CLI-Observer getriggert. Holt Saldo *und* Transaktionen in jedem Fall
@@ -3783,7 +3783,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         lastBalance = nil
         txVM.transactions = []
         txVM.resetPaging()
-        lastShownTitle = "—"
+        lastShownTitle = "–"
         locked = false
         isHiddenBalance = false
         isHoverRevealingBalance = false
@@ -4360,7 +4360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // Fall, den man am Gerät sieht.
                 guard gen == self.leftToPayGen else { return }
                 guard YaxiService.activeSlotId == activeSlot else {
-                    AppLogger.log("leftToPay: Ergebnis für \(activeSlot.prefix(8)) verworfen — aktiv ist \(YaxiService.activeSlotId.prefix(8))",
+                    AppLogger.log("leftToPay: Ergebnis für \(activeSlot.prefix(8)) verworfen – aktiv ist \(YaxiService.activeSlotId.prefix(8))",
                                   category: "LeftToPay")
                     return
                 }
@@ -4779,8 +4779,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard (MultibankingStore.shared.activeSlot?.id ?? "legacy") == sourceSlotId else {
             return TransferOutcome(
                 ok: false, scaRequired: false, error: "slot-changed",
-                userMessage: L10n.t("Quellkonto hat sich geändert — Überweisung abgebrochen.",
-                                    "Source account changed — transfer cancelled."),
+                userMessage: L10n.t("Quellkonto hat sich geändert – Überweisung abgebrochen.",
+                                    "Source account changed – transfer cancelled."),
                 mayHaveBeenExecuted: false)
         }
         // Saldo/Dispo erneut für das Quellkonto prüfen (nur bei bekanntem gecachten Saldo —
@@ -5796,8 +5796,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         if let backoff = scaBackoffUntil, backoff > Date() {
             let remaining = Int(backoff.timeIntervalSinceNow / 60)
             statusItem.button?.toolTip = t(
-                "SCA-Freigabe erforderlich — bitte manuell aktualisieren (Limit erreicht, noch ~\(remaining) Min.)",
-                "SCA approval required — please refresh manually (limit reached, ~\(remaining) min remaining)"
+                "SCA-Freigabe erforderlich – bitte manuell aktualisieren (Limit erreicht, noch ~\(remaining) Min.)",
+                "SCA approval required – please refresh manually (limit reached, ~\(remaining) min remaining)"
             )
             return
         }
@@ -5909,12 +5909,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 let standText = Saldoalter.zeitpunkt(slotId: YaxiService.activeSlotId)
                     .map { Saldoalter.beschriftung($0) }
                 txVM.error = t(
-                    "Dieses Konto steckt nicht in der erteilten Zustimmung. Der angezeigte Stand ist alt\(standText.map { " (\($0))" } ?? "") — bitte das Konto in den Einstellungen neu auswählen.",
-                    "This account is not covered by the granted consent. The balance shown is stale\(standText.map { " (\($0))" } ?? "") — please re-select the account in settings."
+                    "Dieses Konto steckt nicht in der erteilten Zustimmung. Der angezeigte Stand ist alt\(standText.map { " (\($0))" } ?? "") – bitte das Konto in den Einstellungen neu auswählen.",
+                    "This account is not covered by the granted consent. The balance shown is stale\(standText.map { " (\($0))" } ?? "") – please re-select the account in settings."
                 )
                 txVM.errorNeedsReconnect = true
                 statusItem.button?.toolTip = txVM.error
-                AppLogger.log("Saldo: Konto nicht in der Zustimmung — alter Stand bleibt stehen, slot=\(YaxiService.activeSlotId.prefix(8))",
+                AppLogger.log("Saldo: Konto nicht in der Zustimmung – alter Stand bleibt stehen, slot=\(YaxiService.activeSlotId.prefix(8))",
                               category: "Network", level: "WARN")
                 recordCLIRefreshError("Konto nicht in der Zustimmung")
             } else if resp.freigabeNoetig == true {
@@ -5929,7 +5929,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 txVM.error = YaxiService.freigabeNoetigText
                 txVM.errorNeedsReconnect = true
                 statusItem.button?.toolTip = YaxiService.freigabeNoetigText
-                AppLogger.log("Freigabe fällig — Konto stillgelegt, nichts geöffnet (slot=\(YaxiService.activeSlotId.prefix(8)))",
+                AppLogger.log("Freigabe fällig – Konto stillgelegt, nichts geöffnet (slot=\(YaxiService.activeSlotId.prefix(8)))",
                               category: "Network", level: "WARN")
                 recordCLIRefreshError("Freigabe erforderlich")
             } else if resp.scaRequired == true {
@@ -5950,15 +5950,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // Vorrang stand bei „kein verwertbarer Saldo" nur „Keine Daten" im
                 // Tooltip und nichts über der Umsatzliste.
                 let meldung = resp.userMessage ?? resp.error ?? t("Keine Daten", "No data")
-                setzeLeistentitel("— €")
+                setzeLeistentitel("– €")
                 statusItem.button?.toolTip = meldung
                 if resp.userMessage != nil { txVM.error = meldung }
                 recordCLIRefreshError(resp.error ?? meldung)
             }
         } catch {
-            setzeLeistentitel("— €")
+            setzeLeistentitel("– €")
             statusItem.button?.toolTip = "Fehler: \(error.localizedDescription)"
-            txVM.currentBalance = "— €"
+            txVM.currentBalance = "– €"
             AppLogger.log("Balance refresh failed: \(error.localizedDescription)", category: "Network", level: "ERROR")
             recordCLIRefreshError(error.localizedDescription)
         }
@@ -6719,7 +6719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Aufruf → wieder entfernen. `removeSlot` räumt Bons, Cookies und
             // per-Slot-Daten gleich mit ab.
             guard removeIfNeverSynced, !didSync else { return }
-            AppLogger.log("Händler-Login abgebrochen — angelegten Slot wieder entfernt",
+            AppLogger.log("Händler-Login abgebrochen – angelegten Slot wieder entfernt",
                           category: "Setup")
             MultibankingStore.shared.removeSlot(id: slotId)
         })
@@ -6766,7 +6766,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Aufruf → wieder entfernen. `removeSlot` räumt Bons, Cookies und
             // per-Slot-Daten gleich mit ab.
             guard removeIfNeverSynced, !didSync else { return }
-            AppLogger.log("Händler-Login abgebrochen — angelegten Slot wieder entfernt",
+            AppLogger.log("Händler-Login abgebrochen – angelegten Slot wieder entfernt",
                           category: "Setup")
             MultibankingStore.shared.removeSlot(id: slotId)
         })
@@ -6811,7 +6811,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             // Aufruf → wieder entfernen. `removeSlot` räumt Bons, Cookies und
             // per-Slot-Daten gleich mit ab.
             guard removeIfNeverSynced, !didSync else { return }
-            AppLogger.log("Händler-Login abgebrochen — angelegten Slot wieder entfernt",
+            AppLogger.log("Händler-Login abgebrochen – angelegten Slot wieder entfernt",
                           category: "Setup")
             MultibankingStore.shared.removeSlot(id: slotId)
         })
@@ -7529,8 +7529,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             let a = NSAlert()
             a.messageText = L10n.t("App-Schutz nötig", "App protection required")
             a.informativeText = L10n.t(
-                "Richte zuerst ein Bankkonto bzw. ein App-Passwort ein — dann können die PayPal-Zugangsdaten verschlüsselt gespeichert werden.",
-                "Set up a bank account or app password first — then PayPal credentials can be stored encrypted.")
+                "Richte zuerst ein Bankkonto bzw. ein App-Passwort ein – dann können die PayPal-Zugangsdaten verschlüsselt gespeichert werden.",
+                "Set up a bank account or app password first – then PayPal credentials can be stored encrypted.")
             a.runModal()
             return
         }
@@ -7693,7 +7693,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         timer?.invalidate()
         timer = nil
         AppLogger.log(
-            "Zugangsdaten abgelehnt für Slot \(slotId.prefix(8)) — Auto-Refresh gestoppt (Sperrschutz)",
+            "Zugangsdaten abgelehnt für Slot \(slotId.prefix(8)) – Auto-Refresh gestoppt (Sperrschutz)",
             category: "Auth", level: "WARN"
         )
     }
@@ -8111,8 +8111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         let alert = NSAlert()
         alert.messageText = t("Bank neu verbinden?", "Reconnect bank?")
         alert.informativeText = t(
-            "Die Verbindung zur Bank wird zurückgesetzt. Beim nächsten Abruf musst Du Dich erneut mit TAN/PIN identifizieren. Kontodaten, IBAN und Einstellungen bleiben erhalten.\n\nHat sich Dein Online-Banking-Passwort geändert, wähle „Zugangsdaten ändern“ — sonst meldet sich die App weiter mit dem alten Passwort an und die Bank sperrt den Zugang.",
-            "The connection to the bank will be reset. You'll need to re-authenticate with TAN/PIN on the next refresh. Account data, IBAN, and settings will be preserved.\n\nIf your online banking password changed, choose “Change credentials” — otherwise the app keeps signing in with the old password and the bank will lock your access."
+            "Die Verbindung zur Bank wird zurückgesetzt. Beim nächsten Abruf musst Du Dich erneut mit TAN/PIN identifizieren. Kontodaten, IBAN und Einstellungen bleiben erhalten.\n\nHat sich Dein Online-Banking-Passwort geändert, wähle „Zugangsdaten ändern“ – sonst meldet sich die App weiter mit dem alten Passwort an und die Bank sperrt den Zugang.",
+            "The connection to the bank will be reset. You'll need to re-authenticate with TAN/PIN on the next refresh. Account data, IBAN, and settings will be preserved.\n\nIf your online banking password changed, choose “Change credentials” – otherwise the app keeps signing in with the old password and the bank will lock your access."
         )
         alert.alertStyle = .warning
         alert.addButton(withTitle: t("Zugangsdaten ändern", "Change credentials"))
@@ -8359,7 +8359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         guard einstellungen.freigabeFaelligSeit != nil else { return }
         einstellungen.freigabeFaelligSeit = nil
         BankSlotSettingsStore.save(einstellungen, slotId: slotId)
-        AppLogger.log("Freigabe erledigt — Konto wieder im automatischen Abruf (slot=\(slotId.prefix(8)))",
+        AppLogger.log("Freigabe erledigt – Konto wieder im automatischen Abruf (slot=\(slotId.prefix(8)))",
                       category: "Auth")
     }
 
@@ -8882,7 +8882,7 @@ private struct StatusBalanceFlyoutCardView: View {
         let text: String = paypalSubtitleRange == 0
             ? (paypalLastBooking.map { L10n.t("Letzte Buchung: \($0)", "Last: \($0)") }
                 ?? L10n.t("Keine Buchung", "No transaction"))
-            : "\(L10n.t("Ausgaben", "Spending")) \(paypalMonthLabel): \(paypalMonthSpend ?? "—")"
+            : "\(L10n.t("Ausgaben", "Spending")) \(paypalMonthLabel): \(paypalMonthSpend ?? "–")"
         Button {
             paypalSubtitleRange = paypalSubtitleRange == 0 ? 1 : 0
         } label: {

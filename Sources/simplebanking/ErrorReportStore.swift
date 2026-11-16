@@ -257,8 +257,8 @@ final class ErrorReportStore: ObservableObject {
         let dateStr = ISO8601DateFormatter().string(from: report.createdAt)
         let bank = report.bankDisplayName ?? "Bank"
         return L10n.t(
-            "simplebanking — Unerwarteter Fehler (\(bank), \(dateStr))",
-            "simplebanking — Unexpected error (\(bank), \(dateStr))"
+            "simplebanking – Unerwarteter Fehler (\(bank), \(dateStr))",
+            "simplebanking – Unexpected error (\(bank), \(dateStr))"
         )
     }
 

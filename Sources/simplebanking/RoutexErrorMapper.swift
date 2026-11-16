@@ -161,7 +161,7 @@ enum RoutexErrorMapper {
                                   "Instant transfer unavailable at this bank"),
                     detail: msg,
                     suggestion: L10n.t(
-                        "Schalte „Nur als Echtzeitüberweisung senden\u{201C} aus — dann geht sie als normale Überweisung raus.",
+                        "Schalte „Nur als Echtzeitüberweisung senden\u{201C} aus – dann geht sie als normale Überweisung raus.",
                         "Turn off \u{201C}Send only as instant transfer\u{201D} and it goes out as a regular transfer."),
                     isRetryable: false
                 )

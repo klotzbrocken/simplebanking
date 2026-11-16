@@ -158,7 +158,7 @@ final class AmazonAuthWebView: NSObject, NSWindowDelegate, WKNavigationDelegate 
             let orders = AmazonOrderParser.decode(json)
             AppLogger.log("amazon scraped \(orders.count) orders", category: "Amazon")
             guard !orders.isEmpty else {
-                self.statusLabel.stringValue = "Keine Bestellungen erkannt — Seite Meine Bestellungen offen und Zeitraum gewählt?"
+                self.statusLabel.stringValue = "Keine Bestellungen erkannt – Seite Meine Bestellungen offen und Zeitraum gewählt?"
                 self.syncButton.isEnabled = true
                 if self.headless { self.finish(false) }   // im Hintergrund: Login nötig
                 return

@@ -44,9 +44,9 @@ enum Shortcuts {
         print(ANSIColor.dim(String(repeating: "─", count: 100)))
         for r in rows {
             let merchant = r.effectiveMerchant.isEmpty
-                ? (r.amount < 0 ? (r.empfaenger ?? "—") : (r.absender ?? "—"))
+                ? (r.amount < 0 ? (r.empfaenger ?? "–") : (r.absender ?? "–"))
                 : r.effectiveMerchant
-            let cat = r.category ?? "—"
+            let cat = r.category ?? "–"
             let amtColored = Format.colorMoney(r.amount, currency: r.currency)
             let amt = Format.padRightANSI(amtColored, to: 14)
             let m = Format.pad(merchant.prefix(32).description, to: 33)

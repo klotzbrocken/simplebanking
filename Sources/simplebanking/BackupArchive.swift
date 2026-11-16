@@ -123,8 +123,8 @@ enum BackupArchive {
         var errorDescription: String? {
             switch self {
             case .falschePassphrase:
-                return L10n.t("Falsche Passphrase — die Sicherung ließ sich nicht entschlüsseln.",
-                              "Wrong passphrase — the backup could not be decrypted.")
+                return L10n.t("Falsche Passphrase – die Sicherung ließ sich nicht entschlüsseln.",
+                              "Wrong passphrase – the backup could not be decrypted.")
             case .unbekanntesFormat(let v):
                 return L10n.t("Diese Sicherung stammt aus einer neueren Version (Format \(v)).",
                               "This backup comes from a newer version (format \(v)).")
@@ -139,8 +139,8 @@ enum BackupArchive {
                 return L10n.t("Zu wenig freier Speicher: Die Sicherung braucht rund \(b) MB, frei sind \(f) MB. Es wurde nichts geändert.",
                               "Not enough free space: the backup needs about \(b) MB, \(f) MB are available. Nothing was changed.")
             case .zugangsdatenUnlesbar(let name):
-                return L10n.t("Die Zugangsdaten eines Kontos ließen sich nicht lesen (\(name)) — die Sicherung wurde nicht erstellt, weil dieses Konto sonst unbemerkt gefehlt hätte.",
-                              "One account's credentials could not be read (\(name)) — the backup was not created, because that account would otherwise have been missing without notice.")
+                return L10n.t("Die Zugangsdaten eines Kontos ließen sich nicht lesen (\(name)) – die Sicherung wurde nicht erstellt, weil dieses Konto sonst unbemerkt gefehlt hätte.",
+                              "One account's credentials could not be read (\(name)) – the backup was not created, because that account would otherwise have been missing without notice.")
             }
         }
     }
@@ -262,7 +262,7 @@ enum BackupArchive {
             // eine Lücke findet und nichts erklärt sie.
             guard let daten = try? Data(contentsOf: url) else {
                 bericht.unlesbar += 1
-                AppLogger.log("Sicherung: \(url.lastPathComponent) nicht lesbar — ausgelassen",
+                AppLogger.log("Sicherung: \(url.lastPathComponent) nicht lesbar – ausgelassen",
                               category: "Backup", level: "WARN")
                 continue
             }
@@ -277,7 +277,7 @@ enum BackupArchive {
             }
             guard daten.count <= budget else {
                 bericht.budgetErschoepft += 1
-                AppLogger.log("Sicherung: \(url.lastPathComponent) übersprungen — Gesamtgrenze erreicht",
+                AppLogger.log("Sicherung: \(url.lastPathComponent) übersprungen – Gesamtgrenze erreicht",
                               category: "Backup", level: "WARN")
                 continue
             }
@@ -305,7 +305,7 @@ enum BackupArchive {
             // großes oder unlesbares Theme fiel ohne Protokoll und ohne Zähler heraus.
             guard let daten = try? Data(contentsOf: ordner.appendingPathComponent(name)) else {
                 bericht.unlesbar += 1
-                AppLogger.log("Sicherung: Theme \(name) nicht lesbar — ausgelassen",
+                AppLogger.log("Sicherung: Theme \(name) nicht lesbar – ausgelassen",
                               category: "Backup", level: "WARN")
                 continue
             }
@@ -317,7 +317,7 @@ enum BackupArchive {
             }
             guard daten.count <= budget else {
                 bericht.budgetErschoepft += 1
-                AppLogger.log("Sicherung: Theme \(name) übersprungen — Gesamtgrenze erreicht",
+                AppLogger.log("Sicherung: Theme \(name) übersprungen – Gesamtgrenze erreicht",
                               category: "Backup", level: "WARN")
                 continue
             }
@@ -588,7 +588,7 @@ enum BackupArchive {
                                     isDirectory: true)
         guard (try? FileManager.default.createDirectory(at: ordner, withIntermediateDirectories: true)) != nil
         else {
-            AppLogger.log("Zugangsdaten konnten nicht beiseitegelegt werden — Ordner nicht anlegbar",
+            AppLogger.log("Zugangsdaten konnten nicht beiseitegelegt werden – Ordner nicht anlegbar",
                           category: "Backup", level: "WARN")
             return
         }

@@ -53,7 +53,10 @@ enum Vorlesetext {
         )).trimmingCharacters(in: .whitespacesAndNewlines)
 
         if text.contains("•") { return L10n.t("Kontostand ausgeblendet", "balance hidden") }
-        if text.contains("—") || text.contains("--") {
+        // Beide Striche: Bis 2.2.2 schrieb die Leiste „— €", und ein in den
+        // Einstellungen zwischengespeicherter Titel aus einer alten Fassung darf
+        // nicht stumm als Strich vorgelesen werden.
+        if text.contains("–") || text.contains("—") || text.contains("--") {
             return L10n.t("kein Kontostand abgerufen", "no balance fetched")
         }
         // „…" und „Lädt…" meinen dasselbe; das eine ist die kurze Fassung für die

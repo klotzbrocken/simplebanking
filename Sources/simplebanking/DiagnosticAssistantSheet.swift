@@ -162,8 +162,8 @@ struct DiagnosticAssistantSheet: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.sbTextSecondary)
                 Text(L10n.t(
-                    "Zeichnet eine neue Einrichtung vollständig auf — jeden Schritt, jede Freigabe und die YAXI-Traces. Der Bericht erscheint, sobald der Versuch endet, auch wenn er scheitert.",
-                    "Records a new setup in full — every step, every approval and the YAXI traces. The report appears once the attempt ends, even if it fails."))
+                    "Zeichnet eine neue Einrichtung vollständig auf – jeden Schritt, jede Freigabe und die YAXI-Traces. Der Bericht erscheint, sobald der Versuch endet, auch wenn er scheitert.",
+                    "Records a new setup in full – every step, every approval and the YAXI traces. The report appears once the attempt ends, even if it fails."))
                     .font(.system(size: 10.5))
                     .foregroundColor(.sbTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -195,8 +195,8 @@ struct DiagnosticAssistantSheet: View {
                     Spacer()
                 }
                 if let b = einrichtungsBericht {
-                    Text(L10n.t("Bericht erstellt — \(b.anhaenge.count) Datei(en), \(b.traceAnzahl) Trace(s).",
-                                "Report created — \(b.anhaenge.count) file(s), \(b.traceAnzahl) trace(s)."))
+                    Text(L10n.t("Bericht erstellt – \(b.anhaenge.count) Datei(en), \(b.traceAnzahl) Trace(s).",
+                                "Report created – \(b.anhaenge.count) file(s), \(b.traceAnzahl) trace(s)."))
                         .font(.system(size: 10.5))
                         .foregroundColor(b.traceAnzahl == 0 ? .sbRedStrong : .sbTextSecondary)
                 }
@@ -244,8 +244,8 @@ struct DiagnosticAssistantSheet: View {
                 if let start = laufSeit,
                    zeit.date.timeIntervalSince(start) > 15 {
                     Label(L10n.t(
-                        "Wartet auf eine Freigabe — bitte in der App von \(label) bestätigen.",
-                        "Waiting for approval — please confirm in the \(label) app."),
+                        "Wartet auf eine Freigabe – bitte in der App von \(label) bestätigen.",
+                        "Waiting for approval – please confirm in the \(label) app."),
                           systemImage: "iphone.and.arrow.forward")
                         .font(.system(size: 11.5))
                         .foregroundColor(.sbBlueStrong)
@@ -366,7 +366,7 @@ struct DiagnosticAssistantSheet: View {
         switch r {
         case .ok(let ms):              return "\(ms)ms ✓"
         case .failed(_, let ms):       return "\(ms)ms ✗"
-        case .skipped:                 return "—"
+        case .skipped:                 return "–"
         }
     }
 
@@ -416,8 +416,8 @@ struct DiagnosticAssistantSheet: View {
     private var footerRunning: some View {
         HStack(spacing: 10) {
             ProgressView().controlSize(.small)
-            Text(L10n.t("Bitte warten — schalte Banken durch.",
-                        "Please wait — switching banks."))
+            Text(L10n.t("Bitte warten – schalte Banken durch.",
+                        "Please wait – switching banks."))
                 .font(.system(size: 12))
                 .foregroundColor(.sbTextSecondary)
             Spacer()

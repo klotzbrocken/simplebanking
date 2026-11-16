@@ -47,7 +47,7 @@ final class InitialSetupExtensionPanel: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        panel.title = "simplebanking — Einrichtung abschließen"
+        panel.title = "simplebanking – Einrichtung abschließen"
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.minSize = NSSize(width: Self.fensterBreite, height: Self.fensterHoehe)
@@ -405,15 +405,15 @@ struct InitialSetupExtensionSheet: View {
             stepTitle(L10n.t("Wie soll simplebanking erscheinen?",
                              "How should simplebanking appear?"))
             stepDescription(L10n.t(
-                "simplebanking läuft standardmäßig nur in der Menüleiste — kompakt und unauffällig. Möchtest du zusätzlich ein Dock-Icon und Cmd+Tab-Sichtbarkeit?",
-                "simplebanking runs by default only in the menu bar — compact and unobtrusive. Would you like a Dock icon and Cmd+Tab visibility too?"
+                "simplebanking läuft standardmäßig nur in der Menüleiste – kompakt und unauffällig. Möchtest du zusätzlich ein Dock-Icon und Cmd+Tab-Sichtbarkeit?",
+                "simplebanking runs by default only in the menu bar – compact and unobtrusive. Would you like a Dock icon and Cmd+Tab visibility too?"
             ))
 
             VStack(spacing: 8) {
                 dockCard(false,
                          label: L10n.t("Nur Menüleiste", "Menu bar only"),
-                         detail: L10n.t("Kompakt — kein Dock-Icon, kein Cmd+Tab",
-                                        "Compact — no Dock icon, no Cmd+Tab"))
+                         detail: L10n.t("Kompakt – kein Dock-Icon, kein Cmd+Tab",
+                                        "Compact – no Dock icon, no Cmd+Tab"))
                 dockCard(true,
                          label: L10n.t("Menüleiste + Dock", "Menu bar + Dock"),
                          detail: L10n.t("Klassisches App-Erlebnis mit Dock-Icon",
@@ -465,8 +465,8 @@ struct InitialSetupExtensionSheet: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.sbBlueStrong)
-                Text(L10n.t("Optional — nur wenn du KI-Tools nutzt",
-                            "Optional — only if you use AI tools"))
+                Text(L10n.t("Optional – nur wenn du KI-Tools nutzt",
+                            "Optional – only if you use AI tools"))
                     .font(.system(size: 10.5, weight: .semibold))
                     .tracking(0.3)
                     .foregroundColor(.sbBlueStrong)
@@ -488,8 +488,8 @@ struct InitialSetupExtensionSheet: View {
                     .font(.system(size: 14))
                     .foregroundColor(.sbOrangeStrong)
                 Text(L10n.t(
-                    "Wichtig: Der MCP-Server läuft lokal und liest nur deinen Cache (Lese-only). Der KI-Client (z.B. Claude Desktop) kann je nach Frage Auszüge an seinen KI-Anbieter weiterreichen, um sie zu beantworten — das hängt also vom gewählten Client ab. Du kannst die Freigabe jederzeit in den Einstellungen widerrufen.",
-                    "Important: the MCP server runs locally and only reads your cache (read-only). Depending on the question, the AI client (e.g. Claude Desktop) may forward excerpts to its AI provider — this depends on the chosen client. You can revoke this in Settings any time."
+                    "Wichtig: Der MCP-Server läuft lokal und liest nur deinen Cache (Lese-only). Der KI-Client (z.B. Claude Desktop) kann je nach Frage Auszüge an seinen KI-Anbieter weiterreichen, um sie zu beantworten – das hängt also vom gewählten Client ab. Du kannst die Freigabe jederzeit in den Einstellungen widerrufen.",
+                    "Important: the MCP server runs locally and only reads your cache (read-only). Depending on the question, the AI client (e.g. Claude Desktop) may forward excerpts to its AI provider – this depends on the chosen client. You can revoke this in Settings any time."
                 ))
                     .font(.system(size: 11))
                     .foregroundColor(.sbTextSecondary)
@@ -541,8 +541,8 @@ struct InitialSetupExtensionSheet: View {
             stepTitle(L10n.t("simplesend freischalten?",
                              "Unlock simplesend?"))
             stepDescription(L10n.t(
-                "Mit simplesend kannst du direkt aus simplebanking SEPA-Überweisungen auslösen — Empfänger und IBAN werden aus deinen Buchungen vorgeschlagen. Einmalkauf, kein Abo.",
-                "simplesend lets you initiate SEPA transfers right from simplebanking — recipients and IBAN are suggested from your transactions. One-time purchase, no subscription."
+                "Mit simplesend kannst du direkt aus simplebanking SEPA-Überweisungen auslösen – Empfänger und IBAN werden aus deinen Buchungen vorgeschlagen. Einmalkauf, kein Abo.",
+                "simplesend lets you initiate SEPA transfers right from simplebanking – recipients and IBAN are suggested from your transactions. One-time purchase, no subscription."
             ))
 
             VStack(alignment: .leading, spacing: 10) {
@@ -550,8 +550,8 @@ struct InitialSetupExtensionSheet: View {
                              text: L10n.t("SEPA-Überweisung in 2 Klicks aus deinen Buchungen heraus.",
                                           "SEPA transfer in 2 clicks from your transactions."))
                 upsellBullet(icon: "doc.text.viewfinder",
-                             text: L10n.t("Rechnung aufs Flyout ziehen — Betrag, IBAN und Zweck liest simplebanking selbst aus, auf diesem Mac.",
-                                          "Drag an invoice onto the flyout — simplebanking reads amount, IBAN and reference itself, on this Mac."))
+                             text: L10n.t("Rechnung aufs Flyout ziehen – Betrag, IBAN und Zweck liest simplebanking selbst aus, auf diesem Mac.",
+                                          "Drag an invoice onto the flyout – simplebanking reads amount, IBAN and reference itself, on this Mac."))
                 upsellBullet(icon: "lock.shield.fill",
                              text: L10n.t("TAN-Bestätigung wie gewohnt direkt bei deiner Bank.",
                                           "TAN confirmation directly with your bank."))
@@ -722,8 +722,8 @@ struct InitialSetupExtensionSheet: View {
             // damit der User merkt dass nichts passiert ist.
             passwordRequired = currentlyRequired
             passwordSetupError = L10n.t(
-                "Konnte Auto-Unlock nicht einrichten — bitte später in den Einstellungen erneut versuchen.",
-                "Couldn't set up auto-unlock — please retry later in Settings."
+                "Konnte Auto-Unlock nicht einrichten – bitte später in den Einstellungen erneut versuchen.",
+                "Couldn't set up auto-unlock – please retry later in Settings."
             )
             return
         }
@@ -802,7 +802,7 @@ struct InitialSetupExtensionSheet: View {
                                       "Could not write MCP configuration.")
             return
         }
-        mcpStatusMessage = L10n.t("Eingerichtet — Claude Desktop neu starten.",
-                                  "Configured — please restart Claude Desktop.")
+        mcpStatusMessage = L10n.t("Eingerichtet – Claude Desktop neu starten.",
+                                  "Configured – please restart Claude Desktop.")
     }
 }

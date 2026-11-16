@@ -126,8 +126,8 @@ struct RoundupChoiceSheet: View {
                 Text(L10n.t("Aufrunden", "Round-up"))
                     .font(.system(size: 16, weight: .semibold))
                 Text(L10n.t(
-                    "Wähle Schrittweite und Zeitraum. Nach Klick auf 'Jetzt sparen' öffnet sich das Überweisungsfenster mit Betrag und Empfänger vorausgefüllt — du bestätigst es wie immer manuell (PIN/SCA bleiben bei dir).",
-                    "Pick step size and period. After clicking 'Save now' the transfer sheet opens with amount and recipient pre-filled — you confirm it manually as always (PIN/SCA stays with you)."
+                    "Wähle Schrittweite und Zeitraum. Nach Klick auf 'Jetzt sparen' öffnet sich das Überweisungsfenster mit Betrag und Empfänger vorausgefüllt – du bestätigst es wie immer manuell (PIN/SCA bleiben bei dir).",
+                    "Pick step size and period. After clicking 'Save now' the transfer sheet opens with amount and recipient pre-filled – you confirm it manually as always (PIN/SCA stays with you)."
                 ))
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
@@ -245,7 +245,7 @@ struct RoundupChoiceSheet: View {
                             Image(systemName: ibanIsValid ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                             Text(ibanIsValid
                                 ? L10n.t("IBAN gültig", "IBAN valid")
-                                : L10n.t("IBAN ungültig — bitte prüfen", "Invalid IBAN — please check"))
+                                : L10n.t("IBAN ungültig – bitte prüfen", "Invalid IBAN – please check"))
                         }
                         .font(.system(size: 10))
                         .foregroundColor(ibanIsValid ? .green : .orange)
@@ -254,8 +254,8 @@ struct RoundupChoiceSheet: View {
             }
 
             Text(L10n.t(
-                "Default aus den Slot-Einstellungen — du kannst hier für diese Überweisung einen anderen Empfänger eingeben.",
-                "Default is taken from slot settings — you can enter a different recipient just for this transfer."
+                "Default aus den Slot-Einstellungen – du kannst hier für diese Überweisung einen anderen Empfänger eingeben.",
+                "Default is taken from slot settings – you can enter a different recipient just for this transfer."
             ))
             .font(.system(size: 10))
             .foregroundColor(.secondary)

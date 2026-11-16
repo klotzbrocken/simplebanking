@@ -68,7 +68,7 @@ struct FinancialHealthScoreView: View {
                              desc: "Abflüsse zu Spar-/Vorsorgekonten (Sparrate).")
                 metricColumn(color: Self.liquidColor, title: "Liquide",
                              value: formatCurrency(vm.displayed.balance),
-                             desc: String(format: "Kontostand — %.1f Mon. Ausgaben.", vm.displayed.bufferMonths))
+                             desc: String(format: "Kontostand – %.1f Mon. Ausgaben.", vm.displayed.bufferMonths))
             }
             .padding(.horizontal)
 
@@ -127,15 +127,15 @@ struct FinancialHealthScoreView: View {
             Text("So entsteht dein MMI")
                 .font(.system(size: 14, weight: .bold))
             explainRow(color: Self.liquidColor, title: "Pufferreichweite",
-                       text: "Wie viele Monate dein Kontostand die ø-Ausgaben deckt — der Kern des Scores. ~3 Monate = gesund.")
+                       text: "Wie viele Monate dein Kontostand die ø-Ausgaben deckt – der Kern des Scores. ~3 Monate = gesund.")
             explainRow(color: Self.savingsColor, title: "Sparrate",
-                       text: "Aktives Sparen (ETF, Sparplan, Depot, Tagesgeld) zählt positiv mit — bis +0,15 Bonus auf den Score.")
+                       text: "Aktives Sparen (ETF, Sparplan, Depot, Tagesgeld) zählt positiv mit – bis +0,15 Bonus auf den Score.")
             Divider().padding(.vertical, 2)
             Text("So hebst du ihn")
                 .font(.system(size: 14, weight: .bold))
-            tipRow("Liquiden Puffer aufbauen — schon 1–3 Monatsausgaben heben den Score deutlich.")
-            tipRow("Regelmäßig sparen — erkannte Sparabflüsse zählen positiv mit.")
-            tipRow("Fixkosten senken — weniger Burn = längere Pufferreichweite.")
+            tipRow("Liquiden Puffer aufbauen – schon 1–3 Monatsausgaben heben den Score deutlich.")
+            tipRow("Regelmäßig sparen – erkannte Sparabflüsse zählen positiv mit.")
+            tipRow("Fixkosten senken – weniger Burn = längere Pufferreichweite.")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

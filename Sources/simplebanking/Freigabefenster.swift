@@ -89,7 +89,7 @@ final class Freigabefenster: NSObject, ASWebAuthenticationPresentationContextPro
                     // Nutzerhandlung, nur ein Programmneustart half. Seit 2.1.0 gibt es
                     // „Freigabe neu anstoßen" in der Umsatzliste und im Statusmenü —
                     // siehe `Freigabewache.abbrechen`.
-                    AppLogger.log("Freigabefenster: vom Nutzer geschlossen — Warten läuft weiter, „Freigabe neu anstoßen“ beendet es",
+                    AppLogger.log("Freigabefenster: vom Nutzer geschlossen – Warten läuft weiter, „Freigabe neu anstoßen“ beendet es",
                                   category: "YaxiService")
                 } else if let fehlertext {
                     AppLogger.log("Freigabefenster: Sitzung endete mit Fehler: \(fehlertext)",
@@ -103,7 +103,7 @@ final class Freigabefenster: NSObject, ASWebAuthenticationPresentationContextPro
         s.presentationContextProvider = self
         session = s
         guard s.start() else {
-            AppLogger.log("Freigabefenster: Sitzung ließ sich nicht starten — Rückfall auf Safari",
+            AppLogger.log("Freigabefenster: Sitzung ließ sich nicht starten – Rückfall auf Safari",
                           category: "YaxiService", level: "WARN")
             session = nil
             fertigContinuation?.finish()

@@ -270,7 +270,7 @@ enum CredentialsStore {
         case (false, false):
             // Nichts anfassen. Beide behalten ist die einzige Chance, dass der Nutzer
             // (oder ein Backup) daraus noch etwas rettet.
-            AppLogger.log("Credentials: weder credentials-legacy.json noch credentials.json sind lesbare Envelopes — beide bleiben unverändert",
+            AppLogger.log("Credentials: weder credentials-legacy.json noch credentials.json sind lesbare Envelopes – beide bleiben unverändert",
                           category: "Credentials", level: "WARN")
         }
     }

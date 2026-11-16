@@ -111,7 +111,7 @@ extension UpdateChecker: SPUUpdaterDelegate {
         hatAufgeraeumt = true
 
         let bundleId = Bundle.main.bundleIdentifier ?? ""
-        AppLogger.log("Fortsetzen der Installation gescheitert — räume Sparkle-Reste auf (\(bundleId))",
+        AppLogger.log("Fortsetzen der Installation gescheitert – räume Sparkle-Reste auf (\(bundleId))",
                       category: "UpdateChecker", level: "WARN")
         Self.resteAufraeumen(bundleId: bundleId)
 

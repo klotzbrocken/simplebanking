@@ -42,7 +42,7 @@ enum AIProviderService {
     Rules:
     - gehalt: ONLY if amount is positive AND purpose/recipient matches income signals
     - umbuchung: ONLY if recipient name matches the account owner or looks like a self-transfer
-    - sonstiges: use when no other category fits — never leave unassigned
+    - sonstiges: use when no other category fits – never leave unassigned
     Return ONLY a valid JSON array: [{"id": "...", "category": "..."}]
     No explanation. No markdown. No extra keys.
     """
@@ -69,10 +69,10 @@ enum AIProviderService {
     The user asks questions about their own transactions.
     You receive a JSON array of relevant transactions (recipient, purpose, amount, date, category) as context.
     Rules:
-    - Answer only based on the provided transaction data — never invent figures
+    - Answer only based on the provided transaction data – never invent figures
     - If the data does not contain enough information to answer, say so clearly
     - Respond always in German, informal (du)
-    - Keep answers concise — max 4 sentences unless the user explicitly asks for detail
+    - Keep answers concise – max 4 sentences unless the user explicitly asks for detail
     - NEVER mention, repeat, or reference any IBAN, account number, BIC, or full legal name
     - Do not speculate about future transactions or balances
     """

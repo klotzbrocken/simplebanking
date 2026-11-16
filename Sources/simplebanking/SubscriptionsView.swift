@@ -252,7 +252,7 @@ struct SubscriptionsView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(dauerauftraege.laeuft)
-                .help("Fragt die Daueraufträge bei der Bank ab — auch die, die noch nie gebucht wurden. Braucht eine Freigabe.")
+                .help("Fragt die Daueraufträge bei der Bank ab – auch die, die noch nie gebucht wurden. Braucht eine Freigabe.")
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)

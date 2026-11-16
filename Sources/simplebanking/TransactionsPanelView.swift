@@ -1743,8 +1743,8 @@ private struct TransactionsPanelView: View {
                 }
                 .buttonStyle(PlainButtonStyle())
                 .beschriftet(L10n.t("Aufrunden", "Round up"),
-                             hinweis: L10n.t("Aufrunden-Ansicht — Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
-                                             "Round-up view — show amounts rounded up (enables round-up for this account)"),
+                             hinweis: L10n.t("Aufrunden-Ansicht – Beträge aufgerundet anzeigen (aktiviert Aufrunden für dieses Konto)",
+                                             "Round-up view – show amounts rounded up (enables round-up for this account)"),
                              aktiv: roundupView.isActive)
             }
         }
@@ -4861,7 +4861,7 @@ private final class TransactionsPanelToolbarDelegate: NSObject, NSToolbarDelegat
         )
         button.contentTintColor = pinned ? NSColor.controlAccentColor : nil
         button.toolTip = pinned
-            ? "Oben fixiert — klicken zum Lösen"
+            ? "Oben fixiert – klicken zum Lösen"
             : "Oben halten"
     }
 

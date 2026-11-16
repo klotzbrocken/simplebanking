@@ -27,6 +27,8 @@ final class VorlesetextTests: XCTestCase {
     }
 
     func testKeinSaldoAbgerufen() {
+        XCTAssertEqual(Vorlesetext.leiste("– €"), "simplebanking, kein Kontostand abgerufen")
+        // Der alte Strich aus Fassungen bis 2.2.2, etwa aus einem zwischengespeicherten Titel.
         XCTAssertEqual(Vorlesetext.leiste("— €"), "simplebanking, kein Kontostand abgerufen")
         XCTAssertEqual(Vorlesetext.leiste("--,-- €"), "simplebanking, kein Kontostand abgerufen")
     }

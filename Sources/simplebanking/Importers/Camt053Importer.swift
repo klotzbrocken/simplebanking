@@ -226,11 +226,11 @@ enum Camt053Importer {
             currentNtry = nil
 
             guard let bookingDate = b.bookingDate else {
-                warnings.append("Ntry ohne BookgDt/Dt — übersprungen.")
+                warnings.append("Ntry ohne BookgDt/Dt – übersprungen.")
                 return
             }
             guard let amountRaw = b.amount, let amountValue = Double(amountRaw) else {
-                warnings.append("Ntry ohne parseable Amt — übersprungen.")
+                warnings.append("Ntry ohne parseable Amt – übersprungen.")
                 return
             }
 

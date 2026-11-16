@@ -222,7 +222,7 @@ enum TransferClipboardParser {
     }
 
     private static func cleanName(_ raw: String) -> String {
-        raw.trimmingCharacters(in: CharacterSet(charactersIn: " \t-–—•*.:,;"))
+        raw.trimmingCharacters(in: CharacterSet(charactersIn: " \t-––•*.:,;"))
     }
 
     /// Schneidet einen Label-Wert vor den Bankdaten ab. Rechnungen packen hinter

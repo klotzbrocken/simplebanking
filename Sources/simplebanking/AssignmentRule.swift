@@ -173,8 +173,8 @@ struct AssignmentRule: Codable, Identifiable {
         var actions: [String] = []
         if let cat = setCategory { actions.append(cat.displayName) }
         if let r = recurring { actions.append(r.label) }
-        let actionStr = actions.isEmpty ? "—" : actions.joined(separator: " + ")
-        return "Wenn \(conds.isEmpty ? "—" : conds) → \(actionStr)"
+        let actionStr = actions.isEmpty ? "–" : actions.joined(separator: " + ")
+        return "Wenn \(conds.isEmpty ? "–" : conds) → \(actionStr)"
     }
 }
 

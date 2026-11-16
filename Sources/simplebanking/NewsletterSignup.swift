@@ -168,8 +168,8 @@ struct NewsletterSignupView: View {
 
                 // Die Offenlegung gehört ans Feld, nicht in eine Fußnote: Hier tippt
                 // jemand in einer Banking-App eine Adresse ein, die das Gerät verlässt.
-                (Text(L10n.t("Nur deine Adresse — keine Konto- oder Umsatzdaten. Versand über Formspree (USA). Abmelden jederzeit per Antwort. ",
-                             "Your address only — no account or transaction data. Delivered via Formspree (USA). Unsubscribe any time by replying. "))
+                (Text(L10n.t("Nur deine Adresse – keine Konto- oder Umsatzdaten. Versand über Formspree (USA). Abmelden jederzeit per Antwort. ",
+                             "Your address only – no account or transaction data. Delivered via Formspree (USA). Unsubscribe any time by replying. "))
                  + Text(L10n.t("Datenschutz", "Privacy")).underline())
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)

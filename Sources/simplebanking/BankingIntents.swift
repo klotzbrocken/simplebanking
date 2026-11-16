@@ -33,7 +33,7 @@ import AppIntents
 struct SaldoIntent: AppIntent {
     static let title: LocalizedStringResource = "Kontostand abfragen"
     static let description = IntentDescription(
-        "Zeigt den aktuellen Kontostand aus dem lokalen Bestand — ohne Bankabruf und ohne TAN."
+        "Zeigt den aktuellen Kontostand aus dem lokalen Bestand – ohne Bankabruf und ohne TAN."
     )
     /// Kein `openAppWhenRun`: Der Sinn ist ja gerade, die App nicht zu brauchen.
     static let openAppWhenRun = false
@@ -111,7 +111,7 @@ struct UmsaetzeIntent: AppIntent {
         let buchungen = IntentDaten.letzteBuchungen(anzahl: anzahl, tage: 90, slots: nil)
         let zeilen = buchungen.map { tx -> String in
             let betrag = IntentDaten.formatiert(tx.parsedAmount, waehrung: tx.amount?.currency ?? "EUR")
-            let wer = tx.creditor?.name ?? tx.debtor?.name ?? "—"
+            let wer = tx.creditor?.name ?? tx.debtor?.name ?? "–"
             return "\(wer): \(betrag)"
         }
         let text = zeilen.isEmpty
@@ -126,7 +126,7 @@ struct UmsaetzeIntent: AppIntent {
 struct AktualisierenIntent: AppIntent {
     static let title: LocalizedStringResource = "Konten aktualisieren"
     static let description = IntentDescription(
-        "Ruft die Banken ab. Kann je nach Bank eine Freigabe verlangen — deshalb nicht für unbeaufsichtigte Automatisierungen geeignet."
+        "Ruft die Banken ab. Kann je nach Bank eine Freigabe verlangen – deshalb nicht für unbeaufsichtigte Automatisierungen geeignet."
     )
     /// Holt die App bewusst nach vorn: Verlangt die Bank eine TAN oder eine Freigabe im
     /// Browser, muss jemand davorsitzen. Ein stiller Hintergrundabruf, der auf eine

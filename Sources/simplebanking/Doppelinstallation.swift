@@ -113,7 +113,7 @@ enum Doppelinstallation {
         // App-Translocation: macOS führt eine Kopie aus einem Wegwerf-Pfad aus, wenn sie
         // noch nie im Finder bewegt wurde. Sparkle lehnt dort jede Installation ab.
         if normiert(bundle.bundleURL).contains("/AppTranslocation/") {
-            AppLogger.log("Installation: läuft aus App-Translocation — Sparkle kann hier nicht installieren",
+            AppLogger.log("Installation: läuft aus App-Translocation – Sparkle kann hier nicht installieren",
                           category: "App", level: "WARN")
         }
 
@@ -133,10 +133,10 @@ enum Doppelinstallation {
         // ein „nein" von damals erklärt, warum später nie etwas kam.
         let plistAuto = info["SUEnableAutomaticChecks"] as? Bool
         let nutzerAuto = defaults.object(forKey: "SUEnableAutomaticChecks") as? Bool
-        AppLogger.log("Sparkle: autoCheck plist=\(plistAuto.map(String.init(describing:)) ?? "—") "
-                      + "nutzer=\(nutzerAuto.map(String.init(describing:)) ?? "—") "
+        AppLogger.log("Sparkle: autoCheck plist=\(plistAuto.map(String.init(describing:)) ?? "–") "
+                      + "nutzer=\(nutzerAuto.map(String.init(describing:)) ?? "–") "
                       + "hasLaunchedBefore=\(defaults.bool(forKey: "SUHasLaunchedBefore")) "
-                      + "lastCheck=\(defaults.object(forKey: "SULastCheckTime").map(String.init(describing:)) ?? "—")",
+                      + "lastCheck=\(defaults.object(forKey: "SULastCheckTime").map(String.init(describing:)) ?? "–")",
                       category: "App")
     }
 

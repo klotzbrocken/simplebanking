@@ -134,8 +134,8 @@ struct ImportSheet: View {
 
             radio(.ofxFile,
                   title: t("OFX-Datei importieren", "Import OFX file"),
-                  subtitle: t("DKB, Comdirect u.a. — Datei aus dem Online-Banking auswählen.",
-                              "DKB, Comdirect et al. — pick a file from your online banking export."))
+                  subtitle: t("DKB, Comdirect u.a. – Datei aus dem Online-Banking auswählen.",
+                              "DKB, Comdirect et al. – pick a file from your online banking export."))
 
             radio(.camtFile,
                   title: t("CAMT.053-Datei importieren", "Import CAMT.053 file"),

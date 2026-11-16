@@ -880,7 +880,7 @@ enum YaxiService {
             // Hier gibt es noch keinen Client und damit keinen Trace. Dann muss die Zeile
             // es sagen, sonst sieht die Diagnose nur eine leere Trace-Ablage und der
             // Nutzer meldet „erstellt kein Trace".
-            ohneTraceWeil("fetchBalances", "keine connectionId — der Slot war nie eingerichtet",
+            ohneTraceWeil("fetchBalances", "keine connectionId – der Slot war nie eingerichtet",
                           alwaysTrace: alwaysTrace)
             return BalancesResponse(ok: false, booked: nil, expected: nil, session: nil,
                                    connectionData: nil, error: "no connectionId yet",
@@ -1001,7 +1001,7 @@ enum YaxiService {
                     }
                     ticket = try YaxiTicketMaker.balancesTicket()
                     if erstMitConnectionDataWiederholen(error) {
-                        AppLogger.log("fetchBalances: unklarer Serverfehler — erst unverändert wiederholen, Zustimmung bleibt", category: "YaxiService", level: "WARN")
+                        AppLogger.log("fetchBalances: unklarer Serverfehler – erst unverändert wiederholen, Zustimmung bleibt", category: "YaxiService", level: "WARN")
                         do {
                             let retryTicket = ticket
                             resp = try await client.balances(
@@ -1023,10 +1023,10 @@ enum YaxiService {
                             // siehe `darfZustimmungVerwerfen`. Lieber den Fehler zeigen
                             // als die Verbindung dauerhaft zerstören.
                             guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
-                                AppLogger.log("fetchBalances: Redirect-Bank — Zustimmung wird NICHT verworfen, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                                AppLogger.log("fetchBalances: Redirect-Bank – Zustimmung wird NICHT verworfen, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
                                 throw error
                             }
-                            AppLogger.log("fetchBalances: auch mit Zustimmung gescheitert — jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
+                            AppLogger.log("fetchBalances: auch mit Zustimmung gescheitert – jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
                             ticket = try YaxiTicketMaker.balancesTicket()
                             resp = try await ohneCD(ticket)
                         }
@@ -1042,7 +1042,7 @@ enum YaxiService {
                         // zuvor `UnexpectedError` lieferte und damit im oberen,
                         // geschützten Zweig landete.
                         guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
-                            AppLogger.log("fetchBalances: Redirect-Bank — kein Abruf ohne Zustimmung, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                            AppLogger.log("fetchBalances: Redirect-Bank – kein Abruf ohne Zustimmung, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
                             throw error
                         }
                         AppLogger.log("fetchBalances: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
@@ -1147,7 +1147,7 @@ enum YaxiService {
             // hergibt. Er kostet keine weitere Freigabe — dieselbe Zustimmung, dieselbe
             // Sitzung — und nennt im Protokoll, was die Bank tatsächlich anbietet.
             if entschluesselt.balances.isEmpty, !entschluesselt.missingAccounts.isEmpty, !iban.isEmpty {
-                AppLogger.log("fetchBalances: Bank kennt \(iban.prefix(8))… nicht — frage ohne Kontoangabe nach",
+                AppLogger.log("fetchBalances: Bank kennt \(iban.prefix(8))… nicht – frage ohne Kontoangabe nach",
                               category: "YaxiService", level: "WARN")
                 if let alle = try? await client.balances(
                     ticket: ticket,
@@ -1279,7 +1279,7 @@ enum YaxiService {
         let model = loadCredentialsModel(slotId: slotSnapshot)
         let d = UserDefaults.standard
         guard let connectionId = d.string(forKey: connIdKey), !connectionId.isEmpty else {
-            ohneTraceWeil("fetchTransactions", "keine connectionId — der Slot war nie eingerichtet",
+            ohneTraceWeil("fetchTransactions", "keine connectionId – der Slot war nie eingerichtet",
                           alwaysTrace: alwaysTrace)
             return TransactionsResponse(ok: false, transactions: nil, session: nil,
                                        connectionData: nil, error: "no connectionId yet",
@@ -1375,7 +1375,7 @@ enum YaxiService {
                     }
                     ticket = try YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
                     if erstMitConnectionDataWiederholen(error) {
-                        AppLogger.log("fetchTransactions: unklarer Serverfehler — erst unverändert wiederholen, Zustimmung bleibt", category: "YaxiService", level: "WARN")
+                        AppLogger.log("fetchTransactions: unklarer Serverfehler – erst unverändert wiederholen, Zustimmung bleibt", category: "YaxiService", level: "WARN")
                         do {
                             let retryTicket = ticket
                             resp = try await client.transactions(
@@ -1392,10 +1392,10 @@ enum YaxiService {
                             // siehe `darfZustimmungVerwerfen`. Lieber den Fehler zeigen
                             // als die Verbindung dauerhaft zerstören.
                             guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
-                                AppLogger.log("fetchTransactions: Redirect-Bank — Zustimmung wird NICHT verworfen, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                                AppLogger.log("fetchTransactions: Redirect-Bank – Zustimmung wird NICHT verworfen, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
                                 throw error
                             }
-                            AppLogger.log("fetchTransactions: auch mit Zustimmung gescheitert — jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
+                            AppLogger.log("fetchTransactions: auch mit Zustimmung gescheitert – jetzt ohne connectionData (kostet eine Freigabe): \(error)", category: "YaxiService", level: "WARN")
                             ticket = try YaxiTicketMaker.issueTransactionsTicket(iban: iban, from: from)
                             resp = try await ohneCD(ticket)
                         }
@@ -1411,7 +1411,7 @@ enum YaxiService {
                         // zuvor `UnexpectedError` lieferte und damit im oberen,
                         // geschützten Zweig landete.
                         guard darfZustimmungVerwerfen(error: error, istRedirectBank: model.none) else {
-                            AppLogger.log("fetchTransactions: Redirect-Bank — kein Abruf ohne Zustimmung, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
+                            AppLogger.log("fetchTransactions: Redirect-Bank – kein Abruf ohne Zustimmung, Fehler wird durchgereicht", category: "YaxiService", level: "WARN")
                             throw error
                         }
                         AppLogger.log("fetchTransactions: consent expired, retrying without connectionData", category: "YaxiService", level: "WARN")
@@ -2115,8 +2115,8 @@ enum YaxiService {
             AppLogger.log("sendTransfer: slot busy, abort slot=\(slotSnapshot.prefix(8))", category: "YaxiService", level: "WARN")
             return TransferOutcome(ok: false, scaRequired: false,
                                    error: "bank busy",
-                                   userMessage: L10n.t("Bankverbindung gerade beschäftigt — bitte gleich erneut versuchen.",
-                                                       "Bank connection busy — please try again shortly."),
+                                   userMessage: L10n.t("Bankverbindung gerade beschäftigt – bitte gleich erneut versuchen.",
+                                                       "Bank connection busy – please try again shortly."),
                                    mayHaveBeenExecuted: false)
         }
         return outcome
@@ -2172,7 +2172,7 @@ enum YaxiService {
             DebtorAccountReference(id: .iban($0), currency: Quellkonto.waehrung)
         }
         if quellkonto == nil {
-            AppLogger.log("sendTransfer: keine IBAN am Slot \(slotSnapshot.prefix(8)) — Quellkonto bleibt offen",
+            AppLogger.log("sendTransfer: keine IBAN am Slot \(slotSnapshot.prefix(8)) – Quellkonto bleibt offen",
                           category: "YaxiService", level: "WARN")
         }
 
@@ -2429,7 +2429,7 @@ enum YaxiService {
             // Bewusst still herabgestuft: Der interaktive Weg läuft gleich und meldet
             // den Fehler dann selbst — mit Trace und Fehlerbericht. Ihn hier schon als
             // Fehler zu behandeln, hieße einen zu zählen, der noch gar nicht feststeht.
-            AppLogger.log("fetchBalances: Schnellabruf nicht möglich (\(error)) — interaktiv weiter",
+            AppLogger.log("fetchBalances: Schnellabruf nicht möglich (\(error)) – interaktiv weiter",
                           category: "YaxiService", level: "WARN")
             return nil
         }
@@ -2457,7 +2457,7 @@ enum YaxiService {
                                             session: antwort.session?.bytes,
                                             connectionData: antwort.connectionData?.bytes)
         } catch {
-            AppLogger.log("fetchTransactions: Schnellabruf nicht möglich (\(error)) — interaktiv weiter",
+            AppLogger.log("fetchTransactions: Schnellabruf nicht möglich (\(error)) – interaktiv weiter",
                           category: "YaxiService", level: "WARN")
             return nil
         }
@@ -2521,7 +2521,7 @@ enum YaxiService {
             // Hier stand „using first as fallback". Das lieferte den Saldo eines
             // fremden Kontos unter dem Namen des eigenen. Wurde eine bestimmte IBAN
             // angefragt und ist sie nicht dabei, gibt es keinen Saldo — nur den Hinweis.
-            AppLogger.log("makeBalancesResponse: angefragte IBAN \(target.prefix(8))… nicht in der Antwort (\(allEntries.count) andere) — kein Saldo",
+            AppLogger.log("makeBalancesResponse: angefragte IBAN \(target.prefix(8))… nicht in der Antwort (\(allEntries.count) andere) – kein Saldo",
                           category: "YaxiService", level: "WARN")
             return BalancesResponse(
                 ok: false, booked: nil, expected: nil,
@@ -2574,7 +2574,7 @@ enum YaxiService {
         // die Rückfrage an YAXI belegt statt geraten.
         if let stand = booked.dateTime, stand > Date() {
             let vorsprung = stand.timeIntervalSinceNow
-            AppLogger.log(String(format: "Saldo liegt %.0f min in der Zukunft — Bank stempelt vermutlich Ortszeit als UTC", vorsprung / 60),
+            AppLogger.log(String(format: "Saldo liegt %.0f min in der Zukunft – Bank stempelt vermutlich Ortszeit als UTC", vorsprung / 60),
                           category: "YaxiService", level: "WARN")
         }
 
@@ -2772,12 +2772,12 @@ enum YaxiService {
     /// Der Satz, wenn ein Hintergrundabruf eine Freigabe bräuchte und deshalb stehen
     /// geblieben ist. Er sagt, was zu tun ist, und drängt nicht.
     static let freigabeNoetigText = L10n.t(
-        "Dieses Konto braucht eine neue Freigabe deiner Bank. simplebanking öffnet die Bankseite nicht von selbst — tippe auf \u{201E}Neu verbinden\u{201C}, wenn du sie jetzt erteilen willst.",
-        "This account needs a fresh approval from your bank. simplebanking does not open the bank page on its own — choose \u{201C}Reconnect\u{201D} when you want to grant it.")
+        "Dieses Konto braucht eine neue Freigabe deiner Bank. simplebanking öffnet die Bankseite nicht von selbst – tippe auf \u{201E}Neu verbinden\u{201C}, wenn du sie jetzt erteilen willst.",
+        "This account needs a fresh approval from your bank. simplebanking does not open the bank page on its own – choose \u{201C}Reconnect\u{201D} when you want to grant it.")
 
     static let freigabeLaeuftText = L10n.t(
-        "Für dieses Konto läuft gerade schon eine Freigabe. Schließe sie in der Banking-App oder im Browser ab — oder warte einen Moment, dann geht es wieder.",
-        "An approval is already running for this account. Finish it in your banking app or browser — or wait a moment and try again.")
+        "Für dieses Konto läuft gerade schon eine Freigabe. Schließe sie in der Banking-App oder im Browser ab – oder warte einen Moment, dann geht es wieder.",
+        "An approval is already running for this account. Finish it in your banking app or browser – or wait a moment and try again.")
 
     /// Der Satz, wenn die Bank keinen Saldo geliefert hat, den man anzeigen darf.
     ///
@@ -2944,7 +2944,7 @@ enum YaxiService {
                 let alterText = alter.map { String(format: "%.1f h", $0 / 3600) } ?? "unbekannt"
                 AppLogger.log(
                     "SCA: Freigabe durchlaufen (\(depth) Schritte), aber KEINE neuen " +
-                    "Verbindungsdaten — gespeicherte sind \(alterText) alt, slot=\(slotId.prefix(8))",
+                    "Verbindungsdaten – gespeicherte sind \(alterText) alt, slot=\(slotId.prefix(8))",
                     category: "YaxiService", level: "WARN")
             }
             return .erfolg(SCAOutcome(payload: payload, session: session, connectionData: connectionData))
@@ -2980,7 +2980,7 @@ enum YaxiService {
                 // steht der Grund hier statt nirgends.
                 if Auswahlart.sindKonten(options.map { "\($0.key) \($0.label) \($0.explanation ?? "")" }) {
                     AppLogger.log(
-                        "SCA Selection: Optionen sehen nach KONTEN aus (\(options.count)) — " +
+                        "SCA Selection: Optionen sehen nach KONTEN aus (\(options.count)) – " +
                         "die Auswahl trifft die App, nicht der Nutzer. slot=\(slotId.prefix(8))",
                         category: "YaxiService", level: "WARN")
                 }
@@ -3023,10 +3023,10 @@ enum YaxiService {
                     //
                     // Stattdessen: Bankmeldung zeigen und den Nutzer sagen lassen, wann er
                     // bestätigt hat. Genau ein `confirm` danach.
-                    AppLogger.log("SCA Confirmation: kein pollingDelay — Bestätigung wird erfragt statt gepollt",
+                    AppLogger.log("SCA Confirmation: kein pollingDelay – Bestätigung wird erfragt statt gepollt",
                                   category: "YaxiService")
                     guard let provider = fieldInputProvider else {
-                        AppLogger.log("SCA Confirmation: kein Provider — ohne Polling-Freigabe nicht fortsetzbar",
+                        AppLogger.log("SCA Confirmation: kein Provider – ohne Polling-Freigabe nicht fortsetzbar",
                                       category: "YaxiService", level: "WARN")
                         return .abgebrochen
                     }
@@ -3111,7 +3111,7 @@ enum YaxiService {
                 // Nur Metadaten loggen — der eingegebene Wert ist Secret.
                 AppLogger.log(
                     "SCA field: requesting input type=\(type) secrecy=\(secrecy) " +
-                    "min=\(minLen.map(String.init) ?? "—") max=\(maxLen.map(String.init) ?? "—")",
+                    "min=\(minLen.map(String.init) ?? "–") max=\(maxLen.map(String.init) ?? "–")",
                     category: "YaxiService"
                 )
                 // Das Panel wird aus dem Runloop-Callback heraus aufgebaut und gezeigt.
@@ -3175,7 +3175,7 @@ enum YaxiService {
             // `pollRedirect` bis zu zehn Minuten auf eine Freigabe zu warten, die niemand
             // erteilen kann, und hielte solange die `Freigabewache`.
             guard ausloeser == .nutzerhandlung else {
-                AppLogger.log("SCA: Freigabe nötig, aber Abruf lief im Hintergrund — nichts geöffnet (slot=\(slotId.prefix(8)))",
+                AppLogger.log("SCA: Freigabe nötig, aber Abruf lief im Hintergrund – nichts geöffnet (slot=\(slotId.prefix(8)))",
                               category: "YaxiService")
                 await meldeFreigabeNoetig(slotId: slotId)
                 return .freigabeNoetig
@@ -3184,7 +3184,7 @@ enum YaxiService {
             // geöffnet. Siehe `Freigabewache`: Der Nutzer bestätigt gerade im Browser;
             // eine weitere Seite macht die begonnene nur wertlos.
             guard await Freigabewache.shared.beginnen(slotId) else {
-                AppLogger.log("SCA Redirect: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
+                AppLogger.log("SCA Redirect: Freigabe für diesen Slot läuft bereits – keine zweite Seite",
                               category: "YaxiService", level: "WARN")
                 return .freigabeLaeuftBereits
             }
@@ -3217,13 +3217,13 @@ enum YaxiService {
             // `pollRedirect` bis zu zehn Minuten auf eine Freigabe zu warten, die niemand
             // erteilen kann, und hielte solange die `Freigabewache`.
             guard ausloeser == .nutzerhandlung else {
-                AppLogger.log("SCA: Freigabe nötig, aber Abruf lief im Hintergrund — nichts geöffnet (slot=\(slotId.prefix(8)))",
+                AppLogger.log("SCA: Freigabe nötig, aber Abruf lief im Hintergrund – nichts geöffnet (slot=\(slotId.prefix(8)))",
                               category: "YaxiService")
                 await meldeFreigabeNoetig(slotId: slotId)
                 return .freigabeNoetig
             }
             guard await Freigabewache.shared.beginnen(slotId) else {
-                AppLogger.log("SCA RedirectHandle: Freigabe für diesen Slot läuft bereits — keine zweite Seite",
+                AppLogger.log("SCA RedirectHandle: Freigabe für diesen Slot läuft bereits – keine zweite Seite",
                               category: "YaxiService", level: "WARN")
                 return .freigabeLaeuftBereits
             }
@@ -3329,7 +3329,7 @@ enum YaxiService {
     private static func freigabeAbgebrochen(slotId: String, wo: String) async -> Bool {
         guard await Freigabewache.shared.nimmAbbruch(slotId) else { return false }
         await RedirectCoordinator.shared.vergessen(slotId: slotId)
-        AppLogger.log("\(wo): vom Nutzer beendet — Warten abgebrochen (slot=\(slotId.prefix(8)))",
+        AppLogger.log("\(wo): vom Nutzer beendet – Warten abgebrochen (slot=\(slotId.prefix(8)))",
                       category: "YaxiService")
         return true
     }
@@ -3518,7 +3518,7 @@ enum YaxiService {
     /// dort, wo er nachsieht.
     static func ohneTraceWeil(_ aufruf: String, _ grund: String, alwaysTrace: Bool) {
         guard alwaysTrace else { return }
-        AppLogger.log("\(aufruf): kein Trace möglich — \(grund)", category: "YaxiService", level: "WARN")
+        AppLogger.log("\(aufruf): kein Trace möglich – \(grund)", category: "YaxiService", level: "WARN")
     }
 
     /// Trace für einen Ausgang, der weder geglückt ist noch geworfen hat.
@@ -3748,7 +3748,7 @@ enum YaxiService {
     @discardableResult
     private static func openRedirectURL(_ url: URL, vorgang: String, erwartetRueckleitung: Bool) async -> Freigabefenster? {
         guard await RedirectCoordinator.shared.darfOeffnen(vorgang: vorgang) else {
-            AppLogger.log("SCA: Freigabe-Seite für diesen Vorgang bereits geöffnet — kein zweites Fenster",
+            AppLogger.log("SCA: Freigabe-Seite für diesen Vorgang bereits geöffnet – kein zweites Fenster",
                           category: "YaxiService")
             return nil
         }

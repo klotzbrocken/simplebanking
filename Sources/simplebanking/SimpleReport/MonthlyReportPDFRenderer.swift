@@ -364,7 +364,7 @@ private func drawPage2(ctx: CGContext, report: MonthlyReport, totalPages: Int) {
     drawRainbow(ctx, y: R.pageHeight - 10)
 
     let titleY: CGFloat = 808
-    let h2 = report.header.monthTitle + " — " + report.header.accountName
+    let h2 = report.header.monthTitle + " – " + report.header.accountName
     drawText(ctx, h2, x: R.marginL, baseline: titleY, font: R.sans(13, bold: true), color: R.textBlack)
     drawText(ctx, "■  DETAILS", x: R.pageWidth - R.marginR, baseline: titleY,
              font: R.mono(8), color: R.labelGray, align: .right)
@@ -551,7 +551,7 @@ private func drawTxListPage(
 
     // Header
     let titleY: CGFloat = 808
-    let h2 = report.header.monthTitle + " — " + report.header.accountName
+    let h2 = report.header.monthTitle + " – " + report.header.accountName
     drawText(ctx, h2, x: R.marginL, baseline: titleY, font: R.sans(13, bold: true), color: R.textBlack)
     drawText(ctx, "■  ALLE UMSÄTZE", x: R.pageWidth - R.marginR, baseline: titleY,
              font: R.mono(8), color: R.labelGray, align: .right)

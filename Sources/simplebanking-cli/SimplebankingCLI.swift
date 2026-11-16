@@ -153,7 +153,7 @@ struct BalanceCommand: ParsableCommand {
             if let b = it.balance {
                 bal = Format.colorMoney(b, currency: it.currency)
             } else {
-                bal = ANSIColor.dim("— (kein Cache)")
+                bal = ANSIColor.dim("– (kein Cache)")
             }
             let ibanShort = ANSIColor.dim("•••\(String(it.iban.suffix(4)))")
             let slot = ANSIColor.dim(String(it.slotId.prefix(8)))

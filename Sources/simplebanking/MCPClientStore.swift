@@ -56,8 +56,8 @@ enum MCPClientStore {
             case .auswertung:
                 return L10n.t("Summen je Kategorie und Monat.", "Totals per category and month.")
             case .ueberweisung:
-                return L10n.t("Darf Überweisungsentwürfe anlegen. Ausgelöst wird nichts ohne deine Bestätigung und Freigabe — aber ein Entwurf entsteht, ohne dass du gefragt wirst. Braucht eine aktive simplesend-Lizenz.",
-                              "May create transfer drafts. Nothing is executed without your confirmation and approval — but a draft appears without asking you. Requires an active simplesend licence.")
+                return L10n.t("Darf Überweisungsentwürfe anlegen. Ausgelöst wird nichts ohne deine Bestätigung und Freigabe – aber ein Entwurf entsteht, ohne dass du gefragt wirst. Braucht eine aktive simplesend-Lizenz.",
+                              "May create transfer drafts. Nothing is executed without your confirmation and approval – but a draft appears without asking you. Requires an active simplesend licence.")
             }
         }
 

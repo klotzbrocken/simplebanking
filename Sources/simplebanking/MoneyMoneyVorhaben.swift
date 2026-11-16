@@ -30,11 +30,11 @@ struct MoneyMoneyAbsage: Hashable {
     var satz: String {
         switch grund {
         case .keineIban:
-            return L10n.t("ohne IBAN — in simplebanking nicht abrufbar",
-                          "no IBAN — cannot be fetched in simplebanking")
+            return L10n.t("ohne IBAN – in simplebanking nicht abrufbar",
+                          "no IBAN – cannot be fetched in simplebanking")
         case .depot:
-            return L10n.t("Depot oder Versicherung — kein Konto für Open Banking",
-                          "portfolio or insurance — not an Open Banking account")
+            return L10n.t("Depot oder Versicherung – kein Konto für Open Banking",
+                          "portfolio or insurance – not an Open Banking account")
         case .nichtErreichbar:
             return L10n.t("diese Bank ist über Open Banking nicht erreichbar",
                           "this bank is not reachable via Open Banking")
@@ -44,8 +44,8 @@ struct MoneyMoneyAbsage: Hashable {
         case .nichtVerbunden:
             // Sagt, was zu tun ist. „Nicht verbunden" allein ließe offen, ob das
             // Konto überhaupt gehen würde.
-            return L10n.t("in simplebanking nicht verbunden — Konto hinzufügen, dann erneut übernehmen",
-                          "not connected in simplebanking — add the account, then import again")
+            return L10n.t("in simplebanking nicht verbunden – Konto hinzufügen, dann erneut übernehmen",
+                          "not connected in simplebanking – add the account, then import again")
         }
     }
 }

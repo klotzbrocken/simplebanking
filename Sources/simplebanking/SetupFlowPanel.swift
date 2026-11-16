@@ -43,7 +43,7 @@ enum SetupProgress: Sendable {
     private static func mitKonto(_ text: String, _ konto: String?) -> String {
         guard let name = konto?.trimmingCharacters(in: .whitespacesAndNewlines),
               !name.isEmpty, name.count <= 30 else { return text }
-        return text.replacingOccurrences(of: "…", with: "") + " — " + name + "…"
+        return text.replacingOccurrences(of: "…", with: "") + " – " + name + "…"
     }
 
     var subtitle: String {
@@ -971,8 +971,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         // „MoneyMoney muss nicht geöffnet sein": Der zweite Satz war wahr und
         // führte trotzdem in die Irre.
         let hinweis = infoBox(icon: "lock.open", t(
-            "Wir speichern dieses Kennwort nicht und schreiben nichts in MoneyMoney zurück — es wird nur gelesen. Beende MoneyMoney vorher, sonst ist die Datenbank gerade in Arbeit.",
-            "We do not store this password and write nothing back to MoneyMoney — it is only read. Quit MoneyMoney first, otherwise its database is busy."))
+            "Wir speichern dieses Kennwort nicht und schreiben nichts in MoneyMoney zurück – es wird nur gelesen. Beende MoneyMoney vorher, sonst ist die Datenbank gerade in Arbeit.",
+            "We do not store this password and write nothing back to MoneyMoney – it is only read. Quit MoneyMoney first, otherwise its database is busy."))
 
         mmMeldungLabel.stringValue = ""
         mmMeldungLabel.isHidden = true
@@ -1041,8 +1041,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         let untertitel = NSTextField(wrappingLabelWithString: mmTreffer.isEmpty
             ? t("Zu keinem Deiner MoneyMoney-Konten gibt es einen Open-Banking-Zugang. Richte Deine Bank wie gewohnt ein.",
                 "None of your MoneyMoney accounts has an Open Banking connection. Set up your bank the usual way.")
-            : t("Für jede Bank folgt gleich eine Anmeldung mit Zwei-Faktor — ohne die kann simplebanking nichts abrufen. Der Verlauf kommt danach.",
-                "Each bank needs a two-factor sign-in next — without it simplebanking cannot fetch anything. The history follows afterwards."))
+            : t("Für jede Bank folgt gleich eine Anmeldung mit Zwei-Faktor – ohne die kann simplebanking nichts abrufen. Der Verlauf kommt danach.",
+                "Each bank needs a two-factor sign-in next – without it simplebanking cannot fetch anything. The history follows afterwards."))
         untertitel.font = .systemFont(ofSize: 13)
         untertitel.textColor = .secondaryLabelColor
         untertitel.preferredMaxLayoutWidth = fieldWidth
@@ -1071,7 +1071,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
                 let bezeichnung = absage.konto.name?.trimmingCharacters(in: .whitespaces)
                 let kennung = (bezeichnung?.isEmpty == false ? bezeichnung : nil)
                     ?? (absage.konto.iban.isEmpty ? t("Konto ohne IBAN", "account without IBAN") : absage.konto.iban)
-                return "• \(kennung) — \(absage.satz)"
+                return "• \(kennung) – \(absage.satz)"
             }
             let absageLabel = NSTextField(wrappingLabelWithString:
                 t("Übergangen:", "Skipped:") + "\n" + zeilen.joined(separator: "\n"))
@@ -1112,8 +1112,8 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
         var teile: [NSView] = [title, untertitel, behaelter]
         if bankanzahl > 1 {
             let bankhinweis = NSTextField(wrappingLabelWithString: t(
-                "\(bankanzahl) Banken — simplebanking fragt sie eine nach der anderen. Brich ruhig ab, der Rest bleibt gemerkt.",
-                "\(bankanzahl) banks — simplebanking asks for them one at a time. Feel free to stop; the rest is remembered."))
+                "\(bankanzahl) Banken – simplebanking fragt sie eine nach der anderen. Brich ruhig ab, der Rest bleibt gemerkt.",
+                "\(bankanzahl) banks – simplebanking asks for them one at a time. Feel free to stop; the rest is remembered."))
             bankhinweis.font = .systemFont(ofSize: 11)
             bankhinweis.textColor = .secondaryLabelColor
             bankhinweis.preferredMaxLayoutWidth = fieldWidth
@@ -1208,7 +1208,7 @@ final class SetupWizardPanel: NSObject, NSWindowDelegate, NSTableViewDataSource,
                 let auszug = try MoneyMoneyLesepfad.auszug(datenbank: datei, kennwort: kennwort)
                 AppLogger.log("MoneyMoney-Import: gelesen in "
                               + String(format: "%.1f", Date().timeIntervalSince(begonnen))
-                              + "s — Konten \(auszug.konten.count), "
+                              + "s – Konten \(auszug.konten.count), "
                               + "Umsätze \(auszug.umsaetze.count), "
                               + "Kategorien \(auszug.kategorien.count)",
                               category: "MoneyMoney")
