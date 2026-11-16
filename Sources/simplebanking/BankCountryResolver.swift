@@ -1,130 +1,60 @@
 import Foundation
-
-// MARK: - BankCountry
-//
-// Land einer Bank, abgeleitet aus dem Display-Namen (Routex/YAXI liefert
-// bei der Suche kein Country-Feld, BIC erst nach Connection — daher
-// Heuristik). Default ist DE (Hauptzielgruppe; deutsche Banken haben
-// selten ein Land im Namen).
-
-enum BankCountry: String, CaseIterable, Sendable, Equatable {
-    case de, at, ch, be, nl, fr, es, it, lu, gb, other
-
-    /// Unicode-Flag-Emoji oder Globus für `.other`.
-    var flag: String {
-        switch self {
-        case .de:    return "🇩🇪"
-        case .at:    return "🇦🇹"
-        case .ch:    return "🇨🇭"
-        case .be:    return "🇧🇪"
-        case .nl:    return "🇳🇱"
-        case .fr:    return "🇫🇷"
-        case .es:    return "🇪🇸"
-        case .it:    return "🇮🇹"
-        case .lu:    return "🇱🇺"
-        case .gb:    return "🇬🇧"
-        case .other: return "🌐"
-        }
-    }
-
-    var iso: String { rawValue.uppercased() }
-
-    var displayName: String {
-        switch self {
-        case .de:    return L10n.t("Deutschland",  "Germany")
-        case .at:    return L10n.t("Österreich",   "Austria")
-        case .ch:    return L10n.t("Schweiz",      "Switzerland")
-        case .be:    return L10n.t("Belgien",      "Belgium")
-        case .nl:    return L10n.t("Niederlande",  "Netherlands")
-        case .fr:    return L10n.t("Frankreich",   "France")
-        case .es:    return L10n.t("Spanien",      "Spain")
-        case .it:    return L10n.t("Italien",      "Italy")
-        case .lu:    return L10n.t("Luxemburg",    "Luxembourg")
-        case .gb:    return L10n.t("Vereinigtes Königreich", "United Kingdom")
-        case .other: return L10n.t("Andere",       "Other")
-        }
-    }
-}
+import RoutexClient
 
 // MARK: - BankCountryResolver
+//
+// Die Flagge hinter einem Eintrag in der Bankenliste.
+//
+// Hier stand bis 2.2.2 eine Heuristik über den Anzeigenamen: eine Tabelle mit
+// Mustern je Land („schweiz", „bawag", „kantonalbank"), eine Override-Liste für
+// Namen ohne Länderhinweis (Berenberg, HypoVereinsbank), eine Reihenfolge, die
+// erklärt werden musste (CH vor AT, sonst gilt „Raiffeisen Schweiz" als
+// österreichisch) und ein Rückfall auf Deutschland für alles Übrige. Portugal
+// trug damit eine deutsche Flagge, obwohl YAXI dort 22 Verbindungen führt.
+//
+// Am 14.11.2026 hat ein Nutzer die süddeutsche Zweigniederlassung der
+// Raiffeisenlandesbank Oberösterreich eingerichtet und kam nicht durch. In der
+// Liste stehen zwei Einträge mit fast demselben Namen, einer für Österreich und
+// einer für Deutschland, und beide trafen dasselbe Muster
+// („raiffeisenlandesbank" → AT): Sie waren nicht unterscheidbar, und die
+// deutsche Niederlassung war als österreichisch ausgezeichnet. Auf die Frage
+// nach einem Länderfeld kam am 16.11.2026 von YAXI die Antwort, dass es das
+// längst gibt: `ConnectionInfo.countries`.
+//
+// Deshalb wird hier nicht mehr geraten, sondern gelesen. Die Flagge entsteht
+// aus dem ISO-3166-1-Code, nicht aus einer Tabelle — damit gilt sie für jedes
+// Land, das YAXI heute oder morgen anbietet.
 
 enum BankCountryResolver {
 
-    /// Override-Map für Edge-Cases, in denen die Heuristik daneben liegt.
-    /// Schlüssel = lowercase displayName-Substring (in der Reihenfolge
-    /// geprüft), Wert = Country.
-    private static let overrides: [(needle: String, country: BankCountry)] = [
-        ("berenberg",            .de),    // „Berenberg Bank" hat keinen Country-Hint
-        ("hypovereinsbank",      .de),    // HVB ist Teil von UniCredit, aber DE-Bank
-        ("targobank",            .de),
-        ("santander consumer",   .de),    // DE-Tochter
-        ("santander privatkund", .de)
-    ]
+    /// Flagge für die Länder einer Bankverbindung.
+    ///
+    /// Mehrere Länder (Revolut führt eine lange Liste) oder ein Code, der keine
+    /// Flagge ergibt, werden zum Globus: Eine von zwei Flaggen zu zeigen wäre
+    /// eine Aussage, die die Daten nicht tragen.
+    static func flagge(fuer codes: [CountryCode]) -> String {
+        guard codes.count == 1, let code = codes.first else { return globus }
+        return emojiFlagge(code.rawValue) ?? globus
+    }
 
-    /// Patterns pro Country. Reihenfolge zählt: Länder mit eindeutigen Namen
-    /// (CH/BE/ES/IT/FR/NL/LU/GB) werden VOR AT geprüft, weil AT generische
-    /// Patterns wie „raiffeisen " hat, die sonst „Raiffeisen Schweiz"
-    /// fälschlich als AT klassifizieren würden. Lowercase-Substring-Matching.
-    private static let countryPatterns: [(country: BankCountry, needles: [String])] = [
-        (.ch, [
-            "schweiz", "switzerland", "suisse", "svizzera",
-            "zürich", "zuerich", "zürcher", "zuercher",
-            "ubs", "postfinance", "kantonalbank"
-        ]),
-        (.be, [
-            "belgium", "belgië", "belgique", "belgien"
-        ]),
-        (.es, [
-            "españa", "espana", "spain", "spanien"
-        ]),
-        (.it, [
-            "italia", "italy", "italien"
-        ]),
-        (.fr, [
-            "france", "française", "francaise", "frankreich"
-        ]),
-        (.nl, [
-            "netherlands", "nederland", "niederlande",
-            "abn amro", "rabobank", "ing nederland", "ing netherlands"
-        ]),
-        (.lu, [
-            "luxembourg", "luxemburg"
-        ]),
-        (.gb, [
-            "united kingdom", " uk ", "england", "british",
-            "barclays", "lloyds", "natwest", "hsbc"
-        ]),
-        (.at, [
-            "austria", "österreich", "oesterreich",
-            "wien", "tirol", "steiermark", "salzburg", "kärnten", "kaernten",
-            "vorarlberg", "burgenland",
-            "raiffeisen ", "raiffeisenlandesbank", "raiffeisenbank ",
-            "sparkasse oberösterreich", "bawag", "easybank",
-            "oberbank", "hypo oberösterreich", "hypo tirol",
-            "alpen privatbank", "bks bank", "posojilnica",
-            "volkskreditbank", "vkb"
-        ])
-    ]
+    static let globus = "🌐"
 
-    /// Liefert das Land der Bank anhand ihres `displayName`. Nicht zugeordnete
-    /// Banken fallen auf `.de` zurück (deutsche Banken nennen ihr Land i.d.R.
-    /// nicht im Namen → die unauffälligen Treffer sind statistisch DE).
-    static func resolve(displayName: String) -> BankCountry {
-        let name = " " + displayName.lowercased() + " "
-
-        // 1) Override-Map zuerst (überschreibt Heuristik)
-        for o in overrides where name.contains(o.needle) {
-            return o.country
+    /// Zwei Buchstaben in die beiden Regional-Indicator-Zeichen übersetzen, aus
+    /// denen jede Länderflagge besteht: „DE" → U+1F1E9 U+1F1EA.
+    ///
+    /// `nil` für alles, was keine zwei ASCII-Buchstaben sind. Das SDK prüft den
+    /// Code nicht gegen die ISO-Liste, damit alte Server durchlaufen, also kann
+    /// hier alles ankommen.
+    private static func emojiFlagge(_ code: String) -> String? {
+        let gross = code.uppercased()
+        let buchstaben = Array(gross.unicodeScalars)
+        guard buchstaben.count == 2 else { return nil }
+        var flagge = ""
+        for b in buchstaben {
+            guard b.value >= 65, b.value <= 90,
+                  let zeichen = UnicodeScalar(0x1F1E6 + b.value - 65) else { return nil }
+            flagge.unicodeScalars.append(zeichen)
         }
-
-        // 2) Substring-Heuristik
-        for (country, needles) in countryPatterns {
-            for n in needles where name.contains(n) {
-                return country
-            }
-        }
-
-        // 3) Fallback
-        return .de
+        return flagge
     }
 }

@@ -1,90 +1,58 @@
 import XCTest
+import RoutexClient
 @testable import simplebanking
 
+/// Die Flagge in der Bankenliste kommt aus `ConnectionInfo.countries`, nicht
+/// aus dem Namen. Bis 2.2.2 wurde sie geraten, und das hat am 14.11.2026 einen
+/// Nutzer eine Einrichtung gekostet: Die süddeutsche Zweigniederlassung der
+/// Raiffeisenlandesbank Oberösterreich traf dasselbe Namensmuster wie das
+/// österreichische Haus, also trugen beide Einträge dieselbe falsche Flagge.
 final class BankCountryResolverTests: XCTestCase {
 
-    // MARK: - Default
-
-    func test_defaultsToGermany_forNeutralName() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Sparkasse"),       .de)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Deutsche Bank"),   .de)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Commerzbank"),     .de)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "ING"),             .de)
+    private func flagge(_ codes: String...) -> String {
+        BankCountryResolver.flagge(fuer: codes.map { CountryCode($0) })
     }
 
-    // MARK: - Austria
-
-    func test_austria_byKeyword() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Bank Austria"),       .at)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Hypo Oberösterreich"), .at)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "BAWAG P.S.K."),        .at)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "easybank"),            .at)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Oberbank"),            .at)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Raiffeisenlandesbank Niederösterreich-Wien"), .at)
+    func test_einLandGibtSeineFlagge() {
+        XCTAssertEqual(flagge("DE"), "🇩🇪")
+        XCTAssertEqual(flagge("AT"), "🇦🇹")
+        XCTAssertEqual(flagge("ES"), "🇪🇸")
     }
 
-    // MARK: - Belgium / Spain / Italy
-
-    func test_belgium() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "ING Belgium"),            .be)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Deutsche Bank Belgium"),  .be)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "ING België"),             .be)
+    /// Portugal trug unter der Heuristik eine deutsche Flagge, weil der Name
+    /// kein Muster traf und alles Unbekannte als deutsch galt. YAXI führt dort
+    /// 22 Verbindungen.
+    func test_portugalWarDerStilleFehlerDerHeuristik() {
+        XCTAssertEqual(flagge("PT"), "🇵🇹")
     }
 
-    func test_spain() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "ING España"),             .es)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Deutsche Bank España"),   .es)
+    /// Der Fall, um den es ging: zwei Häuser derselben Bank, zwei Länder, und
+    /// der Name hilft bei keinem von beiden.
+    func test_zweiNiederlassungenDerselbenBankSindUnterscheidbar() {
+        XCTAssertNotEqual(flagge("DE"), flagge("AT"))
     }
 
-    func test_italy() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "ING Italia"),             .it)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Deutsche Bank Italia"),   .it)
+    /// Kleinschreibung vom Server darf nicht zum Globus führen.
+    func test_kleingeschriebenerCodeZaehltAuch() {
+        XCTAssertEqual(flagge("de"), "🇩🇪")
     }
 
-    // MARK: - Switzerland / Netherlands / France / Luxembourg / UK
-
-    func test_switzerland() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "UBS"),               .ch)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Raiffeisen Schweiz"), .ch)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Zürcher Kantonalbank"), .ch)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "PostFinance"),       .ch)
+    /// Mehrere Länder sind keine Aussage über eines. Revolut führt eine lange
+    /// Liste; eine davon zu zeigen wäre geraten, und genau das sollte weg.
+    func test_mehrereLaenderGebenDenGlobus() {
+        XCTAssertEqual(flagge("DE", "AT", "ES"), BankCountryResolver.globus)
     }
 
-    func test_netherlands() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "ABN AMRO"),  .nl)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Rabobank"),  .nl)
+    func test_keinLandGibtDenGlobus() {
+        XCTAssertEqual(BankCountryResolver.flagge(fuer: []), BankCountryResolver.globus)
     }
 
-    func test_france() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Banque de France"), .fr)
-    }
-
-    func test_luxembourg() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Bank Luxembourg"),  .lu)
-    }
-
-    func test_unitedKingdom() {
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Barclays"),  .gb)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "HSBC"),      .gb)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Lloyds"),    .gb)
-    }
-
-    // MARK: - Overrides
-
-    func test_overrides_winOverHeuristic() {
-        // Berenberg klingt nicht offensichtlich nach DE — Override zwingt es.
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Berenberg Bank"), .de)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "HypoVereinsbank"), .de)
-        XCTAssertEqual(BankCountryResolver.resolve(displayName: "Targobank"),       .de)
-    }
-
-    // MARK: - Country metadata
-
-    func test_eachCountry_hasFlagAndDisplayName() {
-        for c in BankCountry.allCases {
-            XCTAssertFalse(c.flag.isEmpty, "missing flag for \(c)")
-            XCTAssertFalse(c.displayName.isEmpty, "missing displayName for \(c)")
-            XCTAssertFalse(c.iso.isEmpty, "missing iso for \(c)")
-        }
+    /// Das SDK prüft den Code nicht gegen die ISO-Liste, damit alte Server
+    /// durchlaufen. Hier kann also alles ankommen.
+    func test_unsinnigerCodeGibtDenGlobus() {
+        XCTAssertEqual(flagge("D"), BankCountryResolver.globus)
+        XCTAssertEqual(flagge("DEU"), BankCountryResolver.globus)
+        XCTAssertEqual(flagge("12"), BankCountryResolver.globus)
+        XCTAssertEqual(flagge(""), BankCountryResolver.globus)
     }
 }
