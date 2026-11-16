@@ -353,10 +353,28 @@ final class ErrorReportStore: ObservableObject {
         return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
     }
 
+    /// Routex-SDK-Version und Revision aus der Info.plist, die `build-app.sh`
+    /// aus `Package.resolved` füllt. Bei einem Dev-Build über `swift run` fehlt
+    /// der Key, dann steht „unknown" da.
+    ///
+    /// Hier stand die Version bis 2.2.2 als fester String. Beim Sprung auf 0.5
+    /// und 0.6 hat sie niemand mitgezogen, also meldete jeder Fehlerreport
+    /// „0.4.1" an YAXI. Am 15.11.2026 ist das aufgefallen, als der Support
+    /// einen Fehler gegen die falsche SDK-Version eingeordnet hat. Eine
+    /// Konstante, die bei jedem Upgrade von Hand nach muss, geht wieder schief:
+    /// deshalb liest sie, was der Build ohnehin schon einträgt.
     nonisolated static func routexSDKVersion() -> String {
-        // Routex liefert keine Version-API; wir tragen die SPM-Pin-Version manuell.
-        // Wenn Du das SDK upgradest, hier mitziehen.
-        "0.4.1"
+        let dict = Bundle.main.infoDictionary
+        let v = dict?["SBRoutexVersion"] as? String
+        let r = dict?["SBRoutexRevision"] as? String
+        switch (v, r) {
+        case (let v?, let r?) where v != "?" && r != "?":
+            return "\(v) (\(r))"
+        case (let v?, _) where v != "?":
+            return v
+        default:
+            return "unknown"
+        }
     }
 }
 

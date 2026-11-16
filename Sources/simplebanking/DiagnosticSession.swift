@@ -544,21 +544,11 @@ final class DiagnosticSession: ObservableObject {
         return "\(v) (Build \(b))"
     }
 
-    /// Routex-SDK-Version + Revision-Prefix aus Info.plist (von build-app.sh
-    /// aus `Package.resolved` injiziert). Bei Dev-Build via `swift run` ohne
-    /// build-app.sh-Wrap fehlt der Key — wir geben "unknown" aus.
+    /// Routex-SDK-Version, siehe `ErrorReportStore.routexSDKVersion()`. Stand
+    /// hier ein zweites Mal; zwei Fassungen derselben Angabe sind genau der
+    /// Grund, warum der Fehlerreport zwei Minor-Versionen lang „0.4.1" meldete.
     private func routexSDKVersion() -> String {
-        let dict = Bundle.main.infoDictionary
-        let v = dict?["SBRoutexVersion"] as? String
-        let r = dict?["SBRoutexRevision"] as? String
-        switch (v, r) {
-        case (let v?, let r?) where v != "?" && r != "?":
-            return "\(v) (\(r))"
-        case (let v?, _) where v != "?":
-            return v
-        default:
-            return "unknown"
-        }
+        ErrorReportStore.routexSDKVersion()
     }
 }
 
