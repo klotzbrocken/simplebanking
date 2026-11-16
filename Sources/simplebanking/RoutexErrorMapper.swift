@@ -110,14 +110,39 @@ enum RoutexErrorMapper {
                 isRetryable: false
             )
 
-        case .serviceBlocked(_, let msg):
-            return UserMessage(
-                title: L10n.t("Bank-Zugang gesperrt", "Bank access blocked"),
-                detail: msg,
-                suggestion: L10n.t("Bei der Bank entsperren lassen.",
-                                   "Contact the bank to unblock."),
-                isRetryable: false
-            )
+        // Drei verschiedene Dinge unter einem Fehler, und der Code sagt welches. Bis
+        // 2.2.2 stand hier für alle drei „Bank-Zugang gesperrt, bei der Bank entsperren
+        // lassen" – ein Rat, der zweimal von drei Mal in die Irre führt. Wer kein
+        // TAN-Verfahren eingerichtet hat, richtet eines ein; wer einen Hinweis im
+        // Online-Banking offen hat, bestätigt ihn. Nur ohne Code ist tatsächlich nichts
+        // bekannt außer: geht nicht.
+        case .serviceBlocked(let code, let msg):
+            switch code {
+            case .missingSetup:
+                return UserMessage(
+                    title: L10n.t("Bei der Bank nicht eingerichtet", "Not set up at the bank"),
+                    detail: msg,
+                    suggestion: L10n.t("Im Online-Banking der Bank prüfen, ob ein TAN-Verfahren für Drittanbieter eingerichtet ist, danach erneut verbinden.",
+                                       "Check in your bank's online banking that a TAN method for third-party access is set up, then reconnect."),
+                    isRetryable: false
+                )
+            case .actionRequired:
+                return UserMessage(
+                    title: L10n.t("Die Bank wartet auf dich", "The bank is waiting for you"),
+                    detail: msg,
+                    suggestion: L10n.t("Im Online-Banking der Bank anmelden und offene Hinweise bestätigen, danach erneut versuchen.",
+                                       "Log in to your bank's online banking, confirm any pending notices, then retry."),
+                    isRetryable: true
+                )
+            case nil:
+                return UserMessage(
+                    title: L10n.t("Bank-Zugang gesperrt", "Bank access blocked"),
+                    detail: msg,
+                    suggestion: L10n.t("Bei der Bank entsperren lassen.",
+                                       "Contact the bank to unblock."),
+                    isRetryable: false
+                )
+            }
 
         // `ConsentExpired` ist seit 0.5 in `unauthorized` aufgegangen. Der Vorschlag
         // deckt deshalb beides ab: eine abgelaufene Sitzung löst sich durch erneutes

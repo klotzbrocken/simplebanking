@@ -1096,13 +1096,9 @@ enum YaxiService {
                 // `userMessage` war hier immer nil, und der Aufrufer setzte dafür einen
                 // allgemeinen Satz ein. Bei der eigenen Wache ist der Grund bekannt —
                 // dann soll er auch dastehen.
-                var meldung: String? = nil
+                let meldung = Self.scaMeldung(freigabe)
                 var freigabeNoetig = false
-                if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
-                if case .freigabeNoetig = freigabe {
-                    meldung = Self.freigabeNoetigText
-                    freigabeNoetig = true
-                }
+                if case .freigabeNoetig = freigabe { freigabeNoetig = true }
                 await traceBeiAusgang(client: client, ticket: ticket,
                                       label: "diag-fetchBalances-sca-\(freigabe.kurzname)",
                                       alwaysTrace: alwaysTrace)
@@ -1458,13 +1454,9 @@ enum YaxiService {
                 confirm: confirm, respond: respond, ausloeser: ausloeser
             )
             guard case .erfolg(let outcome) = freigabe else {
-                var meldung: String? = nil
+                let meldung = Self.scaMeldung(freigabe)
                 var freigabeNoetig = false
-                if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
-                if case .freigabeNoetig = freigabe {
-                    meldung = Self.freigabeNoetigText
-                    freigabeNoetig = true
-                }
+                if case .freigabeNoetig = freigabe { freigabeNoetig = true }
                 await traceBeiAusgang(client: client, ticket: ticket,
                                       label: "diag-fetchTransactions-sca-\(freigabe.kurzname)",
                                       alwaysTrace: alwaysTrace)
@@ -2009,13 +2001,9 @@ enum YaxiService {
                 confirm: confirm, respond: respond, ausloeser: ausloeser
             )
             guard case .erfolg(let outcome) = freigabe else {
-                var meldung: String? = nil
+                let meldung = Self.scaMeldung(freigabe)
                 var freigabeNoetig = false
-                if case .freigabeLaeuftBereits = freigabe { meldung = Self.freigabeLaeuftText }
-                if case .freigabeNoetig = freigabe {
-                    meldung = Self.freigabeNoetigText
-                    freigabeNoetig = true
-                }
+                if case .freigabeNoetig = freigabe { freigabeNoetig = true }
                 return DauerauftragsAbruf(nutzermeldung: meldung, freigabeNoetig: freigabeNoetig)
             }
 
@@ -2300,11 +2288,21 @@ enum YaxiService {
                 return TransferOutcome(ok: false, scaRequired: true, error: nil,
                                        userMessage: Self.freigabeLaeuftText,
                                        mayHaveBeenExecuted: false)
+            case .bankfehler:
+                // Die Bank hat das Warten mit einem eigenen Fehler beendet. Ihr Text
+                // steht jetzt da statt „Status unklar"; ob die Zahlung noch durchging,
+                // sagt er aber nicht – deshalb wie `.unklar` keine Behauptung dazu.
+                AppLogger.log("sendTransfer: Bankfehler während der Freigabe, slot=\(slotSnapshot.prefix(8))",
+                              category: "YaxiService", level: "WARN")
+                return TransferOutcome(
+                    ok: false, scaRequired: false, error: nil,
+                    userMessage: Self.scaMeldung(freigabe),
+                    mayHaveBeenExecuted: true)
             case .unklar:
                 // Hier stand bisher ebenfalls `mayHaveBeenExecuted: false` — eine
                 // Gewissheit, die die App nicht hat. Es ging bereits etwas an die Bank;
                 // ob die Zahlung ausgeführt wurde, weiß nur der Kontoauszug.
-                AppLogger.log("sendTransfer: Ausgang unklar — kein Fehlschlag behaupten, slot=\(slotSnapshot.prefix(8))",
+                AppLogger.log("sendTransfer: Ausgang unklar – kein Fehlschlag behaupten, slot=\(slotSnapshot.prefix(8))",
                               category: "YaxiService", level: "WARN")
                 return TransferOutcome(
                     ok: false, scaRequired: false, error: nil,
@@ -2795,17 +2793,28 @@ enum YaxiService {
     /// eigene Sperre nicht mehr wie ein Bankfehler klingt.
     private static func scaFehler(_ ergebnis: SCAErgebnis, schritt: String,
                                   von: Int, bis: Int) -> NSError {
-        let text: String
-        if case .freigabeNoetig = ergebnis {
-            text = "\(schritt): \(freigabeNoetigText)"
-        } else if case .freigabeLaeuftBereits = ergebnis {
-            text = "\(schritt): \(freigabeLaeuftText)"
-        } else {
-            text = L10n.t("\(schritt): Freigabe konnte nicht abgeschlossen werden (Schritt \(von) von \(bis)). Bitte erneut verbinden.",
-                          "\(schritt): approval could not be completed (step \(von) of \(bis)). Please reconnect.")
-        }
+        let text = scaMeldung(ergebnis).map { "\(schritt): \($0)" }
+            ?? L10n.t("\(schritt): Freigabe konnte nicht abgeschlossen werden (Schritt \(von) von \(bis)). Bitte erneut verbinden.",
+                      "\(schritt): approval could not be completed (step \(von) of \(bis)). Please reconnect.")
         return NSError(domain: "YaxiService", code: -2,
                        userInfo: [NSLocalizedDescriptionKey: text])
+    }
+
+    /// Der Grund, den der Nutzer bei einem nicht erfolgreichen Ergebnis zu lesen bekommt.
+    ///
+    /// `nil` heißt: Es gibt keinen besseren Text als den des Aufrufers. Die eigene Sperre
+    /// hat einen, und ein Fehler der Bank hat ihren eigenen – „Kein TAN-Verfahren
+    /// eingerichtet" ist ein Rat, „Freigabe konnte nicht abgeschlossen werden" ist keiner.
+    private static func scaMeldung(_ ergebnis: SCAErgebnis) -> String? {
+        switch ergebnis {
+        case .freigabeNoetig: return freigabeNoetigText
+        case .freigabeLaeuftBereits: return freigabeLaeuftText
+        case .bankfehler(let fehler):
+            let meldung = RoutexErrorMapper.userMessage(for: fehler)
+            return [meldung.title, meldung.detail ?? meldung.suggestion]
+                .compactMap { $0 }.joined(separator: " ")
+        case .erfolg, .abgebrochen, .unklar: return nil
+        }
     }
 
     /// Wer diesen Bankabruf angestoßen hat.
@@ -2847,6 +2856,9 @@ enum YaxiService {
         /// Der Ablauf brach ab, **nachdem** etwas an die Bank ging. Bei Zahlungen darf
         /// daraus weder ein „fehlgeschlagen" noch ein neuer Versuch werden.
         case unklar
+        /// Die Bank hat während des Wartens einen eigenen Fehler geschickt. Für
+        /// diesen Kontext ist das die endgültige Antwort, siehe `wartenFortsetzen`.
+        case bankfehler(RoutexError)
 
         /// Für den Namen der Trace-Datei — der Grund ist die Diagnose, nicht die
         /// Uhrzeit. Siehe `traceBeiAusgang`.
@@ -2857,6 +2869,7 @@ enum YaxiService {
             case .freigabeNoetig: return "freigabe-noetig"
             case .freigabeLaeuftBereits: return "freigabe-laeuft"
             case .unklar: return "unklar"
+            case .bankfehler: return "bankfehler"
             }
         }
     }
@@ -3306,6 +3319,19 @@ enum YaxiService {
     /// realen Retry-Spielraum (insgesamt bis zu ~3 Min Pause zwischen Polls).
     static let scaMaxConsecutiveErrors = 8
 
+    /// Ist dieser Fehler die endgültige Antwort der Bank auf den Freigabe-Kontext?
+    ///
+    /// Nur ein Transportfehler (`HTTPError`) ist ein Grund, mit demselben Kontext noch
+    /// einmal zu fragen. Was der Dienst selbst schickt (`RoutexError`), gilt für genau
+    /// diesen Kontext und ändert sich nicht: „MissingSetup" oder ein gesperrter Zugang
+    /// heilt nicht dadurch, dass man acht Mal nachfragt.
+    ///
+    /// Bis 2.2.2 zählte in den beiden Warteschleifen jeder Fehler gleich. Die App pollte
+    /// mit Backoff weiter und meldete am Ende „Status unklar"; der Grund der Bank war
+    /// damit weg. Gemeldet am 14.11.2026 (VW Bank, pushTAN), von YAXI am 16.11.2026
+    /// bestätigt. `SDKFehlerfamilienTests` hält die vier Fehlerfamilien fest.
+    static func endgueltigerBankfehler(_ fehler: Error) -> RoutexError? { fehler as? RoutexError }
+
     /// Exponentielles Backoff für SCA-Polling nach Bank-Errors. Wird ZUSÄTZLICH
     /// zum bank-supplied `currentDelay` aufgeschlagen — die Bank kann uns also
     /// nicht in zu schnelles Polling zwingen, wenn sie kurzzeitig instabil ist.
@@ -3396,6 +3422,13 @@ enum YaxiService {
                                            verfahren: verfahren)
                 }
             } catch {
+                if let bank = endgueltigerBankfehler(error) {
+                    AppLogger.log("SCA Confirmation: Bankfehler in Runde \(i), Warten beendet: \(bank)",
+                                  category: "YaxiService", level: "WARN")
+                    await writeTrace(client: client, label: "pollConfirmation-bankfehler",
+                                     ticket: ticket, error: error)
+                    return .bankfehler(bank)
+                }
                 consecutiveErrors += 1
                 errorBackoff = scaBackoffSeconds(forConsecutiveErrors: consecutiveErrors)
                 AppLogger.log("SCA Confirmation poll \(i) error (\(consecutiveErrors) consecutive, next backoff \(errorBackoff)s): \(error.localizedDescription)", category: "YaxiService", level: "WARN")
@@ -3475,6 +3508,13 @@ enum YaxiService {
                                            confirm: confirm, respond: respond, ausloeser: ausloeser, verfahren: verfahren)
                 }
             } catch {
+                if let bank = endgueltigerBankfehler(error) {
+                    AppLogger.log("SCA Redirect: Bankfehler, Warten beendet: \(bank)",
+                                  category: "YaxiService", level: "WARN")
+                    await writeTrace(client: client, label: "pollRedirect-bankfehler",
+                                     ticket: ticket, error: error)
+                    return .bankfehler(bank)
+                }
                 consecutiveErrors += 1
                 // pollRedirect schläft bereits 5s zwischen Polls — kleinerer
                 // additional Backoff (cap 15s) reicht, sonst staut sich die

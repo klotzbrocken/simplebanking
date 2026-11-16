@@ -8,6 +8,10 @@
 
   Drei Stellen, damit es nicht wiederkommt: „Unbekannt" lässt sich nicht mehr als Regelziel speichern (das Blatt sagt jetzt, warum), eine neue Regel zum selben Muster und Bereich **ersetzt** ihre Vorgängerin statt sich dahinter einzureihen, und eine schon gespeicherte Regel auf den Platzhalter wird beim Lesen aussortiert — wer sie hat, wird sie ohne Zutun los.
 
+- **Die App wartete auf eine Freigabe, die die Bank längst abgelehnt hatte** – bis zu zweieinhalb Minuten lang, danach stand „Status unklar" da. Schickt die Bank während des Wartens einen eigenen Fehler, ist das die Antwort auf genau diese Freigabe, und sie ändert sich nicht. Die beiden Warteschleifen zählten ihn aber wie einen Netzaussetzer, fragten mit Backoff bis zu acht Mal nach und warfen den Grund am Ende weg. Jetzt endet das Warten beim ersten Fehler des Dienstes, und sein Text steht da statt des allgemeinen Satzes; nur ein Transportfehler führt noch zu einem zweiten Versuch mit derselben Freigabe. Bei einer Überweisung bleibt es dabei, dass die App keinen Fehlschlag behauptet – ob die Zahlung durchging, sagt dieser Fehler nicht. *Gemeldet am 14.11.2026 für die VW Bank (pushTAN), von YAXI am 16.11.2026 bestätigt.*
+
+- **„Bank-Zugang gesperrt, bei der Bank entsperren lassen" stand auch dann da, wenn nichts gesperrt war** – derselbe Fehler trägt einen Code, und der unterscheidet drei Lagen: Bei der Bank ist kein TAN-Verfahren für Drittanbieter eingerichtet, die Bank wartet auf eine Anmeldung im Online-Banking, oder der Zugang ist tatsächlich gesperrt. Der Code wurde verworfen, also bekamen alle drei den Rat, der nur für die letzte stimmt. Jetzt hat jede Lage ihren eigenen.
+
 ### Geändert
 
 - **Die Kategorie stand zweimal in den Buchungsdetails** — einmal als Auswahlfeld neben dem Buchungstext, einmal als unveränderliche Zeile in ihrer eigenen Karte darunter. Geändert wird sie jetzt in der Karte, die ihren Namen trägt; der Buchungstext bekommt die ganze Breite, die vorher das zweite Feld belegte.

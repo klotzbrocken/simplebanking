@@ -136,6 +136,55 @@ final class SDKFehlerfamilienTests: XCTestCase {
         }
     }
 
+    // MARK: Das Warten endet an einem Bankfehler
+
+    /// Was der Dienst schickt, ist die Antwort auf **diesen** Freigabe-Kontext, und sie
+    /// ändert sich nicht: Nochmal fragen bringt nochmal „MissingSetup". Nur der
+    /// Transport ist ein Grund, es mit demselben Kontext erneut zu versuchen.
+    ///
+    /// Bis 2.2.2 zählten beide Warteschleifen jeden Fehler gleich: acht Runden mit
+    /// Backoff, dann „Status unklar", und der Grund der Bank war weg. Gemeldet am
+    /// 14.11.2026 für die VW Bank (pushTAN), von YAXI am 16.11.2026 bestätigt.
+    func test_nurTransportfehlerDarfWeitergepolltWerden() {
+        for fehler: RoutexError in [.serviceBlocked(code: .missingSetup, userMessage: nil),
+                                    .serviceBlocked(code: .actionRequired, userMessage: nil),
+                                    .serviceBlocked(code: nil, userMessage: nil),
+                                    .unauthorized(userMessage: nil),
+                                    .invalidCredentials(userMessage: nil),
+                                    .unexpectedError(userMessage: nil)] {
+            XCTAssertNotNil(
+                YaxiService.endgueltigerBankfehler(fehler),
+                "\(fehler): hier muss das Warten enden, sonst pollt die App chancenlos weiter")
+        }
+        XCTAssertNil(YaxiService.endgueltigerBankfehler(HTTPError.noResponse),
+                     "Ein Transportfehler sagt nichts über die Freigabe – der Kontext bleibt gültig")
+        XCTAssertNil(YaxiService.endgueltigerBankfehler(
+            RoutexClientError.malformedResponse(message: "x", underlying: nil)),
+            "Unverändert: eine unlesbare Antwort wird weiter mit Backoff wiederholt")
+    }
+
+    /// `ServiceBlockedCode` trägt den Unterschied zwischen „bei der Bank nichts
+    /// eingerichtet", „melde dich im Online-Banking an" und „gesperrt". Bis 2.2.2
+    /// bekamen alle drei denselben Rat: entsperren lassen. Zwei von drei Mal war das
+    /// der falsche.
+    func test_serviceBlockedCodeFuehrtDieTexteAuseinander() {
+        let fehlt = RoutexErrorMapper.userMessage(
+            for: RoutexError.serviceBlocked(code: .missingSetup, userMessage: nil))
+        let handlung = RoutexErrorMapper.userMessage(
+            for: RoutexError.serviceBlocked(code: .actionRequired, userMessage: nil))
+        let gesperrt = RoutexErrorMapper.userMessage(
+            for: RoutexError.serviceBlocked(code: nil, userMessage: nil))
+
+        XCTAssertEqual(Set([fehlt.title, handlung.title, gesperrt.title]).count, 3,
+                       "drei verschiedene Lagen, drei verschiedene Titel")
+        XCTAssertEqual(Set([fehlt.suggestion, handlung.suggestion, gesperrt.suggestion]
+                            .compactMap { $0 }).count, 3,
+                       "und drei verschiedene Ratschläge, sonst war die Unterscheidung umsonst")
+        XCTAssertFalse(fehlt.isRetryable, "ohne eingerichtetes Verfahren hilft kein zweiter Versuch")
+        XCTAssertTrue(handlung.isRetryable, "nach der Anmeldung im Online-Banking lohnt er sich")
+        XCTAssertFalse(gesperrt.isRetryable)
+    }
+
     // MARK: Werttypen dürfen nicht in die Einstellungen
 
     /// **Der Absturz vom 23.08.2026.** Beim Einrichten einer neuen Bank beendete sich die

@@ -5937,12 +5937,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
                 // Pause auto-refresh for 1 hour so we don't burn through the bank's daily
                 // SCA authorization limit before the user can approve.
                 scaBackoffUntil = Date().addingTimeInterval(3600)
-                setzeLeistentitel("— €")
-                statusItem.button?.toolTip = t(
-                    "Banking-Freigabe erforderlich — klicke \"Aktualisieren\" wenn du bereit bist, die SCA-Anfrage in deiner Banking-App zu bestätigen",
-                    "Banking approval required — click \"Refresh\" when ready to approve the SCA request in your banking app"
+                setzeLeistentitel("– €")
+                // Hat die Bank einen eigenen Grund genannt, steht der hier – und zwar
+                // auch über der Umsatzliste. Vorher gewann in diesem Zweig immer der
+                // allgemeine Satz: Wer „Bei der Bank nicht eingerichtet" hätte lesen
+                // sollen, bekam „klicke Aktualisieren, wenn du bereit bist" – ein Rat,
+                // der ins Leere führt, weil kein Aktualisieren der Welt hilft.
+                let scaMeldung = resp.userMessage?.nilIfEmpty ?? t(
+                    "Banking-Freigabe erforderlich – klicke \"Aktualisieren\" wenn du bereit bist, die SCA-Anfrage in deiner Banking-App zu bestätigen",
+                    "Banking approval required – click \"Refresh\" when ready to approve the SCA request in your banking app"
                 )
-                AppLogger.log("SCA required — auto-refresh paused for 1h to preserve daily SCA limit", category: "Network", level: "WARN")
+                statusItem.button?.toolTip = scaMeldung
+                if resp.userMessage != nil { txVM.error = scaMeldung }
+                AppLogger.log("SCA required – auto-refresh paused for 1h to preserve daily SCA limit", category: "Network", level: "WARN")
                 recordCLIRefreshError("SCA-Freigabe erforderlich")
             } else {
                 // `userMessage` zuerst: Sie ist der Satz, der für den Nutzer geschrieben
