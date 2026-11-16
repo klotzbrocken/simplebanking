@@ -6,7 +6,7 @@ struct SimplebankingCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "sb",
         abstract: "Read-only CLI für simplebanking. Liest den lokalen Cache, ohne die Menüleisten-App zu brauchen.",
-        version: "1.5.0",
+        version: CLIVersion.text(),
         subcommands: [
             BalanceCommand.self,
             AccountsCommand.self,
