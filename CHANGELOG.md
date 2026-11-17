@@ -16,6 +16,14 @@
 
 - **`sb --version` meldete 1.5.0, während die App bei 2.2.2 stand** – die Zahl war in der Befehlskonfiguration des CLI festgeschrieben und seit 1.5.0 niemandem aufgefallen, weil eine falsche Versionsangabe fehlerfrei läuft. Sie kommt jetzt aus der Info.plist des Bundles, in dem das Binary liegt, und bringt die Build-Nummer mit („2.2.2 (20261116779)"), damit ein Supportfall einem Build zuzuordnen ist. Der `sb`-Befehl ist ein Symlink in das App-Bundle, deshalb wird der Pfad vorher aufgelöst; ein Entwicklungsbuild ohne Bundle sagt „Entwicklungs-Build" statt einer erfundenen Zahl. Aufgefallen beim Rauchtest des Builds vom 16.11.2026, zwei Stunden nach demselben Fehler in der SDK-Zeile des Fehlerreports.
 
+### Neu
+
+- **Seitenleiste im Umsatzfenster** – links neben der Ampel sitzt ein Knopf (oder ⌘⌥S), und die Leiste zeigt Konten mit Saldo, Kategorien als Filter und die fünf Auswertungen. Mit offener Leiste erscheint eine Auswertung **rechts daneben** statt in einem eigenen Fenster; was schon in einem Fenster steht, bleibt dort. Die beiden Knöpfe greifen nicht ineinander: Der grüne Ampelknopf schaltet weiterhin die Inhaltsbreite (348 oder 840), die Leiste legt 230 Punkte davor, und das Fenster wächst nach links, damit die Liste an ihrer Stelle bleibt. Die Kontosalden kommen aus dem Zwischenspeicher und tragen deshalb eine Zeile mit dem Alter des ältesten Abrufs; die Summe über alle Konten erscheint nur, wenn zu jedem Konto ein Zeitpunkt bekannt ist, denn eine Summe aus Zahlen verschiedenen Alters sieht genauer aus, als sie ist.
+
+- **Geld senden steht im großen Fenster ebenfalls in der Leiste** – Überweisung, Terminüberweisung und Vorlagen. Das Formular erscheint dann **im Fenster** statt in einem zweiten daneben; „Termin" öffnet gleich den Terminwähler, und eine Vorlage füllt dasselbe Formular, statt ein eigenes zu sein. Der Papierflieger in der Fußzeile folgt derselben Regel wie der Auswertungsknopf: Mit Leiste bleibt er im Fenster, ohne Leiste öffnet er das gewohnte eigene. Über den Knopf oben rechts geht das Formular jederzeit ins eigene Fenster.
+
+- **Das große Fenster lässt sich ziehen** – breiter und höher, mit und ohne Seitenleiste, aber nie unter die Vorgabe (840 Punkte, mit Leiste 1070). Darunter bräuchte der Inhalt ein zweites Layout, das es nicht gibt. Der schmale Schnellblick bleibt fest, seine Karten sind auf 348 Punkte gezeichnet. Eine selbst gezogene Größe übersteht jetzt auch einen Neustart; bisher kam nur die Position zurück.
+
 ### Geändert
 
 - **Die Demo ist jetzt zu erkennen** – „🎭 Demo" steht im Kopf der Kontostand-Karte und über der Umsatzliste. Vorher sagte es nur der Tooltip am Menüleistensymbol und ein Abzeichen im Senden-Blatt. Die Demo-Slots tragen echte Bankmarken und ein Jahr erfundener Umsätze, also sah es aus wie ein Konto, und der Melder von oben hielt die erfundenen Buchungen für seine.

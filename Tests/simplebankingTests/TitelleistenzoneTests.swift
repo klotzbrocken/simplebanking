@@ -30,4 +30,18 @@ final class TitelleistenzoneTests: XCTestCase {
                                                       fenster: fenster, ampelRechts: 78),
                        "Ein Doppelklick in der Liste öffnet eine Buchung")
     }
+
+    /// Seit der Seitenleiste steht deren Knopf rechts neben der Ampel, also im selben
+    /// Streifen. `Umsatzfenster.ampelRechts` zählt ihn mit; ohne das würde ein
+    /// Doppelklick darauf das Fenster zoomen, statt die Leiste zweimal umzuschalten.
+    func testAufDemSeitenleistenKnopfNicht() {
+        let ampelMitKnopf = Seitenleiste.ampelBreite + Seitenleiste.knopfBreite + Seitenleiste.knopfAbstand
+        let aufDemKnopf = NSPoint(x: Seitenleiste.ampelBreite + Seitenleiste.knopfBreite / 2, y: 610)
+        XCTAssertFalse(Titelleistenzone.istZoomklick(aufDemKnopf, fenster: fenster,
+                                                     ampelRechts: ampelMitKnopf),
+                       "Der Knopf gehört nicht zur Zoomzone")
+        XCTAssertTrue(Titelleistenzone.istZoomklick(NSPoint(x: ampelMitKnopf + 10, y: 610),
+                                                    fenster: fenster, ampelRechts: ampelMitKnopf),
+                      "Rechts daneben bleibt es ein Zoomklick")
+    }
 }

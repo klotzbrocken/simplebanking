@@ -14,6 +14,27 @@ private struct TransactionsPanelView: View {
     var onTogglePin: (() -> Void)? = nil
     var isPinnedProvider: (() -> Bool)? = nil
     @State private var isPinnedLocal: Bool = false
+    /// Schnappschuss für die eingebettete Auswertung. Dasselbe Modell, das auch das
+    /// Dashboard-Fenster füllt, damit beide Wege denselben Stand zeigen.
+    @ObservedObject var auswertung: DashboardModel = DashboardModel()
+    var onToggleSeitenleiste: (() -> Void)? = nil
+    var seitenleisteOffenProvider: (() -> Bool)? = nil
+    var ampelmasseProvider: (() -> Seitenleiste.Ampelmasse)? = nil
+    @State private var ampelmasse = Seitenleiste.Ampelmasse()
+    /// Für die eingebettete Überweisung: dieselben beiden Zugänge, die das
+    /// Überweisungsfenster auch bekommt (Hauptkennwort, Kontowechsel).
+    var requestMasterPassword: (() -> String?)? = nil
+    var onSwitchSlot: ((Int) -> Void)? = nil
+    @State private var vorlageFuerForm: QuickSendFavorite? = nil
+    /// Gespiegelt wie `isPinnedLocal`: Die Ansicht führt den Zustand mit, das Fenster
+    /// besitzt ihn. Die Breite ändert sonst niemand hinter ihrem Rücken.
+    @State private var seitenleisteOffen: Bool = false
+    /// Was im Inhaltsbereich steht. Siehe `Seitenleiste.auswertungsPlatz`.
+    @State private var hauptansicht: Hauptansicht = .umsaetze
+    @State private var kategorienZu: Bool = false
+    @State private var kontenZu: Bool = false
+    @State private var auswertungenZu: Bool = false
+    @State private var sendenZu: Bool = false
     @ObservedObject private var logoStore = BankLogoStore.shared
     @ObservedObject private var multibankingStore = MultibankingStore.shared
     @AppStorage("appearanceMode") private var appearanceMode: Int = 0
@@ -1538,6 +1559,207 @@ private struct TransactionsPanelView: View {
         .focusEffectDisabled()
     }
 
+    /// Knopf links in der Titelleiste: Seitenleiste ein- und ausblenden.
+    ///
+    /// Er sitzt neben der Ampel, also in dem Streifen, in dem ein Doppelklick das Fenster
+    /// zoomt. `Umsatzfenster` nimmt ihn deshalb von der Zoomzone aus.
+    private var seitenleistenKnopf: some View {
+        Button { seitenleisteUmschalten() } label: {
+            Image(systemName: seitenleisteOffen ? "sidebar.left" : "sidebar.leading")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
+                .frame(width: Seitenleiste.knopfBreite, height: Seitenleiste.knopfHoehe)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(seitenleisteOffen ? Color.primary.opacity(0.1) : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .beschriftet(seitenleisteOffen
+                     ? L10n.t("Seitenleiste ausblenden", "Hide sidebar")
+                     : L10n.t("Seitenleiste einblenden", "Show sidebar"),
+                     aktiv: seitenleisteOffen)
+    }
+
+    /// Kopfzeile der Liste, wenn die Konten links stehen.
+    ///
+    /// Nur das Konto. Der aktive Kategoriefilter steht eine Zeile tiefer in der
+    /// Ergebniszeile, die es für Suche und Filter ohnehin gibt — dort mit Anzahl und
+    /// dem Knopf zum Aufheben, und auch dann noch, wenn die Leiste wieder zu ist.
+    @ViewBuilder
+    private var umsatzTitel: some View {
+        Text(umsatzTitelText)
+            .font(ThemeFonts.flyoutBody(size: 12))
+            .textCase(ThemeChrome.textCase)
+            .foregroundColor(.secondary)
+            .lineLimit(1)
+        Spacer(minLength: 0)
+    }
+
+    private var umsatzTitelText: String {
+        let umsaetze = L10n.t("Umsätze", "Transactions")
+        if vm.isUnifiedMode { return "\(umsaetze) · " + L10n.t("Alle Konten", "All accounts") }
+        guard let slot = multibankingStore.activeSlot else { return umsaetze }
+        return "\(umsaetze) · \(slot.nickname?.nilIfEmpty ?? slot.displayName)"
+    }
+
+    private var seitenleiste: some View {
+        Seitenleistenansicht(vm: vm, store: multibankingStore, accountNav: accountNav,
+                             ansicht: $hauptansicht,
+                             kontenZu: $kontenZu,
+                             kategorienZu: $kategorienZu,
+                             auswertungenZu: $auswertungenZu,
+                             sendenZu: $sendenZu,
+                             sendenMoeglich: simplesendVisible && slotSupportsTransfer)
+    }
+
+    /// Geld senden im Fenster statt in einem zweiten: Überweisung, Terminüberweisung
+    /// und Vorlagen teilen sich dasselbe Formular.
+    @ViewBuilder
+    private func sendeSpalte(_ art: Sendeart) -> some View {
+        VStack(spacing: 0) {
+            spaltenKopf(titel: art.label) {
+                // Dasselbe Formular, nur im eigenen Fenster. Die Leiste bleibt offen.
+                NotificationCenter.default.post(
+                    name: Notification.Name("simplebanking.openTransferSheet"), object: nil)
+                hauptansicht = .umsaetze
+            }
+            Divider()
+            if art == .vorlagen {
+                vorlagenListe
+            } else {
+                TransferSheet(
+                    requestMasterPassword: { requestMasterPassword?() },
+                    onClose: { hauptansicht = .umsaetze },
+                    onSwitchSlot: { idx in onSwitchSlot?(idx) },
+                    eingebettet: true,
+                    startTermin: art == .termin,
+                    vorlage: vorlageFuerForm
+                )
+                // Eine neue Vorlage soll ein neues Formular füllen, kein schon
+                // bearbeitetes: `TransferSheet` belegt die Felder nur einmal.
+                .id(vorlageFuerForm?.id.uuidString ?? "ohne-vorlage")
+            }
+        }
+    }
+
+    /// Die gepinnten Vorlagen aus dem Quick-Send-Drawer. Ein Klick füllt damit das
+    /// Formular nebenan; gepflegt werden sie weiterhin dort und in den Einstellungen.
+    @ViewBuilder
+    private var vorlagenListe: some View {
+        let vorlagen = QuickSendFavoritesStore.shared.items
+        if vorlagen.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "star").font(.system(size: 22)).foregroundColor(.secondary)
+                Text(L10n.t("Noch keine Vorlagen", "No templates yet"))
+                    .font(.system(size: 13, weight: .semibold))
+                Text(L10n.t("Vorlagen entstehen im Senden-Bereich des Flyouts und lassen sich in den Einstellungen bearbeiten.",
+                            "Templates are created in the flyout's send area and edited in Settings."))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                VStack(spacing: 6) {
+                    ForEach(vorlagen) { vorlage in
+                        Button {
+                            vorlageFuerForm = vorlage
+                            hauptansicht = .senden(.ueberweisung)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(vorlage.emoji).font(.system(size: 18))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(vorlage.name).font(.system(size: 13, weight: .semibold))
+                                    Text(vorlage.purpose.nilIfEmpty ?? vorlage.iban)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 8)
+                                if let betrag = vorlage.amount.nilIfEmpty {
+                                    Text("\(betrag) €")
+                                        .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(Color.cardBackground))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    /// Kopfzeile für alles, was im Inhaltsbereich die Liste ablöst.
+    @ViewBuilder
+    private func spaltenKopf(titel: String, imFenster: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Button { hauptansicht = .umsaetze } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                    Text(L10n.t("Umsätze", "Transactions")).font(.system(size: 12))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .beschriftet(L10n.t("Zurück zu den Umsätzen", "Back to transactions"))
+            Spacer(minLength: 0)
+            Text(titel)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button(action: imFenster) {
+                Image(systemName: "macwindow").font(.system(size: 12))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .beschriftet(L10n.t("In eigenem Fenster öffnen", "Open in its own window"))
+        }
+        .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
+        .padding(.horizontal, 14 + ThemeChrome.randAusgleich)
+        .padding(.top, 9)
+        .padding(.bottom, 8)
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// Eine Auswertung im Inhaltsbereich, statt Saldo-Karte und Liste.
+    ///
+    /// Der Hero entfällt hier: Der Saldo steht in der Seitenleiste neben jedem Konto, und
+    /// eine Auswertung bringt ihre eigene Kopfzeile mit.
+    private func auswertungsSpalte(_ reiter: DashboardTab) -> some View {
+        VStack(spacing: 0) {
+            // Ausdrücklich, nicht automatisch: Die Leiste bleibt offen, nur die
+            // Auswertung zieht in ihr eigenes Fenster um.
+            spaltenKopf(titel: reiter.label) {
+                onOpenDashboard?(reiter)
+                hauptansicht = .umsaetze
+            }
+            Divider()
+            DashboardView(model: auswertung, reiterleisteSichtbar: false)
+        }
+    }
+
+    /// Umschalten aus der Ansicht heraus (Knopf und ⌘⌥S).
+    ///
+    /// Eine eingebettete Auswertung geht mit der Leiste zu, sie wandert **nicht** in ein
+    /// Fenster: Ein Klick auf „Seitenleiste" soll die Leiste bewegen und sonst nichts.
+    /// Wer die Auswertung als Fenster will, nimmt den Knopf dafür.
+    private func seitenleisteUmschalten() {
+        if seitenleisteOffen { hauptansicht = .umsaetze }
+        seitenleisteOffen.toggle()
+        onToggleSeitenleiste?()
+    }
+
     @ViewBuilder
     private func slotLogoTile(_ slot: BankSlot, size: CGFloat) -> some View {
         let brand = BankLogoAssets.resolve(displayName: slot.displayName, logoID: slot.logoId,
@@ -1867,7 +2089,18 @@ private struct TransactionsPanelView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        HStack(spacing: 0) {
+            if seitenleisteOffen {
+                seitenleiste
+                Divider()
+            }
+            Group {
+            if seitenleisteOffen, case .auswertung(let art) = hauptansicht {
+                auswertungsSpalte(art)
+            } else if seitenleisteOffen, case .senden(let art) = hauptansicht {
+                sendeSpalte(art)
+            } else {
+            VStack(spacing: 0) {
             // Balance Card
             Group {
                 if receiptActive {
@@ -1905,7 +2138,11 @@ private struct TransactionsPanelView: View {
             // Symbole (bank-spezifische Suche/Filter/Kategorien sind dort ohne Sinn).
             if multibankingStore.slots.count > 1 || (!roundupView.isActive && !receiptActive) {
                 HStack(spacing: 8) {
-                    if multibankingStore.slots.count > 1 {
+                    // Mit Seitenleiste stehen die Konten links; an ihrer Stelle steht,
+                    // welches Konto und welcher Filter gerade gelten.
+                    if seitenleisteOffen {
+                        umsatzTitel
+                    } else if multibankingStore.slots.count > 1 {
                         accountDotsBar
                     } else {
                         Spacer(minLength: 0)
@@ -2049,12 +2286,32 @@ private struct TransactionsPanelView: View {
                 .padding(.bottom, 8)
             }
 
-            if !receiptActive && (vm.isSearchActive || vm.activeFilter != .all) {
+            if !receiptActive && (vm.isSearchActive || vm.activeFilter != .all || vm.kategorieFilter != nil) {
                 HStack(spacing: 6) {
                     Text("\(vm.filteredTransactions.count) Ergebnisse")
                         .font(ThemeFonts.rowBody(size: 12, weight: .semibold, lofiSize: 14))
                         .textCase(ThemeChrome.textCase)
                         .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary)
+                    // Die Kategorie aus der Seitenleiste steht hier und nicht nur dort:
+                    // Sie gilt weiter, wenn die Leiste zugeht, und eine Liste, die ohne
+                    // sichtbaren Grund kürzer ist, war schon einmal eine Meldung wert.
+                    if let kategorie = vm.kategorieFilter {
+                        Text("· \(kategorie.displayName)")
+                            .font(ThemeFonts.rowBody(size: 12, lofiSize: 14))
+                            .textCase(ThemeChrome.textCase)
+                            .foregroundColor(themed ? Color.themedInk.opacity(0.85) : .secondary)
+                        Button(action: { vm.kategorieFilter = nil }) {
+                            if ThemeChrome.glyphControls {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(themed ? Color.themedControlInk : Color.secondary)
+                            } else {
+                                BTXTextControl(text: "X", size: 13)
+                            }
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .beschriftet(L10n.t("Kategoriefilter aufheben", "Clear category filter"))
+                    }
                     if vm.activeFilter != .all {
                         Text("· \(vm.activeFilter.label)")
                             .font(ThemeFonts.rowBody(size: 12, lofiSize: 14))
@@ -2413,7 +2670,16 @@ private struct TransactionsPanelView: View {
                 }
 
                 // Dashboard — ein Einstieg statt verstreuter Einzel-Menüeinträge
-                Button(action: { onOpenDashboard?(.overview) }) {
+                // Mit Seitenleiste geht die Auswertung daneben auf, sonst als Fenster.
+                // Die Entscheidung fällt genau hier, siehe `Seitenleiste.auswertungsPlatz`.
+                Button(action: {
+                    switch Seitenleiste.auswertungsPlatz(seitenleisteOffen: seitenleisteOffen,
+                                                         ansicht: .auswertung(.overview)) {
+                    case .eingebettet(let reiter): hauptansicht = .auswertung(reiter)
+                    case .eigenesFenster(let reiter): onOpenDashboard?(reiter)
+                    case .keiner: break
+                    }
+                }) {
                     if ThemeChrome.glyphControls {
                         Image(systemName: ThemeChrome.symbol(for: .dashboard))
                             .font(.system(size: 15))
@@ -2533,9 +2799,16 @@ private struct TransactionsPanelView: View {
                 // Nur für Slots, von denen überhaupt überwiesen werden kann.
                 if simplesendVisible, slotSupportsTransfer {
                     Button(action: {
-                        NotificationCenter.default.post(
-                            name: Notification.Name("simplebanking.openTransferSheet"),
-                            object: nil)
+                        // Mit Seitenleiste bleibt das Senden im Fenster, wie die
+                        // Auswertung auch. Sonst das gewohnte eigene Fenster.
+                        if seitenleisteOffen {
+                            vorlageFuerForm = nil
+                            hauptansicht = .senden(.ueberweisung)
+                        } else {
+                            NotificationCenter.default.post(
+                                name: Notification.Name("simplebanking.openTransferSheet"),
+                                object: nil)
+                        }
                     }) {
                         if ThemeChrome.glyphControls {
                             Image(systemName: ThemeChrome.symbol(for: .send))
@@ -2557,17 +2830,29 @@ private struct TransactionsPanelView: View {
             .padding(.top, 10)
             .padding(.bottom, (lofi ? 14 : 6) + ThemeChrome.randAusgleich)
             .background(activePanelBg)
-        }
-        .frame(minWidth: 348, idealWidth: 348, maxWidth: 840, minHeight: 620, idealHeight: 620, maxHeight: 620)
-        // Wallpaper zuunterst, bis in die Titelleiste. `activePanelBg` wird unter einem
-        // Wallpaper durchsichtig und lässt es stehen.
-        .background {
-            ZStack {
-                ThemeWallpaper(flaeche: panelIsWide ? .listeBreit : .listeSchmal)
-                activePanelBg
+            }   // VStack: Umsatzspalte
+            }   // else: keine eingebettete Auswertung
+            }   // Group: der Inhaltsbereich rechts der Seitenleiste
+            // Wallpaper zuunterst, bis in die Titelleiste. `activePanelBg` wird unter einem
+            // Wallpaper durchsichtig und lässt es stehen.
+            //
+            // Die Fläche liegt unter dem **Inhalt**, nicht unter dem ganzen Fenster: Die
+            // Theme-Tapeten sind für 348 und 840 gezeichnet (`WallpaperFlaeche`), über
+            // 1070 gezogen wären sie verzerrt. Die Seitenleiste bringt ihre eigene mit.
+            .background {
+                ZStack {
+                    ThemeWallpaper(flaeche: panelIsWide ? .listeBreit : .listeSchmal)
+                    activePanelBg
+                }
+                .ignoresSafeArea(.all, edges: .top)
             }
-            .ignoresSafeArea(.all, edges: .top)
         }
+        // Nach oben offen: Im breiten Fenster darf der Nutzer ziehen, der Inhalt geht
+        // mit. Die Untergrenze hält das Fenster selbst (`setzeGrenzen`).
+        .frame(minWidth: TransactionsPanel.narrowWidth, idealWidth: TransactionsPanel.narrowWidth,
+               maxWidth: .infinity,
+               minHeight: TransactionsPanel.panelHeight, idealHeight: TransactionsPanel.panelHeight,
+               maxHeight: .infinity)
         // „Bildschirmrand" des BTX-Themes: liegt als Overlay INNEN auf der Fläche,
         // verbraucht also keinen Platz und verschiebt nichts. Themes ohne
         // `screenBorder` bekommen hier nichts.
@@ -2585,10 +2870,34 @@ private struct TransactionsPanelView: View {
                 .padding(.trailing, 16)
                 .ignoresSafeArea(.container, edges: .top)
         }
+        // Seitenleisten-Knopf links, neben der Ampel. Gegenstück zum Chrome rechts, und
+        // derselbe Grund für `ignoresSafeArea`: Der Streifen gehört AppKit.
+        //
+        // Nur im breiten Fenster: siehe `Seitenleiste.moeglich`.
+        .overlay(alignment: .topLeading) {
+            if Seitenleiste.moeglich(breit: panelIsWide) {
+                seitenleistenKnopf
+                    // Auf der Linie der Ampel, von AppKit erfragt. Eine feste Zahl war
+                    // je nach Fensterart und macOS-Fassung ein paar Punkte daneben.
+                    .padding(.top, max(0, ampelmasse.mitteVonOben - Seitenleiste.knopfHoehe / 2))
+                    .padding(.leading, max(0, ampelmasse.rechterRand + Seitenleiste.knopfAbstand
+                                              - Seitenleiste.knopfInnenrand))
+                    .ignoresSafeArea(.container, edges: .top)
+            }
+        }
         // CRT-Easter-Egg (nur BTX): NACH Blende und Fenster-Chrome, damit der
         // Shader das komplette Bild wölbt — wie eine echte Röhre.
         .btxCRTEffect()
-        .onAppear { isPinnedLocal = isPinnedProvider?() ?? false }
+        .onAppear {
+            isPinnedLocal = isPinnedProvider?() ?? false
+            seitenleisteOffen = seitenleisteOffenProvider?() ?? false
+            ampelmasse = ampelmasseProvider?() ?? Seitenleiste.Ampelmasse()
+        }
+        // Der gewählte Reiter steht in `hauptansicht`; das Modell der eingebetteten
+        // Ansicht zieht nach, damit es nur eine Quelle dafür gibt.
+        .onChange(of: hauptansicht) { neu in
+            if case .auswertung(let reiter) = neu { auswertung.tab = reiter }
+        }
         // Wechsel auf einen Händler-/eBon-Slot: Bank-Filter und Suche zurücksetzen —
         // Bons kennen weder Einnahmen/Abos-Filter noch die Umsatzsuche; ein aktiver
         // Filter würde sonst beim Rückwechsel unerwartet weiterwirken.
@@ -2602,8 +2911,19 @@ private struct TransactionsPanelView: View {
         .preferredColorScheme(colorScheme)
         .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { newWidth in
             withAnimation(.easeInOut(duration: 0.2)) {
-                panelIsWide = newWidth >= 700
+                // Die Leiste zählt nicht zum Inhalt: Ohne das Herausrechnen hielte sich
+                // ein schmales Fenster mit Leiste für breit.
+                panelIsWide = Seitenleiste.istBreit(fensterbreite: newWidth, offen: seitenleisteOffen)
+                // Schmal heißt keine Leiste. Der grüne Ampelknopf kann dorthin schalten,
+                // während sie offen ist; dann geht sie mit.
+                if !Seitenleiste.moeglich(breit: panelIsWide), seitenleisteOffen {
+                    seitenleisteOffen = false
+                    hauptansicht = .umsaetze
+                }
             }
+            // Die Ampel verschiebt sich mit der Fensterbreite nicht, der Knopf daneben
+            // schon: Er erscheint erst im breiten Fenster und braucht dann ein Maß.
+            ampelmasse = ampelmasseProvider?() ?? ampelmasse
         }
         .onChange(of: llmAPIKeyPresent) { enabled in
             if !enabled {
@@ -2756,7 +3076,10 @@ private struct TransactionsPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(activePanelBg)
         .overlay(alignment: .topLeading) {
-            if currentTintStyle == .sidebar, let color = bankAccentForOverlay {
+            // Mit Seitenleiste entfällt der Streifen: Er trägt die Farbe des aktiven
+            // Kontos und säße an der Außenkante der Leiste, also neben einer Liste, in
+            // der das Konto ohnehin markiert ist.
+            if currentTintStyle == .sidebar, !seitenleisteOffen, let color = bankAccentForOverlay {
                 // 4 px Streifen am linken Rand — von oben (BalanceBar) bis knapp
                 // OBERHALB der Iconbar. Der Footer ist ~52 pt hoch (padding.top 28 +
                 // Icons + padding.bottom 4) und deckend; der Streifen wird unten um
@@ -2866,6 +3189,13 @@ private struct TransactionsPanelView: View {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        // ⌘⌥S → Seitenleiste. Nicht ⌃⌘S: Das ist seit 1.x der globale Hotkey für den
+        // Flyout (`GlobalHotkeyManager`), und ein Carbon-Hotkey sticht ein Fenster.
+        if event.modifierFlags.contains([.command, .option]),
+           event.charactersIgnoringModifiers?.lowercased() == "s" {
+            seitenleisteUmschalten()
+            return nil
+        }
         // ⌘R → Refresh
         guard event.modifierFlags.contains(.command),
               event.charactersIgnoringModifiers == "r" else { return event }
@@ -4574,8 +4904,71 @@ final class AccountNavModel: ObservableObject {
         panel.level = isPinned ? .floating : .normal
     }
 
+    // MARK: - Seitenleiste
+
+    private static let seitenleisteKey = "transactionsPanel.sidebarVisible"
+
+    /// Nur der gemerkte Zustand. Die Breite setzt `seitenleisteUmschalten` bzw. der
+    /// Start; die Ansicht leitet ihren Zustand aus der Fensterbreite ab.
+    private var seitenleisteOffen: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.seitenleisteKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.seitenleisteKey) }
+    }
+
+    /// Knopf in der Titelleiste und ⌘⌥S. Die Inhaltsbreite bleibt, wie sie war.
+    ///
+    /// Gerechnet wird mit der **aktuellen** Breite, nicht mit der Vorgabe: Wer das
+    /// Fenster größer gezogen hat, behält seine Größe und bekommt die Leiste dazu.
+    private func seitenleisteUmschalten() {
+        let breit = Seitenleiste.istBreit(fensterbreite: panel.frame.width, offen: seitenleisteOffen)
+        guard Seitenleiste.moeglich(breit: breit) else { return }
+        seitenleisteOffen.toggle()
+        let ziel = panel.frame.width + (seitenleisteOffen ? Seitenleiste.breite : -Seitenleiste.breite)
+        setzeBreite(ziel)
+    }
+
+    /// Wo die Ampel sitzt. Für den Knopf daneben, der auf ihrer Linie liegen soll.
+    private func ampelmasse() -> Seitenleiste.Ampelmasse {
+        guard let knopf = panel.standardWindowButton(.zoomButton),
+              let inhalt = panel.contentView else { return Seitenleiste.Ampelmasse() }
+        let rahmen = knopf.convert(knopf.bounds, to: inhalt)
+        return Seitenleiste.Ampelmasse(rechterRand: rahmen.maxX,
+                                       mitteVonOben: inhalt.bounds.height - rahmen.midY)
+    }
+
+    /// Breite setzen und die Grenzen nachziehen.
+    private func setzeBreite(_ ziel: CGFloat, animiert: Bool = true) {
+        let sichtbar = panel.screen?.visibleFrame ?? panel.frame
+        let neu = Seitenleiste.rahmen(aktuell: panel.frame, sichtbar: sichtbar, zielbreite: ziel)
+        setzeGrenzen(fuer: neu.size)
+        panel.setFrame(neu, display: true, animate: animiert)
+    }
+
+    /// Was der Nutzer am Fensterrand darf.
+    ///
+    /// Schmal bleibt gesperrt (`minSize == maxSize`): Das ist der Schnellblick, und
+    /// seine Karten sind auf 348 pt gezeichnet. Im breiten Fenster darf gezogen werden,
+    /// aber **nicht unter die Vorgabe** — 840 pt plus Leiste, falls sie offen ist.
+    /// Darunter bräuchte der Inhalt ein zweites Layout, das es nicht gibt.
+    private func setzeGrenzen(fuer groesse: NSSize) {
+        let offen = seitenleisteOffen
+        let breit = Seitenleiste.istBreit(fensterbreite: groesse.width, offen: offen)
+        let mindestbreite = Seitenleiste.fensterbreite(offen: offen, breit: breit)
+        guard breit else {
+            panel.minSize = NSSize(width: mindestbreite, height: Self.panelHeight)
+            panel.maxSize = NSSize(width: mindestbreite, height: Self.panelHeight)
+            return
+        }
+        panel.minSize = NSSize(width: mindestbreite, height: Self.panelHeight)
+        panel.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                               height: CGFloat.greatestFiniteMagnitude)
+    }
+
     init(vm: TransactionsViewModel, onRefresh: @escaping () async -> Void = {}, onSettings: (() -> Void)? = nil,
-         onOpenDashboard: ((DashboardTab) -> Void)? = nil) {
+         onOpenDashboard: ((DashboardTab) -> Void)? = nil,
+         auswertung: DashboardModel = DashboardModel(),
+         requestMasterPassword: (() -> String?)? = nil,
+         onSwitchSlot: ((Int) -> Void)? = nil) {
         self.vm = vm
         self.onSettings = onSettings
         self.onOpenDashboard = onOpenDashboard
@@ -4615,24 +5008,39 @@ final class AccountNavModel: ObservableObject {
         // Fullscreen deaktivieren — grüner Button wird zum Breiten-Toggle
         panel.collectionBehavior = [.fullScreenNone, .managed]
 
-        let h = Self.panelHeight
-        let w = Self.narrowWidth
-        panel.setContentSize(NSSize(width: w, height: h))
-        // Start schmal fix; der grüne Zoom-Button + windowDidResize passen min/max
-        // dann an die jeweilige Breite (schmal/breit) an.
-        panel.minSize = NSSize(width: w, height: h)
-        panel.maxSize = NSSize(width: w, height: h)
+        // Mit gemerkter Seitenleiste öffnet das Fenster gleich breit genug für sie; die
+        // Leiste gibt es nur dort (`Seitenleiste.moeglich`).
+        let gemerkt = UserDefaults.standard.bool(forKey: Self.seitenleisteKey)
+        let mindestbreite = Seitenleiste.fensterbreite(offen: gemerkt, breit: gemerkt)
+        if positionRestored {
+            // Eine selbst gezogene Größe bleibt erhalten, aber nie unter der Vorgabe:
+            // Darunter bräuchte der Inhalt ein zweites Layout.
+            var rahmen = panel.frame
+            rahmen.size.width = max(rahmen.width, mindestbreite)
+            rahmen.size.height = max(rahmen.height, Self.panelHeight)
+            panel.setFrame(rahmen, display: false)
+        } else {
+            panel.setContentSize(NSSize(width: mindestbreite, height: Self.panelHeight))
+        }
+        // Die Grenzen setzt `setzeGrenzen` gleich nach `super.init()`.
 
         super.init()
 
         panel.delegate = self
+        setzeGrenzen(fuer: panel.frame.size)
         applyWindowLevel()   // restore persisted stay-on-top state
         configureTitlebar()
         let host = NSHostingView(rootView: TransactionsPanelView(
             vm: vm, onRefresh: onRefresh, accountNav: accountNav, onOpenDashboard: onOpenDashboard,
             onSettings: onSettings,
             onTogglePin: { [weak self] in self?.isPinned.toggle() },
-            isPinnedProvider: { [weak self] in self?.isPinned ?? false }
+            isPinnedProvider: { [weak self] in self?.isPinned ?? false },
+            auswertung: auswertung,
+            onToggleSeitenleiste: { [weak self] in self?.seitenleisteUmschalten() },
+            seitenleisteOffenProvider: { [weak self] in self?.seitenleisteOffen ?? false },
+            ampelmasseProvider: { [weak self] in self?.ampelmasse() ?? Seitenleiste.Ampelmasse() },
+            requestMasterPassword: requestMasterPassword,
+            onSwitchSlot: onSwitchSlot
         ))
         host.translatesAutoresizingMaskIntoConstraints = false
 
@@ -4709,19 +5117,32 @@ final class AccountNavModel: ObservableObject {
     // MARK: - NSWindowDelegate: Zoom-Toggle (grüner Button)
 
     nonisolated func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        // Block manual edge-drag resizing — nur der grüne Zoom-Button (über
-        // windowWillUseStandardFrame + setFrame) ändert die Größe (Breiten-Toggle).
-        return sender.frame.size
+        MainActor.assumeIsolated {
+            // Schmal bleibt gesperrt: Dort ändert nur der grüne Zoom-Button die Größe.
+            // Breit darf gezogen werden; die Untergrenze hält `minSize`
+            // (siehe `setzeGrenzen`), nach oben gibt es keine.
+            let breit = Seitenleiste.istBreit(fensterbreite: sender.frame.width,
+                                              offen: seitenleisteOffen)
+            return breit ? frameSize : sender.frame.size
+        }
     }
 
     /// Grüner Zoom-Button: Breiten-Toggle schmal (348) ↔ breit (wideWidth), Höhe bleibt.
+    ///
+    /// Eine offene Seitenleiste bleibt offen und wird mitgerechnet: Der Knopf schaltet den
+    /// **Inhalt**, nicht die Leiste. Die Mitte bleibt dabei stehen, wie bisher; nur das
+    /// Ein- und Ausblenden der Leiste wächst nach links (siehe `Seitenleiste.rahmen`).
     nonisolated func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame: NSRect) -> NSRect {
         MainActor.assumeIsolated {
-            let narrow = TransactionsPanel.narrowWidth
-            let wide   = TransactionsPanel.wideWidth
             let height = window.frame.height
-            let isNarrow = window.frame.width < (narrow + wide) / 2
-            let targetWidth: CGFloat = isNarrow ? wide : narrow
+            let offen = seitenleisteOffen
+            let breitJetzt = Seitenleiste.istBreit(fensterbreite: window.frame.width, offen: offen)
+            let zielBreit = !breitJetzt
+            // Schmal hat keinen Platz für die Leiste; sie geht mit zu. Die Ansicht merkt
+            // das an der neuen Breite (`onGeometryChange`).
+            let zielOffen = Seitenleiste.moeglich(breit: zielBreit) ? offen : false
+            if zielOffen != offen { seitenleisteOffen = zielOffen }
+            let targetWidth = Seitenleiste.fensterbreite(offen: zielOffen, breit: zielBreit)
             let x = window.frame.midX - targetWidth / 2
             let y = window.frame.minY
             let screen = window.screen?.visibleFrame ?? defaultFrame
@@ -4742,13 +5163,9 @@ final class AccountNavModel: ObservableObject {
         guard let window = notification.object as? NSWindow else { return }
         // AppKit guarantees window delegate callbacks on the main thread.
         MainActor.assumeIsolated {
-            // Auf die aktuelle Breite (schmal/breit) einrasten, Höhe fix.
-            let narrow = TransactionsPanel.narrowWidth
-            let wide   = TransactionsPanel.wideWidth
-            let snap: CGFloat = window.frame.width > (narrow + wide) / 2 ? wide : narrow
-            let frameHeight = window.frame.height
-            window.minSize = NSSize(width: snap, height: frameHeight)
-            window.maxSize = NSSize(width: snap, height: frameHeight)
+            // Grenzen an den neuen Zustand anpassen: schmal gesperrt, breit frei nach
+            // oben. Früher rastete das Fenster hier auf eine feste Breite ein.
+            setzeGrenzen(fuer: window.frame.size)
         }
     }
 

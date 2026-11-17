@@ -42,6 +42,15 @@ struct TransferSheet: View {
     /// Wird z.B. vom Aufrunden-Flow genutzt, um die ausgezahlten Pots zu finalisieren.
     /// Greift NICHT bei `.mayHaveBeenExecuted` oder `.failed`.
     var onTransferSucceeded: ((TransferRequest) -> Void)? = nil
+    /// Im Umsatzfenster neben der Seitenleiste statt im eigenen Fenster: Die Breite
+    /// kommt dann vom Gastgeber, nicht von den festen 480.
+    var eingebettet: Bool = false
+    /// „Terminüberweisung" aus der Seitenleiste: Der Terminwähler geht gleich auf.
+    /// Sonst wäre der Unterschied zum Eintrag darüber unsichtbar.
+    var startTermin: Bool = false
+    /// Vorlage aus der Seitenleiste. Belegt dieselben Felder wie ein Klick auf eine
+    /// Vorlage im Quick-Send-Drawer, also die Rohwerte und keinen geprüften Auftrag.
+    var vorlage: QuickSendFavorite? = nil
 
     @ObservedObject private var bankingStore = MultibankingStore.shared
 
@@ -321,8 +330,10 @@ struct TransferSheet: View {
         }
         // Höhe flexibel — das umgebende NSPanel wird in BalanceBar auf die
         // exakte Frame-Höhe des Umsatzfensters gesetzt, damit beide Fenster
-        // nebeneinander gleich hoch sind.
-        .frame(width: 480)
+        // nebeneinander gleich hoch sind. Eingebettet gibt der Inhaltsbereich des
+        // Umsatzfensters die Breite vor.
+        .frame(width: eingebettet ? nil : 480)
+        .frame(maxWidth: eingebettet ? .infinity : nil)
         .frame(maxHeight: .infinity)
         .background(Color.panelBackground)
         // Drop-Zone: PDF/Bild einer Rechnung ablegen → Textebene bzw. On-device-OCR
@@ -737,9 +748,19 @@ struct TransferSheet: View {
         ))
         .onAppear {
             applyPrefillIfNeeded()
+            applyVorlageIfNeeded()
+            if startTermin, scheduledDate == nil {
+                // Direkt in den Termin-Zustand, nicht nur den Wähler aufklappen: Der
+                // Eintrag heißt „Terminüberweisung", also steht dort auch ein Termin.
+                // Morgen ist der früheste, den die Bank annimmt; ändern geht an
+                // derselben Stelle weiter, an der sonst „Sofort" steht.
+                let morgen = TransferScheduleHelpers.tomorrow()
+                customDateValue = morgen
+                scheduledDate = morgen
+            }
             // Initial-Fokus: Namensfeld (außer Prefill da — dann Betrag fokussieren,
             // damit User Schritt 1 schnell prüft und mit Tab durchgeht).
-            let initialFocus: TransferField = prefill != nil ? .amount : .name
+            let initialFocus: TransferField = (prefill != nil || vorlage != nil) ? .amount : .name
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 focusField = initialFocus
             }
@@ -758,6 +779,19 @@ struct TransferSheet: View {
         ibanTouched = true
         amountInput = formatAmountForInput(p.amountEUR)
         if let r = p.remittance { purpose = r }
+    }
+
+    /// Dasselbe für eine Vorlage. Rohwerte, kein geprüfter Auftrag: Eine Vorlage ohne
+    /// Betrag soll die Form öffnen, nicht abgelehnt werden.
+    @State private var didApplyVorlage: Bool = false
+    private func applyVorlageIfNeeded() {
+        guard let v = vorlage, !didApplyVorlage else { return }
+        didApplyVorlage = true
+        name = v.name
+        iban = v.iban
+        ibanTouched = true
+        amountInput = v.amount
+        purpose = v.purpose
     }
 
     private var autocompleteList: some View {

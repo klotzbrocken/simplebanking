@@ -156,6 +156,16 @@ final class TransactionsViewModel: ObservableObject {
         didSet { applyCurrentFilter(resetPage: true) }
     }
 
+    /// Kategorie aus der Seitenleiste, `nil` = alle.
+    ///
+    /// Eigene Größe neben `activeFilter`: Die acht Fälle dort sind Arten von Buchungen
+    /// (Einnahme, Abo, vorgemerkt), eine Kategorie ist eine Eigenschaft. Beides zusammen
+    /// ergibt Sinn („nur Ausgaben in Essen & Alltag"), und `activeFilter` ist ein
+    /// einzelner Wert, in den sich eine zweite Dimension nicht hineinfalten lässt.
+    @Published var kategorieFilter: TransactionCategory? = nil {
+        didSet { applyCurrentFilter(resetPage: true) }
+    }
+
     var isUnifiedMode: Bool {
         // Unified bezieht sich nur auf ECHTE Konten — eBon-Slots (REWE/dm) zählen
         // nicht. Erst ab 2 echten Konten ist die Übersicht sinnvoll.
@@ -293,6 +303,11 @@ final class TransactionsViewModel: ObservableObject {
                 let key = TxEnrichmentKey.make(slotId: slotId, txID: tx.anreicherungsSchluessel)
                 return enrichmentData[key]?.reminderId != nil
             }
+        }
+
+        // Step 3: Kategorie aus der Seitenleiste
+        if let kategorie = kategorieFilter {
+            base = base.filter { TransactionCategorizer.category(for: $0) == kategorie }
         }
 
         filteredTransactions = base

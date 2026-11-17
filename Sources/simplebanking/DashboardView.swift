@@ -81,6 +81,9 @@ final class DashboardModel: ObservableObject {
 /// Kalender, Abos, Geld-Alter) with one tabbed window.
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
+    /// Eingebettet im Umsatzfenster navigiert die Seitenleiste, dann entfällt die
+    /// Reiterleiste: Zwei Wege zur selben Auswahl nebeneinander wären einer zu viel.
+    var reiterleisteSichtbar: Bool = true
 
     private func bankLogo(for slot: BankSlot) -> NSImage? {
         // Alle drei Merkmale mitgeben, nicht nur den Namen.
@@ -104,6 +107,7 @@ struct DashboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if reiterleisteSichtbar {
             HStack(spacing: 4) {
                 // Aktive Bank — Logo + Name vor den Tabs. Quelle = Model-Snapshot (atomar
                 // mit Saldo/Transaktionen), NICHT der Live-Store. Im Unified-Modus
@@ -162,6 +166,7 @@ struct DashboardView: View {
             .padding(.bottom, 10)
 
             Divider()
+            }
 
             Group {
                 switch model.tab {

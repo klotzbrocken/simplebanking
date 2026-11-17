@@ -61,8 +61,21 @@ final class Umsatzfenster: NSPanel {
 
     /// Rechter Rand der Ampel in Fensterkoordinaten, plus etwas Luft. Gefragt statt
     /// geraten: Wie breit die drei Knöpfe sind, entscheidet AppKit.
+    ///
+    /// Seit der Seitenleiste sitzt deren Knopf rechts daneben, also im selben Streifen.
+    /// Ohne ihn mitzuzählen zoomte ein Doppelklick auf den Knopf das Fenster, statt die
+    /// Leiste zweimal umzuschalten.
     private var ampelRechts: CGFloat {
-        guard let knopf = standardWindowButton(.zoomButton) else { return 78 }
-        return knopf.convert(knopf.bounds, to: nil).maxX + 8
+        // Den Knopf gibt es nur im breiten Fenster; schmal bliebe sonst ein totes Stück
+        // Streifen, in dem ein Doppelklick nichts täte.
+        let breit = Seitenleiste.istBreit(fensterbreite: frame.width,
+                                          offen: frame.width > TransactionsPanel.wideWidth)
+        let knopfzone = Seitenleiste.moeglich(breit: breit)
+            ? Seitenleiste.knopfBreite + Seitenleiste.knopfAbstand
+            : 0
+        guard let knopf = standardWindowButton(.zoomButton) else {
+            return Seitenleiste.ampelBreite + knopfzone
+        }
+        return knopf.convert(knopf.bounds, to: nil).maxX + 8 + knopfzone
     }
 }

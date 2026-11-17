@@ -1299,6 +1299,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     private let txVM = TransactionsViewModel()
     private var txPanel: TransactionsPanel?
     private var dashboardPanel: DashboardPanel?
+    /// Schnappschuss für die **eingebettete** Auswertung im Umsatzfenster. Eigenes
+    /// Modell, aber dieselbe Quelle und derselbe Takt wie das Fenster (siehe
+    /// `refreshDashboardIfOpen`) — sonst zeigten die beiden Wege verschiedene Stände.
+    private let eingebetteteAuswertung = DashboardModel()
     private var statusMenu: NSMenu?
     private var balancePopover: NSPopover?
     /// Vollbild-Dim-Overlays (1 pro Screen) + zentriertes Flyout-Fenster für
@@ -1977,7 +1981,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
             self?.showSettings()
         }, onOpenDashboard: { [weak self] tab in
             self?.openDashboard(tab: tab)
-        })
+        }, auswertung: eingebetteteAuswertung,
+           requestMasterPassword: { [weak self] in self?.requestMasterPassword() },
+           onSwitchSlot: { [weak self] idx in
+               Task { await self?.switchToSlot(index: idx) }
+           })
         updateTxPanelAccountNav()
         settingsPanel = SettingsPanel()
 
@@ -8275,12 +8283,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
     /// Spiegelt den aktuellen Snapshot (Bank/„Alle Konten" + Saldo + Transaktionen) in ein
     /// bereits offenes Dashboard — no-op, wenn keins offen ist. Wird beim Slot-Wechsel/Refresh
     /// gerufen, damit das Dashboard nicht Bank B zeigt, aber Bank A auswertet.
+    ///
+    /// Die eingebettete Auswertung in der Seitenleiste hängt am selben Takt. Sie kostet
+    /// nichts, wenn gerade keine offen ist: Das Modell hält nur Werte.
     private func refreshDashboardIfOpen() {
         let unified = dashboardIsUnified
+        let slot = unified ? nil : MultibankingStore.shared.activeSlot
         dashboardPanel?.refresh(transactions: txVM.transactions,
                                 balance: lastBalance ?? 0,
-                                slot: unified ? nil : MultibankingStore.shared.activeSlot,
+                                slot: slot,
                                 isUnified: unified)
+        eingebetteteAuswertung.apply(transactions: txVM.transactions,
+                                     balance: lastBalance ?? 0,
+                                     slot: slot,
+                                     isUnified: unified)
     }
 
     /// Aggregiert das Dashboard gerade mehrere Konten? Gleiches Idiom wie an den
