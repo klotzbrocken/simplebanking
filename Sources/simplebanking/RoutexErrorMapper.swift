@@ -118,12 +118,19 @@ enum RoutexErrorMapper {
         // bekannt außer: geht nicht.
         case .serviceBlocked(let code, let msg):
             switch code {
+            // Der häufigste Fall in der Praxis ist nicht das fehlende TAN-Verfahren,
+            // das die SDK-Doku als Beispiel nennt, sondern: Die Bank stellt für diesen
+            // Zugang **kein Konto** über die Schnittstelle bereit. Am 17.11.2026 von
+            // YAXI zum Fall Volkswagen Bank so bestätigt. Deshalb steht hier kein
+            // bestimmter Grund, sondern die Folge, und ausdrücklich **kein** „erneut
+            // verbinden": Ein neuer Anlauf endet nachweislich genauso.
             case .missingSetup:
                 return UserMessage(
-                    title: L10n.t("Bei der Bank nicht eingerichtet", "Not set up at the bank"),
+                    title: L10n.t("Dieser Zugang ist bei der Bank nicht freigeschaltet",
+                                  "This access is not enabled at the bank"),
                     detail: msg,
-                    suggestion: L10n.t("Im Online-Banking der Bank prüfen, ob ein TAN-Verfahren für Drittanbieter eingerichtet ist, danach erneut verbinden.",
-                                       "Check in your bank's online banking that a TAN method for third-party access is set up, then reconnect."),
+                    suggestion: L10n.t("Die Bank gibt für diese Anmeldung nichts frei, meist weil kein passendes Konto hinterlegt ist oder der Zugriff über Drittanbieter fehlt. Das lässt sich nur bei der Bank klären, ein erneuter Versuch ändert nichts.",
+                                       "The bank is releasing nothing for this login, usually because no eligible account is linked or third-party access is missing. Only the bank can sort this out; retrying changes nothing."),
                     isRetryable: false
                 )
             case .actionRequired:
