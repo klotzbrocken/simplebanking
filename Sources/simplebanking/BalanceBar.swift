@@ -228,9 +228,32 @@ final class CredentialsPanel {
 final class FlyoutWidgetWindow: NSWindow {
     /// Liefert das Kontextmenü beim Rechtsklick (vom AppDelegate gesetzt).
     var contextMenuProvider: (() -> NSMenu)?
+    /// Wird gerufen, sobald auf der Karte gezogen wird — siehe `Widgetzug`. Der
+    /// AppDelegate startet daraufhin dasselbe Ziehen wie beim Ablegen.
+    var onZiehenBeginnt: (() -> Void)?
+    private var zugStart: NSPoint?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    /// Nur mitlesen, nichts verbrauchen: Der Klick gehört weiter der Karte.
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown:
+            let getroffen = contentView?.hitTest(event.locationInWindow)
+            zugStart = Widgetzug.istBedienelement(getroffen) ? nil : event.locationInWindow
+        case .leftMouseDragged:
+            if let start = zugStart, Widgetzug.zieht(von: start, nach: event.locationInWindow) {
+                zugStart = nil
+                onZiehenBeginnt?()
+            }
+        case .leftMouseUp:
+            zugStart = nil
+        default:
+            break
+        }
+        super.sendEvent(event)
+    }
 
     override func rightMouseDown(with event: NSEvent) {
         if let menu = contextMenuProvider?(), let view = contentView {
@@ -4582,6 +4605,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopo
         detachedFlyoutHost = result.host
         window.contextMenuProvider = { [weak self] in
             self?.makeFlyoutWidgetMenu() ?? NSMenu()
+        }
+        // Verschieben nach dem Ablegen: dasselbe Ziehen wie beim Ablegen selbst.
+        window.onZiehenBeginnt = { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.startWidgetDragTracking(window: window)
         }
 
         // Position: Cursor horizontal mittig, knapp unter der Oberkante — so
