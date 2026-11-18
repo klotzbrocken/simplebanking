@@ -150,6 +150,16 @@ final class LicenseManager: ObservableObject {
         guard !trimmed.isEmpty else {
             throw LicenseError.invalid(message: L10n.t("Lizenz-Key fehlt.", "License key is missing."))
         }
+        // Offensichtlich zu kurz gar nicht erst zu Polar schicken: Von dort käme ein
+        // 404 und daraus die Meldung „Lizenz-Key nicht gefunden", die nach einem
+        // verlorenen Kauf klingt statt nach einer Verwechslung (siehe
+        // `LicenseClipboardScanner.koennteKeySein`).
+        guard LicenseClipboardScanner.koennteKeySein(trimmed) else {
+            throw LicenseError.invalid(
+                message: L10n.t("Das sieht nicht nach einem Lizenz-Key aus. Er steht in der Bestellbestätigung und ist über vierzig Zeichen lang.",
+                                "That does not look like a license key. You will find it in your order confirmation; it is over forty characters long.")
+            )
+        }
         #if DEBUG
         // Master-Code überspringt Polar komplett. Nur in DEBUG.
         if let master = LicenseConfig.masterCode, trimmed == master {

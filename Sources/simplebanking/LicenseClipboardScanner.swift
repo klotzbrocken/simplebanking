@@ -20,6 +20,21 @@ enum LicenseClipboardScanner {
         return extractKey(from: raw)
     }
 
+    /// Könnte das überhaupt ein Key sein?
+    ///
+    /// Bewusst großzügig: nur die Länge, nicht das Muster. Ein Muster, das Polar
+    /// morgen anders erzeugt, sperrte sonst zahlende Kunden aus. Die Grenze trifft,
+    /// worum es geht: Bestellnummern, Rechnungsnummern, abgetippte Bruchstücke. Ein
+    /// Key ist ein Präfix plus UUID, also über vierzig Zeichen.
+    ///
+    /// Gemeldet am 17.11.2026: Ein Kunde tippte sechs Zeichen ein und bekam „Lizenz-Key
+    /// nicht gefunden". Das ist die Antwort des Servers auf einen Schlüssel, den es
+    /// nicht gibt, und sie klingt zehn Minuten nach dem Bezahlen wie „wir kennen deinen
+    /// Kauf nicht".
+    static func koennteKeySein(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20
+    }
+
     /// Pure: holt einen Key aus beliebigem Text. Testbar ohne NSPasteboard.
     static func extractKey(from text: String) -> String? {
         // Nur den ersten/längsten plausiblen Match akzeptieren.

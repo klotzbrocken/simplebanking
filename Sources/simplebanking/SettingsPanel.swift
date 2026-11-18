@@ -3173,8 +3173,13 @@ struct SettingsView: View {
                 .font(ThemeFonts.body(size: 12))
                 .foregroundColor(.secondary)
             HStack(spacing: 8) {
-                SecureField("XXXX-XXXX-XXXX-XXXX", text: $licenseKeyInput)
+                // Sichtbar, kein Punktefeld. Ein Lizenz-Key ist kein Kennwort, er steht
+                // in der Bestellbestätigung. Verdeckt sahen sechs eingetippte Zeichen
+                // aus wie vierzig, und der Tippfehler war nicht zu finden (gemeldet am
+                // 17.11.2026). Abgelegt wird er weiterhin im Schlüsselbund.
+                TextField("XXXX-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX", text: $licenseKeyInput)
                     .textFieldStyle(.roundedBorder)
+                    .font(ThemeFonts.body(size: 12).monospaced())
                     .disabled(licenseIsActivating)
                 Button(action: { Task { await activateLicense() } }) {
                     if licenseIsActivating {
