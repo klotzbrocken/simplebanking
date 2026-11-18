@@ -49,6 +49,33 @@
             Gültig für: simplebanking-20260726-100455.dmg (Build 20260726541).
         -->
         <item>
+            <title>2.3.0</title>
+            <pubDate>Wed, 18 Nov 2026 04:29:15 +0100</pubDate>
+            <sparkle:version>20261118785</sparkle:version>
+            <sparkle:shortVersionString>2.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>20260725535</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
+            <enclosure url="https://github.com/klotzbrocken/simplebanking/releases/download/v2.3.0/simplebanking-2.3.0.dmg" length="36328430" type="application/octet-stream" sparkle:edSignature="weVrHHfVKzbPhQeRS6CVv/wtsiAWgQ8XKtUEFlE0zlGwfpW1J7F2Cf9397STKMf5cM5VXOmOOjEbxVXrQ+CyBg=="/>
+            <link>https://github.com/klotzbrocken/simplebanking/releases/latest</link>
+            <description><![CDATA[
+                <h2>simplebanking 2.3.0</h2>
+                <h3>Neu</h3>
+                <ul>
+                    <li><strong>Eine Seitenleiste im gro&#223;en Fenster.</strong> Konten mit Saldo, Kategorien als Filter, die f&#252;nf Auswertungen und Geld senden. Auf geht sie mit &#8984;&#8997;S oder dem Knopf neben der Ampel. Ist sie offen, erscheint eine Auswertung rechts daneben statt in einem zweiten Fenster &#8211; und dasselbe gilt f&#252;r die &#220;berweisung. Der schmale Schnellblick bleibt, wie er war.</li>
+                    <li><strong>Das gro&#223;e Fenster l&#228;sst sich ziehen.</strong> Breiter und h&#246;her, mit und ohne Seitenleiste, nur nicht unter die Vorgabe. Die gezogene Gr&#246;&#223;e &#252;bersteht jetzt auch den Neustart; bisher kam nur die Position zur&#252;ck.</li>
+                </ul>
+                <h3>Behoben</h3>
+                <ul>
+                    <li><strong>Die Demo h&#228;lt niemanden mehr fest.</strong> Eine echte Bank einzurichten beendete den Demo-Modus nicht, und nach dem Neustart war das eigene Konto wieder weg. Jede Einrichtung verl&#228;sst die Demo jetzt von selbst, und solange eine l&#228;uft, steht das sichtbar in der Kontostand-Karte und &#252;ber der Umsatzliste.</li>
+                    <li><strong>Die Karte auf dem Schreibtisch l&#228;sst sich wieder verschieben.</strong> Einmal abgelegt, klebte sie fest; nur beim Ablegen selbst lie&#223; sie sich bewegen.</li>
+                    <li><strong>Wenn die Bank nein sagt, steht es da.</strong> Bisher fragte simplebanking zweieinhalb Minuten lang weiter und meldete dann &#8222;Freigabe konnte nicht abgeschlossen werden&#8220;. Jetzt endet das Warten beim ersten Nein, und der Grund der Bank steht da: kein freigeschaltetes Konto an der Schnittstelle, eine offene Anmeldung im Online-Banking oder ein gesperrter Zugang.</li>
+                    <li><strong>Der Lizenzschl&#252;ssel ist beim Eintragen zu sehen.</strong> Das Feld verdeckte die Eingabe wie ein Kennwort, und darin sehen sechs Zeichen aus wie vierzig. Eine offensichtlich zu kurze Eingabe sagt jetzt, dass sie zu kurz ist.</li>
+                </ul>
+            ]]></description>
+        </item>
+        <item>
             <title>2.2.2</title>
             <pubDate>Sat, 14 Nov 2026 06:01:19 +0100</pubDate>
             <sparkle:version>20261113778</sparkle:version>
