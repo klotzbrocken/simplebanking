@@ -267,6 +267,8 @@ enum WhatsNewContent {
     /// — dann zeigt der Trigger keine Sheet (still update).
     static func highlights(for version: String) -> [WhatsNewItem]? {
         switch version {
+        case "2.3.0":
+            return v230
         case "2.2.2":
             return v222
         case "2.2.1":
@@ -298,6 +300,56 @@ enum WhatsNewContent {
     /// importiert hat, und zwar unsichtbar: Es gab keine Fehlermeldung, nur keine
     /// Umsätze. Wer deshalb glaubt, sein Import sei schiefgegangen, soll hier lesen,
     /// dass er es nicht war und was jetzt zu tun ist.
+    /// 2.3.0. Kurze Texte, höchstens 300 Zeichen: Das Fenster wird gelesen, wenn es
+    /// aufgeht, und nicht studiert. Die älteren Einträge unten sind länger, sie stammen
+    /// aus der Zeit davor. `WhatsNewInhaltTests` hält die Grenze fest.
+    ///
+    /// Auswahlregel wie immer: nur, was jemand auch merkt. Die Länderflagge aus dem
+    /// echten Feld, die SDK-Zeile im Fehlerreport und die Version des CLI stehen
+    /// deshalb nicht hier.
+    private static let v230: [WhatsNewItem] = [
+        WhatsNewItem(
+            icon: "sidebar.left",
+            tint: .sbBlueStrong,
+            title: L10n.t("Eine Seitenleiste im großen Fenster",
+                          "A sidebar in the large window"),
+            description: L10n.t(
+                "Das große Fenster hat links eine Leiste: Konten mit Saldo, Kategorien als Filter, Auswertungen und Geld senden. Auf geht sie mit ⌘⌥S oder dem Knopf neben der Ampel. Ist sie offen, erscheint eine Auswertung rechts daneben statt in einem zweiten Fenster. Der schmale Schnellblick bleibt, wie er war.",
+                "The large window has a sidebar: accounts with balance, categories as a filter, reports and sending money. Open it with ⌘⌥S or the button next to the traffic lights. With it open, a report appears beside it instead of in a second window. The narrow quick look stays as it was."
+            )
+        ),
+        WhatsNewItem(
+            icon: "arrow.up.left.and.arrow.down.right",
+            tint: .sbBlueStrong,
+            title: L10n.t("Das große Fenster lässt sich ziehen",
+                          "The large window can be resized"),
+            description: L10n.t(
+                "Das große Fenster lässt sich breiter und höher ziehen, mit und ohne Seitenleiste, nur nicht unter die Vorgabe. Die gezogene Größe übersteht jetzt auch den Neustart; bisher kam nur die Position zurück.",
+                "The large window can be dragged wider and taller, with or without the sidebar, just not below its default size. The size you set now survives a restart; until now only the position came back."
+            )
+        ),
+        WhatsNewItem(
+            icon: "theatermasks",
+            tint: .sbGreenStrong,
+            title: L10n.t("Die Demo hält dich nicht mehr fest",
+                          "The demo no longer holds on to you"),
+            description: L10n.t(
+                "Eine echte Bank einzurichten beendete den Demo-Modus nicht, nach dem Neustart war das eigene Konto wieder weg. Jede Einrichtung verlässt die Demo jetzt von selbst, und solange eine läuft, steht „🎭 Demo\u{201C} in der Kontostand-Karte und über der Umsatzliste.",
+                "Setting up a real bank did not end demo mode, and after a restart your own account was gone again. Every setup now leaves the demo by itself, and while one is running, “🎭 Demo” sits in the balance card and above the transaction list."
+            )
+        ),
+        WhatsNewItem(
+            icon: "hand.draw",
+            tint: .sbGreenStrong,
+            title: L10n.t("Die Karte auf dem Schreibtisch lässt sich wieder verschieben",
+                          "The card on your desktop can be moved again"),
+            description: L10n.t(
+                "Einmal abgelegt, klebte die Kontostand-Karte auf dem Schreibtisch fest. Jetzt lässt sie sich jederzeit anfassen und verschieben. Ein Klick bleibt ein Klick, und wer auf einem Knopf zieht, bewegt den Knopf und nicht das Fenster.",
+                "Once dropped, the balance card on your desktop was stuck. You can now pick it up and move it any time. A click stays a click, and dragging on a button moves the button, not the window."
+            )
+        ),
+    ]
+
     private static let v222: [WhatsNewItem] = [
         WhatsNewItem(
             icon: "calendar.badge.clock",

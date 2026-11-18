@@ -85,6 +85,30 @@ final class WhatsNewInhaltTests: XCTestCase {
         }
     }
 
+    /// Seit 2.3.0 sind die Texte kurz: höchstens 300 Zeichen. Das Fenster geht beim
+    /// Update auf und wird gelesen, nicht studiert. Die älteren Einträge stammen aus der
+    /// Zeit davor und bleiben, wie sie sind.
+    func test_neueTexteBleibenKurz() throws {
+        let items = try XCTUnwrap(WhatsNewContent.highlights(for: "2.3.0"))
+        XCTAssertFalse(items.isEmpty)
+        for item in items {
+            XCTAssertLessThanOrEqual(
+                item.description.count, 300,
+                "\(item.title): \(item.description.count) Zeichen")
+        }
+    }
+
+    /// Jeder Eintrag von 2.3.0 trägt Symbol, Titel und beide Sprachen.
+    func test_230_istVollstaendig() throws {
+        let items = try XCTUnwrap(WhatsNewContent.highlights(for: "2.3.0"))
+        XCTAssertEqual(items.count, 4)
+        for item in items {
+            XCTAssertFalse(item.icon.isEmpty)
+            XCTAssertFalse(item.title.isEmpty)
+            XCTAssertFalse(item.description.isEmpty)
+        }
+    }
+
     /// Versionen ohne kuratierte Highlights zeigen bewusst kein Fenster.
     func test_unbekannteVersion_zeigtNichts() {
         XCTAssertNil(WhatsNewContent.highlights(for: "0.0.1"))
